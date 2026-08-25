@@ -13,7 +13,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "/help", args: "", desc: "show keybindings", mutating: false },
     Command { name: "/quit", args: "", desc: "exit seatui", mutating: false },
     Command { name: "/clear", args: "", desc: "wipe scrollback + transcript", mutating: true },
-    Command { name: "/model", args: "[id]", desc: "restart child with SEA_MODEL override", mutating: true },
+    Command { name: "/model", args: "[id]", desc: "restart child with MNEMO_MODEL override", mutating: true },
     Command { name: "/context", args: "", desc: "estimate context usage (chars/4)", mutating: false },
     Command { name: "/memory", args: "<query>", desc: "search memory layer via memsrv", mutating: false },
     Command { name: "/resume", args: "[n]", desc: "list/load saved sessions", mutating: false },

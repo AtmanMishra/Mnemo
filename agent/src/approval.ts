@@ -1,13 +1,14 @@
 /**
  * Tool approval gate (Claude Code style).
  *
- * When SEA_APPROVAL_MODE=interactive and stdin is a TTY, every gated action is
+ * When MNEMO_APPROVAL_MODE=interactive (or legacy SEA_APPROVAL_MODE) and stdin is
+ * a TTY, every gated action is
  * printed and the user is asked "[y]es / [n]o / [a]lways-this-tool":
  *   y -> proceed once
  *   n -> deny (caller returns an error result to the model)
  *   a -> add the tool to this session's allowlist and proceed
  *
- * Any other mode (including unset, or SEA_APPROVAL_MODE=0) auto-approves, as
+ * Any other mode (including unset, or value 0) auto-approves, as
  * does a non-TTY stdin (piped/automated runs) -- the gate is best-effort and
  * fails OPEN outside an interactive terminal so automation keeps working.
  *
@@ -65,7 +66,7 @@ export function isAlwaysAllowed(tool: string): boolean {
 }
 
 function interactiveEnabled(): boolean {
-  return process.env.SEA_APPROVAL_MODE === "interactive";
+  return (process.env.MNEMO_APPROVAL_MODE ?? process.env.SEA_APPROVAL_MODE) === "interactive";
 }
 
 function isTty(): boolean {

@@ -5,9 +5,9 @@
  * Usage:
  *   node bin/sea-loop.ts --every 30m --prompt "check CI status and fix failures" [--max-runs 5] [--quiet]
  *
- * Each tick spawns the sea CLI one-shot (`node bin/sea.ts "<prompt>"`) as a
+ * Each tick spawns the mnemo CLI one-shot (`node bin/mnemo.ts "<prompt>"`) as a
  * child process, so every run inherits the full environment: memory journal
- * env vars, provider keys, and SEA_APPROVAL_MODE. Run start/end is logged to
+ * env vars, provider keys, and MNEMO_APPROVAL_MODE. Run start/end is logged to
  * stderr. Stops after --max-runs runs, or on Ctrl+C (SIGINT aborts both the
  * wait and any in-flight child).
  *
@@ -107,14 +107,14 @@ export function parseArgs(argv: string[]): LoopArgs {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const intervalMs = parseInterval(args.every);
-  // Same resolution rule as spawn_subagent: SEA_AGENT_BIN overrides the CLI.
-  const cli = process.env.SEA_AGENT_BIN ?? path.join(import.meta.dirname ?? ".", "sea.ts");
+  // Same resolution rule as spawn_subagent: MNEMO_AGENT_BIN overrides the CLI.
+  const cli = process.env.MNEMO_AGENT_BIN ?? process.env.SEA_AGENT_BIN ?? path.join(import.meta.dirname ?? ".", "mnemo.ts");
 
   const controller = new AbortController();
   process.on("SIGINT", () => controller.abort());
 
   // One-shot CLI run; inherits env (memory journal, provider keys,
-  // SEA_APPROVAL_MODE) and stdio, so interactive approval still reaches the user.
+  // MNEMO_APPROVAL_MODE) and stdio, so interactive approval still reaches the user.
   const runner = async (): Promise<void> => {
     await new Promise<void>((resolve) => {
       const child = spawn(process.execPath, [cli, args.prompt], {

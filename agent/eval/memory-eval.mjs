@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Phase-3b eval: same questions WITH seeded memory vs WITHOUT.
- * Usage: OPENROUTER_API_KEY=... SEA_MODEL=... node eval/memory-eval.mjs
+ * Usage: OPENROUTER_API_KEY=... MNEMO_MODEL=... node eval/memory-eval.mjs
  */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -62,10 +62,10 @@ const TASKS = [
 ];
 
 function askAgent(q, journal) {
-  const r = spawnSync("node", [path.join(ROOT, "agent/bin/sea.ts"), q], {
+  const r = spawnSync("node", [path.join(ROOT, "agent/bin/mnemo.ts"), q], {
     encoding: "utf8",
     timeout: 180000,
-    env: { ...process.env, SEA_MEMORY_JOURNAL: journal, SEA_CLI_FORCE: "" },
+    env: { ...process.env, MNEMO_MEMORY_JOURNAL: journal, SEA_MEMORY_JOURNAL: journal, SEA_CLI_FORCE: "" },
   });
   return (r.stdout || "").trim();
 }

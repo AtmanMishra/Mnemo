@@ -4,7 +4,7 @@
  *
  * Gate policy (identical to the pre-migration readline gate):
  * - Only bash_exec, write_file, apply_edit are gated.
- * - SEA_APPROVAL_MODE=interactive AND stdin is a TTY -> prompt once per call
+ * - MNEMO_APPROVAL_MODE=interactive AND stdin is a TTY -> prompt once per call
  *   via ctx.ui.confirm() (native TUI dialog).
  * - Deny blocks the call; the block reason is returned to the model as the
  *   tool result.
@@ -62,7 +62,7 @@ export async function decideApproval(
   tty: boolean = Boolean(process.stdin.isTTY),
 ): Promise<ApprovalDecision> {
   if (!GATED_TOOLS.has(ev.toolName)) return {}; // not gated
-  if ((env.SEA_APPROVAL_MODE ?? "") !== "interactive") return {}; // mode off
+  if ((env.MNEMO_APPROVAL_MODE ?? env.SEA_APPROVAL_MODE ?? "") !== "interactive") return {}; // mode off
   if (!tty) return {}; // non-TTY: fail open like the old gate
 
   const summary = summarizeToolCall(ev.toolName, ev.input);

@@ -96,10 +96,10 @@ fn print_scrollback(term: &mut Term, lines: Vec<Line<'static>>) -> io::Result<()
 fn header_lines() -> Vec<Line<'static>> {
     vec![
         Line::from(vec![
-            Span::styled("SEA", Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)),
+            Span::styled("MNEMO", Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)),
             Span::styled(" // ", Style::default().fg(theme::GREY)),
             Span::styled(
-                "self-evolving agent",
+                "agentic coding assistant",
                 Style::default().fg(theme::WHITE).add_modifier(Modifier::BOLD),
             ),
         ]),
@@ -219,7 +219,7 @@ fn run_live(yolo: bool, verbose: bool) -> io::Result<ExitCode> {
 
     let script = session::default_script_path();
     if !script.exists() {
-        eprintln!("sea-agent script not found: {}", script.display());
+        eprintln!("mnemo script not found: {}", script.display());
         return Ok(ExitCode::FAILURE);
     }
 
@@ -443,13 +443,13 @@ fn execute_action(
             print_scrollback(term, header_lines())?;
         }
         Action::Model(Some(id)) => {
-            std::env::set_var("SEA_MODEL", &id);
+            std::env::set_var("MNEMO_MODEL", &id);
             match sess.restart(script) {
                 Ok(()) => {
                     app.restart_reset();
                     print_scrollback(
                         term,
-                        system_note(&format!("restarted with SEA_MODEL={}", id)),
+                        system_note(&format!("restarted with MNEMO_MODEL={}", id)),
                     )?;
                 }
                 Err(e) => print_scrollback(term, system_note(&format!("restart failed: {}", e)))?,

@@ -1,15 +1,15 @@
 {
-  "name": "sea-agent",
+  "name": "mnemo",
   "version": "0.1.0",
   "description": "Self-Evolving Agent runtime built on the pi framework (@earendil-works/*)",
   "type": "module",
   "bin": {
-    "sea": "./bin/sea.ts"
+    "mnemo": "./bin/mnemo.ts"
   },
   "scripts": {
     "test": "node --test \"test/*.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "start": "node ./bin/sea.ts"
+    "start": "node ./bin/mnemo.ts"
   },
   "engines": {
     "node": ">=22.6"

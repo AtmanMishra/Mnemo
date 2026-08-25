@@ -12,7 +12,7 @@
  * tool call appends a commit_log entry; session shutdown logs the outcome and
  * stops the sidecar. Journal path defaults to
  * memory-layer/data/sea-agent-journal.jsonl under the repo root and can be
- * overridden with SEA_MEMORY_JOURNAL.
+ * overridden with MNEMO_MEMORY_JOURNAL (legacy SEA_MEMORY_JOURNAL still works).
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
@@ -48,8 +48,8 @@ export class MemClient {
   private readonly journalPath: string;
 
   constructor(opts: { binaryPath?: string; journalPath?: string } = {}) {
-    this.binaryPath = opts.binaryPath ?? (process.env.SEA_MEMSRV_BIN || DEFAULT_BINARY);
-    this.journalPath = opts.journalPath ?? (process.env.SEA_MEMORY_JOURNAL || DEFAULT_JOURNAL);
+    this.binaryPath = opts.binaryPath ?? ((process.env.MNEMO_MEMSRV_BIN ?? process.env.SEA_MEMSRV_BIN) || DEFAULT_BINARY);
+    this.journalPath = opts.journalPath ?? ((process.env.MNEMO_MEMORY_JOURNAL ?? process.env.SEA_MEMORY_JOURNAL) || DEFAULT_JOURNAL);
   }
 
   get alive(): boolean {

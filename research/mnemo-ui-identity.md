@@ -13,10 +13,12 @@ PIXEL — chunky, quantized, restrained.
 4. Meters/progress: braille dither cells, color shifts yellow->orange->red.
 5. Icons: Nerd Font glyphs with ASCII fallback. NO emoji anywhere.
 6. Typography: hierarchy via weight + color ONLY. No italics-for-emphasis.
-7. Motion: braille spinner frames only; nothing else animates.
-8. Fonts (user-side recommendation, graceful degradation): Silkscreen /
-   Press Start 2P / Pixelify Sans terminal font preset documented in README;
-   UI must be fully legible in plain monospace.
+7. Motion: ALLOWED and encouraged where it aids comprehension:
+   braille spinners, pane-switch slide/fade (1 frame), meter fill animation,
+   streaming-text pulse on the input cursor. Never decorative-only loops.
+8. Fonts (user-side recommendation): PRIMARY Silkscreen, SECONDARY VT323
+   (terminal preset documented in README); UI must be fully legible in plain
+   monospace.
 9. Minimalist restraint (per minimalist-ui): no gradients, no filler text,
    no AI cliches; whitespace via empty rows not decoration.
 

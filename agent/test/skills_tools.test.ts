@@ -9,6 +9,7 @@ import {
   createSkillTool,
   sanitizeSkillName,
   setSkillsHome,
+  setProjectRoot,
   globalSkillDir,
 } from "../src/tools/skills.ts";
 import { discoverSkills } from "../src/skills/discovery.ts";
@@ -17,6 +18,7 @@ let tmp: string;
 beforeEach(async () => {
   tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sea-skills-"));
   setSkillsHome(tmp);
+  setProjectRoot(tmp); // isolate from this repo's own .agents/skills
 });
 
 test("sanitizeSkillName enforces [a-z0-9-]", () => {

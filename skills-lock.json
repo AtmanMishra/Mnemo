@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "tui-design": {
+      "source": "hyperb1iss/hyperskills",
+      "sourceType": "github",
+      "skillPath": "skills/tui-design/SKILL.md",
+      "computedHash": "1f1029297ae042457a3e2e353b442414f061f584ed1a56429ddbfeb39a7efba0"
+    }
+  }
+}

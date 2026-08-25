@@ -1,13 +1,13 @@
 /**
  * spawn_subagent: hierarchical sub-agent spawning with parent-selected context.
  *
- * The child is a full sea-agent process (same tools, same shared memory journal),
+ * The child is a full mnemo process (same tools, same shared memory journal),
  * started one-shot with a prompt composed of the parent's TASK + CONTEXT BRIEF.
  * The brief is what the parent CHOOSES to pass -- children never inherit the
  * parent transcript. Children write their own findings into the shared memory
  * layer, so siblings and future sessions benefit (the graph is the bus).
  *
- * Overridable for tests: SEA_AGENT_BIN points at any command that prints the
+ * Overridable for tests: MNEMO_AGENT_BIN points at any command that prints the
  * child's final answer to stdout.
  */
 import { spawn } from "node:child_process";
@@ -51,13 +51,13 @@ export function runSubagent(
   opts: { task: string; context?: string; timeoutMs?: number; signal?: AbortSignal } = { task: "" },
 ): Promise<SubagentResult> {
   const timeoutMs = opts.timeoutMs ?? 300_000;
-  // default CLI path relative to this module: agent/bin/sea.ts
-  const cli = process.env.SEA_AGENT_BIN
-    ?? path.join(import.meta.dirname ?? ".", "..", "..", "agent", "bin", "sea.ts");
+  // default CLI path relative to this module: agent/bin/mnemo.ts
+  const cli = process.env.MNEMO_AGENT_BIN ?? process.env.SEA_AGENT_BIN
+    ?? path.join(import.meta.dirname ?? ".", "..", "..", "agent", "bin", "mnemo.ts");
   const started = Date.now();
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, composeChildPrompt(opts.task, opts.context)], {
-      env: { ...process.env }, // SEA_MEMORY_JOURNAL inherits -> SHARED memory graph
+      env: { ...process.env }, // MNEMO_MEMORY_JOURNAL inherits -> SHARED memory graph
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -107,7 +107,7 @@ export const subagentSpawnTool: SeaTool = {
   name: "spawn_subagent",
   label: "Spawn sub-agent",
   description:
-    "Spawn a hierarchical sub-agent (full sea-agent with all tools + shared memory) to complete one self-contained task. " +
+    "Spawn a hierarchical sub-agent (full mnemo agent with all tools + shared memory) to complete one self-contained task. " +
     "Pass ONLY the relevant context in 'context' -- the child does not see this conversation. " +
     "The child writes its findings into shared memory automatically.",
   parameters,

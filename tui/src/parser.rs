@@ -1,4 +1,4 @@
-//! Parsers for sea-agent child-process control-channel lines (stderr).
+//! Parsers for mnemo child-process control-channel lines (stderr).
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BannerInfo {
@@ -13,9 +13,14 @@ pub struct ToolEvent {
     pub ok: bool,
 }
 
-/// Parse "sea-agent: provider=<p> model=<m>" startup banner lines.
+/// Parse "mnemo: provider=<p> model=<m>" startup banner lines.
+/// Legacy children may still print the "sea-agent:" prefix; accept both.
 pub fn parse_banner(line: &str) -> Option<BannerInfo> {
-    let rest = line.trim().strip_prefix("sea-agent:")?;
+    let trimmed = line.trim();
+    let rest = match trimmed.strip_prefix("mnemo:") {
+        Some(r) => r,
+        None => trimmed.strip_prefix("sea-agent:")?,
+    };
     let mut provider = None;
     let mut model = None;
     for tok in rest.split_whitespace() {
@@ -68,7 +73,7 @@ mod tests {
 
     #[test]
     fn banner_parses_provider_and_model() {
-        let b = parse_banner("sea-agent: provider=openrouter model=openrouter/openai/gpt-4o-mini")
+        let b = parse_banner("mnemo: provider=openrouter model=openrouter/openai/gpt-4o-mini")
             .expect("should parse");
         assert_eq!(b.provider, "openrouter");
         assert_eq!(b.model, "openrouter/openai/gpt-4o-mini");
@@ -77,7 +82,10 @@ mod tests {
     #[test]
     fn banner_rejects_non_banner_lines() {
         assert!(parse_banner("hello world").is_none());
-        assert!(parse_banner("sea-agent REPL ready.").is_none());
+        assert!(parse_banner("mnemo REPL ready.").is_none());
+        // legacy prefix still accepted for old children
+        let legacy = parse_banner("sea-agent: provider=openrouter model=m").expect("legacy");
+        assert_eq!(legacy.provider, "openrouter");
         assert!(parse_banner("").is_none());
     }
 

@@ -15,6 +15,15 @@ import { syncBundlesToSkills, skillLocations } from "../skills/harness-bridge.ts
 import { textResult, type SeaTool } from "./types.ts";
 
 let skillsHomeOverride: string | null = null;
+let projectRootOverride: string | null = null;
+
+/** Tests: redirect PROJECT skill locations (.pi/skills, .agents/skills walk). */
+export function setProjectRoot(root: string | null): void {
+  projectRootOverride = root;
+}
+function projectRoot(): string {
+  return projectRootOverride ?? process.cwd();
+}
 
 /** Point the "global" skill root at a custom directory (tests). */
 export function setSkillsHome(home: string | null): void {
@@ -52,8 +61,8 @@ export const listSkillsTool: SeaTool = {
   parameters: listParams,
   async execute() {
     // harness bundles (created via harness-engine) become discoverable skills
-    try { syncBundlesToSkills(skillLocations(process.cwd())); } catch { /* best-effort */ }
-    const skills = await discoverSkills({ cwd: process.cwd(), home: skillsHome() });
+    try { syncBundlesToSkills(skillLocations(projectRoot())); } catch { /* best-effort */ }
+    const skills = await discoverSkills({ cwd: projectRoot(), home: skillsHome() });
     if (skills.length === 0) return textResult("(no skills found)", { skills: [] });
     const width = Math.max(...skills.map((s) => s.name.length));
     const lines = skills.map(
@@ -74,7 +83,7 @@ export const loadSkillTool: SeaTool = {
     "Load a skill's full SKILL.md body and follow its instructions for the current task.",
   parameters: loadParams,
   async execute(_id, params) {
-    const skills = await discoverSkills({ cwd: process.cwd(), home: skillsHome() });
+    const skills = await discoverSkills({ cwd: projectRoot(), home: skillsHome() });
     const skill = skills.find((s) => s.name === params.name);
     if (!skill) {
       const known = skills.map((s) => s.name).join(", ") || "(none)";

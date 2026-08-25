@@ -1,6 +1,6 @@
 //! Child-process plumbing behind the `SessionStream` trait.
 //!
-//! `RealSession` spawns `node <repo>/agent/bin/sea.ts` with full env
+//! `RealSession` spawns `node <repo>/agent/bin/mnemo.ts` with full env
 //! passthrough (incl. OPENROUTER_API_KEY, SEA_MODEL) and reads its
 //! stdout/stderr on background threads into an mpsc channel.
 //! `FakeSession` is a scripted implementation for --render-once and tests.
@@ -68,12 +68,12 @@ pub struct RealSession {
     exit_sent: bool,
 }
 
-/// Default location of the sea-agent CLI entrypoint relative to this crate.
+/// Default location of the mnemo CLI entrypoint relative to this crate.
 pub fn default_script_path() -> PathBuf {
     if let Ok(p) = std::env::var("SEA_SCRIPT") {
         return PathBuf::from(p);
     }
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../agent/bin/sea.ts")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../agent/bin/mnemo.ts")
 }
 
 fn spawn_reader(mut r: impl Read + Send + 'static, kind: fn(String) -> OutputEvent, tx: Sender<OutputEvent>) {

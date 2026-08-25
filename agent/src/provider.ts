@@ -2,7 +2,7 @@
  * Model provider selection from environment variables. No key is hardcoded
  * and nothing here is required to run tests - only the CLI needs a provider.
  *
- * Precedence: SEA_PROVIDER forces a choice; otherwise the first set of
+ * Precedence: MNEMO_PROVIDER (or legacy SEA_PROVIDER) forces a choice; otherwise the first set of
  * OPENAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY wins.
  */
 export interface ProviderSelection {
@@ -23,17 +23,17 @@ const KEY_ENV_BY_PROVIDER: Record<SupportedProvider, string> = {
 };
 
 export function pickProvider(env: NodeJS.ProcessEnv = process.env): ProviderSelection | null {
-  const forced = env.SEA_PROVIDER?.trim().toLowerCase();
+  const forced = (env.MNEMO_PROVIDER ?? env.SEA_PROVIDER)?.trim().toLowerCase();
   if (forced) {
     if (!(SUPPORTED as readonly string[]).includes(forced)) {
-      throw new Error(`SEA_PROVIDER="${forced}" is not supported. Use one of: ${SUPPORTED.join(", ")}`);
+      throw new Error(`MNEMO_PROVIDER="${forced}" is not supported. Use one of: ${SUPPORTED.join(", ")}`);
     }
     const p = forced as SupportedProvider;
-    return { provider: p, apiKeyEnv: KEY_ENV_BY_PROVIDER[p], modelId: env.SEA_MODEL };
+    return { provider: p, apiKeyEnv: KEY_ENV_BY_PROVIDER[p], modelId: env.MNEMO_MODEL ?? env.SEA_MODEL };
   }
   for (const p of SUPPORTED) {
     const envVar = KEY_ENV_BY_PROVIDER[p];
-    if (env[envVar]) return { provider: p, apiKeyEnv: envVar, modelId: env.SEA_MODEL };
+    if (env[envVar]) return { provider: p, apiKeyEnv: envVar, modelId: env.MNEMO_MODEL ?? env.SEA_MODEL };
   }
   return null;
 }
@@ -41,7 +41,7 @@ export function pickProvider(env: NodeJS.ProcessEnv = process.env): ProviderSele
 export function missingKeyMessage(sel: ProviderSelection | null): string {
   if (!sel) {
     return [
-      "sea-agent: no model provider configured.",
+      "mnemo: no model provider configured.",
       "",
       "Set exactly one of these environment variables:",
       "  OPENAI_API_KEY       - use OpenAI models",
@@ -50,9 +50,9 @@ export function missingKeyMessage(sel: ProviderSelection | null): string {
       "  OPENCODE_API_KEY     - use OpenCode models (e.g. ox-alpha)",
       "",
       "Optional overrides:",
-      "  SEA_PROVIDER=openai|anthropic|openrouter   force a provider when several keys are set",
-      "  SEA_MODEL=<provider/model-id>              pick a specific model id",
+      "  MNEMO_PROVIDER=openai|anthropic|openrouter force a provider when several keys are set",
+      "  MNEMO_MODEL=<provider/model-id>            pick a specific model id",
     ].join("\n");
   }
-  return `sea-agent: ${sel.apiKeyEnv} is not set (required for provider "${sel.provider}").`;
+  return `mnemo: ${sel.apiKeyEnv} is not set (required for provider "${sel.provider}").`;
 }

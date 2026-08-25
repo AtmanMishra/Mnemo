@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// sea-agent CLI entry: thin shim over pi's main().
+// mnemo CLI entry: thin shim over pi's main().
 //
 // Usage:
-//   sea "<prompt>"            one-shot prompt (pi print mode when non-TTY)
-//   sea                       interactive TUI (pi interactive mode)
-//   sea --list-sessions       list saved sessions from ~/.sea/sessions and exit
-//   sea --help                pi's own help
+//   mnemo "<prompt>"          one-shot prompt (pi print mode when non-TTY)
+//   mnemo                     interactive TUI (pi interactive mode)
+//   mnemo --list-sessions     list saved sessions from ~/.sea/sessions and exit
+//   mnemo --help              pi's own help
 //
 // Everything else is forwarded to @earendil-works/pi-coding-agent's main():
 // provider/model come from pickProvider() unless the user passed explicit
@@ -85,7 +85,7 @@ async function run(): Promise<void> {
   }
   if (argv.includes("--export") || argv.includes("--import")) {
     console.error(
-      "sea-agent: legacy --export/--import were removed; use pi's native " +
+      "mnemo: legacy --export/--import were removed; use pi's native " +
         "--session-dir/--resume/--fork and /share instead.",
     );
   }
@@ -94,7 +94,7 @@ async function run(): Promise<void> {
   try {
     selection = pickProvider();
   } catch (err: any) {
-    console.error(`sea-agent: ${err?.message ?? err}`);
+    console.error(`mnemo: ${err?.message ?? err}`);
     process.exit(2);
   }
   if (!selection || !process.env[selection.apiKeyEnv]) {
