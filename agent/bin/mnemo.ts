@@ -20,6 +20,12 @@ import { main } from "@earendil-works/pi-coding-agent";
 import { discoverSkills } from "../src/skills/discovery.ts";
 import { listSessions, defaultSessionDir } from "../src/skills/store.ts";
 import { pickProvider, missingKeyMessage } from "../src/provider.ts";
+import * as readline from "node:readline/promises";
+import {
+  PROVIDERS, loadAuth, resolveApiKey, clearProviderAuth,
+  setProviderAuth, setDefaultProvider, type ProviderId,
+} from "../src/auth/store.ts";
+import { runWizard } from "../src/auth/wizard.ts";
 import { seaToolsInline } from "../extensions/sea-tools-inline.ts";
 import { memoryLayerHooks } from "../extensions/memory-layer.ts";
 import approvalExt from "../extensions/approval-gate.ts";
@@ -43,6 +49,110 @@ async function handleListSessions(): Promise<void> {
     console.log(
       `${s.name.padEnd(width)}  ${String(s.messageCount).padStart(3)} msgs  ${s.mtime.toISOString()}  ${s.file}`,
     );
+  }
+}
+
+function realIO() {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return {
+    write: (s: string) => process.stdout.write(s),
+    question: async (q: string) => {
+      const a = await rl.question(q);
+      return a;
+    },
+    close: () => rl.close(),
+  };
+}
+
+/** mnemo auth [login|status|logout <provider>] */
+async function handleAuth(args: string[]): Promise<void> {
+  const sub = args[1] ?? "login";
+  if (sub === "logout") {
+    const p = args[2] as ProviderId | undefined;
+    if (!p || !(PROVIDERS as readonly string[]).includes(p)) {
+      console.error(`usage: mnemo auth logout <${PROVIDERS.join("|")}>`);
+      process.exit(1);
+    }
+    console.log(clearProviderAuth(p) ? `cleared ${p}` : `${p}: nothing stored`);
+    return;
+  }
+  if (sub === "status") {
+    const auth = loadAuth();
+    for (const p of PROVIDERS) {
+      const stored = auth.providers[p];
+      const inEnv = Boolean(process.env[
+        p === "anthropic" ? "ANTHROPIC_API_KEY" :
+        p === "openai" ? "OPENAI_API_KEY" :
+        p === "openrouter" ? "OPENROUTER_API_KEY" : "OPENCODE_API_KEY"]);
+      const state = inEnv ? "env key" : stored?.key || stored?.accessToken ? "stored" : "-";
+      const def = auth.defaultProvider === p ? "  <- default" : "";
+      console.log(`${p.padEnd(14)} ${state.padEnd(9)} ${def}`);
+    }
+    return;
+  }
+  // login = full wizard
+  const io = realIO();
+  try {
+    const res = await runWizard(io, process.env.HOME ?? "");
+    void res;
+  } finally {
+    io.close();
+  }
+}
+
+/** Returns provider/model resolved from env or store; runs wizard on first run. */
+async function ensureAuthenticated(): Promise<void> {
+  // explicit provider via env/flags?
+  let selection = pickProvider();
+  if (selection && process.env[selection.apiKeyEnv]) return;
+
+  // stored default?
+  const auth = loadAuth();
+  const storedDefault = auth.defaultProvider;
+  const candidates: ProviderId[] = storedDefault
+    ? [storedDefault, ...(PROVIDERS as readonly ProviderId[]).filter((p) => p !== storedDefault)]
+    : [...(PROVIDERS as readonly ProviderId[])];
+  for (const p of candidates) {
+    const r = resolveApiKey(p);
+    if (r?.key) {
+      const envName =
+        p === "anthropic" ? "ANTHROPIC_API_KEY" :
+        p === "openai" ? "OPENAI_API_KEY" :
+        p === "openrouter" ? "OPENROUTER_API_KEY" : "OPENCODE_API_KEY";
+      process.env[envName] = r.key;
+      if (!process.env.SEA_PROVIDER && !process.env.MNEMO_PROVIDER) {
+        process.env.MNEMO_PROVIDER = p;
+      }
+      if (!process.env.MNEMO_MODEL && !process.env.SEA_MODEL) {
+        const model = auth.providers[p]?.defaultModel;
+        if (model) process.env.MNEMO_MODEL = model;
+      }
+      return;
+    }
+  }
+
+  // nothing anywhere -> first-run wizard (interactive only)
+  if (!process.stdout.isTTY || !process.stdin.isTTY) {
+    console.error(missingKeyMessage(selection));
+    console.error("or run: mnemo auth   (in an interactive terminal)");
+    process.exit(1);
+  }
+  console.error("No provider configured. Starting setup...\n");
+  const io = realIO();
+  try {
+    const res = await runWizard(io, process.env.HOME ?? "");
+    const r = resolveApiKey(res.provider);
+    if (r) {
+      const envName =
+        res.provider === "anthropic" ? "ANTHROPIC_API_KEY" :
+        res.provider === "openai" ? "OPENAI_API_KEY" :
+        res.provider === "openrouter" ? "OPENROUTER_API_KEY" : "OPENCODE_API_KEY";
+      process.env[envName] = r.key;
+      process.env.MNEMO_PROVIDER ??= res.provider;
+      if (res.defaultModel) process.env.MNEMO_MODEL ??= res.defaultModel;
+    }
+  } finally {
+    io.close();
   }
 }
 
@@ -75,7 +185,12 @@ async function run(): Promise<void> {
     return;
   }
   // Help/version/pi subcommands must reach pi without a provider check.
-  const PI_SUBCOMMANDS = ["auth", "install", "remove", "uninstall", "update", "list", "config"];
+  if (argv[0] === "auth") {
+    await handleAuth(argv);
+    return;
+  }
+  const PI_SUBCOMMANDS = ["install", "remove", "uninstall", "update", "list", "config"];
+  const needsOnboarding = argv.length === 0 || ["--onboard"].includes(argv[0] ?? "");
   const needsNoProvider =
     ["--help", "-h", "--version", "-v"].some((a) => argv.includes(a)) ||
     PI_SUBCOMMANDS.includes(argv[0] ?? "");
@@ -89,6 +204,8 @@ async function run(): Promise<void> {
         "--session-dir/--resume/--fork and /share instead.",
     );
   }
+
+  await ensureAuthenticated();
 
   let selection;
   try {
