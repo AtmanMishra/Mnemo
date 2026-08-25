@@ -1,0 +1,82 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Subagent Tree</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc; --fg: #172033; --muted: #5b6475; --line: #64748b;
+    --neutral: #e2e8f0; --input: #bfdbfe; --process: #c7d2fe;
+    --storage: #99f6e4; --external: #fde68a; --risk: #fecaca;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f172a; --fg: #e5e7eb; --muted: #a3adbd; --line: #94a3b8;
+      --neutral: #334155; --input: #1d4ed8; --process: #4338ca;
+      --storage: #0f766e; --external: #92400e; --risk: #991b1b;
+    }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  main { max-width:980px; margin:32px auto; padding:0 20px; }
+  svg { width:100%; height:auto; display:block; }
+  .title { font-size:20px; font-weight:650; fill:var(--fg); }
+  .label { font-size:13px; font-weight:600; fill:var(--fg); }
+  .small { font-size:11px; fill:var(--muted); }
+  .node { stroke: var(--line); stroke-width:1; }
+  .neutral { fill:var(--neutral); } .input { fill:var(--input); }
+  .process { fill:var(--process); } .storage { fill:var(--storage); }
+  .external { fill:var(--external); } .risk { fill:var(--risk); }
+  .edge { stroke:var(--line); stroke-width:1.5; fill:none; }
+  .zone { fill:none; stroke:var(--line); stroke-width:1; stroke-dasharray:6 5; opacity:.8; }
+</style>
+<main>
+
+<svg viewBox="0 0 940 520" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/>
+    </marker>
+  </defs>
+  <text x="20" y="30" class="title">Hierarchical Subagents — selective context briefs over shared memory</text>
+
+  <path class="edge" marker-end="url(#arr3)" d="M280,130 L150,205"/>
+  <path class="edge" marker-end="url(#arr3)" d="M310,130 L310,205"/>
+  <path class="edge" marker-end="url(#arr3)" d="M340,130 L470,205"/>
+  <path class="edge" marker-end="url(#arr3)" d="M480,270 L600,345"/>
+  <path class="edge" marker-end="url(#arr3)" d="M310,268 L310,345"/>
+  <path class="edge" stroke-dasharray="5 4" marker-end="url(#arr3)" d="M640,410 L780,300"/>
+  <path class="edge" stroke-dasharray="5 4" marker-end="url(#arr3)" d="M350,410 L770,295"/>
+
+  <rect x="230" y="65" width="170" height="65" rx="8" class="node process"/>
+  <text x="315" y="92" text-anchor="middle" class="label">main agent</text>
+  <text x="315" y="112" text-anchor="middle" class="small">owns task decomposition</text>
+
+  <rect x="60" y="205" width="170" height="65" rx="8" class="node input"/>
+  <text x="145" y="232" text-anchor="middle" class="label">child A (k8s)</text>
+  <text x="145" y="252" text-anchor="middle" class="small">brief: ingress facts only</text>
+
+  <rect x="245" y="205" width="130" height="63" rx="8" class="node input"/>
+  <text x="310" y="232" text-anchor="middle" class="label">child B (tests)</text>
+  <text x="310" y="252" text-anchor="middle" class="small">brief: test facts</text>
+
+  <rect x="420" y="205" width="170" height="65" rx="8" class="node input"/>
+  <text x="505" y="232" text-anchor="middle" class="label">child C (frontend)</text>
+  <text x="505" y="252" text-anchor="middle" class="small">spawns own child</text>
+
+  <rect x="540" y="345" width="150" height="65" rx="8" class="node neutral"/>
+  <text x="615" y="372" text-anchor="middle" class="label">grandchild C.1</text>
+  <text x="615" y="392" text-anchor="middle" class="small">depth ≤ 3 enforced</text>
+
+  <rect x="235" y="345" width="150" height="65" rx="8" class="node neutral"/>
+  <text x="310" y="372" text-anchor="middle" class="label">child episodes</text>
+  <text x="310" y="392" text-anchor="middle" class="small">own log; sees only brief</text>
+
+  <rect x="720" y="255" width="185" height="75" rx="8" class="node storage"/>
+  <text x="812" y="282" text-anchor="middle" class="label">SHARED MEMORY GRAPH</text>
+  <text x="812" y="303" text-anchor="middle" class="small">children write Outcome nodes</text>
+  <text x="812" y="321" text-anchor="middle" class="small">+ facts — parents read results</text>
+
+  <text x="60" y="480" class="small">spawn = memory_search(task) → ≤2000-token context brief → child session branch. Budget: depth 3 · 4 parallel · tokens inherited/split.</text>
+</svg>
+</main>

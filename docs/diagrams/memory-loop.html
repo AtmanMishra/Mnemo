@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memory Loop</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc; --fg: #172033; --muted: #5b6475; --line: #64748b;
+    --neutral: #e2e8f0; --input: #bfdbfe; --process: #c7d2fe;
+    --storage: #99f6e4; --external: #fde68a; --risk: #fecaca;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f172a; --fg: #e5e7eb; --muted: #a3adbd; --line: #94a3b8;
+      --neutral: #334155; --input: #1d4ed8; --process: #4338ca;
+      --storage: #0f766e; --external: #92400e; --risk: #991b1b;
+    }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  main { max-width:980px; margin:32px auto; padding:0 20px; }
+  svg { width:100%; height:auto; display:block; }
+  .title { font-size:20px; font-weight:650; fill:var(--fg); }
+  .label { font-size:13px; font-weight:600; fill:var(--fg); }
+  .small { font-size:11px; fill:var(--muted); }
+  .node { stroke: var(--line); stroke-width:1; }
+  .neutral { fill:var(--neutral); } .input { fill:var(--input); }
+  .process { fill:var(--process); } .storage { fill:var(--storage); }
+  .external { fill:var(--external); } .risk { fill:var(--risk); }
+  .edge { stroke:var(--line); stroke-width:1.5; fill:none; }
+  .zone { fill:none; stroke:var(--line); stroke-width:1; stroke-dasharray:6 5; opacity:.8; }
+</style>
+<main>
+
+<svg viewBox="0 0 940 560" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/>
+    </marker>
+  </defs>
+  <text x="20" y="30" class="title">Automatic Memory Loop — write, recall, learn from failure</text>
+
+  <!-- connectors -->
+  <path class="edge" marker-end="url(#arr2)" d="M180,120 L180,190"/>
+  <path class="edge" marker-end="url(#arr2)" d="M180,250 L180,320"/>
+  <path class="edge" marker-end="url(#arr2)" d="M240,355 L400,290"/>
+  <path class="edge" marker-end="url(#arr2)" d="M470,240 L620,180"/>
+  <path class="edge" marker-end="url(#arr2)" d="M700,230 L700,330"/>
+  <path class="edge" stroke-dasharray="5 4" marker-end="url(#arr2)" d="M640,380 L300,470 L150,395"/>
+  <path class="edge" stroke-dasharray="5 4" marker-end="url(#arr2)" d="M760,390 L860,450"/>
+
+  <rect x="80" y="55" width="200" height="65" rx="8" class="node input"/>
+  <text x="180" y="82" text-anchor="middle" class="label">session starts</text>
+  <text x="180" y="102" text-anchor="middle" class="small">episode node auto-created</text>
+
+  <rect x="90" y="190" width="180" height="60" rx="8" class="node process"/>
+  <text x="180" y="216" text-anchor="middle" class="label">agent works</text>
+  <text x="180" y="236" text-anchor="middle" class="small">every tool call logged</text>
+
+  <rect x="90" y="320" width="180" height="70" rx="8" class="node neutral"/>
+  <text x="180" y="347" text-anchor="middle" class="label">task fails</text>
+  <text x="180" y="367" text-anchor="middle" class="small">failure detail captured</text>
+
+  <rect x="400" y="235" width="200" height="60" rx="8" class="node process"/>
+  <text x="500" y="261" text-anchor="middle" class="label">steer(episode)</text>
+  <text x="500" y="281" text-anchor="middle" class="small">blame attribution → ops</text>
+
+  <rect x="620" y="115" width="160" height="115" rx="8" class="node storage"/>
+  <text x="700" y="140" text-anchor="middle" class="label">steering outcomes</text>
+  <text x="700" y="162" text-anchor="middle" class="small">down-weight bad feeder</text>
+  <text x="700" y="180" text-anchor="middle" class="small">supersede stale fact</text>
+  <text x="700" y="198" text-anchor="middle" class="small">or create GAP node</text>
+
+  <rect x="620" y="330" width="160" height="60" rx="8" class="node input"/>
+  <text x="700" y="356" text-anchor="middle" class="label">next session</text>
+  <text x="700" y="376" text-anchor="middle" class="small">search sees better graph</text>
+
+  <rect x="830" y="430" width="95" height="50" rx="8" class="node external"/>
+  <text x="877" y="452" text-anchor="middle" class="label">success</text>
+  <text x="877" y="470" text-anchor="middle" class="small">reinforce</text>
+
+  <rect x="60" y="445" width="220" height="55" rx="8" class="node storage"/>
+  <text x="170" y="468" text-anchor="middle" class="label">journal (locked, replayable)</text>
+  <text x="170" y="488" text-anchor="middle" class="small">every op journaled — crash safe</text>
+</svg>
+</main>

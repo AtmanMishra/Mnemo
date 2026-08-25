@@ -1,0 +1,13 @@
+[package]
+name = "seatui"
+version = "0.1.0"
+edition = "2021"
+description = "PIXEL-design terminal UI for the sea-agent coding agent"
+
+[dependencies]
+ratatui = { version = "0.29",  }
+crossterm = "0.28"
+
+[[bin]]
+name = "seatui"
+path = "src/main.rs"

@@ -1,0 +1,30 @@
+{
+  "name": "sea-agent",
+  "version": "0.1.0",
+  "description": "Self-Evolving Agent runtime built on the pi framework (@earendil-works/*)",
+  "type": "module",
+  "bin": {
+    "sea": "./bin/sea.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "start": "node ./bin/sea.ts"
+  },
+  "engines": {
+    "node": ">=22.6"
+  },
+  "license": "MIT",
+  "keywords": [],
+  "author": "",
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.84.3",
+    "@earendil-works/pi-ai": "^0.84.3",
+    "@earendil-works/pi-coding-agent": "^0.84.3",
+    "typebox": "^1.3.18"
+  },
+  "devDependencies": {
+    "@types/node": "^26.3.0",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,15 @@
+# secrets - NEVER commit
+.env
+**/.env
+
+# build artifacts
+node_modules/
+target/
+dist/
+
+# runtime data (journals, caches)
+memory-layer/data/
+*.lock.tmp
+
+# misc
+.DS_Store

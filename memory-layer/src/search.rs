@@ -1,0 +1,116 @@
+//! Vector search over node embeddings + graph-aware rerank.
+//! Node vectors are DERIVED (label + active facts + recent log) -> never journaled.
+use crate::model::{EdgeKind, Millis, NodeId, NodeKind};
+use crate::store::StoreData;
+use crate::vec::{cosine, Embedder};
+use std::collections::HashMap;
+
+/// Text a node is embedded from. Derived; recomputed after updates.
+pub fn node_text(store: &StoreData, id: NodeId) -> Option<String> {
+    let n = store.nodes.get(&id)?;
+    if n.deleted { return None; }
+    let mut parts = vec![format!("{:?} {}", n.kind, n.label)];
+    for f in n.active_facts() {
+        parts.push(format!("{} {}", f.key, f.value));
+    }
+    for l in n.log.iter().rev().take(3) {
+        parts.push(format!("{} {}", l.kind, l.detail));
+    }
+    Some(parts.join(" "))
+}
+
+/// Build embeddings for all live nodes.
+pub fn build_vectors(
+    store: &StoreData,
+    emb: &dyn Embedder,
+) -> HashMap<NodeId, Vec<f32>> {
+    store.nodes.keys().copied()
+        .filter_map(|id| node_text(store, id).map(|t| (id, emb.embed(&t))))
+        .collect()
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SearchResult {
+    pub node: NodeId,
+    pub score: f32,
+    /// how much of the score came from cluster expansion vs direct hit
+    pub via_graph: bool,
+}
+
+/// Shared graph-expansion rerank over raw seed hits.
+fn expand(
+    store: &StoreData,
+    seeds: Vec<(NodeId, f32)>,
+    k: usize,
+    now: Millis,
+) -> Vec<SearchResult> {
+    let mut out: HashMap<NodeId, SearchResult> = HashMap::new();
+    for (id, s) in seeds {
+        if store.nodes.get(&id).map(|n| n.deleted).unwrap_or(true) {
+            continue;
+        }
+        out.insert(id, SearchResult { node: id, score: s, via_graph: false });
+        for e in store.edges.values() {
+            if !e.alive_at(now) { continue; }
+            if !matches!(e.kind, EdgeKind::PartOf | EdgeKind::SuppliesContext | EdgeKind::ActivatedWith | EdgeKind::DerivedFrom) { continue; }
+            let nb = if e.src == id { Some(e.dst) } else if e.dst == id { Some(e.src) } else { None };
+            if let Some(nb_id) = nb {
+                let boosted = s * 0.5 * e.weight.max(0.1);
+                let entry = out.entry(nb_id).or_insert(SearchResult { node: nb_id, score: 0.0, via_graph: true });
+                if boosted > entry.score {
+                    entry.score = boosted;
+                    entry.via_graph = true;
+                }
+            }
+        }
+    }
+    let mut results: Vec<SearchResult> = out.into_values().collect();
+    results.sort_by(|a, b| b.score.total_cmp(&a.score));
+    results.truncate(k);
+    results
+}
+
+fn passes_filter(store: &StoreData, id: NodeId, kf: Option<NodeKind>) -> bool {
+    store.nodes.get(&id)
+        .map(|n| !n.deleted && kf.map_or(true, |k| n.kind == k))
+        .unwrap_or(false)
+}
+
+/// Search v1: brute-force cosine seeds + graph expansion (exact; fine to ~100k nodes).
+#[allow(dead_code)]
+pub fn search(
+    store: &StoreData,
+    vectors: &HashMap<NodeId, Vec<f32>>,
+    emb: &dyn Embedder,
+    query: &str,
+    k: usize,
+    now: Millis,
+    type_filter: Option<NodeKind>,
+) -> Vec<SearchResult> {
+    let q = emb.embed(query);
+    let mut scored: Vec<(NodeId, f32)> = vectors.iter()
+        .filter(|(id, _)| passes_filter(store, **id, type_filter))
+        .map(|(id, v)| (*id, cosine(&q, v)))
+        .filter(|(_, s)| *s > 1e-6)
+        .collect();
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+    expand(store, scored, k, now)
+}
+
+/// Search v2: HNSW ANN seeds + same graph expansion. Same contract as `search`.
+pub fn search_ann(
+    store: &StoreData,
+    index: &crate::ann::AnnIndex,
+    emb: &dyn Embedder,
+    query: &str,
+    k: usize,
+    now: Millis,
+    type_filter: Option<NodeKind>,
+) -> Vec<SearchResult> {
+    let q = emb.embed(query);
+    let seeds: Vec<(NodeId, f32)> = index.search(&q, k * 4).into_iter()
+        .map(|(id, s)| (id as NodeId, s))
+        .filter(|(id, _)| passes_filter(store, *id, type_filter))
+        .collect();
+    expand(store, seeds, k, now)
+}

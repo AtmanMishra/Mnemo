@@ -1,0 +1,104 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc; --fg: #172033; --muted: #5b6475; --line: #64748b;
+    --neutral: #e2e8f0; --input: #bfdbfe; --process: #c7d2fe;
+    --storage: #99f6e4; --external: #fde68a; --risk: #fecaca;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f172a; --fg: #e5e7eb; --muted: #a3adbd; --line: #94a3b8;
+      --neutral: #334155; --input: #1d4ed8; --process: #4338ca;
+      --storage: #0f766e; --external: #92400e; --risk: #991b1b;
+    }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  main { max-width:980px; margin:32px auto; padding:0 20px; }
+  svg { width:100%; height:auto; display:block; }
+  .title { font-size:20px; font-weight:650; fill:var(--fg); }
+  .label { font-size:13px; font-weight:600; fill:var(--fg); }
+  .small { font-size:11px; fill:var(--muted); }
+  .node { stroke: var(--line); stroke-width:1; }
+  .neutral { fill:var(--neutral); } .input { fill:var(--input); }
+  .process { fill:var(--process); } .storage { fill:var(--storage); }
+  .external { fill:var(--external); } .risk { fill:var(--risk); }
+  .edge { stroke:var(--line); stroke-width:1.5; fill:none; }
+  .zone { fill:none; stroke:var(--line); stroke-width:1; stroke-dasharray:6 5; opacity:.8; }
+</style>
+<main>
+
+<svg viewBox="0 0 940 620" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/>
+    </marker>
+  </defs>
+  <text x="20" y="30" class="title">Self-Evolving Coding Agent — System Architecture</text>
+
+  <!-- connectors first -->
+  <path class="edge" marker-end="url(#arr)" d="M300,120 L300,170"/>
+  <path class="edge" marker-end="url(#arr)" d="M420,215 L560,255"/>
+  <path class="edge" marker-end="url(#arr)" d="M700,215 L700,255"/>
+  <path class="edge" marker-end="url(#arr)" d="M660,320 L400,395"/>
+  <path class="edge" marker-end="url(#arr)" d="M790,320 L790,395"/>
+  <path class="edge" marker-end="url(#arr)" d="M330,455 L330,505"/>
+  <path class="edge" stroke-dasharray="5 4" marker-end="url(#arr)" d="M900,290 L895,180"/>
+
+  <!-- presentation zone -->
+  <rect x="150" y="55" width="300" height="65" rx="8" class="node neutral"/>
+  <text x="300" y="82" text-anchor="middle" class="label">TUI — memtui / pixel agent TUI</text>
+  <text x="300" y="102" text-anchor="middle" class="small">ratatui · node list · search · steering view</text>
+
+  <!-- agent runtime zone -->
+  <rect class="zone" x="40" y="170" width="520" height="130" rx="10"/>
+  <text x="56" y="192" class="small">AGENT RUNTIME — sea-agent on pi (TypeScript)</text>
+  <rect x="60" y="205" width="220" height="75" rx="8" class="node process"/>
+  <text x="170" y="230" text-anchor="middle" class="label">pi agent loop</text>
+  <text x="170" y="250" text-anchor="middle" class="small">multi-provider models</text>
+  <text x="170" y="266" text-anchor="middle" class="small">steering/followUp queues</text>
+  <rect x="310" y="205" width="235" height="75" rx="8" class="node input"/>
+  <text x="427" y="228" text-anchor="middle" class="label">core tools</text>
+  <text x="427" y="247" text-anchor="middle" class="small">bash · files · edit · glob</text>
+  <text x="427" y="264" text-anchor="middle" class="small">ipy_run persistent kernel</text>
+
+  <!-- extension shim -->
+  <rect x="600" y="170" width="200" height="45" rx="8" class="node neutral"/>
+  <text x="700" y="198" text-anchor="middle" class="label">extension host shim</text>
+
+  <!-- capabilities row -->
+  <rect x="450" y="255" width="230" height="65" rx="8" class="node external"/>
+  <text x="565" y="282" text-anchor="middle" class="label">harness engine (TS)</text>
+  <text x="565" y="302" text-anchor="middle" class="small">createHarness() self-built skills</text>
+
+  <rect x="620" y="255" width="300" height="65" rx="8" class="node process"/>
+  <text x="770" y="282" text-anchor="middle" class="label">memory-layer.ts extension</text>
+  <text x="770" y="302" text-anchor="middle" class="small">memory_search / write_fact / steer</text>
+
+  <!-- memsrv sidecar zone -->
+  <rect class="zone" x="250" y="395" width="650" height="110" rx="10"/>
+  <text x="266" y="417" class="small">RUST SIDECAR — memsrv (JSON-RPC stdio)</text>
+  <rect x="270" y="430" width="270" height="60" rx="8" class="node storage"/>
+  <text x="405" y="453" text-anchor="middle" class="label">graph memory</text>
+  <text x="405" y="473" text-anchor="middle" class="small">{facts, state, log, context} + steering</text>
+  <rect x="580" y="430" width="290" height="60" rx="8" class="node storage"/>
+  <text x="725" y="453" text-anchor="middle" class="label">vector retrieval</text>
+  <text x="725" y="473" text-anchor="middle" class="small">HNSW + graph expansion · Embedder trait</text>
+
+  <!-- journal -->
+  <rect x="180" y="505" width="300" height="55" rx="8" class="node risk"/>
+  <text x="330" y="528" text-anchor="middle" class="label">journal.jsonl (+ .lock)</text>
+  <text x="330" y="548" text-anchor="middle" class="small">append-only ops · replay = exact state</text>
+  <rect x="580" y="505" width="290" height="55" rx="8" class="node storage"/>
+  <text x="725" y="528" text-anchor="middle" class="label">embed-cache.json</text>
+  <text x="725" y="548" text-anchor="middle" class="small">text-hash → vector per model</text>
+
+  <!-- external -->
+  <rect x="800" y="140" width="125" height="40" rx="8" class="node external"/>
+  <text x="862" y="165" text-anchor="middle" class="label">OpenRouter</text>
+</svg>
+</main>
