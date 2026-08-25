@@ -17,7 +17,7 @@ hierarchical subagents sharing knowledge.
 | 5 | Product polish | DONE v1 | TUI v2 inline REPL; skills; approval gate; loops; export/import |
 | 6 | Live LLM validation | DONE (OpenCode) | eval 3/3 vs 0/3 on ox-alpha-free; spawn_subagent live; agent built its own harness live |
 | 7 | Harness engine integration | DONE | create_harness tool: model builds tool plugins at runtime; bundles auto-become skills via bridge |
-| 8 | Native pi InteractiveMode migration | IN PROGRESS | interactive-migrator executing research/tui-adoption-report.md plan (Option A) |
+| 8 | Native pi InteractiveMode migration | DONE | sea = pi main() + extensionFactories; REPL deleted; 92/92 tests; live-verified |
 
 ## Component scoreboard
 | Component | Location | Tests | State |
