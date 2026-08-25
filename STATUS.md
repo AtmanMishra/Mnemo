@@ -14,7 +14,8 @@ hierarchical subagents sharing knowledge.
 | 3b | LLM task-success eval | FIRST RUN DONE | WITH memory 2/3 vs WITHOUT 0/3 (nemotron-120b:free); T3 flaky from rate limits; re-run after daily reset |
 | 4 | Subagent spawning (tree) | v1 DONE | spawn_subagent tool: parent-chosen brief, shared journal, timeout-kill; 5 deterministic tests; live LLM test pending quota reset |
 | 4 | Subagent spawning (tree) | DESIGNED | depth 3 / 4 parallel / 2k-token briefs |
-| 5 | Product polish (TUI, import/export, loops) | IN PROGRESS | seatui-builder building the pixel-design Rust TUI (tui/ crate) against the live sea-agent REPL |
+| 5 | Product polish | DONE v1 | TUI v2 inline REPL; skills; approval gate; loops; export/import |
+| 6 | Live LLM validation round 2 | PENDING QUOTA | eval re-run + spawn_subagent live + TUI live chat after OpenRouter daily reset |
 
 ## Component scoreboard
 | Component | Location | Tests | State |
@@ -85,3 +86,9 @@ use paid credits. Deterministic tests never call LLMs - keep it that way.
 ## Docs
 - docs/system-design.md — full system design (v1.0)
 - docs/diagrams/{architecture,memory-loop,subagent-tree}.html + memory-layer.excalidraw — diagrams (diagram-maker skill)
+
+## Session log (latest)
+- Fixed approval.test.ts hang: readline drops unmatched pre-written lines -> scripted answers now
+  feed per-prompt from output detection; ask() resolves on stream EOF instead of pending forever.
+- All builders delivered & verified. Pushed commits ca93a51, 5170959 to github.com/AtmanMishra/self-evolving-agent.
+- Test totals: agent 71, tui 23 (+31 self-checks), memory-layer 19 (+2 integration). All green.
