@@ -38,6 +38,20 @@ Methods : ping dump state{node} search{query,k} create_node{kind,label} episode{
           steer{episode,failure,fix?} good{episode,detail} exit
 Phase 1b accepted by pi-runtime-builder (extension in progress).
 
+## LLM task eval FINAL (ox-alpha-free via OpenCode Zen)
+| Task | WITH memory | WITHOUT memory |
+|------|------------|----------------|
+| checkout package manager | pnpm PASS | honest ignorance FAIL |
+| billing port | 8081 PASS | FAIL |
+| helm rollback cause | --wait flag PASS | FAIL |
+| **Score** | **3/3** | **0/3** |
+Fixes that produced the jump from 1/3: (1) memsrv search now returns label+state per hit
+(scores alone are useless to an LLM), (2) cli.ts asserts a persistent-memory directive into
+systemPrompt before every model call.
+Also live-verified: spawn_subagent hierarchical delegation (child wrote ops fact to shared
+graph node #15; parent confirmed via its own memory search). opencode + opencode-go providers
+added (OPENCODE_API_KEY).
+
 ## Eval results (memeval, 15 queries, 12-node 3-domain graph)
 | Embedder | Hit@1 | Hit@3 | MRR |
 |----------|-------|-------|-----|

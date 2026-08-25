@@ -36,6 +36,7 @@ export const allTools: SeaTool[] = [
   listSkillsTool,
   loadSkillTool,
   createSkillTool,
+  subagentSpawnTool,
 ];
 
 export const toolNames = allTools.map((t) => t.name);

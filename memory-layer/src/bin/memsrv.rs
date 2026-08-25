@@ -175,7 +175,19 @@ fn handle(
             let k = params.get("k").and_then(|k| k.as_u64()).unwrap_or(5) as usize;
             let vectors = build_vectors(s, emb);
             let results = search(s, &vectors, emb, query, k, *clock, None);
-            Ok(json!({ "results": results })) // SearchResult is Serialize
+            // enrich hits with label + derived state so the caller can READ
+            // what was found (scores alone are useless to an LLM)
+            let enriched: Vec<serde_json::Value> = results.iter().map(|r| {
+                json!({
+                    "node": r.node,
+                    "score": r.score,
+                    "via_graph": r.via_graph,
+                    "label": s.nodes.get(&r.node).map(|n| n.label.clone()).unwrap_or_default(),
+                    "kind": s.nodes.get(&r.node).map(|n| format!("{:?}", n.kind)).unwrap_or_default(),
+                    "state": s.state_of(r.node).unwrap_or_default(),
+                })
+            }).collect();
+            Ok(json!({ "results": enriched }))
         }
 
         "steer" => {

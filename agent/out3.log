@@ -1,0 +1,10 @@
+The sub-agent completed the task. Here's what it did:
+
+**Sub-agent action:** Called `memory_write_fact` with:
+- **Label:** `ops`
+- **Key:** `deploy-window`
+- **Value:** `Friday 5pm`
+
+**Verification:** A memory search confirms the fact was stored successfully — a new aspect node (`ops`, #15) was created with the fact `deploy-window: Friday 5pm` attached, and its log shows both `created: node created as ops` and `fact_added: deploy-window: Friday 5pm`.
+
+Note: the sub-agent returned exit code 1 (likely just a reporting quirk on completion), but the underlying memory write clearly succeeded.

@@ -11,6 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Type } from "typebox";
 import { discoverSkills } from "../skills/discovery.ts";
+import { syncBundlesToSkills, skillLocations } from "../skills/harness-bridge.ts";
 import { textResult, type SeaTool } from "./types.ts";
 
 let skillsHomeOverride: string | null = null;
@@ -50,6 +51,8 @@ export const listSkillsTool: SeaTool = {
     "List discovered skills (name, scope, description). Use load_skill to read the full instructions of one.",
   parameters: listParams,
   async execute() {
+    // harness bundles (created via harness-engine) become discoverable skills
+    try { syncBundlesToSkills(skillLocations(process.cwd())); } catch { /* best-effort */ }
     const skills = await discoverSkills({ cwd: process.cwd(), home: skillsHome() });
     if (skills.length === 0) return textResult("(no skills found)", { skills: [] });
     const width = Math.max(...skills.map((s) => s.name.length));

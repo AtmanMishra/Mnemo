@@ -95,7 +95,7 @@ async function main(): Promise<void> {
   const oneShotPrompt = promptArgs.length > 0 ? promptArgs.join(" ") : undefined;
 
   const modelRuntime = await ModelRuntime.create();
-  let session;
+  let session: any;
   try {
     const model = await resolveModel(modelRuntime, selection.provider, selection.modelId);
     console.error(`sea-agent: provider=${selection.provider} model=${model.provider}/${model.id}`);
@@ -111,10 +111,32 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Persistent-memory directive: small models need an explicit instruction to
+  // consult/store memory proactively (validated by eval/memory-eval.mjs).
+  const MEMORY_DIRECTIVE = [
+
+    "",
+    "## Persistent memory",
+    "You have long-term memory tools: memory_search, memory_write_fact, memory_steer.",
+    "- ALWAYS call memory_search BEFORE answering any question about this project, its services, ports, tooling, or past work. Never claim you lack information without searching first.",
+    "- When you learn a durable fact (stack decisions, fixes that worked or failed, credentials locations), store it via memory_write_fact.",
+  ].join("\n");
+  // pi recomputes state.systemPrompt on internal events, so assert the
+  // directive immediately before every model call instead of once.
+  function assertMemoryDirective(): void {
+    const agentState = (session as any)?.agent?.state;
+    if (agentState && typeof agentState.systemPrompt === "string"
+        && !agentState.systemPrompt.includes("Persistent memory")) {
+      agentState.systemPrompt += MEMORY_DIRECTIVE;
+    }
+  }
+
   await printAssistantText(session);
   await fireEvent("session_start");
+  assertMemoryDirective();
 
   if (oneShotPrompt) {
+    assertMemoryDirective();
     await session.prompt(oneShotPrompt);
     await fireEvent("session_shutdown");
     await session.dispose();
@@ -129,6 +151,7 @@ async function main(): Promise<void> {
       const trimmed = line.trim();
       if (!trimmed) continue;
       if (trimmed === "/exit" || trimmed === "/quit") break;
+      assertMemoryDirective();
       await session.prompt(trimmed);
       process.stdout.write("\n");
     }

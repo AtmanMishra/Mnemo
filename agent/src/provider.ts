@@ -6,12 +6,12 @@
  * OPENAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY wins.
  */
 export interface ProviderSelection {
-  provider: "openai" | "anthropic" | "openrouter" | "opencode";
+  provider: "openai" | "anthropic" | "openrouter" | "opencode" | "opencode-go";
   apiKeyEnv: string;
   modelId?: string;
 }
 
-const SUPPORTED = ["openai", "anthropic", "openrouter", "opencode"] as const;
+const SUPPORTED = ["openai", "anthropic", "openrouter", "opencode", "opencode-go"] as const;
 type SupportedProvider = (typeof SUPPORTED)[number];
 
 const KEY_ENV_BY_PROVIDER: Record<SupportedProvider, string> = {
@@ -19,6 +19,7 @@ const KEY_ENV_BY_PROVIDER: Record<SupportedProvider, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openrouter: "OPENROUTER_API_KEY",
   opencode: "OPENCODE_API_KEY",
+  "opencode-go": "OPENCODE_API_KEY",
 };
 
 export function pickProvider(env: NodeJS.ProcessEnv = process.env): ProviderSelection | null {
