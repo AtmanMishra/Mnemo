@@ -4,7 +4,7 @@ This file tracks ALL areas of work. Per-task live status lives in STATUS.md.
 Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 
 ## AREA 1 — AUTH & ONBOARDING (single-command experience)
-- [ ] 1.1 Auth store: ~/.sea/auth.json (chmod 600) via pi AuthStorage wrapper; read order: env > auth.json
+- [~] 1.1 Auth store: ~/.sea/auth.json (chmod 600) via pi AuthStorage wrapper; read order: env > auth.json
 - [ ] 1.2 `mnemo auth` wizard: provider picker (anthropic/openai/openrouter/opencode/opencode-go) -> paste key OR oauth device flow where supported -> default model pick from live catalog
 - [ ] 1.3 First-run detection: no creds anywhere -> auto-launch wizard; rebrand help/header to MNEMO
 - [ ] 1.4 `mnemo auth status|logout` commands
