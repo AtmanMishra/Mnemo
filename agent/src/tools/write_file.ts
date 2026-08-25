@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { Type } from "typebox";
 import { resolveInWorkspace } from "./workspace.ts";
 import { textResult, type SeaTool } from "./types.ts";
+import { approvalGate } from "../approval.ts";
 
 const parameters = Type.Object({
   path: Type.String({ description: "File path (absolute or relative to workspace root)." }),
@@ -15,6 +16,9 @@ export const writeFileTool: SeaTool = {
   description: "Create or overwrite a file with the given content. Parent directories are created automatically.",
   parameters,
   async execute(_id, params) {
+    const lines = params.content.length === 0 ? 0 : params.content.split("\n").length;
+    const denied = await approvalGate("write_file", `write ${lines} lines (${params.content.length} bytes) to ${params.path}`);
+    if (denied) return textResult(denied);
     const abs = resolveInWorkspace(params.path);
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await fs.writeFile(abs, params.content, "utf8");

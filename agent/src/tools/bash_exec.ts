@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import { Type } from "typebox";
 import { textResult, type SeaTool } from "./types.ts";
+import { approvalGate } from "../approval.ts";
 
 const parameters = Type.Object({
   command: Type.String({ description: "Shell command to execute (run via /bin/sh -c)" }),
@@ -70,6 +71,8 @@ export const bashExecTool: SeaTool = {
     "Non-zero exit codes are reported in the result, not thrown as errors.",
   parameters,
   async execute(_toolCallId, params, signal) {
+    const denied = await approvalGate("bash_exec", `$ ${params.command}`);
+    if (denied) return textResult(denied);
     const res = await runBash(params.command, {
       timeoutMs: params.timeout_ms,
       cwd: params.cwd,

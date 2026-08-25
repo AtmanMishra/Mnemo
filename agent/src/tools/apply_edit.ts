@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import { Type } from "typebox";
 import { resolveInWorkspace } from "./workspace.ts";
 import { textResult, type SeaTool } from "./types.ts";
+import { approvalGate } from "../approval.ts";
 
 const parameters = Type.Object({
   path: Type.String({ description: "File to edit (absolute or relative to workspace root)." }),
@@ -32,6 +33,8 @@ export const applyEditTool: SeaTool = {
     "Exact string replacement in a file: replaces old_str with new_str. Fails if old_str is not found or appears more than once without replace_all.",
   parameters,
   async execute(_id, params) {
+    const denied = await approvalGate("apply_edit", `replace a ${params.old_str.length}-char match with ${params.new_str.length} chars in ${params.path}`);
+    if (denied) return textResult(denied);
     const abs = resolveInWorkspace(params.path);
     let text: string;
     try {

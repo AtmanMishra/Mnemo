@@ -1,185 +1,158 @@
-//! Compose functions: draw the PIXEL layout into a ratatui frame.
+//! Inline-REPL drawing: bottom viewport (input + status + overlays) and
+//! tool-call card lines for the native scrollback.
 
-use crate::app::{AgentState, App, Speaker};
+use crate::app::{AgentState, App};
+use crate::parser::ToolEvent;
 use crate::theme;
 use ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
 
-/// Greedy word-wrap. Long words are hard-broken at the width boundary.
-pub fn wrap(text: &str, width: usize) -> Vec<String> {
-    let w = width.max(1);
-    let mut out: Vec<String> = Vec::new();
-    for para in text.split('\n') {
-        if para.is_empty() {
-            out.push(String::new());
-            continue;
-        }
-        let mut line = String::new();
-        for word in para.split(' ') {
-            let mut rest: std::borrow::Cow<str> = std::borrow::Cow::Borrowed(word);
-            loop {
-                let cur = line.chars().count();
-                let rl = rest.chars().count();
-                if cur == 0 && rl <= w {
-                    line.push_str(&rest);
-                    break;
-                }
-                if cur > 0 && cur + 1 + rl <= w {
-                    line.push(' ');
-                    line.push_str(&rest);
-                    break;
-                }
-                if cur > 0 {
-                    out.push(std::mem::take(&mut line));
-                }
-                // line is empty here
-                if rl > w {
-                    let chars: Vec<char> = rest.chars().collect();
-                    out.push(chars[..w].iter().collect());
-                    rest = std::borrow::Cow::Owned(chars[w..].iter().collect());
-                } else {
-                    line.push_str(&rest);
-                    break;
-                }
-            }
-        }
-        out.push(line);
+pub const BASE_HEIGHT: u16 = 4; // input block (3) + status (1)
+
+/// Total inline viewport height given current overlay state.
+pub fn inline_height(app: &App) -> u16 {
+    let mut h = BASE_HEIGHT;
+    if app.show_help {
+        h += help_lines().len() as u16 + 2; // + borders
     }
-    out
+    if app.confirm.is_some() {
+        h += 1;
+    } else if !app.palette_matches().is_empty() {
+        let n = app.palette_matches().len() as u16;
+        h += n.min(6);
+    }
+    h.min(20)
 }
 
-pub fn speaker_prefix(speaker: Speaker) -> Span<'static> {
-    match speaker {
-        Speaker::User => Span::styled("▶ you", Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD)),
-        Speaker::Agent => Span::styled("◆ sea", Style::default().fg(theme::GREEN).add_modifier(Modifier::BOLD)),
-        Speaker::System => Span::styled("·· sys", Style::default().fg(theme::GREY)),
+pub const CONTEXT_CAPACITY_TOKENS: u64 = 128_000;
+
+fn context_fraction(app: &App) -> f32 {
+    (app.context_tokens() as f32 / CONTEXT_CAPACITY_TOKENS as f32).clamp(0.0, 1.0)
+}
+
+fn context_color(app: &App) -> ratatui::style::Color {
+    match context_fraction(app) {
+        f if f < 0.5 => theme::YELLOW,
+        f if f < 0.8 => theme::ORANGE,
+        _ => theme::RED,
     }
 }
 
-fn chat_lines(area_width: u16, app: &App) -> Vec<Line<'static>> {
-    let w = area_width.max(4) as usize;
-    const INDENT: usize = 7; // "▶ you " width
-    let body_w = w.saturating_sub(INDENT);
-    let mut lines: Vec<Line> = Vec::new();
-    for e in &app.chat {
-        let wrapped = {
-            let text = e.text.trim_end_matches('\n').to_string();
-            if text.is_empty() {
-                vec![String::new()]
-            } else {
-                wrap(&text, body_w)
-            }
-        };
-        let mut first = vec![
-            speaker_prefix(e.speaker),
-            Span::raw(" "),
-            Span::raw(wrapped[0].clone()),
-        ];
-        lines.push(Line::from(std::mem::take(&mut first)));
-        for cont in &wrapped[1..] {
-            lines.push(Line::from(vec![
-                Span::raw(" ".repeat(INDENT)),
-                Span::raw(cont.clone()),
-            ]));
-        }
-        lines.push(Line::from(""));
-    }
-    lines
+fn clock_utc() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let (h, rem) = ((secs / 3600) % 24, secs % 3600);
+    let (m, s) = (rem / 60, rem % 60);
+    format!("{:02}:{:02}:{:02}", h, m, s)
 }
 
-pub fn draw_chat(f: &mut Frame, area: Rect, app: &App) {
-    let block = Block::default()
-        .title(Span::styled(theme::title("chat"), theme::title_style()))
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(Style::default().fg(theme::DARKBLUE));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    let lines = chat_lines(inner.width, app);
-    let visible = inner.height as usize;
-    let total = lines.len();
-    let skip = if app.autoscroll {
-        total.saturating_sub(visible)
+/// Draw one inline frame inside the viewport area.
+pub fn compose_inline(f: &mut Frame, app: &App, now: std::time::Instant) {
+    let area = f.area();
+    let status_h = 1u16;
+    let confirm_h = u16::from(app.confirm.is_some());
+    let palette_rows = if app.confirm.is_none() {
+        app.palette_matches().len().min(6) as u16
     } else {
-        total
-            .saturating_sub(visible)
-            .saturating_sub(app.scroll_up as usize)
+        0
     };
-    let para = Paragraph::new(lines).scroll((skip.min(u16::MAX as usize) as u16, 0));
-    f.render_widget(para, inner);
+    let help_h = if app.show_help { help_lines().len() as u16 + 2 } else { 0 };
+    let input_h = area.height.saturating_sub(status_h + confirm_h + palette_rows + help_h);
+
+    // Stack from the bottom: status, input, then overlays above.
+    let rows = Layout::vertical([
+        Constraint::Min(help_h),
+        Constraint::Length(help_h),
+        Constraint::Length(palette_rows),
+        Constraint::Length(confirm_h),
+        Constraint::Length(input_h),
+        Constraint::Length(status_h),
+    ])
+    .split(area);
+
+    if help_h > 0 {
+        draw_help(f, rows[1]);
+    }
+    if palette_rows > 0 && app.confirm.is_none() {
+        draw_palette(f, rows[2], app);
+    }
+    if confirm_h > 0 {
+        draw_confirm(f, rows[3], app);
+    }
+    draw_input(f, rows[4], app);
+    draw_status(f, rows[5], app, now);
 }
 
-pub fn draw_activity(f: &mut Frame, area: Rect, app: &App) {
+fn draw_help(f: &mut Frame, area: Rect) {
     let block = Block::default()
-        .title(Span::styled(theme::title("activity"), theme::title_style()))
+        .title(Span::styled(theme::title("? help"), theme::title_style()))
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
-        .border_style(Style::default().fg(theme::DARKBLUE));
+        .border_style(Style::default().fg(theme::YELLOW))
+        .style(Style::default().bg(theme::BLACK));
     let inner = block.inner(area);
     f.render_widget(block, area);
+    f.render_widget(Paragraph::new(help_lines()), inner);
+}
 
-    let lines: Vec<Line> = app
-        .activity
+fn help_lines() -> Vec<Line<'static>> {
+    let key = Style::default().fg(theme::ORANGE);
+    let desc = Style::default().fg(theme::WHITE);
+    [
+        ("type", "edit prompt"),
+        ("Enter", "send / run command"),
+        ("Up/Down", "history"),
+        ("Tab", "complete slash command"),
+        ("?", "toggle help"),
+        ("Ctrl+C", "quit"),
+    ]
+    .iter()
+    .map(|(k, d)| {
+        Line::from(vec![
+            Span::styled(format!("{:<10}", k), key),
+            Span::styled(*d, desc),
+        ])
+    })
+    .collect()
+}
+
+fn draw_palette(f: &mut Frame, area: Rect, app: &App) {
+    let matches = app.palette_matches();
+    let lines: Vec<Line> = matches
         .iter()
-        .take(crate::app::ACTIVITY_CAP)
-        .map(|t| {
-            let (tag, color) = if t.ok {
-                ("ok  ", theme::GREEN)
-            } else {
-                ("err ", theme::RED)
-            };
+        .take(area.height as usize)
+        .map(|c| {
             Line::from(vec![
-                Span::styled(format!("[{}]", tag), Style::default().fg(color)),
-                Span::styled(format!(" {}", t.name), Style::default().fg(theme::WHITE)),
+                Span::styled(format!("{:<10}", c.name), Style::default().fg(theme::GREEN)),
+                Span::styled(format!(" {:<9}", c.args), Style::default().fg(theme::BLUE)),
+                Span::styled(c.desc, Style::default().fg(theme::GREY)),
             ])
         })
         .collect();
-    f.render_widget(Paragraph::new(lines), inner);
+    f.render_widget(Paragraph::new(lines), area);
 }
 
-const MEMORY_HELP: &[&str] = &[
-    "The memory layer is attached to",
-    "the agent session.",
-    "",
-    "memory_search(q, k)",
-    "  recall facts + past episodes",
-    "write_fact(text)",
-    "  persist durable knowledge",
-    "steer(hint)",
-    "  nudge the running agent",
-    "",
-    "(live memory pane coming soon)",
-];
-
-pub fn draw_memory(f: &mut Frame, area: Rect) {
-    let block = Block::default()
-        .title(Span::styled(theme::title("memory"), theme::title_style()))
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(Style::default().fg(theme::DARKBLUE));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    let mut lines: Vec<Line> = MEMORY_HELP
-        .iter()
-        .map(|s| Line::from(Span::styled(*s, Style::default().fg(theme::WHITE))))
-        .collect();
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled("ctx ", Style::default().fg(theme::BLUE)),
-        Span::styled(
-            theme::dither_meter(0.42, (inner.width as usize).saturating_sub(6).max(4)),
-            Style::default().fg(theme::BLUE),
-        ),
-    ]));
-    f.render_widget(Paragraph::new(lines), inner);
+fn draw_confirm(f: &mut Frame, area: Rect, app: &App) {
+    if let Some(p) = &app.confirm {
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" approve ", Style::default().fg(theme::BLACK).bg(theme::YELLOW)),
+                Span::styled(
+                    format!(" {} [y/n] (--yolo disables)", p.label),
+                    Style::default().fg(theme::YELLOW),
+                ),
+            ])),
+            area,
+        );
+    }
 }
 
-pub fn draw_input(f: &mut Frame, area: Rect, app: &App) {
+fn draw_input(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .title(Span::styled(theme::title("input"), theme::title_style()))
         .borders(Borders::ALL)
@@ -195,45 +168,54 @@ pub fn draw_input(f: &mut Frame, area: Rect, app: &App) {
     f.set_cursor_position(Position::new(col.min(inner.x + inner.width.saturating_sub(1)), inner.y));
 }
 
-pub fn draw_status(f: &mut Frame, area: Rect, app: &App, now: std::time::Instant) {
+fn draw_status(f: &mut Frame, area: Rect, app: &App, now: std::time::Instant) {
     let cols = Layout::horizontal([
+        Constraint::Percentage(30),
         Constraint::Percentage(40),
-        Constraint::Percentage(20),
-        Constraint::Percentage(40),
+        Constraint::Percentage(30),
     ])
     .split(area);
 
-    let left_model = app.model.clone().unwrap_or_else(|| "starting...".into());
-    let mut left_spans = vec![Span::styled(
-        format!(" SEA {}", left_model),
-        Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD),
-    )];
-    if let Some(p) = &app.provider {
-        left_spans.push(Span::styled(format!(" ({})", p), Style::default().fg(theme::GREY)));
-    }
-    if app.exited {
-        left_spans = vec![Span::styled(
-            " SEA (agent exited)",
-            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
-        )];
-    }
-    f.render_widget(Paragraph::new(Line::from(left_spans)), cols[0]);
-
-    let mid: Line = match app.state {
-        AgentState::Thinking => Line::from(Span::styled(
-            format!("THINKING {}", app.spinner_frame(now)),
-            Style::default().fg(theme::YELLOW),
-        )),
-        AgentState::Idle => Line::from(Span::styled("IDLE", Style::default().fg(theme::GREEN))),
-        AgentState::Starting => {
-            Line::from(Span::styled("STARTING", Style::default().fg(theme::GREY)))
-        }
-    };
-    f.render_widget(Paragraph::new(mid).alignment(Alignment::Center), cols[1]);
-
+    let model = app.model.clone().unwrap_or_else(|| "starting...".into());
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            "[?] help | [/] commands | Ctrl+C quit ",
+            format!(" {}", model),
+            Style::default().fg(theme::BLUE),
+        ))),
+        cols[0],
+    );
+
+    let frac = context_fraction(app);
+    let width = (cols[1].width as usize).saturating_sub(10).max(4);
+    let bar = theme::dither_meter(frac, width);
+    let state_txt = match app.state {
+        AgentState::Thinking => {
+            format!("{} ", app.spinner_frame(now))
+        }
+        _ => String::new(),
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(state_txt, Style::default().fg(theme::YELLOW)),
+            Span::styled(bar, Style::default().fg(context_color(app))),
+            Span::styled(
+                format!(" {:>2.0}%", frac * 100.0),
+                Style::default().fg(context_color(app)),
+            ),
+        ]))
+        .alignment(Alignment::Center),
+        cols[1],
+    );
+
+    let session = app
+        .session_file
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "(new)".into());
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!("{} {} ", session, clock_utc()),
             Style::default().fg(theme::GREY),
         )))
         .alignment(Alignment::Right),
@@ -241,101 +223,94 @@ pub fn draw_status(f: &mut Frame, area: Rect, app: &App, now: std::time::Instant
     );
 }
 
-fn overlay_area(area: Rect, w: u16, h: u16) -> Rect {
-    let w = w.min(area.width.saturating_sub(2)).max(10);
-    let h = h.min(area.height.saturating_sub(2)).max(3);
-    Rect {
-        x: area.x + (area.width - w) / 2,
-        y: area.y + (area.height - h) / 2,
-        width: w,
-        height: h,
+// ---------------------------------------------------------------------------
+// Tool call cards (printed into native scrollback)
+// ---------------------------------------------------------------------------
+
+const DIFF_TOOLS: &[&str] = &["apply_edit", "write_file"];
+
+/// One-line tool-end card: green dot + name (+ grey detail) on success,
+/// red dot + name + "error" on failure. For apply_edit/write_file with
+/// details, renders a +/- diff summary.
+pub fn tool_card(ev: &ToolEvent, details: Option<&str>) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    if ev.ok {
+        spans.push(Span::styled("● ", Style::default().fg(theme::GREEN)));
+        spans.push(Span::styled(
+            ev.name.clone(),
+            Style::default().fg(theme::WHITE).add_modifier(Modifier::BOLD),
+        ));
+        if DIFF_TOOLS.contains(&ev.name.as_str()) {
+            if let Some(d) = details {
+                spans.push(Span::styled(format!(" {}", d), Style::default().fg(theme::GREY)));
+            } else {
+                spans.push(Span::styled(" edit applied", Style::default().fg(theme::GREY)));
+            }
+        } else if let Some(d) = details {
+            spans.push(Span::styled(format!(" {}", d), Style::default().fg(theme::GREY)));
+        }
+    } else {
+        spans.push(Span::styled("● ", Style::default().fg(theme::RED)));
+        spans.push(Span::styled(ev.name.clone(), Style::default().fg(theme::RED)));
+        spans.push(Span::styled(" error", Style::default().fg(theme::RED)));
     }
+    spans
 }
 
-fn help_text() -> Vec<Line<'static>> {
-    let key = Style::default().fg(theme::ORANGE);
-    let desc = Style::default().fg(theme::WHITE);
-    let rows: &[(&str, &str)] = &[
-        ("type", "edit prompt"),
-        ("Enter", "send prompt / run command"),
-        ("Up/Down", "input history (or chat scroll when empty)"),
-        ("PageUp/PageDown", "scroll chat"),
-        ("Left/Right", "move input cursor"),
-        ("?", "toggle this help"),
-        ("/", "command hints (/restart /clear /quit)"),
-        ("Ctrl+C", "quit (kills agent child)"),
-    ];
-    rows.iter()
-        .map(|(k, d)| {
-            Line::from(vec![
-                Span::styled(format!("{:<18}", k), key),
-                Span::styled(*d, desc),
-            ])
-        })
-        .collect()
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands;
+    use crate::parser::ToolEvent;
 
-fn commands_text() -> Vec<Line<'static>> {
-    let cmd = Style::default().fg(theme::GREEN);
-    let desc = Style::default().fg(theme::WHITE);
-    [
-        ("/restart", "respawn the sea-agent child process"),
-        ("/clear", "wipe the chat transcript"),
-        ("/quit", "exit seatui"),
-    ]
-    .iter()
-    .map(|(c, d)| {
-        Line::from(vec![
-            Span::styled(format!("{:<12}", c), cmd),
-            Span::styled(*d, desc),
-        ])
-    })
-    .collect()
-}
-
-fn draw_centered_overlay(f: &mut Frame, title: &'static str, lines: Vec<Line<'static>>) {
-    let size = f.area();
-    let h = lines.len() as u16 + 2;
-    let w = lines
-        .iter()
-        .map(|l| l.width() as u16)
-        .max()
-        .unwrap_or(20)
-        + 4;
-    let area = overlay_area(size, w, h);
-    f.render_widget(Clear, area);
-    let block = Block::default()
-        .title(Span::styled(theme::title(title), theme::title_style()))
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(Style::default().fg(theme::YELLOW))
-        .style(Style::default().bg(theme::BLACK));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    f.render_widget(Paragraph::new(lines), inner);
-}
-
-/// Full frame composition.
-pub fn compose(f: &mut Frame, app: &App, now: std::time::Instant) {
-    let root = Layout::vertical([
-        Constraint::Min(3),
-        Constraint::Length(3),
-        Constraint::Length(1),
-    ])
-    .split(f.area());
-    let cols = Layout::horizontal([Constraint::Percentage(68), Constraint::Percentage(32)])
-        .split(root[0]);
-    let right =
-        Layout::vertical([Constraint::Percentage(45), Constraint::Min(0)]).split(cols[1]);
-    draw_chat(f, cols[0], app);
-    draw_activity(f, right[0], app);
-    draw_memory(f, right[1]);
-    draw_input(f, root[1], app);
-    draw_status(f, root[2], app, now);
-    if app.show_help {
-        draw_centered_overlay(f, "? help", help_text());
+    #[test]
+    fn ok_card_has_green_dot_and_name() {
+        let spans = tool_card(
+            &ToolEvent { name: "Bash".into(), ok: true },
+            Some("ls -la"),
+        );
+        assert_eq!(spans[0].content.as_ref(), "● ");
+        assert_eq!(spans[0].style.fg, Some(theme::GREEN));
+        assert_eq!(spans[1].content.as_ref(), "Bash");
+        assert_eq!(spans[2].content.as_ref(), " ls -la");
     }
-    if app.show_cmds {
-        draw_centered_overlay(f, "/ commands", commands_text());
+
+    #[test]
+    fn error_card_marks_failure() {
+        let spans = tool_card(&ToolEvent { name: "run_tests".into(), ok: false }, None);
+        assert_eq!(spans[0].style.fg, Some(theme::RED));
+        assert_eq!(spans[2].content.as_ref(), " error");
+    }
+
+    #[test]
+    fn diff_tool_gets_edit_summary() {
+        let spans = tool_card(&ToolEvent { name: "write_file".into(), ok: true }, None);
+        assert!(spans.iter().any(|s| s.content.contains("edit applied")));
+        let spans = tool_card(&ToolEvent { name: "apply_edit".into(), ok: true }, Some("+3 -1 src/main.rs"));
+        assert!(spans.iter().any(|s| s.content.contains("+3 -1 src/main.rs")));
+    }
+
+    #[test]
+    fn inline_height_varies_with_overlays() {
+        let mut app = App::new();
+        assert_eq!(inline_height(&app), BASE_HEIGHT);
+        app.input = "/".into();
+        assert!(inline_height(&app) > BASE_HEIGHT);
+        app.input.clear();
+        app.show_help = true;
+        assert!(inline_height(&app) >= BASE_HEIGHT + 4);
+        app.show_help = false;
+        app.confirm = Some(crate::app::PendingConfirm {
+            label: "clear".into(),
+            action: commands::Action::Clear,
+        });
+        assert_eq!(inline_height(&app), BASE_HEIGHT + 1);
+    }
+
+    #[test]
+    fn command_list_has_expected_entries() {
+        for name in ["/help", "/quit", "/clear", "/model", "/context", "/memory", "/resume"] {
+            assert!(commands::COMMANDS.iter().any(|c| c.name == name), "missing {}", name);
+        }
     }
 }

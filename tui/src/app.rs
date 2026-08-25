@@ -1,14 +1,13 @@
-//! Application state: transcript, activity strip, input editor, status model.
+//! Application state for the inline REPL: input editor, history, transcript
+//! store, streaming buffers, overlays, approval gate.
 
+use crate::commands;
 use crate::parser::{parse_banner, parse_tool_line, split_lines, ToolEvent};
 use crate::session::OutputEvent;
-use std::collections::VecDeque;
-use std::time::Duration;
-use std::time::Instant;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 pub const THINKING_QUIET_MS: u64 = 1500;
-pub const SPINNER_INTERVAL_MS: u64 = 80;
-pub const ACTIVITY_CAP: usize = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Speaker {
@@ -24,15 +23,14 @@ pub enum AgentState {
     Thinking,
 }
 
+/// A mutating command awaiting y/n approval.
 #[derive(Debug, Clone)]
-pub struct Entry {
-    pub speaker: Speaker,
-    pub text: String,
+pub struct PendingConfirm {
+    pub label: String,
+    pub action: commands::Action,
 }
 
 pub struct App {
-    pub chat: Vec<Entry>,
-    pub activity: VecDeque<ToolEvent>,
     pub input: String,
     /// Cursor position as a char index into `input`.
     pub cursor: usize,
@@ -40,15 +38,22 @@ pub struct App {
     /// Position while browsing history; == history.len() means not browsing.
     pub hist_pos: usize,
     draft: String,
-    /// Lines the chat view is scrolled up from the bottom (when !autoscroll).
-    pub scroll_up: u16,
-    pub autoscroll: bool,
+
     pub provider: Option<String>,
     pub model: Option<String>,
     pub state: AgentState,
     pub exited: bool,
+
     pub show_help: bool,
-    pub show_cmds: bool,
+    pub confirm: Option<PendingConfirm>,
+
+    /// Full logical transcript (for /context estimate + session save/load).
+    pub transcript: Vec<(Speaker, String)>,
+    pub session_file: Option<PathBuf>,
+    /// Unflushed tail of the streaming assistant message.
+    pub stream_buf: String,
+    pub model_announced: bool,
+
     last_output: Option<Instant>,
     expecting_reply: bool,
     stderr_buf: String,
@@ -64,21 +69,21 @@ impl Default for App {
 impl App {
     pub fn new() -> Self {
         App {
-            chat: Vec::new(),
-            activity: VecDeque::new(),
             input: String::new(),
             cursor: 0,
             history: Vec::new(),
             hist_pos: 0,
             draft: String::new(),
-            scroll_up: 0,
-            autoscroll: true,
             provider: None,
             model: None,
             state: AgentState::Starting,
             exited: false,
             show_help: false,
-            show_cmds: false,
+            confirm: None,
+            transcript: Vec::new(),
+            session_file: None,
+            stream_buf: String::new(),
+            model_announced: false,
             last_output: None,
             expecting_reply: false,
             stderr_buf: String::new(),
@@ -88,23 +93,31 @@ impl App {
 
     // -- transcript ---------------------------------------------------------
 
-    /// Record a user prompt being sent and enter THINKING.
+    pub fn record(&mut self, speaker: Speaker, text: &str) {
+        self.transcript.push((speaker, text.to_string()));
+    }
+
+    pub fn clear_transcript(&mut self) {
+        self.transcript.clear();
+        self.stream_buf.clear();
+    }
+
+    pub fn context_tokens(&self) -> u64 {
+        let chars: usize = self.transcript.iter().map(|(_, c)| c.len()).sum();
+        (chars as u64).div_ceil(4)
+    }
+
+    // -- send / receive -----------------------------------------------------
+
     pub fn on_send(&mut self, prompt: &str) {
-        self.chat.push(Entry { speaker: Speaker::User, text: prompt.to_string() });
-        self.autoscroll = true;
-        self.scroll_up = 0;
+        self.record(Speaker::User, prompt);
         self.expecting_reply = true;
         self.state = AgentState::Thinking;
         self.last_output = Some(Instant::now());
     }
 
-    pub fn push_system(&mut self, text: &str) {
-        self.chat.push(Entry { speaker: Speaker::System, text: text.to_string() });
-    }
-
-    // -- child output -------------------------------------------------------
-
-    pub fn on_output(&mut self, ev: &OutputEvent) {
+    pub fn on_output(&mut self, ev: &OutputEvent) -> Vec<ToolEvent> {
+        let mut tool_events = Vec::new();
         match ev {
             OutputEvent::Stdout(data) => {
                 self.last_output = Some(Instant::now());
@@ -115,18 +128,18 @@ impl App {
                     if let Some(rest) = data.strip_prefix("> ") {
                         data = rest;
                     } else if data == ">" {
-                        return; // prompt split across chunks: wait for more
+                        return tool_events; // wait for the rest of the prompt
                     } else if let Some(rest) = data.strip_prefix('>') {
                         data = rest.strip_prefix(' ').unwrap_or(rest);
                     }
                     self.expecting_reply = false;
-                    self.chat.push(Entry { speaker: Speaker::Agent, text: data.to_string() });
-                    return;
+                    self.transcript.push((Speaker::Agent, String::new()));
                 }
-                match self.chat.last_mut() {
-                    Some(e) if e.speaker == Speaker::Agent => e.text.push_str(data),
-                    _ => self.chat.push(Entry { speaker: Speaker::Agent, text: data.to_string() }),
+                match self.transcript.last_mut() {
+                    Some((Speaker::Agent, text)) => text.push_str(data),
+                    _ => self.transcript.push((Speaker::Agent, data.to_string())),
                 }
+                self.stream_buf.push_str(data);
             }
             OutputEvent::Stderr(chunk) => {
                 self.last_output = Some(Instant::now());
@@ -136,16 +149,16 @@ impl App {
                         continue;
                     }
                     if let Some(b) = parse_banner(&line) {
-                        self.provider = Some(b.provider);
-                        self.model = Some(b.model);
-                        if self.state == AgentState::Starting && !self.exited {
-                            self.state = AgentState::Idle;
+                        if !self.model_announced {
+                            self.provider = Some(b.provider);
+                            self.model = Some(b.model);
+                            self.model_announced = true;
+                            if !self.exited && self.state == AgentState::Starting {
+                                self.state = AgentState::Idle;
+                            }
                         }
                     } else if let Some(t) = parse_tool_line(&line) {
-                        self.activity.push_front(t);
-                        while self.activity.len() > ACTIVITY_CAP {
-                            self.activity.pop_back();
-                        }
+                        tool_events.push(t);
                     }
                 }
             }
@@ -155,9 +168,9 @@ impl App {
                 self.expecting_reply = false;
             }
         }
+        tool_events
     }
 
-    /// Periodic tick: spinner advance + THINKING->IDLE quiet-time heuristic.
     pub fn on_tick(&mut self, now: Instant) {
         if let Some(t) = self.last_output {
             if self.state == AgentState::Thinking
@@ -170,26 +183,39 @@ impl App {
 
     pub fn spinner_frame(&self, now: Instant) -> &'static str {
         let idx = (now.duration_since(self.start).as_millis()
-            / SPINNER_INTERVAL_MS as u128) as usize
+            / crate::theme::SPINNER_INTERVAL_MS as u128) as usize
             % crate::theme::SPINNER.len();
         crate::theme::SPINNER[idx]
     }
 
-    // -- restart ------------------------------------------------------------
-
-    pub fn on_restart(&mut self) {
+    pub fn restart_reset(&mut self) {
         self.exited = false;
         self.provider = None;
         self.model = None;
+        self.model_announced = false;
         self.state = AgentState::Starting;
         self.expecting_reply = false;
+        self.stream_buf.clear();
         self.last_output = None;
     }
 
-    pub fn clear_chat(&mut self) {
-        self.chat.clear();
-        self.scroll_up = 0;
-        self.autoscroll = true;
+    /// Flush any complete lines from the streaming assistant buffer.
+    /// Returns the completed raw lines; keeps the partial tail buffered.
+    pub fn drain_stream_lines(&mut self) -> Vec<String> {
+        let mut out = Vec::new();
+        while let Some(pos) = self.stream_buf.find('\n') {
+            let line: String = self.stream_buf.drain(..=pos).collect();
+            out.push(line.trim_end_matches(['\n', '\r']).to_string());
+        }
+        out
+    }
+
+    /// Final flush when the message completes (no trailing newline case).
+    pub fn flush_stream_tail(&mut self) -> Option<String> {
+        if self.stream_buf.is_empty() || self.expecting_reply {
+            return None;
+        }
+        Some(std::mem::take(&mut self.stream_buf))
     }
 
     // -- input editing ------------------------------------------------------
@@ -243,12 +269,10 @@ impl App {
         self.cursor = (self.cursor + 1).min(max);
     }
 
-    /// Take the current input for submission (clears the editor).
     pub fn take_input(&mut self) -> Option<String> {
         let text = self.input.trim().to_string();
         self.input.clear();
         self.cursor = 0;
-        self.hist_pos = self.history.len();
         if text.is_empty() {
             None
         } else {
@@ -285,25 +309,22 @@ impl App {
         true
     }
 
-    // -- scrolling ----------------------------------------------------------
+    // -- palette ------------------------------------------------------------
 
-    pub fn scroll_chat_up(&mut self, lines: u16) {
-        self.autoscroll = false;
-        self.scroll_up = self.scroll_up.saturating_add(lines);
+    pub fn palette_matches(&self) -> Vec<&'static crate::commands::Command> {
+        commands::match_commands(&self.input)
     }
 
-    /// Scroll down; re-enables auto-scroll when reaching the bottom.
-    pub fn scroll_chat_down(&mut self, lines: u16, total_lines: usize, visible: usize) {
-        if self.scroll_up <= lines {
-            self.scroll_up = 0;
-            self.autoscroll = true;
+    /// TAB: complete to the first palette match (+ trailing space).
+    pub fn tab_complete(&mut self) -> bool {
+        let matches = self.palette_matches();
+        if let Some(first) = matches.first() {
+            let completed = format!("{} ", first.name);
+            self.input = completed;
+            self.cursor = self.input.chars().count();
+            true
         } else {
-            self.scroll_up -= lines;
-        }
-        let max_scroll = total_lines.saturating_sub(visible);
-        if self.scroll_up as usize >= max_scroll {
-            self.scroll_up = max_scroll.min(u16::MAX as usize) as u16;
-            self.autoscroll = true;
+            false
         }
     }
 }

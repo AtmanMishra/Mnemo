@@ -14,6 +14,9 @@ pub const BLUE: Color = Color::Rgb(0x29, 0xAD, 0xFF);
 pub const WHITE: Color = Color::Rgb(0xFF, 0xF1, 0xE8);
 pub const GREY: Color = Color::Rgb(0x5F, 0x57, 0x4F);
 
+/// Spinner frame interval in milliseconds.
+pub const SPINNER_INTERVAL_MS: u64 = 80;
+
 /// Animated braille spinner frames (cycle every 80ms while THINKING).
 pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
