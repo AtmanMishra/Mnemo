@@ -217,18 +217,116 @@ const steerParams = Type.Object({
   ),
 });
 
-/** Registers the memory tools plus lifecycle logging onto a pi extension API. */
+/**
+ * Persistent-memory directive appended to the system prompt on every turn via
+ * the before_agent_start hook (small models need an explicit instruction to
+ * consult/store memory proactively; validated by eval/memory-eval.mjs).
+ */
+export const MEMORY_DIRECTIVE = [
+  "",
+  "## Persistent memory",
+  "You have long-term memory tools: memory_search, memory_write_fact, memory_steer.",
+  "- ALWAYS call memory_search BEFORE answering any question about this project, its services, ports, tooling, or past work. Never claim you lack information without searching first.",
+  "- When you learn a durable fact (stack decisions, fixes that worked or failed, credentials locations), store it via memory_write_fact.",
+].join("\n");
+
+/** Shared across every registration site so all memory tools hit one episode. */
+const sessionState = { episodeId: null as number | null };
+
+/** The three memory tools as pi-compatible ToolDefinitions (shared instances). */
+export function makeMemoryTools(): any[] {
+  const client = sharedMem;
+  return [
+    {
+      name: "memory_search",
+      label: "Memory search",
+      description: "Semantic search over the persistent memory layer (episodes, facts, outcomes).",
+      parameters: searchParams,
+      async execute(_id: string, params: any) {
+        const res = await client.request("search", { query: params.query, k: params.k ?? 5 });
+        return { content: [{ type: "text", text: fmt(res) }], details: res.result ?? { error: res.error } };
+      },
+    },
+    {
+      name: "memory_write_fact",
+      label: "Memory write fact",
+      description:
+        "Attach a key/value fact to a memory node. Creates a fresh aspect node (label defaults " +
+        "to the key) when no node id is given.",
+      parameters: writeFactParams,
+      async execute(_id: string, params: any) {
+        let nodeId = params.node;
+        if (nodeId === undefined) {
+          const created = await client.request("create_node", {
+            kind: "aspect",
+            label: params.label ?? params.key,
+          });
+          if (!created.ok) throw new Error(`memory_write_fact: ${created.error}`);
+          nodeId = Number(created.result.node);
+        }
+        const res = await client.request("fact", { node: nodeId, key: params.key, value: params.value });
+        if (!res.ok) throw new Error(`memory_write_fact: ${res.error}`);
+        return {
+          content: [{ type: "text", text: `fact ${res.result.fact} written to node ${nodeId}` }],
+          details: { node: nodeId, fact: res.result.fact },
+        };
+      },
+    },
+    {
+      name: "memory_steer",
+      label: "Memory steer",
+      description:
+        "Record a failure in the current episode and let the memory layer blame/supersede the " +
+        "context that caused it.",
+      parameters: steerParams,
+      async execute(_id: string, params: any) {
+        const episode = await ensureEpisode(client, sessionState);
+        const body: Record<string, unknown> = { episode, failure: params.failure };
+        if (params.fix) {
+          body.fix = {
+            node: params.fix.node,
+            fact: params.fix.fact,
+            new_key: params.fix.new_key,
+            new_value: params.fix.new_value,
+          };
+        }
+        const res = await client.request("steer", body);
+        return { content: [{ type: "text", text: fmt(res) }], details: res.result ?? { error: res.error } };
+      },
+    },
+  ];
+}
+
+/** Registers ONLY the lifecycle hooks + directive (tools come from elsewhere). */
+export function memoryLayerHooks(pi: any): void {
+  registerLifecycle(pi);
+}
+
+/**
+ * Registers the memory tools plus lifecycle logging onto a pi extension API.
+ * Standalone entry point: sea-tools-inline already provides the tools when
+ * both extensions run together (pi rejects duplicate tool names).
+ */
 export default function memoryLayerExtension(pi: any): void {
-  const state = { episodeId: null as number | null };
+  for (const tool of makeMemoryTools()) pi.registerTool(tool);
+  registerLifecycle(pi);
+}
+
+function registerLifecycle(pi: any): void {
   const client = sharedMem;
 
   pi.on("session_start", async () => {
-    await ensureEpisode(client, state);
+    await ensureEpisode(client, sessionState);
   });
+
+  // Appenditive system-prompt chaining: officially recomputed each turn.
+  pi.on("before_agent_start", async (event: any) => ({
+    systemPrompt: event.systemPrompt + MEMORY_DIRECTIVE,
+  }));
 
   pi.on("tool_execution_end", async (event: any) => {
     try {
-      const episode = await ensureEpisode(client, state);
+      const episode = await ensureEpisode(client, sessionState);
       const detail = `${event.toolName}: ${event.isError ? "error" : "ok"}`;
       await client.request("commit_log", { node: episode, kind: "tool_call", detail });
     } catch {
@@ -238,69 +336,10 @@ export default function memoryLayerExtension(pi: any): void {
 
   pi.on("session_shutdown", async () => {
     try {
-      const episode = await ensureEpisode(client, state);
+      const episode = await ensureEpisode(client, sessionState);
       await client.request("commit_log", { node: episode, kind: "outcome", detail: "session ended" });
     } catch { /* ignore */ }
     client.stop();
   });
 
-  pi.registerTool({
-    name: "memory_search",
-    label: "Memory search",
-    description: "Semantic search over the persistent memory layer (episodes, facts, outcomes).",
-    parameters: searchParams,
-    async execute(_id: string, params: any) {
-      const res = await client.request("search", { query: params.query, k: params.k ?? 5 });
-      return { content: [{ type: "text", text: fmt(res) }], details: res.result ?? { error: res.error } };
-    },
-  });
-
-  pi.registerTool({
-    name: "memory_write_fact",
-    label: "Memory write fact",
-    description:
-      "Attach a key/value fact to a memory node. Creates a fresh aspect node (label defaults " +
-      "to the key) when no node id is given.",
-    parameters: writeFactParams,
-    async execute(_id: string, params: any) {
-      let nodeId = params.node;
-      if (nodeId === undefined) {
-        const created = await client.request("create_node", {
-          kind: "aspect",
-          label: params.label ?? params.key,
-        });
-        if (!created.ok) throw new Error(`memory_write_fact: ${created.error}`);
-        nodeId = Number(created.result.node);
-      }
-      const res = await client.request("fact", { node: nodeId, key: params.key, value: params.value });
-      if (!res.ok) throw new Error(`memory_write_fact: ${res.error}`);
-      return {
-        content: [{ type: "text", text: `fact ${res.result.fact} written to node ${nodeId}` }],
-        details: { node: nodeId, fact: res.result.fact },
-      };
-    },
-  });
-
-  pi.registerTool({
-    name: "memory_steer",
-    label: "Memory steer",
-    description:
-      "Record a failure in the current episode and let the memory layer blame/supersede the " +
-      "context that caused it.",
-    parameters: steerParams,
-    async execute(_id: string, params: any) {
-      const episode = await ensureEpisode(client, state);
-      const body: Record<string, unknown> = { episode, failure: params.failure };
-      if (params.fix) {
-        body.fix = {
-          node: params.fix.node,
-          fact: params.fix.fact,
-          new_key: params.fix.new_key,
-          new_value: params.fix.new_value,
-        };
-      }
-      const res = await client.request("steer", body);
-      return { content: [{ type: "text", text: fmt(res) }], details: res.result ?? { error: res.error } };
-    },
-  });
 }

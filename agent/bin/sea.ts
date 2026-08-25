@@ -1,37 +1,28 @@
 #!/usr/bin/env node
-// sea-agent CLI entry.
+// sea-agent CLI entry: thin shim over pi's main().
 //
 // Usage:
-//   sea "<prompt>"            one-shot prompt, print the answer, exit
-//   sea                       interactive REPL
+//   sea "<prompt>"            one-shot prompt (pi print mode when non-TTY)
+//   sea                       interactive TUI (pi interactive mode)
 //   sea --list-sessions       list saved sessions from ~/.sea/sessions and exit
-//   sea --import <file> "p"   print imported-transcript scrollback header, then run normally.
-//                             v1 limitation: imported messages are shown as a header only;
-//                             they are NOT re-fed to the model as context.
-//   sea --export <file> "p"   after the one-shot session, write the transcript to <file>
-//                             in JSONL format ({role,content} per line).
+//   sea --help                pi's own help
 //
-// src/cli.ts is stable/read-only for skill-system changes, so flag parsing,
-// the skills boot banner, and the export flow live here.
+// Everything else is forwarded to @earendil-works/pi-coding-agent's main():
+// provider/model come from pickProvider() unless the user passed explicit
+// flags, and --no-builtin-tools keeps only OUR tools active.
+// Our extensions run identically in every mode via extensionFactories:
+//   sea-tools-inline (all 14 tools), memory-layer (memory tools + lifecycle
+//   hooks + persistent-memory directive), approval-gate (y/n gate on
+//   bash_exec/write_file/apply_edit in interactive+TTY).
 import { pathToFileURL } from "node:url";
 import * as path from "node:path";
-import { runCliIfMain, SEA_CLI_FORCE } from "../src/cli.ts";
+import { main } from "@earendil-works/pi-coding-agent";
 import { discoverSkills } from "../src/skills/discovery.ts";
-import {
-  listSessions,
-  loadSession,
-  defaultSessionDir,
-  exportSession,
-  type SessionMessage,
-} from "../src/skills/store.ts";
-import { pickProvider } from "../src/provider.ts";
-import { allTools, toolNames } from "../src/tools/index.ts";
-import { resolveModel } from "../src/cli.ts";
-import {
-  createAgentSession,
-  ModelRuntime,
-  SessionManager,
-} from "@earendil-works/pi-coding-agent";
+import { listSessions, defaultSessionDir } from "../src/skills/store.ts";
+import { pickProvider, missingKeyMessage } from "../src/provider.ts";
+import { seaToolsInline } from "../extensions/sea-tools-inline.ts";
+import { memoryLayerHooks } from "../extensions/memory-layer.ts";
+import approvalExt from "../extensions/approval-gate.ts";
 
 const invokedDirectly = (() => {
   try {
@@ -40,65 +31,6 @@ const invokedDirectly = (() => {
     return false;
   }
 })();
-
-interface Flags {
-  listSessions?: boolean;
-  exportFile?: string;
-  importFile?: string;
-}
-
-function parseFlags(argv: string[]): { flags: Flags; rest: string[] } {
-  const flags: Flags = {};
-  const rest: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--list-sessions") flags.listSessions = true;
-    else if (a === "--export") flags.exportFile = argv[++i] ?? fail("--export requires a file argument");
-    else if (a === "--import") flags.importFile = argv[++i] ?? fail("--import requires a file argument");
-    else rest.push(a);
-  }
-  return { flags, rest };
-}
-
-function fail(msg: string): never {
-  console.error(`sea-agent: ${msg}`);
-  process.exit(2);
-}
-
-async function printSkillsBanner(): Promise<void> {
-  try {
-    const skills = await discoverSkills();
-    console.error(`skills: ${skills.length} loaded`);
-  } catch {
-    console.error("skills: 0 loaded");
-  }
-}
-
-/** v1 import: printed scrollback header only; messages are NOT re-fed to the model. */
-async function printImportHeader(file: string): Promise<void> {
-  let messages: SessionMessage[];
-  try {
-    messages = await loadImportable(file);
-  } catch (err: any) {
-    fail(`--import failed: ${err?.message ?? err}`);
-  }
-  console.error(
-    `sea-agent: imported ${messages.length} message(s) from ${file} as scrollback context ` +
-      `(v1: printed header only — these messages are NOT re-fed to the model).`,
-  );
-  const preview = messages.slice(-4).map((m) => `${m.role}: ${m.content.slice(0, 80)}`);
-  if (preview.length > 0) console.error(["--- transcript tail ---", ...preview].join("\n"));
-}
-
-async function loadImportable(file: string): Promise<SessionMessage[]> {
-  const { importSession } = await import("../src/skills/store.ts");
-  // Named sessions can be referenced as "name:<name>"; anything else is a path.
-  if (file.startsWith("name:")) {
-    const { loadSession } = await import("../src/skills/store.ts");
-    return loadSession(defaultSessionDir(), file.slice("name:".length));
-  }
-  return importSession(file);
-}
 
 async function handleListSessions(): Promise<void> {
   const sessions = await listSessions(defaultSessionDir());
@@ -114,73 +46,76 @@ async function handleListSessions(): Promise<void> {
   }
 }
 
-/**
- * One-shot run with transcript export. Mirrors cli.ts's boot recipe because
- * cli.ts is read-only and does not expose its session object.
- */
-async function runOneShotWithExport(prompt: string, exportFile: string): Promise<void> {
-  const selection = pickProvider();
-  if (!selection) fail(missingKey());
-  const modelRuntime = await ModelRuntime.create();
-  const model = await resolveModel(modelRuntime, selection.provider, selection.modelId);
-  console.error(`sea-agent: provider=${selection.provider} model=${model.provider}/${model.id}`);
-  const { session } = await createAgentSession({
-    cwd: process.cwd(),
-    sessionManager: SessionManager.inMemory(process.cwd()),
-    customTools: allTools as any,
-    tools: toolNames,
-    model,
-  });
-  session.subscribe((event: any) => {
-    if (event?.type === "message_update" && event.message?.role === "assistant") {
-      const deltaEvent = event.assistantMessageEvent;
-      if (deltaEvent?.type === "text_delta" && deltaEvent.delta) process.stdout.write(deltaEvent.delta);
-    }
-    if (event?.type === "tool_execution_end") {
-      console.error(`\n[tool] ${event.toolName} -> ${event.isError ? "error" : "ok"}`);
-    }
-  });
+async function printSkillsBanner(): Promise<void> {
   try {
-    await session.prompt(prompt);
-    const messages: SessionMessage[] = (session.messages as any[]).map((m) => ({
-      role: String(m.role),
-      content:
-        typeof m.content === "string"
-          ? m.content
-          : (Array.isArray(m.content) ? m.content : [])
-              .filter((b: any) => b?.type === "text")
-              .map((b: any) => b.text ?? "")
-              .join("\n"),
-    }));
-    const file = await exportSession(exportFile, messages);
-    console.error(`\nsea-agent: exported ${messages.length} message(s) to ${file}`);
-  } finally {
-    await session.dispose();
+    const skills = await discoverSkills();
+    console.error(`skills: ${skills.length} loaded`);
+  } catch {
+    console.error("skills: 0 loaded");
   }
 }
 
-function missingKey(): string {
-  // Lazy require avoided; reuse provider helper text via dynamic import is overkill
-  // for an error path, so keep it short here.
-  return "no API key found (OPENAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY)";
+/** All sea extensions as pi InlineExtensions. */
+function factories() {
+  return [
+    seaToolsInline,
+    // hooks-only: the 3 memory tools are registered by sea-tools-inline
+    // (pi rejects duplicate tool names across inline extensions)
+    { name: "sea-memory", factory: memoryLayerHooks as any },
+    approvalExt,
+  ];
 }
 
-if (invokedDirectly || SEA_CLI_FORCE) {
-  const { flags, rest } = parseFlags(process.argv.slice(2));
-  const promptArgs = rest.filter((a) => a !== "--");
-  const oneShotPrompt = promptArgs.length > 0 ? promptArgs.join(" ") : undefined;
+async function run(): Promise<void> {
+  const argv = process.argv.slice(2);
 
-  if (flags.listSessions) {
+  // Legacy flag kept locally (skills-store backed); everything else forwards.
+  if (argv.includes("--list-sessions")) {
     await handleListSessions(); // no model/API key needed
-  } else if (flags.exportFile && oneShotPrompt) {
-    await printSkillsBanner();
-    await runOneShotWithExport(oneShotPrompt, flags.exportFile);
-  } else {
-    await printSkillsBanner();
-    if (flags.importFile) await printImportHeader(flags.importFile);
-    if (flags.exportFile && !oneShotPrompt) {
-      console.error("sea-agent: warning: --export currently supports one-shot mode only; ignoring.");
-    }
-    runCliIfMain();
+    return;
   }
+  // Help/version/pi subcommands must reach pi without a provider check.
+  const PI_SUBCOMMANDS = ["auth", "install", "remove", "uninstall", "update", "list", "config"];
+  const needsNoProvider =
+    ["--help", "-h", "--version", "-v"].some((a) => argv.includes(a)) ||
+    PI_SUBCOMMANDS.includes(argv[0] ?? "");
+  if (needsNoProvider) {
+    await main(argv, { extensionFactories: factories() });
+    return;
+  }
+  if (argv.includes("--export") || argv.includes("--import")) {
+    console.error(
+      "sea-agent: legacy --export/--import were removed; use pi's native " +
+        "--session-dir/--resume/--fork and /share instead.",
+    );
+  }
+
+  let selection;
+  try {
+    selection = pickProvider();
+  } catch (err: any) {
+    console.error(`sea-agent: ${err?.message ?? err}`);
+    process.exit(2);
+  }
+  if (!selection || !process.env[selection.apiKeyEnv]) {
+    console.error(missingKeyMessage(selection));
+    process.exit(1);
+  }
+
+  const args = [...argv];
+  const hasProviderFlag = args.some((a) => a === "--provider" || a.startsWith("--provider="));
+  const hasModelFlag = args.some((a) => a === "--model" || a.startsWith("--model="));
+  if (!hasProviderFlag) args.push("--provider", selection.provider);
+  if (!hasModelFlag && selection.modelId) args.push("--model", selection.modelId);
+  if (!args.includes("--no-builtin-tools")) args.push("--no-builtin-tools");
+
+  await printSkillsBanner();
+  await main(args, { extensionFactories: factories() });
+}
+
+if (invokedDirectly) {
+  run().catch((err: unknown) => {
+    console.error(err);
+    process.exit(1);
+  });
 }

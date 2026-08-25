@@ -37,6 +37,21 @@ export const approvalConfig: ApprovalConfig = {
   forceTty: false,
 };
 
+/**
+ * When true, a host-level approver (the pi approval-gate extension using
+ * ctx.ui.confirm) owns prompting for this process, so the in-tool readline
+ * gate auto-approves instead of asking a second time on the TUI-owned stdin.
+ */
+let delegated = false;
+
+export function setDelegatedApproval(value: boolean): void {
+  delegated = value;
+}
+
+export function isDelegatedApproval(): boolean {
+  return delegated;
+}
+
 const sessionAllowlist = new Set<string>();
 
 /** Clear the per-session allowlist (used by tests). */
@@ -84,6 +99,7 @@ function ask(question: string): Promise<string> {
  */
 export async function approve(action: ApprovalAction): Promise<boolean> {
   if (!interactiveEnabled()) return true; // mode off: current behavior
+  if (delegated) return true; // pi extension already prompted via ctx.ui
   if (sessionAllowlist.has(action.tool)) return true; // "always-this-tool"
   if (!isTty()) return true; // non-TTY: fail open (best-effort gate)
 

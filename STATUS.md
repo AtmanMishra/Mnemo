@@ -17,6 +17,7 @@ hierarchical subagents sharing knowledge.
 | 5 | Product polish | DONE v1 | TUI v2 inline REPL; skills; approval gate; loops; export/import |
 | 6 | Live LLM validation | DONE (OpenCode) | eval 3/3 vs 0/3 on ox-alpha-free; spawn_subagent live; agent built its own harness live |
 | 7 | Harness engine integration | DONE | create_harness tool: model builds tool plugins at runtime; bundles auto-become skills via bridge |
+| 8 | Native pi InteractiveMode migration | IN PROGRESS | interactive-migrator executing research/tui-adoption-report.md plan (Option A) |
 
 ## Component scoreboard
 | Component | Location | Tests | State |
@@ -110,3 +111,6 @@ use paid credits. Deterministic tests never call LLMs - keep it that way.
 - OpenCode Zen live round: memory loop, subagent delegation, self-built harness
   (word-counter bundle -> .agents/skills -> discoverable). Secrets hygiene: hardcoded key
   purged from history; keys only in gitignored .env.
+- TUI decision: Option A adopted per research/tui-adoption-report.md - wrap pi main()
+  with extensionFactories (tools + approval + memory directive as inline extensions);
+  custom REPL deleted; gains streaming markdown/diffs/thinking/compaction/resume/fork/tree.
