@@ -1,6 +1,0 @@
-(node:67156) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
-(Use `node --trace-warnings ...` to show where the warning was created)
-skills: 21 loaded
-sea-agent: provider=opencode-go model=opencode-go/ox-alpha-free
-
-[tool] memory_write_fact -> ok
