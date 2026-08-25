@@ -6,18 +6,19 @@
  * OPENAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY wins.
  */
 export interface ProviderSelection {
-  provider: "openai" | "anthropic" | "openrouter";
+  provider: "openai" | "anthropic" | "openrouter" | "opencode";
   apiKeyEnv: string;
   modelId?: string;
 }
 
-const SUPPORTED = ["openai", "anthropic", "openrouter"] as const;
+const SUPPORTED = ["openai", "anthropic", "openrouter", "opencode"] as const;
 type SupportedProvider = (typeof SUPPORTED)[number];
 
 const KEY_ENV_BY_PROVIDER: Record<SupportedProvider, string> = {
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   openrouter: "OPENROUTER_API_KEY",
+  opencode: "OPENCODE_API_KEY",
 };
 
 export function pickProvider(env: NodeJS.ProcessEnv = process.env): ProviderSelection | null {
@@ -45,6 +46,7 @@ export function missingKeyMessage(sel: ProviderSelection | null): string {
       "  OPENAI_API_KEY       - use OpenAI models",
       "  ANTHROPIC_API_KEY    - use Anthropic models",
       "  OPENROUTER_API_KEY   - use OpenRouter models",
+      "  OPENCODE_API_KEY     - use OpenCode models (e.g. ox-alpha)",
       "",
       "Optional overrides:",
       "  SEA_PROVIDER=openai|anthropic|openrouter   force a provider when several keys are set",
