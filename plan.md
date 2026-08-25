@@ -36,15 +36,25 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 - [ ] 4.4 Plan mode: read-only phase + tool allowlist switch
 - [ ] 4.5 Image/screenshot input surfacing through tools
 
-## AREA 5 — PACKAGING & DISTRIBUTION
-- [ ] 5.1 package.json files/engines fields; npm publish (scoped) or npm link quickstart
-- [ ] 5.2 node>=22.6 runtime check with friendly error
-- [ ] 5.3 README quickstart: install -> `mnemo` -> wizard -> done
+## AREA 5 — LOGGING & TRACES
+- [ ] 5.1 Structured logger: level-filtered JSONL traces in ~/.mnemo/logs/<date>.jsonl (request_id spans)
+- [ ] 5.2 LLM call tracing: provider/model/tokens-in/out/latency/stop-reason per model round-trip
+- [ ] 5.3 Tool-call spans: tool name, inputs summary, output size, duration, ok/error (extension hook writes span)
+- [ ] 5.4 Subagent correlation: child spans carry parent session/request ids -> full delegation tree reconstructable
+- [ ] 5.5 `mnemo traces [session-id]` CLI: pretty-print span tree; --json flag
+- [ ] 5.6 Cockpit Logs pane renders the same trace store (pairs with 2.7)
+- [ ] 5.7 Log rotation + redaction (never write api keys / .env values into traces)
 
-## AREA 6 — QUALITY
-- [ ] 6.1 CI: test matrix on push (agent/tui/memory-layer)
-- [ ] 6.2 Eval suite expansion: >15 retrieval cases + 5 LLM task pairs
-- [ ] 6.3 Learned steering policy experiment (log-replay training data)
+## AREA 6 — PACKAGING & DISTRIBUTION
+- [ ] 6.1 package.json files/engines fields; npm publish (scoped) or npm link quickstart
+- [ ] 6.2 node>=22.6 runtime check with friendly error
+- [ ] 6.3 README quickstart: install -> `mnemo` -> wizard -> done
+
+## AREA 7 — QUALITY
+- [ ] 7.1 CI: test matrix on push (agent/tui/memory-layer)
+- [ ] 7.2 Eval suite expansion: >15 retrieval cases + 5 LLM task pairs
+- [ ] 7.3 Learned steering policy experiment (log-replay training data)
+
 
 ## DONE (reference)
 [x] Memory layer core+steering+sidecar (19+2 tests)
