@@ -23,6 +23,7 @@ import { applyEditTool } from "./apply_edit.ts";
 import { globListTool } from "./glob_list.ts";
 import { ipyRunTool } from "./ipy_run.ts";
 import { subagentSpawnTool } from "./subagent.ts";
+import { createHarnessTool } from "./harness.ts";
 import { listSkillsTool, loadSkillTool, createSkillTool } from "./skills.ts";
 import type { SeaTool } from "./types.ts";
 
@@ -37,6 +38,7 @@ export const allTools: SeaTool[] = [
   loadSkillTool,
   createSkillTool,
   subagentSpawnTool,
+  createHarnessTool,
 ];
 
 export const toolNames = allTools.map((t) => t.name);

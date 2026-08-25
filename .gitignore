@@ -13,3 +13,5 @@ memory-layer/data/
 
 # misc
 .DS_Store
+agent/.agents/
+*.log

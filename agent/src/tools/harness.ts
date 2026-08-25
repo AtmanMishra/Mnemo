@@ -1,0 +1,92 @@
+/**
+ * create_harness: the model-facing self-extension tool.
+ * Bridges to harness-engine's createHarness() so the agent can build its own
+ * tool plugins at runtime. Bundles are written into the PROJECT skill location
+ * (.agents/skills), where:
+ *   - harness-bridge syncs a SKILL.md so discovery lists them
+ *   - the safety gate rejects dangerous source before anything touches disk
+ */
+import { Type } from "typebox";
+import * as path from "node:path";
+import { textResult, type SeaTool } from "./types.ts";
+
+const toolSpec = Type.Object({
+  name: Type.String({ description: "Tool identifier, [a-z0-9_-]." }),
+  description: Type.Optional(Type.String({ description: "What this tool does." })),
+  schema: Type.Optional(Type.String({
+    description: 'JSON-schema object as JSON string. Default: {"type":"object","properties":{}}',
+  })),
+  source: Type.String({
+    description:
+      "JS function body of the tool. Receives `params`, must return a string. " +
+      "Example: return `hello ${params.name}`. No imports of fs/child_process.",
+  }),
+});
+
+const parameters = Type.Object({
+  name: Type.String({ description: "Bundle name, [a-z0-9_-], e.g. k8s-debug." }),
+  description: Type.String({ description: "What this bundle is for." }),
+  tools: Type.Array(toolSpec, { description: "One or more tools the bundle provides.", minItems: 1 }),
+});
+
+export interface CreateHarnessDeps {
+  /** Injectable for tests. Defaults to harness-engine's real implementation. */
+  createHarness?: (opts: any) => Promise<any>;
+  root?: string;
+}
+
+export function makeCreateHarnessTool(deps: CreateHarnessDeps = {}): SeaTool {
+  return {
+    name: "create_harness",
+    label: "Create harness",
+    description:
+      "Create a new tool plugin (harness bundle) at runtime. The bundle's tools become " +
+      "available to you and are persisted as a discoverable skill. Use for capabilities you " +
+      "find yourself missing mid-task.",
+    parameters,
+    async execute(_id, params: any) {
+      let createHarness = deps.createHarness;
+      if (!createHarness) {
+        // lazy dynamic import keeps startup cheap and tests hermetic
+        const mod = await import("../../../harness-engine/src/create-harness.ts");
+        const { ToolRegistry } = await import("../../../harness-engine/src/registry.ts");
+        const registry = new (ToolRegistry as any)();
+        const orig = mod.createHarness;
+        createHarness = async (opts: any) => {
+          opts.registry = registry;
+          return orig(opts);
+        };
+      }
+      try {
+        const root = deps.root
+          ?? path.join(process.cwd(), ".agents", "skills");
+        const res = await (createHarness as any)({
+          root,
+          scope: "session",
+          spec: {
+            name: params.name,
+            description: params.description,
+            tools: (params.tools ?? []).map((t: any) => ({
+              name: t.name,
+              description: t.description,
+              schema: t.schema ? JSON.parse(t.schema) : { type: "object", properties: {} },
+              source: t.source,
+            })),
+          },
+        });
+        const pretty = (res.tools as string[]).map((t) =>
+          t.replace(/^tools\//, "").replace(/\.mjs$/, ""));
+        return textResult(
+          `harness created: ${res.bundleId}\ntools: ${pretty.join(", ")}\nlocation: ${res.dir}\n` +
+          `tools are registered for this session; the bundle persists on disk and is ` +
+          `discoverable via list_skills.`,
+          { bundleId: res.bundleId, tools: pretty },
+        );
+      } catch (err: any) {
+        return textResult(`create_harness failed: ${err?.message ?? err}`);
+      }
+    },
+  };
+}
+
+export const createHarnessTool: SeaTool = makeCreateHarnessTool();
