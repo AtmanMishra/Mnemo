@@ -24,6 +24,10 @@ pub enum Entry {
     Error(String),
 }
 
+/// Width of the speaker gutter, in cells. Wrapped rows are indented by it so
+/// a long message keeps its column.
+const GUTTER: usize = 2;
+
 #[derive(Debug, Clone, Default)]
 pub struct ChatPane {
     pub entries: Vec<Entry>,
@@ -129,7 +133,13 @@ impl ChatPane {
             // a blank line before each of your messages: the turn boundary is
             // the thing the eye needs most and costs one row
             if matches!(e, Entry::User(_)) && !all.is_empty() { all.push(Line::from("")); }
-            all.extend(render_entry(e, self.is_open(i), focused == Some(i)));
+            // wrap HERE, not at draw time: the tail slice below counts rows,
+            // and a line that silently becomes three pushes the newest two
+            // off the bottom of the pane
+            all.extend(md::wrap_all(
+                render_entry(e, self.is_open(i), focused == Some(i)),
+                self.width, GUTTER,
+            ));
         }
         if height == 0 || all.len() <= height { return all; }
         let end = all.len().saturating_sub(self.scroll);
@@ -211,7 +221,10 @@ impl ChatPane {
         let focused = self.focused_entry();
         for (i, e) in self.entries.iter().enumerate() {
             if matches!(e, Entry::User(_)) && !owners.is_empty() { owners.push(None); }
-            let n = render_entry(e, self.is_open(i), focused == Some(i)).len();
+            let n = md::wrap_all(
+                render_entry(e, self.is_open(i), focused == Some(i)),
+                self.width, GUTTER,
+            ).len();
             owners.extend(std::iter::repeat(Some(i)).take(n));
         }
         if height == 0 || owners.len() <= height { return owners }
@@ -275,6 +288,12 @@ impl PaneView for ChatPane {
             KeyCode::PageDown => { self.scroll_by(-(height as isize), total, height); true }
             _ => false,
         }
+    }
+
+    fn badge(&self) -> Option<usize> { Some(self.entries.len()) }
+
+    fn purpose(&self) -> &'static str {
+        "Talk to the agent. It reads and edits files here, runs commands, and remembers what matters."
     }
 
     fn status(&self) -> String {

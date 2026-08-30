@@ -10,6 +10,8 @@ use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, Key
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 use ratatui::Terminal;
 use seatui::auth::{self, AuthFile};
 use seatui::brand;
@@ -317,14 +319,37 @@ fn run<B: ratatui::backend::Backend>(
         refresh_sessions(panes, home);
 
         let view = panes.view(cockpit.pane);
-        let (body, help, pane_status) = (view.lines(body_height), view.help(), view.status());
+        let purpose = view.purpose();
+        // the purpose line costs two rows and is always on screen: it is the
+        // difference between "Agents" meaning something and being a guess
+        let head = if purpose.is_empty() { 0 } else { 2 };
+        let mut body = view.lines(body_height.saturating_sub(head));
+        // an empty pane says what will appear here and how to make it appear
+        if body.is_empty() || body.iter().all(|l| l.spans.iter().all(|s| s.content.trim().is_empty())) {
+            body = view.empty_hint().into_iter()
+                .map(|l| Line::from(Span::styled(l, Style::default().fg(theme::GREY))))
+                .collect();
+        }
+        if head > 0 {
+            let mut with_head = vec![
+                Line::from(Span::styled(purpose, Style::default().fg(theme::INDIGO))),
+                Line::from(""),
+            ];
+            with_head.extend(body);
+            body = with_head;
+        }
+        let (help, pane_status) = (view.help(), view.status());
+        let badges = [
+            panes.chat.badge(), panes.sessions.badge(), panes.memory.badge(),
+            panes.agents.badge(), panes.skills.badge(), panes.logs.badge(),
+        ];
         if !cockpit.busy { cockpit.status = cockpit.status_for(pane_status, now_ms()); }
 
         term.draw(|f| {
             let (_, main, _, _) = cockpit_ui::layout_with(f.area(), cockpit.queued.len());
             body_height = main.height.saturating_sub(2) as usize;
             body_width = main.width.saturating_sub(2) as usize;
-            cockpit_ui::draw_with_help(f, cockpit, body, &help);
+            cockpit_ui::draw_full(f, cockpit, body, &help, &badges);
         })?;
 
         if cockpit.busy {

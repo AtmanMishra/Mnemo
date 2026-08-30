@@ -163,8 +163,16 @@ fn cockpit_navigates_and_renders_every_pane_without_an_agent() {
 
     // every pane renders something rather than an empty box
     assert!(screen(&cockpit, &memory, 80, 18).contains("memory is empty"));
-    assert!(screen(&cockpit, &agents, 80, 18).contains("no episodes"));
     assert!(screen(&cockpit, &logs, 80, 18).contains("no journal"), "a missing journal is reported");
+
+    // an empty pane has to say what belongs here and how to make it appear;
+    // "(no episodes yet)" answered neither question
+    for pane in [&agents as &dyn PaneView, &memory, &skills_pane] {
+        assert!(!pane.purpose().is_empty(), "{:?} does not say what it is for", pane.id());
+    }
+    let hint = agents.empty_hint().join(" ");
+    assert!(hint.contains("subagent"), "no route to a first sub-agent: {hint}");
+    assert!(agents.lines(0).is_empty(), "a session that delegated to nobody is not an agent");
 }
 
 #[test]

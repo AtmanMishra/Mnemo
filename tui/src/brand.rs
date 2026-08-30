@@ -60,29 +60,26 @@ pub const ROSETTE: Color = theme::BROWN;
 /// That mix is the whole trick: pixels for the animal, ASCII for the face.
 pub const CAT_SIT: &[&str] = &[
     "..##..........##............",
-    ".####........####...........",
     ".#pp#........#pp#...........",
     "..################..........",
     ".##################.........",
-    ".##R#O######O#R####.........",
+    ".##R##OO####OO##R##.........",
     ".##################.........",
-    "-.###ppnnnnpp###.-..........",
-    "-.###pp.m..pp###.-..........",
-    "..###pppppppp###............",
+    "-########nn########-........",
+    "..################..........",
     "...##############...........",
     "....############.......##...",
     "...##############.....##R#..",
     "..##r####R####r###....##r#..",
     "..##R####r####R###....##R#..",
-    "..##r##pppppp#r###....##r#..",
-    "..##R##pppppp#R###...##R##..",
-    "..###pppppppppp###...##r##..",
+    "..##r####R####r###....##r#..",
+    "..##R####r####R###...##R##..",
+    "..################...##r##..",
     "..################..##R##...",
-    "..################.##r###...",
+    "...##############..##r###...",
     "...##############.######....",
     "...##.##..##.##...####......",
 ];
-
 /// Nyx's head, for the welcome card. Seven rows is as small as the breed
 /// markings survive: below this the mascara and the muzzle merge into a blob
 /// and it stops being a Bengal.
@@ -115,8 +112,8 @@ pub const WALK: [&[&str]; 4] = [&WALK_A, &WALK_B, &WALK_C, &WALK_B];
 const WALK_BODY: [&str; 7] = [
     "..##.......##..##...",
     ".#rr#.....########..",
-    ".#R#.....###O####n#.",
-    ".###...###########m.",
+    ".#R#.....##OO####n#.",
+    ".###...############.",
     "..#####R##########..",
     "..###r####R#######..",
     "..################..",
@@ -234,11 +231,14 @@ pub fn ink(marker: char) -> (&'static str, &'static str, Color) {
         'r' => ("▒▒", "▒", ROSETTE),
         // pale: muzzle, belly, inner ear
         'p' => ("▒▒", "▒", theme::PEACH),
-        // an eye that reads as an eye even with the colour stripped
-        'O' => ("◗◖", "◖", theme::GREEN),
-        '_' => ("‾‾", "‾", ROSETTE),
+        // An open eye is a HOLE in the coat, not a drawn shape. A drawn eye
+        // at this size is two spiky glyphs and it reads as a glare — the
+        // first detailed pass had `◗◖` here and the cat came out frightening.
+        // Negative space is calm, and it needs no colour to work.
+        'O' => ("  ", " ", theme::BLACK),
+        // blinking simply closes the hole
+        '_' => ("██", "█", COAT),
         'n' => ("▄▄", "▄", theme::ACCENT),
-        'm' => ("╰╯", "╰", ROSETTE),
         '\\' => ("╲ ", "╲", theme::GREY),
         '-' => ("──", "─", theme::GREY),
         '/' => (" ╱", "╱", theme::GREY),
@@ -338,7 +338,10 @@ mod tests {
     fn every_art_row_is_the_same_width() {
         // a ragged row shears the mascot's right edge, and it is the kind of
         // thing you only notice on someone else's terminal
-        for (name, art) in [("sit", CAT_SIT), ("head", CAT_HEAD), ("tiny", CAT_TINY)] {
+        let mut arts: Vec<(&str, &[&str])> =
+            vec![("sit", CAT_SIT), ("head", CAT_HEAD), ("tiny", CAT_TINY)];
+        for (i, f) in WALK.iter().enumerate() { arts.push((["walk0","walk1","walk2","walk3"][i], f)); }
+        for (name, art) in arts {
             let widths: Vec<usize> = art.iter().map(|r| r.chars().count()).collect();
             assert!(widths.iter().all(|w| *w == widths[0]), "{name} is ragged: {widths:?}");
         }
@@ -347,7 +350,7 @@ mod tests {
     #[test]
     fn the_art_uses_only_markers_the_painter_knows() {
         // an unknown marker silently becomes a hole in the cat
-        let known = ['#', 'R', 'r', 'p', 'O', '_', 'n', 'm', '\\', '-', '/', 'e', '.'];
+        let known = ['#', 'R', 'r', 'p', 'O', '_', 'n', '\\', '-', '/', 'e', '.'];
         let mut arts: Vec<&[&str]> = vec![CAT_SIT, CAT_HEAD, CAT_TINY, WORDMARK, WORDMARK_SMALL];
         arts.extend(WALK.iter().copied());
         for art in arts {
@@ -371,13 +374,24 @@ mod tests {
         assert!(body.matches('R').count() >= 8, "rosettes must cluster, not appear once");
         assert!(body.contains('n'), "no nose");
         // and the detail that blocks cannot carry at this size
-        assert!(body.contains('O'), "no eyes with a shape");
-        assert!(body.contains('m'), "no mouth");
+        assert!(body.contains('O'), "no eyes");
         assert!(body.contains('-'), "no whiskers");
-        assert!(body.contains('p'), "no pale muzzle or belly");
+        assert!(body.contains('p'), "no inner ear");
         // the mascara sits on the same row as the eyes, flanking them
         let eyes = CAT_SIT.iter().find(|r| r.contains('O')).expect("an eye row");
         assert!(eyes.contains('R'), "no mascara beside the eyes: {eyes:?}");
+    }
+
+    #[test]
+    fn an_open_eye_is_a_hole_and_a_blink_closes_it() {
+        // a DRAWN eye at this size is two spiky glyphs and reads as a glare;
+        // the first detailed pass did that and the cat came out frightening
+        let (open, _, open_c) = ink('O');
+        assert_eq!(open.trim(), "", "an open eye is negative space");
+        assert_eq!(open_c, theme::BLACK);
+        let (shut, _, shut_c) = ink('_');
+        assert_eq!(shut, "██", "blinking closes the hole");
+        assert_eq!(shut_c, COAT);
     }
 
     #[test]
@@ -408,9 +422,9 @@ mod tests {
     fn the_detail_markers_are_line_art_not_repeated_fill() {
         // a whisker drawn twice is two whiskers; the two-cell form of a detail
         // marker has to be the WHOLE mark, not the same glyph again
-        // Only the asymmetric marks can prove it: a level whisker and a flat
-        // nose genuinely ARE two of the same glyph.
-        for m in ['O', 'm', '/', '\\'] {
+        // Only the asymmetric marks can prove it: a level whisker, a flat
+        // nose and a gap eye genuinely ARE two of the same glyph.
+        for m in ['/', '\\'] {
             let (wide, _, _) = ink(m);
             let chars: Vec<char> = wide.chars().collect();
             assert_ne!(chars[0], chars[1], "{m:?} renders as repeated fill: {wide:?}");

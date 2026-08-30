@@ -88,11 +88,20 @@ impl AgentsPane {
     }
 
     /// Episodes in tree order: each root followed by its children.
+    ///
+    /// **Only roots that actually delegated.** Every pi session writes an
+    /// episode, so listing all roots filled this pane with thirty rows of
+    /// "pi session 2026-08-25T…" and nothing else — a list that answered no
+    /// question anyone had. A root with no children is a session, and the
+    /// Sessions pane is where sessions live.
     pub fn tree(&self) -> Vec<(usize, &Episode)> {
         let mut out = Vec::new();
         for root in self.episodes.iter().filter(|e| e.parent.is_none()) {
+            let children: Vec<&Episode> = self.episodes.iter()
+                .filter(|e| e.parent == Some(root.id)).collect();
+            if children.is_empty() { continue }
             out.push((0usize, root));
-            for child in self.episodes.iter().filter(|e| e.parent == Some(root.id)) {
+            for child in children {
                 out.push((1usize, child));
             }
         }
@@ -124,9 +133,7 @@ impl PaneView for AgentsPane {
             return vec![Line::from(Span::styled(format!("✖ {e}"), Style::default().fg(theme::RED)))];
         }
         let tree = self.tree();
-        if tree.is_empty() {
-            return vec![Line::from(Span::styled("(no episodes yet)", Style::default().fg(theme::GREY)))];
-        }
+        if tree.is_empty() { return Vec::new(); }
         let mut out: Vec<Line<'static>> = Vec::new();
         for (i, (depth, e)) in tree.iter().enumerate() {
             let (dot, color) = e.state.glyph();
@@ -169,10 +176,31 @@ impl PaneView for AgentsPane {
         }
     }
 
+    fn badge(&self) -> Option<usize> { Some(self.tree().len()) }
+
+    fn purpose(&self) -> &'static str {
+        "Sub-agents this project has spawned, and how they nest. The agent creates these itself."
+    }
+
+    fn empty_hint(&self) -> Vec<&'static str> {
+        vec![
+            "No sub-agents yet.",
+            "The agent spawns one when a task is self-contained and worth",
+            "doing separately — ask it to: use a subagent to ...",
+            "Each runs on its own model and writes into the same memory.",
+        ]
+    }
+
     fn status(&self) -> String {
-        let running = self.episodes.iter().filter(|e| e.state == RunState::Running).count();
-        let failed = self.episodes.iter().filter(|e| e.state == RunState::Failed).count();
-        format!("{} episodes · {running} running · {failed} failed", self.episodes.len())
+        // count what is ON SCREEN. Counting every episode said "45 episodes"
+        // over a pane showing none of them, which is worse than saying nothing
+        let shown: Vec<&Episode> = self.tree().into_iter().map(|(_, e)| e).collect();
+        if shown.is_empty() { return "no sub-agents".into() }
+        let running = shown.iter().filter(|e| e.state == RunState::Running).count();
+        let failed = shown.iter().filter(|e| e.state == RunState::Failed).count();
+        let parents = self.tree().iter().filter(|(d, _)| *d == 0).count();
+        format!("{} run(s) under {parents} session(s) · {running} running · {failed} failed",
+                shown.len() - parents)
     }
 
     fn help(&self) -> Vec<(&'static str, &'static str)> {
@@ -216,7 +244,22 @@ mod tests {
         let rows = vec![ep(1, "root task"), ep(2, "subagent of #1: sub work"), ep(3, "other root")];
         let p = AgentsPane::load(&rows, &|_| vec![]);
         let tree: Vec<(usize, u64)> = p.tree().iter().map(|(d, e)| (*d, e.id)).collect();
-        assert_eq!(tree, [(0, 1), (1, 2), (0, 3)]);
+        // #3 delegated to nobody, so it is a session, not an agent
+        assert_eq!(tree, [(0, 1), (1, 2)]);
+    }
+
+    #[test]
+    fn a_session_that_delegated_to_nobody_is_not_an_agent() {
+        // every pi session writes an episode. Listing them all filled this
+        // pane with thirty rows of "pi session 2026-08-25T…" and answered no
+        // question anyone had; sessions belong in the Sessions pane.
+        let rows = vec![ep(1, "pi session 2026-08-25T03:23:42Z"),
+                        ep(2, "pi session 2026-08-25T10:58:20Z")];
+        let p = AgentsPane::load(&rows, &|_| vec![]);
+        assert!(p.tree().is_empty(), "{:?}", p.tree().len());
+        assert_eq!(p.badge(), Some(0), "and the rail says so, rather than lying");
+        assert!(p.empty_hint().iter().any(|l| l.contains("subagent")),
+            "the empty state has to say how to make one");
     }
 
     #[test]
@@ -239,18 +282,18 @@ mod tests {
 
     #[test]
     fn status_counts_running_and_failed() {
-        let rows = vec![ep(1, "a"), ep(2, "b"), ep(3, "c")];
+        let rows = vec![ep(1, "a"), ep(2, "subagent of #1: b"), ep(3, "subagent of #1: c")];
         let p = AgentsPane::load(&rows, &|id| match id {
             2 => vec!["outcome: failed hard".into()],
             3 => vec!["outcome: done".into()],
             _ => vec![],
         });
-        assert_eq!(p.status(), "3 episodes · 1 running · 1 failed");
+        assert_eq!(p.status(), "2 run(s) under 1 session(s) · 1 running · 1 failed");
     }
 
     #[test]
     fn transcript_drills_into_the_selected_run_only() {
-        let rows = vec![ep(1, "root"), ep(2, "second")];
+        let rows = vec![ep(1, "root"), ep(2, "subagent of #1: second")];
         let mut p = AgentsPane::load(&rows, &|id| vec![format!("log of {id}")]);
         assert!(p.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 30));
         let shown: Vec<String> = p.lines(0).iter().map(text).collect();
@@ -263,7 +306,7 @@ mod tests {
 
     #[test]
     fn state_glyphs_are_coloured_by_outcome() {
-        let rows = vec![ep(1, "a")];
+        let rows = vec![ep(1, "a"), ep(2, "subagent of #1: b")];
         let p = AgentsPane::load(&rows, &|_| vec!["outcome: error".into()]);
         assert_eq!(p.lines(0)[0].spans[1].style.fg, Some(theme::RED));
     }

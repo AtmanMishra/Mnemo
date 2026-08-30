@@ -6,7 +6,7 @@ use crate::theme;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 /// Nav rail width: "▶ 1 Memory" plus borders.
@@ -56,6 +56,15 @@ pub fn ring(focused: bool) -> Block<'static> {
 
 /// One rail row per pane: "▶ 1 Chat" for the active one, "  2 Memory" otherwise.
 pub fn rail_lines(active: Pane) -> Vec<Line<'static>> {
+    rail_lines_with(active, &[None; 6])
+}
+
+/// The rail, with a count beside each pane.
+///
+/// A rail of six nouns is a menu of six guesses. A count answers the first
+/// question you actually have — is there anything in there? — without making
+/// you visit every tab to find out.
+pub fn rail_lines_with(active: Pane, badges: &[Option<usize>]) -> Vec<Line<'static>> {
     Pane::ALL
         .iter()
         .enumerate()
@@ -65,9 +74,19 @@ pub fn rail_lines(active: Pane) -> Vec<Line<'static>> {
             let style = if on {
                 Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(theme::GREY)
+                Style::default().fg(theme::WHITE)
             };
-            Line::from(Span::styled(format!("{marker} {} {}", i + 1, p.label()), style))
+            let mut spans = vec![
+                Span::styled(format!("{marker} {} {}", i + 1, p.label()), style),
+            ];
+            if let Some(Some(n)) = badges.get(i) {
+                // a zero is worth showing: "nothing here yet" is information
+                spans.push(Span::styled(
+                    format!("  {n}"),
+                    Style::default().fg(if *n == 0 { theme::DARKGREY } else { theme::INDIGO }),
+                ));
+            }
+            Line::from(spans)
         })
         .collect()
 }
@@ -184,11 +203,22 @@ pub fn draw_with_help(
     body: Vec<Line<'static>>,
     pane_help: &[(&'static str, &'static str)],
 ) {
+    draw_full(f, c, body, pane_help, &[None; 6])
+}
+
+/// Render the shell. `badges` are the per-pane counts for the rail.
+pub fn draw_full(
+    f: &mut Frame,
+    c: &Cockpit,
+    body: Vec<Line<'static>>,
+    pane_help: &[(&'static str, &'static str)],
+    badges: &[Option<usize>; 6],
+) {
     let (rail, main, input, status) = layout_with(f.area(), c.queued.len());
     let overlay = overlay_lines(c, pane_help);
 
     f.render_widget(
-        Paragraph::new(rail_lines(c.pane))
+        Paragraph::new(rail_lines_with(c.pane, badges))
             .block(ring(false).title(Span::styled("MNEMO", theme::title_style()))),
         rail,
     );
@@ -204,7 +234,9 @@ pub fn draw_with_help(
         )
     };
     f.render_widget(
-        Paragraph::new(body).block(
+        // Chat wraps its own lines so its tail-anchoring stays honest; this
+        // is the safety net for every other pane
+        Paragraph::new(body).wrap(Wrap { trim: false }).block(
             ring(c.focus == Focus::Main)
                 .title(Span::styled(theme::title(c.pane.label()), theme::title_style())),
         ),
@@ -222,7 +254,10 @@ pub fn draw_with_help(
     // PIXEL rule 7: the prompt cursor pulses while the agent is streaming
     let cursor = if c.busy && c.pulse { "▌" } else { " " };
     f.render_widget(
-        Paragraph::new(prompt_lines(c, cursor)).block(ring(c.focus == Focus::Input)),
+        // a long prompt wraps rather than running off the right edge
+        Paragraph::new(prompt_lines(c, cursor))
+            .wrap(Wrap { trim: false })
+            .block(ring(c.focus == Focus::Input)),
         input,
     );
     f.render_widget(Paragraph::new(status_line(c)), status);
@@ -255,7 +290,8 @@ mod tests {
             .filter(|s| s.starts_with('▶'))
             .collect();
         assert_eq!(marked, vec!["▶ 4 Agents"]);
-        assert_eq!(lines[0].spans[0].style.fg, Some(theme::GREY));
+        assert_eq!(lines[0].spans[0].style.fg, Some(theme::WHITE),
+            "inactive rows stay readable; the accent alone marks the active one");
         assert_eq!(lines[Pane::Agents.index()].spans[0].style.fg, Some(theme::ACCENT));
     }
 

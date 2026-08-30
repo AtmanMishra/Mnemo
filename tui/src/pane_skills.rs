@@ -201,6 +201,20 @@ impl PaneView for SkillsPane {
         }
     }
 
+    fn badge(&self) -> Option<usize> { Some(self.rows.len()) }
+
+    fn purpose(&self) -> &'static str {
+        "SKILL.md instructions the agent can load on demand, plus tool bundles it has built for itself."
+    }
+
+    fn empty_hint(&self) -> Vec<&'static str> {
+        vec![
+            "No skills found.",
+            "A skill is a SKILL.md file in .claude/skills/ here, or in",
+            "~/.claude/skills/. The agent loads one when it is relevant.",
+        ]
+    }
+
     fn status(&self) -> String {
         let harnesses = self.rows.iter().filter(|r| r.origin == Origin::Harness).count();
         format!("{} skills · {harnesses} harnesses", self.rows.len() - harnesses)

@@ -49,7 +49,10 @@ impl MemoryPane {
             .filter(|a| self.area_filter.as_deref().map_or(true, |f| f == **a))
             .map(|area| {
                 let mut rows: Vec<&NodeRow> = self.rows.iter().filter(|r| r.area == *area).collect();
-                rows.sort_by_key(|r| r.id);
+                // What is REMEMBERED first. Every pi session writes an empty
+                // episode node, so ordering by id buried every actual fact
+                // under thirty rows of "pi session … 0 facts".
+                rows.sort_by(|a, b| b.facts.cmp(&a.facts).then(b.id.cmp(&a.id)));
                 (*area, rows)
             })
             .filter(|(_, rows)| !rows.is_empty())
@@ -162,6 +165,20 @@ impl PaneView for MemoryPane {
         }
     }
 
+    fn badge(&self) -> Option<usize> { Some(self.rows.len()) }
+
+    fn purpose(&self) -> &'static str {
+        "What the agent remembers between sessions: facts, past tasks, and lessons from failures."
+    }
+
+    fn empty_hint(&self) -> Vec<&'static str> {
+        vec![
+            "Nothing remembered yet.",
+            "Memory fills as you work — the agent writes facts it learns,",
+            "and searches this automatically before it answers you.",
+        ]
+    }
+
     fn status(&self) -> String {
         let area = self.area_filter.as_deref().unwrap_or("all areas");
         format!("{} nodes · {}", self.visible().len(), area)
@@ -203,9 +220,24 @@ mod tests {
         let p = pane();
         let groups: Vec<&str> = p.grouped().iter().map(|(a, _)| *a).collect();
         assert_eq!(groups, ["Episodic", "Semantic", "Salience"], "empty areas are not shown");
-        // within a group, rows are ordered by id, not by arrival
+        // within a group: what is actually REMEMBERED first, newest as the
+        // tie-break. Ordering by id buried every real fact under a wall of
+        // empty "pi session …" episodes.
         let semantic: Vec<u64> = p.grouped()[1].1.iter().map(|r| r.id).collect();
-        assert_eq!(semantic, [3, 4]);
+        assert_eq!(semantic, [4, 3], "same fact count, so newest first");
+    }
+
+    #[test]
+    fn nodes_with_facts_outrank_empty_ones() {
+        let mut p = pane();
+        p.rows.push(NodeRow { id: 99, kind: "TaskEpisode".into(), area: "Semantic".into(),
+                              label: "pi session 2026-08-30".into(), facts: 0 });
+        p.rows.push(NodeRow { id: 5, kind: "Aspect".into(), area: "Semantic".into(),
+                              label: "deploy window".into(), facts: 7 });
+        let ids: Vec<u64> = p.grouped().iter().find(|(a, _)| *a == "Semantic")
+            .unwrap().1.iter().map(|r| r.id).collect();
+        assert_eq!(ids[0], 5, "seven facts beats a newer empty episode");
+        assert_eq!(*ids.last().unwrap(), 99, "the empty one sinks");
     }
 
     #[test]
@@ -225,7 +257,7 @@ mod tests {
         let mut p = pane();
         assert_eq!(p.selected_node(), Some(2), "first row of the first group");
         p.move_selection(1);
-        assert_eq!(p.selected_node(), Some(3));
+        assert_eq!(p.selected_node(), Some(4), "Semantic, newest of the equal-fact rows");
         p.move_selection(100);
         assert_eq!(p.selected_node(), Some(1), "last visible row");
         p.move_selection(-100);

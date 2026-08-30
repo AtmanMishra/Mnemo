@@ -736,7 +736,7 @@ mod pacing_tests {
             o.step = step;
             let rendered: Vec<String> = lines_in(&o, &auth, 120).iter().map(text).collect();
             let joined = rendered.join("\n");
-            assert!(joined.contains("◗◖") || joined.contains("‾‾"),
+            assert!(joined.contains("▓▓") && joined.contains("▄▄"),
                 "no cat on {step:?}: {joined}");
         }
     }
@@ -780,7 +780,7 @@ mod pacing_tests {
         // she fits from 44 columns up, and is dropped below that rather than
         // being cut off by the right edge
         let has_cat = |cols: usize| lines_in(&o, &auth, cols).iter()
-            .any(|l| text(l).contains("◗◖") || text(l).contains("‾‾"));
+            .any(|l| text(l).contains("▓▓"));
         assert!(!has_cat(30));
         assert!(has_cat(80));
     }

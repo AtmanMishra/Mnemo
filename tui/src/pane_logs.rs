@@ -264,6 +264,16 @@ impl PaneView for LogsPane {
         }
     }
 
+    fn purpose(&self) -> &'static str {
+        "A live tail of what the agent is doing. Press s to switch between memory writes and timing traces."
+    }
+
+    fn empty_hint(&self) -> Vec<&'static str> {
+        vec![
+            "Nothing logged yet.",
+        ]
+    }
+
     fn status(&self) -> String {
         let shown = self.visible().len();
         let src = self.source.label();

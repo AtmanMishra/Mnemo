@@ -398,6 +398,24 @@ impl PaneView for SessionsPane {
         }
     }
 
+    fn badge(&self) -> Option<usize> {
+        Some(match self.level {
+            Level::Projects => self.ordered_projects().len(),
+            _ => self.sessions.len(),
+        })
+    }
+
+    fn purpose(&self) -> &'static str {
+        "Every conversation, grouped by the folder you had it in. Enter resumes one where it left off."
+    }
+
+    fn empty_hint(&self) -> Vec<&'static str> {
+        vec![
+            "No sessions in this project yet.",
+            "Send a message in Chat and one starts here.",
+        ]
+    }
+
     fn status(&self) -> String {
         match self.level {
             Level::Projects => format!("{} project(s)", self.ordered_projects().len()),

@@ -23,6 +23,22 @@ pub trait PaneView {
 
     /// Called once per frame before render, for panes with live data.
     fn tick(&mut self) {}
+
+    /// One sentence: what this pane is FOR, in the reader's words.
+    ///
+    /// Shown at the top of the pane, always. A rail of six nouns is a menu of
+    /// six guesses — "Agents" and "Sessions" mean nothing until something
+    /// says what they are and why you would open them.
+    fn purpose(&self) -> &'static str { "" }
+
+    /// What to say when the pane has nothing in it: what will appear here,
+    /// and the concrete thing that makes it appear. "(no episodes yet)"
+    /// answers neither.
+    fn empty_hint(&self) -> Vec<&'static str> { Vec::new() }
+
+    /// A number for the rail, so you can see whether a pane is worth opening
+    /// without opening it. None when a count would mean nothing.
+    fn badge(&self) -> Option<usize> { None }
 }
 
 #[cfg(test)]
