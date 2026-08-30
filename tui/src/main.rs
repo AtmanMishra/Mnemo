@@ -18,6 +18,7 @@ mod commands;
 mod md;
 mod memclient;
 mod parser;
+mod rpc;
 mod session;
 mod session_store;
 mod theme;

@@ -11,7 +11,7 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 - [ ] 1.5 Verify pi /login lists our providers inside interactive TUI
 
 ## AREA 2 — COCKPIT TUI (one app, navigation rail)
-- [ ] 2.1 RPC backbone: drive agent via pi runRpcMode (JSON-RPC) instead of REPL scraping
+- [x] 2.1 RPC backbone: drive agent via pi runRpcMode (JSON-RPC) instead of REPL scraping
 - [ ] 2.2 Shell: left nav rail (Chat/Memory/Agents/Skills/Logs) + main pane + input/status bar; Tab+number switching; focus rings
 - [ ] 2.3 Chat pane: streaming markdown, thinking blocks, tool cards, diff blocks (reuse pi components / seatui md.rs)
 - [ ] 2.4 Memory pane: brain-area grouped node browser, search, steering log, live journal tail

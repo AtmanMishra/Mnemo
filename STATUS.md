@@ -152,6 +152,13 @@ HEAD ac50ba7, working tree clean, all pushed.
 - memsrv: `create_node` and `episode` accept optional `"area"` param and return the resulting area; new `set_area` method; `dump`, `state` and `search` hits all carry the area (search hits carry it so callers can route on it in 3.2). Unknown area names rejected.
 - Verification: `cargo test` in memory-layer/ = 24 passing / 0 failing (was 19). New tests: area_defaults_by_kind, set_area_survives_journal_replay, snapshot_without_area_field_still_loads, area_parse_round_trips, memsrv_persists_and_returns_area. Other suites re-run green: agent 102, tui 23, harness-engine 19.
 
+### AREA 3.2-3.5 — SEARCH ROUTING & CONSOLIDATION: COMPLETE
+- **3.2 area filter + query router**: search()/search_ann() now take &SearchOpts (kind + areas + prefer + cross_area) instead of Option<NodeKind>; empty areas = all areas so old behaviour is unchanged. route_query() is a keyword→area heuristic returning at most 2 areas, empty when the query has no distinctive cue. memsrv search accepts areas[] as a hard filter and always reports "routed".
+- **3.3 cross-area discount**: routing is soft — SearchOpts.prefer scales out-of-area nodes by CROSS_AREA_DISCOUNT (0.85) rather than excluding them, so a mis-routed query still ranks correctly. memeval unchanged at Hit@1 93% / Hit@3 100% / MRR 0.967 with real OpenRouter embeddings (docs' baseline was 80%) — no regression. Caveat: the memeval corpus is single-area, so the discount is uniform there; mixed-area ranking is covered by unit tests, not memeval.
+- **3.4 salience pain markers**: steer() now creates a Salience node (label "pain: ..." + failure fact) before any blame/correction/rewire op. The episode cites it with DerivedFrom, NOT SuppliesContext, so a pain marker is reachable by search expansion but can never become a blame target for the next failure. memsrv steer returns pain_node.
+- **3.5 consolidation**: new memory-layer/src/consolidate.rs replays Episodic+Salience nodes and distils recurring themes into Semantic "lesson" nodes. A lesson needs >=2 sources AND >=2 shared theme tokens (so "same project" isn't mistaken for "same lesson"); groups sharing the same tokens collapse into one lesson. Idempotent — a second pass emits zero ops but still reports standing lessons; new evidence supersedes the sources fact. Exposed as memsrv "consolidate" and the `mnemo consolidate` CLI subcommand (no provider/LLM needed).
+- **3.6 (Cockpit Memory pane groups by area)** remains open: it depends on the Area 2 cockpit and will land with task 2.4.
+- Verification: memory-layer 36 passing / 0 failing (was 19 at the start of Area 3), agent 104 passing / 0 failing, tui 23, harness-engine 19.
+
 ### Next candidates
-Area 3.1-3.2 (brain-area column + routed search, Rust, no LLM needed) |
 Area 2.1 (RPC backbone -> cockpit) | Area 6 packaging quick wins

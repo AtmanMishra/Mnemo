@@ -12,8 +12,10 @@ vs 0/3 WITHOUT, on a free model (ox-alpha-free via OpenCode).
 Design pillars (do not relitigate without reading the research docs):
 - Memory = a GRAPH, not a vector DB. Nodes have facts/state/log/context; edges get
   created/deleted/reweighted by a steering engine when things fail.
-- Memory is evolving toward BRAIN-AREA specialization (hippocampus/cortex-style
-  regions) — see research/brain-areas-design.md. NOT implemented yet (Area 3).
+- Memory implements BRAIN-AREA specialization (hippocampus/cortex-style regions) — see
+  research/brain-areas-design.md. Complete: node area column, routed search with soft
+  cross-area discount, salience pain markers, consolidation into semantic lessons.
+  Remaining: cockpit Memory pane groups by area (3.6, depends on Area 2 cockpit).
 - The agent runtime is NOT hand-rolled — it wraps pi (`@earendil-works/pi-coding-agent`,
   the same framework prime-agent runs on) via `main(args, {extensionFactories})`.
   Our tools/memory/approval inject as inline extensions. Do not rebuild streaming,
@@ -27,7 +29,7 @@ memory-layer/   Rust. Graph memory engine: nodes{facts,state,log,context}, typed
                 edges, steering, HNSW+hashing/OpenRouter embeddings.
                 Bins: memcli (REPL), memtui (ratatui dashboard), memsrv (JSON-RPC
                 sidecar over stdio — THE integration surface for agents), memeval
-                (retrieval benchmark). 19 tests (cargo test).
+                (retrieval benchmark). 36 tests (cargo test).
 harness-engine/ TypeScript, zero deps. Dynamic tool-plugin system: createHarness()
                 writes bundles (manifest.json + .mjs tool files) that agents can
                 build for themselves at runtime; scoped registry; fs.watch
@@ -44,7 +46,7 @@ agent/          TypeScript, runs on Node >=22.6 native TS stripping (no build st
                                 directive), approval-gate (y/n on mutating tools)
                 src/skills/     SKILL.md discovery at pi's standard locations +
                                 harness-bridge (harness bundles -> discoverable skills)
-                102 tests (npm test).
+                104 tests (npm test).
 tui/            Rust, ratatui. `seatui` — INLINE REPL (like Claude Code/Codex, NOT
                 an alt-screen dashboard): scrollback + slim bottom input/status bar.
                 Superseded goal: becomes the shell for a unified COCKPIT (nav rail:
@@ -66,11 +68,11 @@ EOF
 cd agent && node ./bin/mnemo.ts                 # interactive (pi InteractiveMode)
 node ./bin/mnemo.ts "<prompt>"                  # one-shot
 node ./bin/mnemo.ts auth status                 # provider/key table
-npm test                                         # 102 tests, ~1s, must NOT hang
+npm test                                         # 104 tests, ~1s, must NOT hang
 npx tsc --noEmit                                 # must be clean
 
 cd ../memory-layer
-cargo test                                       # 19 tests
+cargo test                                       # 36 tests
 cargo run --bin memcli                           # memory REPL
 cargo run --bin memtui                           # memory dashboard (? = help)
 cargo run --bin memsrv <journal-path>             # JSON-RPC sidecar (see §5 protocol)
@@ -97,7 +99,7 @@ Line-delimited JSON over stdio. `{"id":N,"method":"M","params":{...}}` ->
 Methods: ping · dump · state{node} · search{query,k} (returns label+kind+state per
 hit, NOT just scores — this was a real bug once, see §6) · create_node{kind,label,area?} ·
 episode{label,area?} · fact{node,key,value} · link{src,dst} · commit_log{node,kind,detail} ·
-steer{episode,failure,fix?{node,fact,new_key,new_value}} · set_area{node,area} · good{episode,detail} · exit.
+steer{episode,failure,fix?{node,fact,new_key,new_value}} · set_area{node,area} · good{episode,detail} · consolidate · exit.
 
 ## 6. Hard-won lessons (do not repeat these mistakes)
 1. NEVER hardcode API keys in any script/file, even "temporary" ones — one leaked
