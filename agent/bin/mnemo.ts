@@ -5,6 +5,9 @@
 //   mnemo "<prompt>"          one-shot prompt (pi print mode when non-TTY)
 //   mnemo                     interactive TUI (pi interactive mode)
 //   mnemo consolidate         distil recurring episodes into semantic lessons
+//
+// MCP servers listed in ~/.mnemo/mcp.json are connected before pi starts and
+// their tools registered as mcp__<server>__<tool>.
 //   mnemo --list-sessions     list saved sessions from ~/.sea/sessions and exit
 //   mnemo --help              pi's own help
 //
@@ -29,6 +32,7 @@ import {
 import { runWizard } from "../src/auth/wizard.ts";
 import { seaToolsInline } from "../extensions/sea-tools-inline.ts";
 import { memoryLayerHooks, runConsolidate, sharedMem } from "../extensions/memory-layer.ts";
+import { discoverMcpTools, loadMcpConfig, setMcpTools } from "../src/mcp.ts";
 import approvalExt from "../extensions/approval-gate.ts";
 
 const invokedDirectly = (() => {
@@ -157,6 +161,16 @@ async function ensureAuthenticated(): Promise<void> {
   }
 }
 
+/** Connect to configured MCP servers before pi registers tools. */
+async function loadMcpTools(): Promise<void> {
+  const config = loadMcpConfig(process.env.HOME ?? undefined);
+  if (Object.keys(config.servers).length === 0) return;
+  const { tools, errors } = await discoverMcpTools(config);
+  setMcpTools(tools);
+  if (tools.length > 0) console.error(`mcp: ${tools.length} tool(s) loaded`);
+  for (const e of errors) console.error(`mcp: ${e.server} unavailable — ${e.error}`);
+}
+
 async function printSkillsBanner(): Promise<void> {
   try {
     const skills = await discoverSkills();
@@ -236,6 +250,7 @@ async function run(): Promise<void> {
   if (!hasModelFlag && selection.modelId) args.push("--model", selection.modelId);
   if (!args.includes("--no-builtin-tools")) args.push("--no-builtin-tools");
 
+  await loadMcpTools();
   await printSkillsBanner();
   await main(args, { extensionFactories: factories() });
 }

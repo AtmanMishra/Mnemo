@@ -19,6 +19,7 @@ import { sharedKernel } from "../src/tools/ipy_run.ts";
 import { makeKernelDispatcher } from "../src/tools/kernel_tools.ts";
 import { decideApproval } from "./approval-gate.ts";
 import { loadPermissions } from "../src/permissions.ts";
+import { getMcpTools } from "../src/mcp.ts";
 import { makeMemoryTools } from "./memory-layer.ts";
 
 /** All 14 tool names this extension registers (11 core + 3 memory). */
@@ -41,7 +42,8 @@ function toToolDefinition(tool: any): any {
 
 /** Factory: registers every sea tool onto an ExtensionAPI. */
 export function seaToolsFactory(pi: any): void {
-  const tools = [...allTools, ...makeMemoryTools()];
+  // MCP tools are discovered before main() runs; see bin/mnemo.ts
+  const tools = [...allTools, ...makeMemoryTools(), ...getMcpTools()];
   for (const tool of tools) {
     pi.registerTool(toToolDefinition(tool));
   }
