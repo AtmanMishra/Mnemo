@@ -23,5 +23,6 @@ func (o Offline) Send(string) tea.Cmd {
 
 func (o Offline) Steer(string) tea.Cmd { return o.Send("") }
 func (o Offline) Interrupt() tea.Cmd   { return nil }
+func (o Offline) Next() tea.Cmd        { return nil }
 func (o Offline) Model() string        { return "offline" }
 func (o Offline) Close() error         { return nil }

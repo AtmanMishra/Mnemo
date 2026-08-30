@@ -59,6 +59,7 @@ type Model struct {
 	explorerFocus bool
 
 	agent   agent.Agent
+	stats   agent.TurnStats
 	working bool
 	tick    int
 
@@ -129,6 +130,7 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.prompt.Focus(),
 		tea.RequestBackgroundColor,
+		m.agent.Next(),
 	)
 }
 

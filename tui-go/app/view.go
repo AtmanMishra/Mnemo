@@ -204,6 +204,9 @@ func (m *Model) status() string {
 		ui.Seg{Text: itoa(openT) + "/" + itoa(totalT) + " thinking", Style: m.th.Thinking},
 		ui.Seg{Text: plural(m.chat.Len(), "block"), Style: m.th.Muted},
 	)
+	if n := m.stats.TokensIn + m.stats.TokensOut; n > 0 {
+		right = append(right, ui.Seg{Text: short(n) + " tok", Style: m.th.Muted})
+	}
 	return ui.Band(m.th, m.w, left, right)
 }
 
@@ -226,6 +229,19 @@ func (m *Model) modeName() string {
 		return "explorer"
 	}
 	return m.mode.String()
+}
+
+// short renders a token count in three characters or so. The exact number is
+// never the question; the order of magnitude is.
+func short(n int) string {
+	switch {
+	case n < 1000:
+		return itoa(n)
+	case n < 100000:
+		return itoa(n/1000) + "." + itoa((n%1000)/100) + "k"
+	default:
+		return itoa(n/1000) + "k"
+	}
 }
 
 // Render returns the composed screen as plain text. Tests read this rather

@@ -14,6 +14,7 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/session"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/theme"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/trace"
 )
 
 // Update is the whole message switch.
@@ -57,11 +58,35 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
 	}
-	return m, m.onAgent(msg)
+	if cmd := m.onAgent(msg); cmd != nil {
+		return m, cmd
+	}
+	return m, nil
 }
 
 // onAgent folds backend messages into the transcript.
+//
+// Every branch re-arms the listener, because a backend that streams drives
+// the loop by being asked for the next message rather than by holding a
+// reference to the program. Forgetting to re-arm once stops the stream dead
+// with no error anywhere.
 func (m *Model) onAgent(msg tea.Msg) tea.Cmd {
+	if cmd := m.fold(msg); cmd != nil || isAgentMsg(msg) {
+		return tea.Batch(cmd, m.agent.Next())
+	}
+	return nil
+}
+
+func isAgentMsg(msg tea.Msg) bool {
+	switch msg.(type) {
+	case agent.Started, agent.Think, agent.Text, agent.ToolStart, agent.ToolEnd,
+		agent.Delegated, agent.Done, agent.Failed, agent.Stats:
+		return true
+	}
+	return false
+}
+
+func (m *Model) fold(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case agent.Started:
 		m.working = true
@@ -129,6 +154,10 @@ func (m *Model) onAgent(msg tea.Msg) tea.Cmd {
 	case agent.Failed:
 		m.working = false
 		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{msg.Err.Error()}})
+		return nil
+
+	case agent.Stats:
+		m.stats = msg.TurnStats
 		return nil
 	}
 	return nil
@@ -623,12 +652,22 @@ func (m *Model) openMemory() tea.Cmd {
 	return nil
 }
 
+// openLogs shows the span log as the tree it already is.
+//
+// Every span carries a parent, so the log is the call graph of a run rather
+// than a flat scroll. That is the difference between "what happened" and
+// "what happened inside what" — and it is the only view where a slow turn
+// shows you which call was slow.
 func (m *Model) openLogs() tea.Cmd {
-	m.ov = overlay.NewList(overlay.Logs,
-		"what the agent and its tools actually did — where a failure explains itself",
-		nil,
-		"No log lines yet.",
-		"Tool calls and agent errors are written here as they happen.",
+	nodes := trace.Nodes(trace.Read(m.cfg.Home))
+	m.ov = overlay.NewTree(overlay.Logs,
+		"every run as a call graph — durations, tokens, and where it failed",
+		nodes,
+		"No traces yet.",
+		"Each run writes one, under ~/.mnemo/logs, and it appears here",
+		"as a tree: the session, the model round trips inside it, and any",
+		"sub-agents underneath those. Branches containing a failure open",
+		"themselves.",
 	)
 	m.armOverlay()
 	return nil

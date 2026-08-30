@@ -47,6 +47,18 @@ type Done struct{}
 // Failed ends the turn badly.
 type Failed struct{ Err error }
 
+// TurnStats is what a model round trip cost.
+type TurnStats struct {
+	Provider  string
+	Model     string
+	TokensIn  int
+	TokensOut int
+	Cost      float64
+}
+
+// Stats reports a completed round trip.
+type Stats struct{ TurnStats }
+
 // Agent runs turns.
 type Agent interface {
 	// Send starts a turn. The returned command must emit Started first and
@@ -58,6 +70,12 @@ type Agent interface {
 
 	// Interrupt stops the running turn without sending anything.
 	Interrupt() tea.Cmd
+
+	// Next blocks until the backend has something to say, and returns it as
+	// a message. The caller re-issues it after every agent message, which is
+	// how a streaming backend drives the loop without holding a reference to
+	// the program.
+	Next() tea.Cmd
 
 	// Model names the model in use, for the header.
 	Model() string

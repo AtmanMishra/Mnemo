@@ -288,7 +288,7 @@ func TestOverlaysAlwaysSayWhatTheyAreFor(t *testing.T) {
 	for chord, want := range map[string]string{
 		"ctrl+s": "every conversation pi has stored",
 		"ctrl+m": "what Mnemo has remembered",
-		"ctrl+l": "what the agent and its tools actually did",
+		"ctrl+l": "every run as a call graph",
 		"ctrl+k": "run anything by name",
 	} {
 		m := fixture(t, 100, 30)
