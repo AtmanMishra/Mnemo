@@ -205,3 +205,29 @@ func TestTrunkMarksTheLastSibling(t *testing.T) {
 		t.Fatalf("last-child trunk is wrong: %q", a2y)
 	}
 }
+
+func TestDescendOpensAndStepsInsideInOnePress(t *testing.T) {
+	m := sample()
+	m.Move(2) // a2, closed
+	if !m.Descend() {
+		t.Fatal("a container must report that it descended")
+	}
+	if m.Current().ID != "a2x" {
+		t.Fatalf("one press should expand AND step inside, landed on %s", m.Current().ID)
+	}
+	if m.Descend() {
+		t.Fatal("a leaf must report false so the caller can act on it")
+	}
+}
+
+func TestDescendOnAnEmptyContainerDoesNotMove(t *testing.T) {
+	loaded := false
+	m := New(&Node{ID: "d", Label: "d", Load: func() []*Node { loaded = true; return nil }})
+	m.Descend()
+	if !loaded {
+		t.Fatal("descending must load")
+	}
+	if m.Current().ID != "d" {
+		t.Fatalf("with nothing inside, the cursor stays put, got %s", m.Current().ID)
+	}
+}

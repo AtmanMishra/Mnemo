@@ -236,6 +236,28 @@ func (m *Model) Open() {
 	m.Move(1)
 }
 
+// Descend opens the focused node and steps onto its first child, in one
+// press. Returns false on a leaf, so the caller can treat that as "use this".
+//
+// Open() deliberately does one thing per press, which is right for l/h
+// browsing. For enter it is wrong: expanding and then having to press again
+// to get inside means resuming the newest session costs three presses instead
+// of two, and the extra press does nothing the reader asked for.
+func (m *Model) Descend() bool {
+	n := m.Current()
+	if n == nil || !n.HasChildren() {
+		return false
+	}
+	if !n.Expanded {
+		n.Expanded = true
+		m.reflow()
+	}
+	if m.cursor+1 < len(m.rows) && m.rows[m.cursor+1].Depth > m.rows[m.cursor].Depth {
+		m.Move(1)
+	}
+	return true
+}
+
 // Close collapses the focused node, or jumps to its parent when it is already
 // closed. This is the move that saves the most keystrokes in a deep tree:
 // leaving a subtree is one press, not "up, up, up, left".

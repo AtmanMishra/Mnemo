@@ -42,6 +42,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.tick++
+		m.chat.SetTick(m.tick)
 		if m.working {
 			return m, tickCmd()
 		}
@@ -98,6 +99,9 @@ func (m *Model) fold(msg tea.Msg) tea.Cmd {
 
 	case agent.Think:
 		m.appendChunk(chat.Think, "thinking", msg.Text)
+		if b := m.chat.Last(); b != nil && b.Kind == chat.Think {
+			b.State = chat.Running
+		}
 		return nil
 
 	case agent.Text:
@@ -148,6 +152,7 @@ func (m *Model) fold(msg tea.Msg) tea.Cmd {
 
 	case agent.Done:
 		m.working = false
+		m.settle()
 		// A queued message is a promise; keep it.
 		if next, ok := m.prompt.PopQueue(); ok {
 			m.layout()
@@ -157,6 +162,7 @@ func (m *Model) fold(msg tea.Msg) tea.Cmd {
 
 	case agent.Failed:
 		m.working = false
+		m.settle()
 		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{msg.Err.Error()}})
 		return nil
 
@@ -165,6 +171,26 @@ func (m *Model) fold(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	return nil
+}
+
+// settle clears every Running marker. A turn that ended must not leave a
+// spinner on screen: a spinner nobody stops is a UI that looks hung.
+func (m *Model) settle() {
+	for _, b := range m.chat.Blocks() {
+		if b.State != chat.Running {
+			continue
+		}
+		if b.Kind == chat.Think {
+			b.State = chat.None
+			continue
+		}
+		// A tool call still open when the turn ended never reported back.
+		b.State = chat.Failed
+		if b.Detail == "" {
+			b.Detail = "no result"
+		}
+	}
+	m.openTool = map[string]*chat.Block{}
 }
 
 // appendChunk streams text into the open block of a kind, or starts one.
@@ -219,6 +245,7 @@ func (m *Model) global(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case key.Matches(msg, k.Interrupt):
 		if m.working {
 			m.working = false
+			m.settle()
 			m.lastInterrupt = time.Now()
 			return tea.Batch(m.agent.Interrupt(), m.notify("interrupted")), true
 		}
@@ -507,8 +534,7 @@ func (m *Model) chooseOverlay() tea.Cmd {
 		m.mode = keymap.Insert
 		return tea.Batch(m.prompt.Focus(), m.runCommand(id))
 	case overlay.Sessions:
-		if ov.Tree() != nil && ov.Tree().Current().HasChildren() {
-			ov.Tree().Open()
+		if ov.Tree() != nil && ov.Tree().Descend() {
 			return nil
 		}
 		m.ov = nil

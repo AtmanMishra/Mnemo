@@ -485,3 +485,38 @@ func lastLine(s string) string {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+func TestATurnThatEndsLeavesNoSpinnerBehind(t *testing.T) {
+	// A spinner nobody stops is a UI that looks hung.
+	m := fixture(t, 100, 30)
+	m.Update(agent.ToolStart{ID: "1", Name: "bash", Args: "go test"})
+	m.Update(agent.Think{Text: "hmm"})
+	m.Update(agent.Done{})
+	for _, b := range m.Chat().Blocks() {
+		if b.State == chat.Running {
+			t.Fatalf("block %q is still running after the turn ended", b.Title)
+		}
+	}
+}
+
+func TestAToolStillOpenWhenTheTurnEndsIsMarkedFailedNotOk(t *testing.T) {
+	m := fixture(t, 100, 30)
+	m.Update(agent.ToolStart{ID: "1", Name: "bash", Args: "go test"})
+	m.Update(agent.Done{})
+	last := m.Chat().Blocks()[m.Chat().Len()-1]
+	if last.State != chat.Failed || last.Detail != "no result" {
+		t.Fatalf("a call that never reported back must say so, got %+v", last)
+	}
+}
+
+func TestInterruptingAlsoStopsTheSpinners(t *testing.T) {
+	m := fixture(t, 100, 30)
+	m.working = true
+	m.Update(agent.ToolStart{ID: "1", Name: "bash"})
+	press(t, m, "ctrl+c")
+	for _, b := range m.Chat().Blocks() {
+		if b.State == chat.Running {
+			t.Fatal("interrupting must settle the transcript too")
+		}
+	}
+}

@@ -65,6 +65,7 @@ type Model struct {
 	focus  int // index into blocks; -1 when nothing is focused
 	scroll int
 	follow bool // pinned to the bottom, which is the normal state
+	tick   int  // animation frame, for blocks that are still running
 }
 
 // New returns an empty transcript pinned to the bottom.
@@ -82,6 +83,14 @@ func (m *Model) SetSize(w, h int) {
 	m.width, m.height = w, h
 	m.clamp()
 }
+
+// SetTick advances the animation used by blocks that are still running.
+//
+// A tool call that has been sent and not answered draws a spinner in its
+// gutter, and a thinking block draws the dither wave. A static dot on a call
+// that is still out looks exactly like a call that finished, which is the
+// difference between waiting and being stuck.
+func (m *Model) SetTick(t int) { m.tick = t }
 
 // Append adds a block and, if the view was pinned to the bottom, keeps it there.
 func (m *Model) Append(b *Block) {
@@ -399,7 +408,7 @@ func (m *Model) renderBlock(t *theme.Theme, b *Block, idx, depth int) []row {
 		avail = 8
 	}
 
-	mark, style := gutter(t, b)
+	mark, style := m.gutterFor(t, b)
 	focused := idx == m.focus && depth == 0
 	if focused {
 		mark = t.G.Seg
@@ -451,6 +460,12 @@ func (m *Model) summary(t *theme.Theme, b *Block, avail int) string {
 		fold = t.G.Open
 	}
 	title := b.Title
+	if b.State == Running && b.Kind == Think {
+		// A thinking block that is still filling shows the ramp rather than a
+		// word: density travelling left to right reads as work in progress,
+		// where a spinner reads as loading.
+		title = title + "  " + theme.Wave(m.tick, 8)
+	}
 	head := t.Muted.Render(fold) + " " + stateStyle(t, b).Render(title)
 	if b.Detail == "" {
 		return ansi.Truncate(head, avail, "…")
@@ -460,6 +475,13 @@ func (m *Model) summary(t *theme.Theme, b *Block, avail int) string {
 		return ansi.Truncate(head, avail, "…")
 	}
 	return head + strings.Repeat(" ", room) + t.Faint.Render(b.Detail)
+}
+
+func (m *Model) gutterFor(t *theme.Theme, b *Block) (string, styler) {
+	if b.State == Running {
+		return theme.Spinner[m.tick%len(theme.Spinner)], t.Accent
+	}
+	return gutter(t, b)
 }
 
 func gutter(t *theme.Theme, b *Block) (string, styler) {

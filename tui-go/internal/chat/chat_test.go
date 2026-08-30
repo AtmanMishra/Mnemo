@@ -277,3 +277,33 @@ func TestNarrowWidthsDoNotPanic(t *testing.T) {
 		_ = m.View(th())
 	}
 }
+
+func TestARunningBlockAnimatesAndAFinishedOneDoesNot(t *testing.T) {
+	// A static dot on a call that is still out looks exactly like a call that
+	// finished. That is the difference between waiting and being stuck.
+	m := New()
+	m.SetSize(60, 20)
+	m.Append(&Block{Kind: Tool, Title: "bash", State: Running})
+	a := ansi.Strip(m.View(th()))
+	m.SetTick(3)
+	b := ansi.Strip(m.View(th()))
+	if a == b {
+		t.Fatal("a running tool block must animate")
+	}
+	m.Blocks()[0].State = OK
+	c := ansi.Strip(m.View(th()))
+	m.SetTick(7)
+	if ansi.Strip(m.View(th())) != c {
+		t.Fatal("a finished block must be still")
+	}
+}
+
+func TestAThinkingBlockShowsTheRampNotASpinner(t *testing.T) {
+	m := New()
+	m.SetSize(60, 20)
+	m.Append(&Block{Kind: Think, Title: "thinking", Body: []string{"x"}, State: Running})
+	got := ansi.Strip(m.View(th()))
+	if !strings.ContainsAny(got, string(theme.Dither[1:])) {
+		t.Fatalf("thinking should draw the density ramp:\n%s", got)
+	}
+}
