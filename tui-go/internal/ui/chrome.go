@@ -147,14 +147,19 @@ func Pane(t *theme.Theme, width, height int, label, body string) string {
 	return strings.Join(out, "\n")
 }
 
-// SideBySide joins two columns with a vertical rule between them, padding
-// both to height so the rule is unbroken.
-func SideBySide(t *theme.Theme, height int, left string, right string) string {
-	if right == "" {
-		return left
-	}
+// Columns joins two columns with a vertical rule and a column of air either
+// side of it.
+//
+// Both widths are given, and both sides are padded HERE rather than by the
+// caller. When the callers padded their own sides, the region rule and the
+// body disagreed by a column and the divider ran down the screen in a zigzag
+// — which reads as a rendering bug, not as a design.
+//
+// The gap costs two columns and is what makes two columns read as two columns
+// rather than as one wall of text.
+func Columns(t *theme.Theme, height int, left string, lw int, right string, rw int) string {
 	l, r := strings.Split(left, "\n"), strings.Split(right, "\n")
-	bar := t.Rule.Render(t.G.V)
+	bar := " " + t.Rule.Render(t.G.V) + " "
 	out := make([]string, 0, height)
 	for i := 0; i < height; i++ {
 		var a, b string
@@ -164,10 +169,13 @@ func SideBySide(t *theme.Theme, height int, left string, right string) string {
 		if i < len(r) {
 			b = r[i]
 		}
-		out = append(out, a+bar+b)
+		out = append(out, Pad(a, lw)+bar+Pad(b, rw))
 	}
 	return strings.Join(out, "\n")
 }
+
+// Gap is how many columns Columns spends on the divider and the air around it.
+const Gap = 3
 
 // Pad makes every line exactly width cells wide, so columns line up when they
 // are joined. Lines longer than width are cut.

@@ -142,10 +142,10 @@ func (m *Model) bodyRule() string {
 	if right == 0 {
 		return ui.Rule(m.th, m.inner(), m.transcriptLabel())
 	}
-	left := m.inner() - right - 3
-	return ui.Pad(ui.Rule(m.th, left, m.transcriptLabel()), left) +
-		"  " + m.th.Rule.Render(m.th.G.V) + " " +
-		ui.Rule(m.th, right, "explorer")
+	left := m.leftWidth()
+	return ui.Columns(m.th, 1,
+		ui.Rule(m.th, left, m.transcriptLabel()), left,
+		ui.Rule(m.th, right, "explorer"), right)
 }
 
 // transcriptLabel says what you are looking at AND what is hidden. A reader
@@ -170,14 +170,18 @@ func (m *Model) body() string {
 	if right == 0 {
 		return ui.Pad(ui.PadTo(left, h), m.inner())
 	}
-	// Pad to height FIRST, then to width: padding to width first leaves the
-	// rows added afterwards empty, and the divider then runs down a ragged
-	// edge of nothing. The divider gets a column of air either side, so the
-	// two columns read as two columns rather than as one wall of text.
-	lw := m.inner() - right - 3
-	return ui.SideBySide(m.th, h,
-		ui.Pad(ui.PadTo(left, h), lw)+" ",
-		" "+ui.Pad(ui.PadTo(m.explorer.View(m.th, m.explorerFocus), h), right))
+	return ui.Columns(m.th, h,
+		ui.PadTo(left, h), m.leftWidth(),
+		ui.PadTo(m.explorer.View(m.th, m.explorerFocus), h), right)
+}
+
+// leftWidth is the transcript column when the explorer is open.
+func (m *Model) leftWidth() int {
+	w := m.inner() - m.explorerWidth() - ui.Gap
+	if w < 8 {
+		w = 8
+	}
+	return w
 }
 
 // bodyHeight is whatever is left after the rows that are never negotiable —

@@ -128,23 +128,42 @@ func TestPadMakesEveryLineTheSameWidth(t *testing.T) {
 	}
 }
 
-func TestSideBySideDrawsAnUnbrokenRule(t *testing.T) {
-	left := Pad("a\nb", 5)
-	right := Pad("1\n2", 4)
-	got := SideBySide(th(), 4, left, right)
+func TestColumnsDrawAnUnbrokenDividerInOneColumn(t *testing.T) {
+	// When the callers padded their own sides, the region rule and the body
+	// disagreed by a column and the divider zigzagged down the screen.
+	got := Columns(th(), 5, "a\nlonger line\nb", 12, "1\n2", 6)
 	lines := strings.Split(got, "\n")
-	if len(lines) != 4 {
-		t.Fatalf("want 4 rows, got %d", len(lines))
+	if len(lines) != 5 {
+		t.Fatalf("want 5 rows, got %d", len(lines))
 	}
+	col := -1
 	for i, l := range lines {
-		if !strings.Contains(ansi.Strip(l), theme.Heavy.V) {
-			t.Fatalf("row %d has no divider: %q — a rule with gaps reads as a rendering bug", i, ansi.Strip(l))
+		plain := ansi.Strip(l)
+		at := strings.Index(plain, theme.Heavy.V)
+		if at < 0 {
+			t.Fatalf("row %d has no divider: %q", i, plain)
+		}
+		if col == -1 {
+			col = at
+		} else if at != col {
+			t.Fatalf("row %d puts the divider at %d, the first row at %d", i, at, col)
 		}
 	}
 }
 
-func TestSideBySideWithNoRightColumnIsJustTheLeft(t *testing.T) {
-	if got := SideBySide(th(), 3, "a\nb", ""); got != "a\nb" {
-		t.Fatalf("a closed explorer must cost nothing: %q", got)
+func TestColumnsAreExactlyTheirWidths(t *testing.T) {
+	got := Columns(th(), 3, "a", 10, "b", 7)
+	for _, l := range strings.Split(got, "\n") {
+		if w := ansi.StringWidth(l); w != 10+Gap+7 {
+			t.Fatalf("row is %d cells, want %d", w, 10+Gap+7)
+		}
+	}
+}
+
+func TestColumnsGiveTheDividerAir(t *testing.T) {
+	// Two columns jammed against a bar read as one wall of text.
+	got := ansi.Strip(Columns(th(), 1, "abc", 3, "xyz", 3))
+	if got != "abc "+theme.Heavy.V+" xyz" {
+		t.Fatalf("got %q", got)
 	}
 }

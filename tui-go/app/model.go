@@ -193,7 +193,7 @@ func (m *Model) layout() {
 	right := m.explorerWidth()
 	left := m.inner()
 	if right > 0 {
-		left = m.inner() - right - 3
+		left = m.leftWidth()
 	}
 
 	m.chat.SetSize(left, body)
