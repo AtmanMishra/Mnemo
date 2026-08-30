@@ -29,7 +29,7 @@ memory-layer/   Rust. Graph memory engine: nodes{facts,state,log,context}, typed
                 edges, steering, HNSW+hashing/OpenRouter embeddings.
                 Bins: memcli (REPL), memtui (ratatui dashboard), memsrv (JSON-RPC
                 sidecar over stdio — THE integration surface for agents), memeval
-                (retrieval benchmark). 37 tests (cargo test).
+                (retrieval benchmark). 44 tests (cargo test).
 harness-engine/ TypeScript, zero deps. Dynamic tool-plugin system: createHarness()
                 writes bundles (manifest.json + .mjs tool files) that agents can
                 build for themselves at runtime; scoped registry; fs.watch
@@ -46,11 +46,11 @@ agent/          TypeScript, runs on Node >=22.6 native TS stripping (no build st
                                 directive), approval-gate (y/n on mutating tools)
                 src/skills/     SKILL.md discovery at pi's standard locations +
                                 harness-bridge (harness bundles -> discoverable skills)
-                104 tests (npm test).
+                179 tests (npm test).
 tui/            Rust, ratatui. `mnemo-cockpit` — nav rail (Chat/Memory/Agents/
                 Skills/Logs) driven by pi's RPC mode: streams text/thinking/tool
                 execution, shows delegation tree, memory search grouped by brain area.
-                seatui (inline REPL) and memtui (dashboard) deprecated. 112 tests.
+                seatui (inline REPL) and memtui (dashboard) deprecated. 115 tests.
 plan.md         MASTER TASK TRACKER. 7 areas, checkboxes. READ THIS FIRST for "what's next".
 STATUS.md       Outcomes/verification log + doc index. Read for "what happened and why".
 research/       Design docs, one file per topic (see STATUS.md's doc index table).
@@ -68,7 +68,9 @@ EOF
 cd agent && node ./bin/mnemo.ts                 # interactive (pi InteractiveMode)
 node ./bin/mnemo.ts "<prompt>"                  # one-shot
 node ./bin/mnemo.ts auth status                 # provider/key table
-npm test                                         # 104 tests, ~1s, must NOT hang
+node ./bin/mnemo.ts traces [session]            # span trees, --json for raw
+node ./bin/mnemo.ts consolidate                 # replay episodes into semantic lessons
+npm test                                         # 179 tests, ~1s, must NOT hang
 npx tsc --noEmit                                 # must be clean
 
 cd ../memory-layer
@@ -82,17 +84,22 @@ cargo run --bin seatui                           # deprecated: inline chat TUI
 cd ../harness-engine && npm test                 # 19 tests (1 flaky, rerun if red)
 ```
 
-## 4. Current state (verified at HEAD 31c3c08)
-- ALL 4 codebases green: agent 102, memory-layer 19, tui 23, harness-engine 19
-  (163 total). Working tree clean, everything pushed.
-- Area 1 (Auth & Onboarding) COMPLETE: `mnemo "<prompt>"` works with ZERO
-  environment variables — credentials resolve from `~/.mnemo/auth.json`.
+## 4. Current state (verified at HEAD 0969477)
+- ALL 4 codebases green: agent 179, memory-layer 44, tui 115, harness-engine 19
+  (357 total). Working tree clean, everything pushed.
+- All 7 plan areas complete (every plan.md checkbox ticked): auth, cockpit,
+  brain-area memory, agent capabilities, tracing, packaging, quality.
 - Live-verified end-to-end on a real LLM (ox-alpha-free / OpenCode): memory
   write+search+recall, hierarchical spawn_subagent delegation (child writes to
   the SAME shared journal), agent building its OWN harness plugin at runtime
   and it becoming a discoverable skill immediately.
-- Eval: retrieval Hit@1 80% (real embeddings) vs 53% (hashing fallback);
-  task-level 3/3 WITH memory vs 0/3 WITHOUT (agent/eval/memory-eval.mjs).
+- Eval: retrieval Hit@1 82% / Hit@3 95% (real embeddings) vs 68% / 73%
+  (hashing fallback), n=22 with brain areas in the corpus. The older 93% was a
+  15-case, single-area corpus — not the same measurement.
+- The 3/3-with-memory vs 0/3-without task result predates the eval expansion to
+  5 pairs and has NOT been re-run: the stored default model (ox-alpha-free) now
+  returns "not supported" from OpenCode. Re-run `mnemo auth` to pick a live
+  model, then `node agent/eval/memory-eval.mjs`.
 
 ## 5. memsrv protocol (the memory integration surface)
 Line-delimited JSON over stdio. `{"id":N,"method":"M","params":{...}}` ->
@@ -130,14 +137,15 @@ steer{episode,failure,fix?{node,fact,new_key,new_value}} · set_area{node,area} 
    the actual ENTRY file, not a file it imports — file-URL comparison only works
    at the true entrypoint.
 
-## 7. What's NOT done (see plan.md for the authoritative live list)
-- Area 1.5: verify pi's in-TUI `/login` lists our providers (quick check)
-- Area 4 (0/5): MCP bridge, web search tool, permission rule engine, plan mode,
-  image input.
-- Area 5 (0/7): structured logging/tracing — spans for tool calls and LLM round
-  trips, `mnemo traces` CLI, subagent correlation, redaction.
-- Area 6 (0/3): packaging — `npm i -g`, node version guard, README quickstart.
-- Area 7 (0/3): CI, bigger eval suite, learned steering policy.
+## 7. What's NOT done
+plan.md's 7 areas are complete. Open threads awaiting real-world validation:
+- Area 7.2: real retrieval misses left failing rather than tuned away. The
+  clearest is "who gets paged when latency spikes", which does not retrieve
+  "alert routing" at all. (Separately, two failure-shaped queries now accept
+  either the aspect or the salience pain marker, because after 3.4 both answers
+  are defensible — those are not counted as misses.)
+- Area 7.3: steering policy learned from journal replay — awaiting a journal with
+  real failures to train on.
 
 ## 8. Rules of engagement
 - memory-layer/, harness-engine/, agent/, tui/ can all be edited — this is one
