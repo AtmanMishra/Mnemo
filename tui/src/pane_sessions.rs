@@ -264,7 +264,7 @@ fn subagent_line(s: &Subagent, on: bool) -> Line<'static> {
     let color = if s.ok { theme::GREEN } else { theme::RED };
     let model = s.model.clone().unwrap_or_else(|| "same model".into());
     let label = if on {
-        Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)
+        Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::WHITE)
     };
@@ -289,7 +289,7 @@ impl PaneView for SessionsPane {
                 let projects = self.ordered_projects();
                 out.push(Line::from(Span::styled(
                     format!("PROJECTS ({})", projects.len()),
-                    Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD),
+                    Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
                 )));
                 if projects.is_empty() {
                     out.push(Line::from(Span::styled("(no projects yet)", Style::default().fg(theme::GREY))));
@@ -298,7 +298,7 @@ impl PaneView for SessionsPane {
                     let on = row == self.selected;
                     row += 1;
                     let style = if on {
-                        Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)
+                        Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(theme::WHITE)
                     };
@@ -319,7 +319,7 @@ impl PaneView for SessionsPane {
             Level::Sessions => {
                 out.push(Line::from(Span::styled(
                     format!("{} — SESSIONS ({})", self.project_title().to_uppercase(), self.sessions.len()),
-                    Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD),
+                    Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
                 )));
                 if self.sessions.is_empty() {
                     out.push(Line::from(Span::styled(
@@ -329,7 +329,7 @@ impl PaneView for SessionsPane {
                     let on = row == self.selected;
                     row += 1;
                     let style = if on {
-                        Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)
+                        Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(theme::WHITE)
                     };
@@ -360,7 +360,7 @@ impl PaneView for SessionsPane {
                 let model = sub.model.clone().unwrap_or_else(|| "same model as parent".into());
                 out.push(Line::from(vec![
                     Span::styled(format!("SUBAGENT — {}", sub.label.to_uppercase()),
-                        Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)),
+                        Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
                     Span::styled(format!("  [{model}]"), Style::default().fg(theme::PURPLE)),
                     Span::styled(
                         if sub.ok { "  ok" } else { "  failed" },

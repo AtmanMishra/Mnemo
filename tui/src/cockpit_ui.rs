@@ -12,10 +12,18 @@ use ratatui::Frame;
 /// Nav rail width: "▶ 1 Memory" plus borders.
 pub const RAIL_WIDTH: u16 = 14;
 const INPUT_HEIGHT: u16 = 3;
+/// A queue longer than this is summarised rather than listed: the transcript
+/// it is waiting behind matters more than the tail of the queue.
+const MAX_QUEUE_ROWS: usize = 4;
 const STATUS_HEIGHT: u16 = 1;
 
 /// Split the screen into (rail, body, input, status).
-pub fn layout(area: Rect) -> (Rect, Rect, Rect, Rect) {
+///
+/// `queued` grows the input box so waiting messages are on screen rather than
+/// clipped by a fixed-height box — capped, because a long queue must not eat
+/// the transcript it is queued behind.
+pub fn layout_with(area: Rect, queued: usize) -> (Rect, Rect, Rect, Rect) {
+    let extra = queued.min(MAX_QUEUE_ROWS) as u16;
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(RAIL_WIDTH), Constraint::Min(10)])
@@ -24,17 +32,22 @@ pub fn layout(area: Rect) -> (Rect, Rect, Rect, Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(3),
-            Constraint::Length(INPUT_HEIGHT),
+            Constraint::Length(INPUT_HEIGHT + extra),
             Constraint::Length(STATUS_HEIGHT),
         ])
         .split(cols[1]);
     (cols[0], rows[0], rows[1], rows[2])
 }
 
+/// The common case: nothing queued.
+pub fn layout(area: Rect) -> (Rect, Rect, Rect, Rect) {
+    layout_with(area, 0)
+}
+
 /// Pane chrome. PIXEL rule 2: double-line borders for chrome, never nested.
 /// Focus is carried by colour (rule 1: colour = state), not by a second frame.
 pub fn ring(focused: bool) -> Block<'static> {
-    let color = if focused { theme::YELLOW } else { theme::GREY };
+    let color = if focused { theme::ACCENT } else { theme::GREY };
     Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
@@ -50,7 +63,7 @@ pub fn rail_lines(active: Pane) -> Vec<Line<'static>> {
             let on = *p == active;
             let marker = if on { "▶" } else { " " };
             let style = if on {
-                Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)
+                Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(theme::GREY)
             };
@@ -67,16 +80,18 @@ pub fn overlay_lines(c: &Cockpit, pane_help: &[(&'static str, &'static str)]) ->
             theme::title("keys"), theme::title_style()))];
         let global = [
             ("tab / shift-tab", "next / previous pane"),
-            ("alt+1..5", "jump to a pane"),
+            ("alt+1..6", "jump to a pane"),
             ("esc", "leave the prompt, focus the body"),
             ("i / enter", "focus the prompt"),
+            ("enter", "send — or queue it, if the agent is working"),
+            ("alt+enter", "interrupt the running turn with this instead"),
             ("/", "command palette"),
             ("?", "this card"),
             ("ctrl+c", "quit"),
         ];
         for (k, d) in global.iter().chain(pane_help.iter()) {
             out.push(Line::from(vec![
-                Span::styled(format!("  {k:<16}"), Style::default().fg(theme::YELLOW)),
+                Span::styled(format!("  {k:<16}"), Style::default().fg(theme::ACCENT)),
                 Span::styled((*d).to_string(), Style::default().fg(theme::WHITE)),
             ]));
         }
@@ -89,11 +104,39 @@ pub fn overlay_lines(c: &Cockpit, pane_help: &[(&'static str, &'static str)]) ->
     ])).collect()
 }
 
+/// The prompt, plus anything waiting behind it.
+///
+/// A queued message has to be visible: typing while the agent works is normal,
+/// and a message that vanished into a buffer with no sign of it is
+/// indistinguishable from one that was dropped.
+pub fn prompt_lines(c: &Cockpit, cursor: &str) -> Vec<Line<'static>> {
+    let mut out = vec![Line::from(vec![
+        Span::styled("› ", Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(c.input.clone(), Style::default().fg(theme::WHITE)),
+        Span::styled(cursor.to_string(), Style::default().fg(theme::ACCENT)),
+    ])];
+    for (i, q) in c.queued.iter().take(MAX_QUEUE_ROWS).enumerate() {
+        out.push(Line::from(vec![
+            Span::styled(format!("{}. ", i + 1), Style::default().fg(theme::INDIGO)),
+            Span::styled(q.clone(), Style::default().fg(theme::INDIGO)),
+        ]));
+    }
+    if c.queued.len() > MAX_QUEUE_ROWS {
+        out.push(Line::from(Span::styled(
+            format!("   +{} more queued", c.queued.len() - MAX_QUEUE_ROWS),
+            Style::default().fg(theme::GREY),
+        )));
+    }
+    out
+}
+
 /// Status bar: pane, focus and whatever the app last reported.
 pub fn status_line(c: &Cockpit) -> Line<'static> {
-    let hint = match c.focus {
-        Focus::Input => "enter send · esc body",
-        Focus::Main => "i input · j/k move · q quit",
+    let hint = match (c.focus, c.busy) {
+        // the two things worth knowing mid-run are exactly the two keys
+        (Focus::Input, true) => "enter queue · alt+enter steer · esc body",
+        (Focus::Input, false) => "enter send · esc body",
+        (Focus::Main, _) => "i input · [ ] blocks · o open · y copy · q quit",
     };
     // colour = state: a session with no model set says so in red, because
     // prompting will fail until it is chosen (8.6)
@@ -109,7 +152,7 @@ pub fn status_line(c: &Cockpit) -> Line<'static> {
     };
     Line::from(vec![
         Span::styled(format!(" {} ", c.pane.label().to_uppercase()),
-            Style::default().fg(theme::BLACK).bg(theme::YELLOW).add_modifier(Modifier::BOLD)),
+            Style::default().fg(theme::BLACK).bg(theme::ACCENT).add_modifier(Modifier::BOLD)),
         Span::styled(model_text, model_style),
         Span::styled(format!("{} ", c.status), Style::default().fg(theme::WHITE)),
         Span::styled(format!("· tab pane · {hint}"), Style::default().fg(theme::GREY)),
@@ -141,7 +184,7 @@ pub fn draw_with_help(
     body: Vec<Line<'static>>,
     pane_help: &[(&'static str, &'static str)],
 ) {
-    let (rail, main, input, status) = layout(f.area());
+    let (rail, main, input, status) = layout_with(f.area(), c.queued.len());
     let overlay = overlay_lines(c, pane_help);
 
     f.render_widget(
@@ -179,12 +222,7 @@ pub fn draw_with_help(
     // PIXEL rule 7: the prompt cursor pulses while the agent is streaming
     let cursor = if c.busy && c.pulse { "▌" } else { " " };
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("› ", Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD)),
-            Span::styled(c.input.clone(), Style::default().fg(theme::WHITE)),
-            Span::styled(cursor.to_string(), Style::default().fg(theme::YELLOW)),
-        ]))
-        .block(ring(c.focus == Focus::Input)),
+        Paragraph::new(prompt_lines(c, cursor)).block(ring(c.focus == Focus::Input)),
         input,
     );
     f.render_widget(Paragraph::new(status_line(c)), status);
@@ -218,7 +256,7 @@ mod tests {
             .collect();
         assert_eq!(marked, vec!["▶ 4 Agents"]);
         assert_eq!(lines[0].spans[0].style.fg, Some(theme::GREY));
-        assert_eq!(lines[Pane::Agents.index()].spans[0].style.fg, Some(theme::YELLOW));
+        assert_eq!(lines[Pane::Agents.index()].spans[0].style.fg, Some(theme::ACCENT));
     }
 
     #[test]
@@ -229,7 +267,7 @@ mod tests {
         let mut term = ratatui::Terminal::new(TestBackend::new(10, 3)).unwrap();
         term.draw(|f| f.render_widget(ring(true), f.area())).unwrap();
         let cell = term.backend().buffer()[(0, 0)].clone();
-        assert_eq!(cell.fg, theme::YELLOW);
+        assert_eq!(cell.fg, theme::ACCENT);
     }
 
     #[test]

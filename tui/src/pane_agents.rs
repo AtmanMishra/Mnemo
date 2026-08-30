@@ -132,7 +132,7 @@ impl PaneView for AgentsPane {
             let (dot, color) = e.state.glyph();
             let on = i == self.selected;
             let style = if on {
-                Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)
+                Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(theme::WHITE)
             };

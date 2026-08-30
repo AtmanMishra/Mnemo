@@ -46,12 +46,13 @@ agent/          TypeScript, runs on Node >=22.6 native TS stripping (no build st
                                 directive), approval-gate (y/n on mutating tools)
                 src/skills/     SKILL.md discovery at pi's standard locations +
                                 harness-bridge (harness bundles -> discoverable skills)
-                195 tests (npm test).
+                204 tests (npm test).
 tui/            Rust, ratatui. `mnemo-agent` — nav rail (Chat/Sessions/Memory/
                 Agents/Skills/Logs) driven by pi's RPC mode: streams text/thinking/
                 tool execution, shows delegation tree, memory search grouped by brain
-                area, session/project drill-down. 133 tests.
+                area, session/project drill-down. 179 tests.
 plan.md         MASTER TASK TRACKER. 8 areas, checkboxes. READ THIS FIRST for "what's next".
+DESIGN.md       The TUI design system: palette, gutters, folding, motion, keys.
 STATUS.md       Outcomes/verification log + doc index. Read for "what happened and why".
 research/       Design docs, one file per topic (see STATUS.md's doc index table).
 AGENTS.md       Repo-root instructions pi auto-loads into every Mnemo session.
@@ -74,18 +75,18 @@ cd ../agent && node ./bin/mnemo.ts "<prompt>"   # one-shot; how sub-agents run
 node ./bin/mnemo.ts auth status                 # provider/key table
 node ./bin/mnemo.ts traces [session]            # span trees, --json for raw
 node ./bin/mnemo.ts consolidate                 # replay episodes into semantic lessons
-npm test                                         # 195 tests, must NOT hang
+npm test                                         # 204 tests, must NOT hang
 npx tsc --noEmit                                # must be clean
 
 # Test suites
 cd ../memory-layer && cargo test                # 44 tests
-cd ../tui && cargo test                         # 133 tests
+cd ../tui && cargo test                         # 179 tests
 cd ../harness-engine && npm test                # 19 tests (1 flaky, rerun if red)
 ```
 
 ## 4. Current state (verified at HEAD 7483d25)
-- ALL 4 codebases green: agent 195, memory-layer 44, tui 133, harness-engine 19
-  (391 total). Working tree clean, everything pushed.
+- ALL 4 codebases green: agent 204, memory-layer 44, tui 179, harness-engine 19
+  (446 total). Working tree clean, everything pushed.
 - All 8 plan areas complete (every plan.md checkbox ticked): auth, cockpit,
   brain-area memory, agent capabilities, tracing, packaging, quality, and the
   one-app rework that made mnemo-agent the only thing you run.

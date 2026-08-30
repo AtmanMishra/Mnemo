@@ -268,7 +268,7 @@ pub fn lines(o: &Onboarding, existing: &AuthFile) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = vec![
         Line::from(Span::styled(
             "▚ MNEMO ▞",
-            Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD),
+            Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "memory that works like a brain",
@@ -285,7 +285,7 @@ pub fn lines(o: &Onboarding, existing: &AuthFile) -> Vec<Line<'static>> {
                 let on = i == o.provider_index;
                 let live = existing.logged_in().contains(p);
                 let style = if on {
-                    Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)
+                    Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme::WHITE)
                 };
@@ -303,7 +303,7 @@ pub fn lines(o: &Onboarding, existing: &AuthFile) -> Vec<Line<'static>> {
             out.push(Line::from(vec![
                 Span::styled(format!("{}  ", o.provider()), Style::default().fg(theme::BLUE)),
                 Span::styled(masked(&o.key), Style::default().fg(theme::WHITE)),
-                Span::styled("▌", Style::default().fg(theme::YELLOW)),
+                Span::styled("▌", Style::default().fg(theme::ACCENT)),
             ]));
             out.push(Line::from(Span::styled(
                 "stored in ~/.mnemo/auth.json, readable only by you",
@@ -314,7 +314,7 @@ pub fn lines(o: &Onboarding, existing: &AuthFile) -> Vec<Line<'static>> {
             out.push(Line::from(vec![
                 Span::styled("model  ", Style::default().fg(theme::BLUE)),
                 Span::styled(o.model.clone(), Style::default().fg(theme::WHITE)),
-                Span::styled("▌", Style::default().fg(theme::YELLOW)),
+                Span::styled("▌", Style::default().fg(theme::ACCENT)),
             ]));
             let rows = o.visible_models();
             if let Some(e) = &o.models_error {
@@ -348,7 +348,7 @@ pub fn lines(o: &Onboarding, existing: &AuthFile) -> Vec<Line<'static>> {
                 {
                     let on = i == cursor;
                     let style = if on {
-                        Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)
+                        Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(theme::WHITE)
                     };

@@ -5,12 +5,14 @@
 //! (projects, their sessions, and the subagents each spawned). Logging in,
 //! switching model and spawning a differently-modelled subagent all happen
 //! here — nothing sends you back to a shell.
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent,
+                       KeyModifiers, MouseButton, MouseEventKind};
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use seatui::auth::{self, AuthFile};
+use seatui::clipboard;
 use seatui::cockpit::{Action, Cockpit, Focus, Pane};
 use seatui::cockpit_ui;
 use seatui::memclient::{self, MemSession};
@@ -152,6 +154,7 @@ fn main() -> io::Result<()> {
                      &mut agent, mem.as_mut(), &home, &root, &cwd);
 
     disable_raw_mode()?;
+    let _ = set_mouse(false); // a terminal left in mouse mode is unusable
     execute!(term.backend_mut(), LeaveAlternateScreen)?;
     term.show_cursor()?;
     if let Some(a) = agent.as_mut() { a.stop(); }
@@ -176,7 +179,7 @@ fn spawn_agent(root: &Path, cwd: &Path, session: Option<&Path>, cockpit: &mut Co
 {
     match RpcSession::spawn_in(root, cwd, session) {
         Ok(s) => Some(s),
-        Err(e) => { cockpit.status = format!("agent unavailable: {e}"); None }
+        Err(e) => { cockpit.notify(format!("agent unavailable: {e}"), now_ms()); None }
     }
 }
 
@@ -285,27 +288,45 @@ fn run<B: ratatui::backend::Backend>(
                 refresh_memory(panes, mem.as_deref_mut());
             }
         }
+        // one queued message per settle, so each gets a whole turn
+        if !cockpit.busy && !cockpit.queued.is_empty() && agent.is_some() {
+            let next = cockpit.queued.remove(0);
+            send_prompt(&next, cockpit, panes, agent.as_mut());
+        }
         panes.view_mut(cockpit.pane).tick();
         refresh_sessions(panes, home);
 
         let view = panes.view(cockpit.pane);
         let (body, help, pane_status) = (view.lines(body_height), view.help(), view.status());
-        if !cockpit.busy { cockpit.status = pane_status; }
+        if !cockpit.busy { cockpit.status = cockpit.status_for(pane_status, now_ms()); }
 
         term.draw(|f| {
-            let (_, main, _, _) = cockpit_ui::layout(f.area());
+            let (_, main, _, _) = cockpit_ui::layout_with(f.area(), cockpit.queued.len());
             body_height = main.height.saturating_sub(2) as usize;
             cockpit_ui::draw_with_help(f, cockpit, body, &help);
         })?;
 
         if cockpit.busy {
-            spin = (spin + 1) % theme::SPINNER.len();
+            // a dither band rather than a spinner: thinking is not one cell of
+            // work, and a travelling wave reads as progress where a twitching
+            // character reads as a stuck process
+            spin = (spin + 1) % theme::DITHER_PERIOD;
             cockpit.pulse = !cockpit.pulse;
-            cockpit.status = format!("{} working", theme::SPINNER[spin]);
+            let waiting = match cockpit.queued.len() {
+                0 => String::new(),
+                n => format!(" · {n} queued"),
+            };
+            cockpit.status = format!("{} thinking{waiting}", theme::dither_wave(spin, 12));
         }
 
         if !event::poll(Duration::from_millis(theme::SPINNER_INTERVAL_MS))? { continue; }
-        let Event::Key(key) = event::read()? else { continue };
+        let key = match event::read()? {
+            Event::Key(k) => k,
+            // Mouse events only arrive while capture is on, which is off by
+            // default — see `set_mouse`.
+            Event::Mouse(m) => { on_mouse(m, cockpit, panes, body_height); continue }
+            _ => continue,
+        };
 
         // Enter inside Sessions opens a project or a session
         if cockpit.pane == Pane::Sessions && cockpit.focus == Focus::Main
@@ -320,11 +341,11 @@ fn run<B: ratatui::backend::Backend>(
                     if let (Some(p), Some(m)) = (s.provider.clone(), s.model.clone()) {
                         cockpit.model = Some((p, m));
                     }
-                    cockpit.status = format!("resumed: {}", s.title);
+                    cockpit.notify(format!("resumed: {}", s.title), now_ms());
                 }
                 Intent::NewSession(path) => {
                     switch_to(root, &path, None, cockpit, panes, agent);
-                    cockpit.status = format!("new session in {}", path.display());
+                    cockpit.notify(format!("new session in {}", path.display()), now_ms());
                 }
                 Intent::OpenSubagent(sub) => {
                     let spans = spans_for(home, &sub.session);
@@ -332,6 +353,22 @@ fn run<B: ratatui::backend::Backend>(
                 }
                 Intent::None => {}
             }
+            continue;
+        }
+        // y copies out of the app. The terminal's own drag-select still
+        // works (we never capture the mouse), but dragging cannot pick out one
+        // logical block across a scroll boundary — this can.
+        if cockpit.focus == Focus::Main && key.code == KeyCode::Char('y') {
+            let text = match cockpit.pane {
+                Pane::Chat => panes.chat.yank_text(),
+                _ => panes.view(cockpit.pane).lines(0).iter()
+                    .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>())
+                    .collect::<Vec<_>>().join("\n"),
+            };
+            cockpit.notify(match clipboard::copy(&text) {
+                Ok(bin) => format!("copied {} chars ({bin})", text.len()),
+                Err(e) => format!("copy failed: {e}"),
+            }, now_ms());
             continue;
         }
         if cockpit.focus == Focus::Main && panes.view_mut(cockpit.pane).on_key(key, body_height) {
@@ -351,13 +388,30 @@ fn run<B: ratatui::backend::Backend>(
                             mem.as_deref_mut(), home, root);
                 } else if cockpit.model.is_none() {
                     // 8.6: an unset model is a readable error, not a crash
-                    cockpit.status = "no model set — run /login, or /model to pick one".into();
-                } else if let Some(a) = agent.as_mut() {
-                    panes.chat.push_user(&line);
-                    cockpit.busy = true;
-                    if let Err(e) = a.prompt(&line) { cockpit.status = format!("send failed: {e}"); }
+                    cockpit.notify("no model set — run /login, or /model to pick one", now_ms());
+                } else if cockpit.busy {
+                    // typing while it works is normal; the message waits its
+                    // turn rather than being dropped or jammed into this one
+                    cockpit.queued.push(line);
+                    cockpit.notify(format!("queued ({}) — alt+enter to steer instead",
+                                             cockpit.queued.len()), now_ms());
                 } else {
-                    cockpit.status = "agent process is not running".into();
+                    send_prompt(&line, cockpit, panes, agent.as_mut());
+                }
+            }
+            Action::Steer(line) => {
+                // steering is only meaningful mid-run; otherwise it is a prompt
+                match (cockpit.busy, agent.as_mut()) {
+                    (true, Some(a)) => {
+                        panes.chat.push_user(&format!("↯ {line}"));
+                        match a.steer(&line) {
+                            Ok(()) => cockpit.notify("steering", now_ms()),
+                            Err(e) => cockpit.notify(format!("steer failed: {e}"), now_ms()),
+                        }
+                    }
+                    (false, _) if cockpit.model.is_some() =>
+                        send_prompt(&line, cockpit, panes, agent.as_mut()),
+                    _ => cockpit.notify("nothing running to steer", now_ms()),
                 }
             }
             Action::Moved(d) => match cockpit.pane {
@@ -375,6 +429,74 @@ fn run<B: ratatui::backend::Backend>(
         }
     }
     Ok(())
+}
+
+/// Turn terminal mouse reporting on or off.
+///
+/// It is OFF by default, and that is a deliberate choice rather than an
+/// omission: while the app does not capture the mouse, the TERMINAL's own
+/// drag-select and copy keep working, and the terminal's selection is better
+/// than anything a TUI can reimplement — it knows the font, the scrollback and
+/// the platform clipboard. Turning capture on buys the scroll wheel and
+/// click-to-open, and costs native selection (most terminals still give it
+/// back if you hold shift, or option on macOS).
+fn set_mouse(on: bool) -> io::Result<()> {
+    let mut out = io::stdout();
+    if on { execute!(out, EnableMouseCapture) } else { execute!(out, DisableMouseCapture) }
+}
+
+/// Wheel scrolls the focused pane; a click on the rail switches pane, and a
+/// click on a foldable block in Chat opens it.
+fn on_mouse(m: crossterm::event::MouseEvent, cockpit: &mut Cockpit, panes: &mut Panes, height: usize) {
+    match m.kind {
+        MouseEventKind::ScrollUp => scroll(cockpit, panes, 1, height),
+        MouseEventKind::ScrollDown => scroll(cockpit, panes, -1, height),
+        MouseEventKind::Down(MouseButton::Left) => {
+            // the rail is the left column; everything else is the body
+            if (m.column as usize) < cockpit_ui::RAIL_WIDTH as usize {
+                // rail row 1 is the first pane: row 0 is the border
+                if let Some(p) = Pane::ALL.get((m.row as usize).saturating_sub(1)) {
+                    cockpit.pane = *p;
+                    cockpit.focus = Focus::Main;
+                }
+                return;
+            }
+            if cockpit.pane == Pane::Chat {
+                let row = (m.row as usize).saturating_sub(1); // body border
+                if panes.chat.focus_at_row(row, height) {
+                    cockpit.focus = Focus::Main;
+                    panes.chat.toggle_focused();
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn scroll(cockpit: &mut Cockpit, panes: &mut Panes, delta: isize, height: usize) {
+    match cockpit.pane {
+        Pane::Chat => {
+            let total = panes.chat.lines(0).len();
+            panes.chat.scroll_by(delta, total, height);
+        }
+        Pane::Sessions => panes.sessions.move_selection(-delta),
+        Pane::Memory => panes.memory.move_selection(-delta),
+        Pane::Agents => panes.agents.move_selection(-delta),
+        Pane::Skills => panes.skills.move_selection(-delta),
+        Pane::Logs => {}
+    }
+}
+
+/// Send one prompt and mark the UI busy. The single place a turn starts, so
+/// the queue and a fresh message cannot drift apart.
+fn send_prompt(line: &str, cockpit: &mut Cockpit, panes: &mut Panes, agent: Option<&mut RpcSession>) {
+    let Some(a) = agent else {
+        cockpit.notify("agent process is not running", now_ms());
+        return;
+    };
+    panes.chat.push_user(line);
+    cockpit.busy = true;
+    if let Err(e) = a.prompt(line) { cockpit.notify(format!("send failed: {e}"), now_ms()); }
 }
 
 fn run_memory_search(panes: &mut Panes, mem: Option<&mut MemSession>) -> bool {
@@ -416,7 +538,7 @@ fn command(
         "model" => {
             *stored = auth::load(home);
             if stored.logged_in().is_empty() {
-                cockpit.status = "no provider logged in — /login first".into();
+                cockpit.notify("no provider logged in — /login first", now_ms());
             } else if arg.is_empty() {
                 // no argument: show what the logged-in providers actually
                 // offer. Asking someone to type a model name they have never
@@ -433,14 +555,32 @@ fn command(
                             Ok(auth) => {
                                 *stored = auth;
                                 apply_model(cockpit, stored);
-                                cockpit.status = format!("model: {p}/{m}");
+                                cockpit.notify(format!("model: {p}/{m}"), now_ms());
                             }
-                            Err(e) => cockpit.status = format!("could not save: {e}"),
+                            Err(e) => cockpit.notify(format!("could not save: {e}"), now_ms()),
                         },
-                        None => cockpit.status =
+                        None => cockpit.notify(
                             format!("'{arg}' is not offered by any logged-in provider — /model to browse"),
+                            now_ms()),
                     },
-                    Err(e) => cockpit.status = format!("could not read the model list: {e}"),
+                    Err(e) => cockpit.notify(format!("could not read the model list: {e}"), now_ms()),
+                }
+            }
+        }
+        "mouse" => {
+            cockpit.mouse = !cockpit.mouse;
+            match set_mouse(cockpit.mouse) {
+                Ok(()) => {
+                    let msg = if cockpit.mouse {
+                        "mouse on — wheel scrolls, click opens a block; hold shift to select text"
+                    } else {
+                        "mouse off — drag to select and copy as usual"
+                    };
+                    cockpit.notify(msg, now_ms());
+                }
+                Err(e) => {
+                    cockpit.mouse = !cockpit.mouse;
+                    cockpit.notify(format!("mouse: {e}"), now_ms());
                 }
             }
         }
@@ -452,20 +592,20 @@ fn command(
         "clear" => panes.chat = ChatPane::new(),
         "thinking" => panes.chat.show_thinking = !panes.chat.show_thinking,
         "abort" => match agent {
-            Some(a) => { let _ = a.abort(); cockpit.status = "abort sent".into(); }
-            None => cockpit.status = "no agent to abort".into(),
+            Some(a) => { let _ = a.abort(); cockpit.notify("abort sent", now_ms()); }
+            None => cockpit.notify("no agent to abort", now_ms()),
         },
         "consolidate" => match mem {
             Some(m) => match m.request("consolidate", serde_json::json!({})) {
                 Ok(r) => {
                     let n = r.get("lessons").and_then(|l| l.as_array()).map(|a| a.len()).unwrap_or(0);
-                    cockpit.status = format!("consolidated: {n} lesson(s)");
+                    cockpit.notify(format!("consolidated: {n} lesson(s)"), now_ms());
                 }
-                Err(e) => cockpit.status = format!("consolidate failed: {e}"),
+                Err(e) => cockpit.notify(format!("consolidate failed: {e}"), now_ms()),
             },
-            None => cockpit.status = "memory sidecar not running".into(),
+            None => cockpit.notify("memory sidecar not running", now_ms()),
         },
-        other => cockpit.status = format!("unknown command /{other}"),
+        other => cockpit.notify(format!("unknown command /{other}"), now_ms()),
     }
 }
 

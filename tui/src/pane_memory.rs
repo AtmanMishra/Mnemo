@@ -103,8 +103,8 @@ impl PaneView for MemoryPane {
         if self.searching {
             out.push(Line::from(vec![
                 Span::styled("search ", Style::default().fg(theme::GREY)),
-                Span::styled(self.query.clone(), Style::default().fg(theme::YELLOW)),
-                Span::styled("▌", Style::default().fg(theme::YELLOW)),
+                Span::styled(self.query.clone(), Style::default().fg(theme::ACCENT)),
+                Span::styled("▌", Style::default().fg(theme::ACCENT)),
             ]));
         }
         let mut idx = 0usize;
@@ -117,7 +117,7 @@ impl PaneView for MemoryPane {
                 let on = idx == self.selected;
                 let marker = if on { "▶" } else { " " };
                 let style = if on {
-                    Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)
+                    Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme::WHITE)
                 };

@@ -20,7 +20,10 @@ pub enum AgentEvent {
     /// Reasoning/thinking text.
     Thinking(String),
     ToolStart { id: String, name: String, args: String },
-    ToolEnd { id: String, name: String, ok: bool },
+    /// `output` is what the tool actually returned, kept so a tool card can be
+    /// opened. Without it a tool call is a name and a dot: you can see THAT
+    /// something ran, never what it said.
+    ToolEnd { id: String, name: String, ok: bool, output: String },
     /// End of a model round trip: what it cost.
     TurnEnd(TurnStats),
     /// Agent is idle again — safe to prompt.
@@ -125,8 +128,33 @@ pub fn parse_event(v: &Value) -> Option<AgentEvent> {
             id: s(v, "toolCallId"),
             name: s(v, "toolName"),
             ok: !v.get("isError").and_then(|b| b.as_bool()).unwrap_or(false),
+            output: v.get("result").map(result_text).unwrap_or_default(),
         }),
         _ => None,
+    }
+}
+
+/// What a tool returned, as text.
+///
+/// pi's result is whatever the tool produced: a plain string, a content array
+/// of typed blocks, or an object. Only the text is renderable, and an unknown
+/// shape is shown as its JSON rather than dropped — a tool card that silently
+/// shows nothing is indistinguishable from one that ran and said nothing.
+pub fn result_text(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts.iter().map(result_text).collect::<Vec<_>>().join(""),
+        Value::Object(map) => {
+            if let Some(content) = map.get("content") { return result_text(content) }
+            match (map.get("type").and_then(|t| t.as_str()), map.get("text")) {
+                (Some("text"), Some(Value::String(t))) => t.clone(),
+                // an image block has no text; say what it is rather than nothing
+                (Some(other), _) => format!("[{other}]"),
+                _ => v.to_string(),
+            }
+        }
+        Value::Null => String::new(),
+        other => other.to_string(),
     }
 }
 
@@ -312,6 +340,22 @@ mod tests {
     }
 
     #[test]
+    fn a_tool_result_becomes_text_whatever_shape_it_arrives_in() {
+        // pi hands back a bare string, a content array, or an object; a card
+        // that silently shows nothing looks the same as one that said nothing
+        assert_eq!(result_text(&json!("plain")), "plain");
+        assert_eq!(result_text(&json!([{"type": "text", "text": "a"},
+                                       {"type": "text", "text": "b"}])), "ab");
+        assert_eq!(result_text(&json!({"content": [{"type": "text", "text": "wrapped"}]})), "wrapped");
+        assert_eq!(result_text(&json!({"type": "image", "data": "…"})), "[image]",
+            "a block with no text says what it is");
+        assert_eq!(result_text(&json!(null)), "");
+        assert_eq!(result_text(&json!(42)), "42");
+        assert_eq!(result_text(&json!({"weird": 1})), r#"{"weird":1}"#,
+            "an unknown shape is shown, not dropped");
+    }
+
+    #[test]
     fn tool_events_carry_name_args_and_outcome() {
         assert_eq!(
             ev(json!({"type": "tool_execution_start", "toolCallId": "t1", "toolName": "bash_exec",
@@ -322,7 +366,8 @@ mod tests {
         assert_eq!(
             ev(json!({"type": "tool_execution_end", "toolCallId": "t1", "toolName": "bash_exec",
                       "result": "...", "isError": true})),
-            Some(AgentEvent::ToolEnd { id: "t1".into(), name: "bash_exec".into(), ok: false }),
+            Some(AgentEvent::ToolEnd { id: "t1".into(), name: "bash_exec".into(), ok: false,
+                                       output: "...".into() }),
         );
         // missing isError means it worked
         assert!(matches!(

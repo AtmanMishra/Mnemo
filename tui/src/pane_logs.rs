@@ -109,7 +109,7 @@ pub fn op_color(kind: &str) -> ratatui::style::Color {
         "tool" => theme::GREEN,
         "llm" => theme::BLUE,
         "subagent" => theme::PURPLE,
-        "session" => theme::YELLOW,
+        "session" => theme::ACCENT,
         _ => theme::GREY,
     }
 }
@@ -215,8 +215,8 @@ impl PaneView for LogsPane {
         if self.filtering {
             out.push(Line::from(vec![
                 Span::styled("filter ", Style::default().fg(theme::GREY)),
-                Span::styled(self.filter.clone(), Style::default().fg(theme::YELLOW)),
-                Span::styled("▌", Style::default().fg(theme::YELLOW)),
+                Span::styled(self.filter.clone(), Style::default().fg(theme::ACCENT)),
+                Span::styled("▌", Style::default().fg(theme::ACCENT)),
             ]));
         }
         if let Some(e) = &self.error {

@@ -59,6 +59,8 @@ pub enum Action {
     None,
     /// Submit the input line (already cleared from state).
     Submit(String),
+    /// Alt+Enter: interrupt the running turn with this instead of waiting.
+    Steer(String),
     /// Selection moved in the pane body; the pane decides what that means.
     Moved(isize),
     Quit,
@@ -69,6 +71,18 @@ pub struct Cockpit {
     pub pane: Pane,
     pub focus: Focus,
     pub input: String,
+    /// A message from the app that outranks the pane's own status line, and
+    /// when it was set. Without this, every command's reply is overwritten by
+    /// the pane status on the very next frame — the command appears to do
+    /// nothing at all.
+    pub notice: Option<(String, u64)>,
+    /// Terminal mouse reporting. Off by default so the terminal's own
+    /// drag-select keeps working; `/mouse` turns it on for wheel and clicks.
+    pub mouse: bool,
+    /// Messages typed while the agent was busy, in the order they were typed.
+    /// They are sent one at a time as it settles, so a second Enter does not
+    /// silently overwrite the first.
+    pub queued: Vec<String>,
     pub status: String,
     pub quit: bool,
     /// `?` help card is open.
@@ -88,6 +102,9 @@ impl Default for Cockpit {
             pane: Pane::Chat,
             focus: Focus::Input,
             input: String::new(),
+            queued: Vec::new(),
+            notice: None,
+            mouse: false,
             status: String::new(),
             quit: false,
             show_help: false,
@@ -98,8 +115,27 @@ impl Default for Cockpit {
     }
 }
 
+/// How long a command's reply stays on the status bar.
+pub const NOTICE_MS: u64 = 5_000;
+
 impl Cockpit {
     pub fn new() -> Self { Self::default() }
+
+    /// Say something that must survive the next redraw.
+    pub fn notify(&mut self, text: impl Into<String>, now: u64) {
+        let text = text.into();
+        self.status = text.clone();
+        self.notice = Some((text, now));
+    }
+
+    /// What the status bar should show: a recent notice, else the pane's own.
+    pub fn status_for(&mut self, pane_status: String, now: u64) -> String {
+        match &self.notice {
+            Some((text, at)) if now.saturating_sub(*at) < NOTICE_MS => text.clone(),
+            Some(_) => { self.notice = None; pane_status }
+            None => pane_status,
+        }
+    }
 
     /// Handle one keystroke. Pane switching works from any focus so the rail is
     /// always reachable, even mid-sentence.
@@ -129,10 +165,19 @@ impl Cockpit {
 
         match self.focus {
             Focus::Input => match key.code {
+                // Enter sends (or queues, which the loop decides); alt+Enter
+                // interrupts. The distinction lives here so both are one
+                // keystroke — "wait for it to finish" and "stop, do this
+                // instead" are the two things you want mid-run, and neither
+                // should cost a command.
                 KeyCode::Enter => {
                     let line = self.input.trim().to_string();
                     self.input.clear();
-                    if line.is_empty() { Action::None } else { Action::Submit(line) }
+                    match (line.is_empty(), alt) {
+                        (true, _) => Action::None,
+                        (false, true) => Action::Steer(line),
+                        (false, false) => Action::Submit(line),
+                    }
                 }
                 KeyCode::Backspace => { self.input.pop(); Action::None }
                 KeyCode::Esc if self.show_help => { self.show_help = false; Action::None }
@@ -274,5 +319,110 @@ mod tests {
         c.on_key(key('?'));
         c.on_key(code(KeyCode::Esc));
         assert!(!c.show_help, "esc closes the card");
+    }
+}
+
+#[cfg(test)]
+mod queue_tests {
+    use super::*;
+
+    fn code(k: KeyCode) -> KeyEvent { KeyEvent::new(k, KeyModifiers::NONE) }
+
+    #[test]
+    fn enter_sends_and_alt_enter_steers() {
+        // the two things you want mid-run are "wait your turn" and "stop, do
+        // this instead"; neither should cost a slash command
+        let mut c = Cockpit::new();
+        c.input = "run the tests".into();
+        assert_eq!(c.on_key(code(KeyCode::Enter)), Action::Submit("run the tests".into()));
+
+        c.input = "actually check the lint first".into();
+        assert_eq!(
+            c.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)),
+            Action::Steer("actually check the lint first".into()),
+        );
+        assert!(c.input.is_empty(), "either way the line is consumed");
+    }
+
+    #[test]
+    fn an_empty_line_steers_nothing() {
+        let mut c = Cockpit::new();
+        assert_eq!(c.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)), Action::None);
+        c.input = "   ".into();
+        assert_eq!(c.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)), Action::None);
+    }
+
+    #[test]
+    fn queued_messages_are_visible_rather_than_swallowed() {
+        // a message that vanished into a buffer with no sign of it looks
+        // exactly like one that was dropped
+        let mut c = Cockpit::new();
+        c.busy = true;
+        c.queued = vec!["first".into(), "second".into()];
+        let shown: Vec<String> = crate::cockpit_ui::prompt_lines(&c, " ").iter()
+            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>())
+            .collect();
+        assert!(shown[1].contains("1. first"), "{shown:?}");
+        assert!(shown[2].contains("2. second"));
+    }
+
+    #[test]
+    fn a_long_queue_is_summarised_instead_of_eating_the_screen() {
+        let mut c = Cockpit::new();
+        c.queued = (0..9).map(|i| format!("msg {i}")).collect();
+        let shown: Vec<String> = crate::cockpit_ui::prompt_lines(&c, " ").iter()
+            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>())
+            .collect();
+        assert!(shown.last().unwrap().contains("+5 more queued"), "{shown:?}");
+        assert!(shown.len() <= 6, "the transcript behind it still matters: {shown:?}");
+    }
+
+    #[test]
+    fn the_status_bar_names_both_keys_only_while_it_matters() {
+        let mut c = Cockpit::new();
+        let text = |c: &Cockpit| crate::cockpit_ui::status_line(c).spans.iter()
+            .map(|s| s.content.to_string()).collect::<String>();
+        assert!(text(&c).contains("enter send"));
+        c.busy = true;
+        let busy = text(&c);
+        assert!(busy.contains("enter queue") && busy.contains("alt+enter steer"), "{busy}");
+    }
+}
+
+#[cfg(test)]
+mod notice_tests {
+    use super::*;
+
+    #[test]
+    fn a_commands_reply_survives_the_next_redraw() {
+        // the bug: the pane status was reassigned every frame, so /mouse,
+        // /model and "copied 400 chars" appeared to do nothing at all
+        let mut c = Cockpit::new();
+        c.notify("mouse on", 1_000);
+        assert_eq!(c.status_for("6 entries".into(), 1_016), "mouse on", "one frame later");
+        assert_eq!(c.status_for("6 entries".into(), 4_000), "mouse on", "and seconds later");
+    }
+
+    #[test]
+    fn but_it_gives_the_pane_its_line_back() {
+        // a notice that never expires is a status bar frozen on old news
+        let mut c = Cockpit::new();
+        c.notify("copied 412 chars", 1_000);
+        assert_eq!(c.status_for("6 entries".into(), 1_000 + NOTICE_MS), "6 entries");
+        assert!(c.notice.is_none(), "and it is cleared, not re-checked forever");
+    }
+
+    #[test]
+    fn with_nothing_to_say_the_pane_speaks() {
+        let mut c = Cockpit::new();
+        assert_eq!(c.status_for("2 project(s)".into(), 500), "2 project(s)");
+    }
+
+    #[test]
+    fn a_newer_notice_replaces_an_older_one() {
+        let mut c = Cockpit::new();
+        c.notify("queued (1)", 1_000);
+        c.notify("queued (2)", 1_200);
+        assert_eq!(c.status_for("x".into(), 1_300), "queued (2)");
     }
 }

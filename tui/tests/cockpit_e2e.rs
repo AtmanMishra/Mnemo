@@ -186,7 +186,7 @@ fn a_prompt_round_trip_renders_as_a_transcript() {
         AgentEvent::Started,
         AgentEvent::Thinking("checking the failing test".into()),
         AgentEvent::ToolStart { id: "t1".into(), name: "bash_exec".into(), args: "cmd=cargo test".into() },
-        AgentEvent::ToolEnd { id: "t1".into(), name: "bash_exec".into(), ok: true },
+        AgentEvent::ToolEnd { id: "t1".into(), name: "bash_exec".into(), ok: true, output: "total 4\ndrwx".into() },
         AgentEvent::Text { text: "the build is ".into(), final_: false },
         AgentEvent::Text { text: "the build is green".into(), final_: true },
         AgentEvent::Settled,

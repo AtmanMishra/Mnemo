@@ -151,8 +151,8 @@ impl PaneView for SkillsPane {
         if self.filtering {
             out.push(Line::from(vec![
                 Span::styled("filter ", Style::default().fg(theme::GREY)),
-                Span::styled(self.filter.clone(), Style::default().fg(theme::YELLOW)),
-                Span::styled("▌", Style::default().fg(theme::YELLOW)),
+                Span::styled(self.filter.clone(), Style::default().fg(theme::ACCENT)),
+                Span::styled("▌", Style::default().fg(theme::ACCENT)),
             ]));
         }
         if rows.is_empty() {
@@ -162,7 +162,7 @@ impl PaneView for SkillsPane {
         for (i, r) in rows.iter().enumerate() {
             let on = i == self.selected;
             let style = if on {
-                Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)
+                Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(theme::WHITE)
             };

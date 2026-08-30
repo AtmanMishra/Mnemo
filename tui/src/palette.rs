@@ -19,6 +19,7 @@ pub const COMMANDS: &[Cmd] = &[
     Cmd { name: "/logs", help: "jump to the logs pane" },
     Cmd { name: "/consolidate", help: "distil episodes into semantic lessons" },
     Cmd { name: "/abort", help: "stop the current agent run" },
+    Cmd { name: "/mouse", help: "wheel + click on, or off so you can drag-select" },
     Cmd { name: "/quit", help: "leave the cockpit" },
 ];
 
