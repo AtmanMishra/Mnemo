@@ -8,6 +8,7 @@ package chat
 import (
 	"strings"
 
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/markdown"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/theme"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -51,7 +52,18 @@ type Block struct {
 	// Children are sub-agent runs. A delegation is an event in the
 	// conversation, so it lives here rather than in a pane of its own.
 	Children []*Block
+
+	// Rendered markdown, cached. Rendering runs a parser and a syntax
+	// highlighter, which is not something to do to every block on every
+	// frame — and a transcript redraws on every keystroke.
+	rendered  []string
+	renderedW int
+	renderedN int
 }
+
+// Invalidate drops the cached rendering. Anything streaming into Body has to
+// call it; nothing else can know the text changed.
+func (b *Block) Invalidate() { b.rendered = nil }
 
 // Foldable reports whether the block has anything hidden behind its summary.
 func (b *Block) Foldable() bool { return len(b.Body) > 0 || len(b.Children) > 0 }
@@ -66,7 +78,13 @@ type Model struct {
 	scroll int
 	follow bool // pinned to the bottom, which is the normal state
 	tick   int  // animation frame, for blocks that are still running
+	md     *markdown.Renderer
 }
+
+// SetMarkdown gives the transcript a renderer. Without one it draws the text
+// as typed, which is what the layout tests want and what a terminal with no
+// colour gets anyway.
+func (m *Model) SetMarkdown(r *markdown.Renderer) { m.md = r }
 
 // New returns an empty transcript pinned to the bottom.
 func New() *Model { return &Model{width: 80, height: 20, focus: -1, follow: true} }
@@ -432,7 +450,7 @@ func (m *Model) renderBlock(t *theme.Theme, b *Block, idx, depth int) []row {
 		if !b.Open {
 			return out
 		}
-		for _, l := range wrap(b.Body, avail) {
+		for _, l := range m.body(t, b, b.Body, avail) {
 			add(cont + t.Muted.Render(l))
 		}
 		for _, c := range b.Children {
@@ -445,7 +463,7 @@ func (m *Model) renderBlock(t *theme.Theme, b *Block, idx, depth int) []row {
 	if b.Title != "" {
 		body = append([]string{b.Title}, body...)
 	}
-	lines := wrap(body, avail)
+	lines := m.body(t, b, body, avail)
 	pad := func(l string) string {
 		// A background only reads as a band if it runs to the margin; a
 		// ragged right edge looks like a highlight that failed.
@@ -457,10 +475,13 @@ func (m *Model) renderBlock(t *theme.Theme, b *Block, idx, depth int) []row {
 		}
 		return l
 	}
+	styled := m.md != nil && prose(b.Kind)
 	for i, l := range lines {
 		text := style.Render(pad(l))
-		if b.Kind == Agent || b.Kind == Notice {
-			text = chord(t, style, l)
+		if styled {
+			// Markdown already coloured this. Painting over it would flatten
+			// every bold heading and every path back to one shade.
+			text = l
 		}
 		if i == 0 {
 			add(lead + text)
@@ -543,33 +564,25 @@ func stateStyle(t *theme.Theme, b *Block) styler {
 
 type styler interface{ Render(...string) string }
 
-// chord draws a leading key name in the accent, so a line of help reads as a
-// key and a description rather than as one grey sentence.
+// body renders a block's text: markdown for prose, verbatim for tool output.
 //
-// The match is deliberately narrow — a chord at the start of the line,
-// followed by at least two spaces — because a rule that colours anything
-// resembling a key ends up colouring prose.
-func chord(t *theme.Theme, style styler, line string) string {
-	trimmed := strings.TrimLeft(line, " ")
-	indent := line[:len(line)-len(trimmed)]
-	i := strings.Index(trimmed, "  ")
-	if i <= 0 || i > 10 {
-		return style.Render(line)
+// A tool's output is a diff, a log or a stack trace. Running it through a
+// markdown parser turns an underscore in an identifier into italics and eats
+// the asterisks out of a glob — the one place formatting must not be applied
+// is the place the text is already exact.
+func (m *Model) body(t *theme.Theme, b *Block, lines []string, avail int) []string {
+	if m.md == nil || !prose(b.Kind) {
+		return wrap(lines, avail)
 	}
-	head := trimmed[:i]
-	if !isChord(head) {
-		return style.Render(line)
+	if b.rendered != nil && b.renderedW == avail && b.renderedN == len(lines) {
+		return b.rendered
 	}
-	return indent + t.Accent.Render(head) + style.Render(trimmed[i:])
+	out := m.md.Render(strings.Join(lines, "\n"), avail)
+	b.rendered, b.renderedW, b.renderedN = out, avail, len(lines)
+	return out
 }
 
-func isChord(s string) bool {
-	switch s {
-	case "esc", "tab", "enter", "alt+enter", "space", "/":
-		return true
-	}
-	return len(s) == 2 && s[0] == '^' && s[1] >= 'a' && s[1] <= 'z'
-}
+func prose(k Kind) bool { return k == Agent || k == Think || k == Notice }
 
 // wrap breaks each logical line to width, preferring word boundaries and
 // cutting anything that has none — a path with no spaces must be cut, not

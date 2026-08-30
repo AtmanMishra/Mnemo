@@ -118,12 +118,14 @@ func Header(t *theme.Theme, width, phase int, working bool, facts []Seg) string 
 	}
 	var tex string
 	if working {
+		// The ramp travels: the largest motion cue on screen, and it costs no
+		// row of its own.
 		tex = t.Thinking.Render(theme.Wave(phase, fill))
 	} else {
-		// Idle: the lightest step of the same ramp, in the mascot's rosette
-		// brown. Present but silent. Drawn a shade above the background it
-		// was neither — the band was simply missing.
-		tex = t.Texture.Render(strings.Repeat(string(theme.Dither[1]), fill))
+		// Idle: a hairline, not a band. A full-width block of texture at rest
+		// reads as an alert bar — the eye takes a solid stripe of colour as
+		// something to attend to, and nothing is happening.
+		tex = t.Rule.Render(strings.Repeat("─", fill))
 	}
 	return mark + " " + tex + " " + right
 }

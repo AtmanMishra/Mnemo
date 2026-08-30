@@ -13,6 +13,7 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/chat"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/command"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/markdown"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/memory"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/pi"
@@ -39,6 +40,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BackgroundColorMsg:
 		m.cfg.Dark = msg.IsDark()
 		m.th = theme.New(theme.PICO8, theme.Heavy, m.cfg.Dark)
+		m.chat.SetMarkdown(markdown.New(m.th))
+		for _, b := range m.chat.Blocks() {
+			b.Invalidate() // the palette moved; every cached render is stale
+		}
 		return m, nil
 
 	case tickMsg:
@@ -205,12 +210,18 @@ func (m *Model) appendChunk(k chat.Kind, title, text string) {
 		m.chat.Append(b)
 		last = b
 	}
+	// A delta is a slice of a continuous stream, so its first part ALWAYS
+	// continues the line already in progress. Keying that off whether this
+	// chunk happens to end in a newline broke a word wherever a chunk
+	// boundary fell — "**Code" and " work**" arrived as two lines, and the
+	// reader saw a heading cut in half.
 	lines := strings.Split(text, "\n")
-	if n := len(last.Body); n > 0 && !strings.HasSuffix(text, "\n") {
+	if n := len(last.Body); n > 0 {
 		last.Body[n-1] += lines[0]
 		lines = lines[1:]
 	}
 	last.Body = append(last.Body, lines...)
+	last.Invalidate()
 }
 
 func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

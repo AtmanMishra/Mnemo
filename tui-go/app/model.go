@@ -20,6 +20,7 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/command"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/filetree"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/markdown"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/memory"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/prompt"
@@ -118,6 +119,7 @@ func New(cfg Config) *Model {
 		mouse:    true,
 		openTool: map[string]*chat.Block{},
 	}
+	m.chat.SetMarkdown(markdown.New(th))
 	m.cmds = command.Load(cfg.CWD, cfg.Home, cfg.HarnessDir)
 	m.welcome()
 	m.layout()
@@ -134,18 +136,16 @@ func (m *Model) Commands() []command.Command { return m.cmds }
 // was that nothing told you what anything did.
 func (m *Model) welcome() {
 	m.chat.Append(&chat.Block{Kind: chat.Agent, Body: []string{
-		"ready.",
+		"**ready.**",
 		"",
-		"/    commands, skills and plugins — start typing and pick with ↑ ↓",
-		"^k   the same list, as a palette",
+		"- `/` — commands, skills and plugins. Start typing; pick with ↑ ↓",
+		"- `^k` — the same list, as a palette",
+		"- `^e` — open every thinking block at once",
+		"- `^t` — the folder explorer, on the right",
+		"- `^s` — sessions, and the sub-agents under them",
 		"",
-		"^e   open every thinking block at once",
-		"^t   the folder explorer, on the right",
-		"^s   sessions, and the sub-agents under them",
-		"",
-		"tab  moves between the prompt, the transcript and the explorer.",
-		"esc  goes up one level, from anywhere. That is the whole model.",
-		"",
+		"`tab` moves between the prompt, the transcript and the explorer.",
+		"`esc` goes up one level, from anywhere. That is the whole model.",
 		"In the transcript and in any tree: ↑ ↓ move, → opens, ← closes.",
 	}})
 }

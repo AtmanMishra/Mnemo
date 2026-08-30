@@ -757,3 +757,53 @@ func TestAShortTerminalDropsTheAirBeforeTheContent(t *testing.T) {
 		t.Fatalf("drew %d rows", len(lines))
 	}
 }
+
+func TestAStreamedMessageIsNotBrokenAtChunkBoundaries(t *testing.T) {
+	// A delta is a slice of a continuous stream, so its first part always
+	// continues the line in progress. Keying that off whether the chunk ends
+	// in a newline broke a word wherever a boundary fell, and "**Code" and
+	// " work**" arrived as two lines with the heading cut in half.
+	m := fixture(t, 100, 30)
+	for _, chunk := range []string{"Here is ", "**Code", " work**\n", "- one thing\n", "and ref", "actor.\n"} {
+		m.Update(agent.Text{Text: chunk})
+	}
+	body := strings.Join(m.Chat().Last().Body, "\n")
+	if !strings.Contains(body, "**Code work**") {
+		t.Fatalf("a heading was cut in half:\n%q", body)
+	}
+	if !strings.Contains(body, "and refactor.") {
+		t.Fatalf("a word was split:\n%q", body)
+	}
+}
+
+func TestTheAgentsMarkdownIsRenderedOnScreen(t *testing.T) {
+	m := fixture(t, 100, 30)
+	m.Update(agent.Text{Text: "**Code work**\n- edit `main.go`\n"})
+	got := screen(m)
+	if strings.Contains(got, "**") {
+		t.Fatalf("asterisks reached the screen:\n%s", got)
+	}
+	if !strings.Contains(got, "Code work") {
+		t.Fatalf("the heading did not:\n%s", got)
+	}
+}
+
+func TestAnIdleHeaderIsAHairlineNotABand(t *testing.T) {
+	// A full-width block of texture at rest reads as an alert bar: the eye
+	// takes a solid stripe of colour as something to attend to.
+	// Wide, because the fixture's working directory is a long temp path and a
+	// header with no room left renders no texture at all — correctly.
+	m := fixture(t, 200, 30)
+	head := strings.Split(screen(m), "\n")[0]
+	if strings.Contains(head, "░") {
+		t.Fatalf("the idle header is still a band: %q", head)
+	}
+	if !strings.Contains(head, "─") {
+		t.Fatalf("the idle header lost its rule: %q", head)
+	}
+	m.working = true
+	m.Update(tickMsg{})
+	if !strings.ContainsAny(strings.Split(screen(m), "\n")[0], "░▒▓█") {
+		t.Fatal("a working header must show the ramp")
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/markdown"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/theme"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -354,17 +355,79 @@ func TestTheUserBandRunsToTheMargin(t *testing.T) {
 	}
 }
 
-func TestALeadingChordIsDrawnAsAKey(t *testing.T) {
+func TestMarkdownIsRenderedNotShown(t *testing.T) {
+	// The reader should never have to parse asterisks out of a sentence.
 	m := New()
-	m.SetSize(60, 10)
-	m.Append(&Block{Kind: Agent, Body: []string{"^e   open every thinking block", "just prose here"}})
-	rows := m.Lines(th())
-	if !strings.Contains(rows[0], "\x1b[") {
-		t.Fatal("a line that starts with a chord must draw the chord differently")
+	m.SetMarkdown(markdown.New(th()))
+	m.SetSize(70, 20)
+	m.Append(&Block{Kind: Agent, Body: []string{
+		"**Code work**", "", "- edit files in `main.go`", "- run builds",
+	}})
+	got := ansi.Strip(strings.Join(m.Lines(th()), "\n"))
+	if strings.Contains(got, "**") {
+		t.Fatalf("asterisks survived:\n%s", got)
 	}
-	// And the rule must be narrow enough not to colour ordinary sentences.
-	before, after := ansi.Strip(rows[1]), rows[1]
-	if strings.Count(after, "\x1b[") > 2 {
-		t.Fatalf("prose was over-styled: %q (%q)", after, before)
+	if strings.Contains(got, "`") {
+		t.Fatalf("backticks survived:\n%s", got)
+	}
+	if !strings.Contains(got, "Code work") || !strings.Contains(got, "main.go") {
+		t.Fatalf("the words did not:\n%s", got)
+	}
+	if !strings.Contains(got, "·") {
+		t.Fatalf("a list should draw bullets:\n%s", got)
+	}
+}
+
+func TestToolOutputIsNeverRunThroughMarkdown(t *testing.T) {
+	// A diff, a log or a stack trace is already exact. Parsing it turns an
+	// underscore in an identifier into italics and eats the asterisks out of
+	// a glob.
+	m := New()
+	m.SetMarkdown(markdown.New(th()))
+	m.SetSize(70, 20)
+	m.Append(&Block{Kind: Tool, Title: "bash", Open: true, Body: []string{
+		"rm -rf **/*_test.go", "- old_name", "+ new_name",
+	}})
+	got := ansi.Strip(strings.Join(m.Lines(th()), "\n"))
+	if !strings.Contains(got, "**/*_test.go") {
+		t.Fatalf("the glob was mangled:\n%s", got)
+	}
+	if !strings.Contains(got, "- old_name") {
+		t.Fatalf("the diff line became a bullet:\n%s", got)
+	}
+}
+
+func TestRenderingIsCachedUntilSomethingChanges(t *testing.T) {
+	// A transcript redraws on every keystroke; a parser and a highlighter per
+	// block per frame is not something to pay for.
+	m := New()
+	m.SetMarkdown(markdown.New(th()))
+	m.SetSize(70, 20)
+	b := &Block{Kind: Agent, Body: []string{"**one**"}}
+	m.Append(b)
+	first := strings.Join(m.Lines(th()), "\n")
+	if b.rendered == nil {
+		t.Fatal("the first render must be cached")
+	}
+	if strings.Join(m.Lines(th()), "\n") != first {
+		t.Fatal("a second render of unchanged text must be identical")
+	}
+	b.Body = append(b.Body, "**two**")
+	b.Invalidate()
+	if !strings.Contains(ansi.Strip(strings.Join(m.Lines(th()), "\n")), "two") {
+		t.Fatal("invalidating must let new text through")
+	}
+	m.SetSize(40, 20)
+	if strings.Join(m.Lines(th()), "\n") == first {
+		t.Fatal("a width change must re-render")
+	}
+}
+
+func TestWithoutARendererTheTextIsShownAsTyped(t *testing.T) {
+	m := New()
+	m.SetSize(70, 20)
+	m.Append(&Block{Kind: Agent, Body: []string{"**bold**"}})
+	if !strings.Contains(ansi.Strip(strings.Join(m.Lines(th()), "\n")), "**bold**") {
+		t.Fatal("with no renderer the text is drawn as it is")
 	}
 }
