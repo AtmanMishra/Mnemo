@@ -23,10 +23,12 @@ func main() {
 		keys = flag.String("keys", "", "comma-separated keys to press before --dump, e.g. ctrl+t,down,down")
 		repo = flag.String("repo", "", "repository root holding agent/bin/mnemo.ts; enables the live agent")
 		sess = flag.String("session", "", "resume this pi session file")
+		msrv = flag.String("memsrv", "", "path to the built memsrv binary")
+		jrnl = flag.String("journal", "", "path to the memory journal memsrv should open")
 	)
 	flag.Parse()
 
-	cfg := app.Config{Home: *home, CWD: *cwd, Dark: true}
+	cfg := app.Config{Home: *home, CWD: *cwd, Dark: true, MemsrvBin: *msrv, MemJournal: *jrnl}
 
 	// The live backend is opt-in by path rather than discovered, so running
 	// the interface never silently spawns a node process somebody did not ask
@@ -58,6 +60,7 @@ func main() {
 		return
 	}
 
+	defer m.Close()
 	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "mnemo:", err)

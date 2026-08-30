@@ -19,6 +19,7 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/chat"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/filetree"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/memory"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/prompt"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/theme"
@@ -33,6 +34,12 @@ type Config struct {
 	CWD   string
 	Agent agent.Agent
 	Dark  bool
+
+	// MemsrvBin and MemJournal point at the memory sidecar and its journal.
+	// Both are configuration: a client that finds its own journal is a client
+	// that, in a test, finds the real one.
+	MemsrvBin  string
+	MemJournal string
 }
 
 // NoticeFor is how long a one-off message stays in the status line.
@@ -73,6 +80,8 @@ type Model struct {
 	// openTool maps a running tool call id to its block, so a result lands on
 	// the call it belongs to rather than being appended as a new line.
 	openTool map[string]*chat.Block
+
+	mem *memory.Client
 }
 
 // New builds the application.
@@ -279,4 +288,15 @@ func parseKey(s string) tea.Key {
 		return tea.Key{}
 	}
 	return tea.Key{Code: r[0], Text: string(r[0])}
+}
+
+// Close releases the backend and the memory sidecar.
+func (m *Model) Close() {
+	if m.mem != nil {
+		_ = m.mem.Close()
+		m.mem = nil
+	}
+	if m.agent != nil {
+		_ = m.agent.Close()
+	}
 }

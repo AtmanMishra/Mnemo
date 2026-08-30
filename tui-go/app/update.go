@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,10 +12,13 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/chat"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/memory"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/pi"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/session"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/theme"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/trace"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/tree"
 )
 
 // Update is the whole message switch.
@@ -518,16 +522,48 @@ func (m *Model) chooseOverlay() tea.Cmd {
 }
 
 // resume replays a stored session into the transcript.
+//
+// The whole conversation, rendered through the same blocks a live turn uses.
+// A summary card would be quicker and would make resuming feel like opening a
+// receipt rather than picking a conversation back up.
 func (m *Model) resume(file string) tea.Cmd {
 	s, ok := session.Read(file)
 	if !ok {
 		return m.notify("could not read that session")
 	}
 	m.chat.Clear()
-	m.chat.Append(&chat.Block{Kind: chat.Agent, Body: []string{
-		"resumed · " + s.Title, "  " + s.Model + " · " + itoa(s.Messages) + " messages",
+	m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{
+		"resumed · " + s.Title + " · " + s.Model,
 	}})
-	return m.notify("resumed " + filepath.Base(file))
+	for _, e := range session.Transcript(file, pi.SummariseArgs) {
+		m.chat.Append(entryBlock(e))
+	}
+	return m.notify("resumed " + itoa(s.Messages) + " messages from " + filepath.Base(file))
+}
+
+func entryBlock(e session.Entry) *chat.Block {
+	switch e.Role {
+	case "user":
+		return &chat.Block{Kind: chat.User, Body: strings.Split(e.Text, "\n")}
+	case "thinking":
+		return &chat.Block{Kind: chat.Think, Title: "thinking", Body: strings.Split(e.Text, "\n")}
+	case "tool":
+		b := &chat.Block{Kind: chat.Tool, Title: e.Name + "  " + e.Detail}
+		switch {
+		case e.OK == nil:
+			// The session file ends before the result arrived. Saying "ok"
+			// would be inventing one.
+			b.Detail = "no result recorded"
+			b.State = chat.Running
+		case *e.OK:
+			b.Detail, b.State = "ok", chat.OK
+		default:
+			b.Detail, b.State = "failed", chat.Failed
+		}
+		return b
+	default:
+		return &chat.Block{Kind: chat.Agent, Body: strings.Split(e.Text, "\n")}
+	}
 }
 
 func (m *Model) toggleExplorer() tea.Cmd {
@@ -640,16 +676,56 @@ func (m *Model) openSessions() tea.Cmd {
 	return nil
 }
 
+// openMemory shows the store as brain area → memory → facts.
+//
+// Sorted by fact count, never by id. By id, thirty empty "pi session …"
+// episodes bury every memory that actually knows something, which is exactly
+// what made the old memory pane useless.
 func (m *Model) openMemory() tea.Cmd {
-	m.ov = overlay.NewList(overlay.Memory,
-		"what Mnemo has remembered, most useful first",
-		nil,
+	nodes, err := m.memory()
+	if err != nil {
+		m.ov = overlay.NewList(overlay.Memory,
+			"what Mnemo has remembered, most useful first", nil,
+			"The memory service is not answering.",
+			err.Error(),
+			"Start it by pointing --memsrv at the built binary and",
+			"--journal at its journal file.",
+		)
+		m.armOverlay()
+		return nil
+	}
+	m.ov = overlay.NewTree(overlay.Memory,
+		"what Mnemo remembers, by brain area — open one to read its facts",
+		nodes,
 		"Nothing remembered yet.",
 		"Mnemo writes a memory when something is worth carrying between",
 		"sessions — a decision, a constraint, a correction you made.",
 	)
 	m.armOverlay()
 	return nil
+}
+
+// memory opens the sidecar on first use and keeps it. Starting it replays a
+// journal, so paying that once is the difference between an overlay that
+// opens and one that stalls every time.
+func (m *Model) memory() ([]*tree.Node, error) {
+	if m.cfg.MemsrvBin == "" || m.cfg.MemJournal == "" {
+		return nil, errors.New("no memory service configured")
+	}
+	if m.mem == nil {
+		c, err := memory.Open(m.cfg.MemsrvBin, m.cfg.MemJournal)
+		if err != nil {
+			return nil, err
+		}
+		m.mem = c
+	}
+	nodes, err := m.mem.Dump()
+	if err != nil {
+		_ = m.mem.Close()
+		m.mem = nil
+		return nil, err
+	}
+	return memory.Nodes(nodes, m.mem.Facts), nil
 }
 
 // openLogs shows the span log as the tree it already is.

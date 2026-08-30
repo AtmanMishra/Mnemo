@@ -361,3 +361,103 @@ func itoa(n int) string {
 	}
 	return string(b[i:])
 }
+
+// Entry is one message of a stored session, in the order it was written.
+//
+// It mirrors what the live backend emits, so a resumed transcript and a
+// running one render through the same blocks. Anything less and resuming
+// looks like reading a log rather than continuing a conversation.
+type Entry struct {
+	Role   string // "user" | "assistant" | "thinking" | "tool"
+	Text   string
+	ID     string // tool call id
+	Name   string // tool name
+	Detail string // tool arguments, or its result summary
+	OK     *bool  // nil while a call has no recorded result
+}
+
+// Transcript replays a stored session file.
+//
+// pi writes a tool call and its result as two separate lines, so a result is
+// matched back onto its call by id rather than appended. A resumed transcript
+// has to read like the live one, not like a log.
+func Transcript(path string, summarise func(any) string) []Entry {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []Entry
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var v map[string]any
+		if json.Unmarshal([]byte(line), &v) != nil || str(v, "type") != "message" {
+			continue
+		}
+		msg, _ := v["message"].(map[string]any)
+		if msg == nil {
+			continue
+		}
+		switch str(msg, "role") {
+		case "user":
+			if t := contentText(msg); t != "" {
+				out = append(out, Entry{Role: "user", Text: t})
+			}
+		case "assistant":
+			parts, _ := msg["content"].([]any)
+			for _, p := range parts {
+				pm, _ := p.(map[string]any)
+				switch str(pm, "type") {
+				case "text":
+					if t := str(pm, "text"); t != "" {
+						out = append(out, Entry{Role: "assistant", Text: t})
+					}
+				case "thinking":
+					if t := str(pm, "thinking"); t != "" {
+						out = append(out, Entry{Role: "thinking", Text: t})
+					}
+				case "toolCall":
+					args := ""
+					if summarise != nil {
+						args = summarise(pm["arguments"])
+					}
+					out = append(out, Entry{
+						Role: "tool", ID: str(pm, "id"), Name: str(pm, "name"), Detail: args,
+					})
+				}
+			}
+		case "toolResult":
+			id := str(msg, "toolCallId")
+			isErr, _ := msg["isError"].(bool)
+			ok := !isErr
+			matched := false
+			for i := len(out) - 1; i >= 0; i-- {
+				if out[i].Role == "tool" && out[i].ID == id {
+					out[i].OK = &ok
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				// A result with no matching call still has to be visible;
+				// dropping it is how a failure disappears.
+				out = append(out, Entry{Role: "tool", ID: id, Name: str(msg, "toolName"), OK: &ok})
+			}
+		}
+	}
+	return out
+}
+
+// contentText concatenates the text parts of a message's content array.
+func contentText(msg map[string]any) string {
+	parts, _ := msg["content"].([]any)
+	var b []string
+	for _, p := range parts {
+		pm, _ := p.(map[string]any)
+		if str(pm, "type") == "text" {
+			b = append(b, str(pm, "text"))
+		}
+	}
+	return strings.TrimSpace(strings.Join(b, ""))
+}

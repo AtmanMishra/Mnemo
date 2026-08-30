@@ -250,3 +250,61 @@ func TestAgoIsCoarse(t *testing.T) {
 		t.Fatal("an unparseable timestamp shows nothing rather than 1970")
 	}
 }
+
+func TestTranscriptReplaysAConversationNotALog(t *testing.T) {
+	h := home(t)
+	p := write(t, h, "-p", "a.jsonl",
+		header("s", "/p", "2026-08-20T10:00:00Z"),
+		userMsg("read the file"),
+		`{"type":"message","message":{"role":"assistant","content":[`+
+			`{"type":"thinking","thinking":"where is it"},`+
+			`{"type":"text","text":"looking now"},`+
+			`{"type":"toolCall","id":"t1","name":"read","arguments":{"path":"main.go"}}]}}`,
+		`{"type":"message","message":{"role":"toolResult","toolCallId":"t1","isError":false}}`,
+		`{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}`,
+	)
+	got := Transcript(p, nil)
+	want := []string{"user", "thinking", "assistant", "tool", "assistant"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d entries: %#v", len(got), got)
+	}
+	for i, r := range want {
+		if got[i].Role != r {
+			t.Fatalf("entry %d is %q, want %q", i, got[i].Role, r)
+		}
+	}
+	if got[3].OK == nil || !*got[3].OK {
+		t.Fatal("the result must land on its own call, matched by id")
+	}
+}
+
+func TestAToolCallWithNoRecordedResultIsNotClaimedToHaveWorked(t *testing.T) {
+	// The session file ends mid-call. Saying "ok" would be inventing one.
+	h := home(t)
+	p := write(t, h, "-p", "a.jsonl",
+		header("s", "/p", "2026-08-20T10:00:00Z"),
+		`{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"t1","name":"bash"}]}}`,
+	)
+	got := Transcript(p, nil)
+	if len(got) != 1 || got[0].OK != nil {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestAResultWithNoCallIsStillVisible(t *testing.T) {
+	h := home(t)
+	p := write(t, h, "-p", "a.jsonl",
+		header("s", "/p", "2026-08-20T10:00:00Z"),
+		`{"type":"message","message":{"role":"toolResult","toolCallId":"ghost","toolName":"bash","isError":true}}`,
+	)
+	got := Transcript(p, nil)
+	if len(got) != 1 || got[0].Name != "bash" || got[0].OK == nil || *got[0].OK {
+		t.Fatalf("dropping an orphan result is how a failure disappears: %#v", got)
+	}
+}
+
+func TestTranscriptOfAMissingFileIsEmptyNotAPanic(t *testing.T) {
+	if got := Transcript(filepath.Join(t.TempDir(), "nope.jsonl"), nil); got != nil {
+		t.Fatalf("got %#v", got)
+	}
+}
