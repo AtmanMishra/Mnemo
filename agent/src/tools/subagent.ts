@@ -15,6 +15,7 @@ import { activeTracing, childTraceEnv as traceEnvFor } from "../../extensions/tr
 import * as path from "node:path";
 import { Type } from "typebox";
 import { textResult, type SeaTool } from "./types.ts";
+import { loadAuth } from "../auth/store.ts";
 
 const parameters = Type.Object({
   task: Type.String({ description: "Self-contained task for the sub-agent." }),
@@ -23,7 +24,45 @@ const parameters = Type.Object({
   })),
   label: Type.Optional(Type.String({ description: "Short label for logging." })),
   timeout_ms: Type.Optional(Type.Number({ description: "Default 300000.", minimum: 1000 })),
+  model: Type.Optional(Type.String({
+    description:
+      "Run this sub-agent on a different model, e.g. 'claude-opus-5' or 'anthropic/claude-opus-5'. " +
+      "Must belong to a logged-in provider. Omit to inherit the parent's model.",
+  })),
 });
+
+/** Every model a logged-in provider offers, as "provider/model". */
+export function availableModels(home?: string): Array<{ provider: string; model: string }> {
+  const auth = home === undefined ? loadAuth() : loadAuth(home);
+  return Object.entries(auth.providers ?? {})
+    .filter(([, a]) => (a?.key ?? "").length >= 8 && a?.defaultModel)
+    .map(([provider, a]) => ({ provider, model: a!.defaultModel! }));
+}
+
+/**
+ * 8.7: resolve a requested model to the env a child process needs.
+ * Omitted means "inherit the parent's", which is the common case and must
+ * stay free. A model the user is not logged in to is refused with the list,
+ * because silently falling back to the parent's model would look like it
+ * worked.
+ */
+export function resolveModelEnv(
+  requested: string | undefined,
+  models: Array<{ provider: string; model: string }>,
+): Record<string, string> {
+  if (!requested || !requested.trim()) return {};
+  const want = requested.trim();
+  const [maybeProvider, maybeModel] = want.includes("/") ? want.split("/", 2) : [undefined, want];
+  const hit = models.find((m) =>
+    m.model === maybeModel && (maybeProvider === undefined || m.provider === maybeProvider));
+  if (!hit) {
+    const list = models.map((m) => `${m.provider}/${m.model}`).join(", ") || "(none logged in)";
+    throw new Error(
+      `spawn_subagent: "${want}" is not a model of a logged-in provider. Available: ${list}`,
+    );
+  }
+  return { MNEMO_PROVIDER: hit.provider, MNEMO_MODEL: hit.model };
+}
 
 export interface SubagentResult {
   answer: string;
@@ -49,7 +88,11 @@ export function composeChildPrompt(task: string, context?: string): string {
 }
 
 export function runSubagent(
-  opts: { task: string; context?: string; timeoutMs?: number; signal?: AbortSignal } = { task: "" },
+  opts: {
+    task: string; context?: string; timeoutMs?: number; signal?: AbortSignal;
+    /** Extra env for the child, e.g. a different model (8.7). */
+    env?: Record<string, string>;
+  } = { task: "" },
 ): Promise<SubagentResult> {
   const timeoutMs = opts.timeoutMs ?? 300_000;
   // default CLI path relative to this module: agent/bin/mnemo.ts
@@ -61,7 +104,7 @@ export function runSubagent(
       // MNEMO_MEMORY_JOURNAL inherits -> SHARED memory graph.
       // The trace env makes the child's spans hang off this call's span, so
       // `mnemo traces` shows the whole delegation tree (5.4).
-      env: { ...process.env, ...childTraceEnv() },
+      env: { ...process.env, ...childTraceEnv(), ...(opts.env ?? {}) },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -127,6 +170,7 @@ export const subagentSpawnTool: SeaTool = {
         task: params.task,
         context: params.context,
         timeoutMs: params.timeout_ms,
+        env: resolveModelEnv(params.model, availableModels()),
       });
       const answer = r.timedOut
         ? `(sub-agent timed out after ${r.durationMs}ms)`

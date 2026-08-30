@@ -12,6 +12,7 @@ use seatui::pane_agents::AgentsPane;
 use seatui::pane_chat::ChatPane;
 use seatui::pane_logs::LogsPane;
 use seatui::pane_memory::MemoryPane;
+use seatui::pane_sessions::SessionsPane;
 use seatui::pane_skills::SkillsPane;
 use seatui::rpc::AgentEvent;
 use std::path::PathBuf;
@@ -138,16 +139,18 @@ fn cockpit_navigates_and_renders_every_pane_without_an_agent() {
     let agents = AgentsPane::new();
     let skills_pane = SkillsPane::load(&dir, &dir, &dir.join("bundles"));
     let logs = LogsPane::new(&dir.join("missing.jsonl"));
+    let sessions_pane = SessionsPane::new(dir.clone());
 
     assert!(skills_pane.rows.iter().any(|r| r.name == "tui-design"),
         "2.6: skills must be discovered from disk, got {:?}", skills_pane.rows);
 
     // tab all the way round, rendering each pane
-    for expected in [Pane::Memory, Pane::Agents, Pane::Skills, Pane::Logs, Pane::Chat] {
+    for expected in [Pane::Sessions, Pane::Memory, Pane::Agents, Pane::Skills, Pane::Logs, Pane::Chat] {
         cockpit.on_key(code(KeyCode::Tab));
         assert_eq!(cockpit.pane, expected);
         let view: &dyn PaneView = match cockpit.pane {
             Pane::Chat => &chat,
+            Pane::Sessions => &sessions_pane,
             Pane::Memory => &memory,
             Pane::Agents => &agents,
             Pane::Skills => &skills_pane,

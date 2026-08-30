@@ -95,10 +95,23 @@ pub fn status_line(c: &Cockpit) -> Line<'static> {
         Focus::Input => "enter send · esc body",
         Focus::Main => "i input · j/k move · q quit",
     };
+    // colour = state: a session with no model set says so in red, because
+    // prompting will fail until it is chosen (8.6)
+    let (model_text, model_style) = match &c.model {
+        Some((provider, model)) => (
+            format!(" {provider}/{model} "),
+            Style::default().fg(theme::BLUE),
+        ),
+        None => (
+            " no model — /login or /model ".to_string(),
+            Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+        ),
+    };
     Line::from(vec![
         Span::styled(format!(" {} ", c.pane.label().to_uppercase()),
             Style::default().fg(theme::BLACK).bg(theme::YELLOW).add_modifier(Modifier::BOLD)),
-        Span::styled(format!(" {} ", c.status), Style::default().fg(theme::WHITE)),
+        Span::styled(model_text, model_style),
+        Span::styled(format!("{} ", c.status), Style::default().fg(theme::WHITE)),
         Span::styled(format!("· tab pane · {hint}"), Style::default().fg(theme::GREY)),
     ])
 }
@@ -106,6 +119,18 @@ pub fn status_line(c: &Cockpit) -> Line<'static> {
 /// Draw the shell. `body` is the pane's own rendered content.
 pub fn draw(f: &mut Frame, c: &Cockpit, body: Vec<Line<'static>>) {
     draw_with_help(f, c, body, &[])
+}
+
+/// Full-screen onboarding: nothing else is drawn while it is open, because
+/// nothing else works yet (8.3).
+pub fn draw_onboarding(f: &mut Frame, body: Vec<Line<'static>>) {
+    let area = f.area();
+    f.render_widget(
+        Paragraph::new(body).block(
+            ring(true).title(Span::styled(theme::title("welcome"), theme::title_style())),
+        ),
+        area,
+    );
 }
 
 /// Draw the shell. `body` is the pane's own rendered content; `pane_help` its
@@ -186,14 +211,14 @@ mod tests {
     #[test]
     fn rail_marks_only_the_active_pane() {
         let lines = rail_lines(Pane::Agents);
-        assert_eq!(lines.len(), 5);
+        assert_eq!(lines.len(), Pane::ALL.len());
         let marked: Vec<String> = lines.iter()
             .map(|l| l.spans[0].content.to_string())
             .filter(|s| s.starts_with('▶'))
             .collect();
-        assert_eq!(marked, vec!["▶ 3 Agents"]);
+        assert_eq!(marked, vec!["▶ 4 Agents"]);
         assert_eq!(lines[0].spans[0].style.fg, Some(theme::GREY));
-        assert_eq!(lines[2].spans[0].style.fg, Some(theme::YELLOW));
+        assert_eq!(lines[Pane::Agents.index()].spans[0].style.fg, Some(theme::YELLOW));
     }
 
     #[test]
@@ -205,6 +230,21 @@ mod tests {
         term.draw(|f| f.render_widget(ring(true), f.area())).unwrap();
         let cell = term.backend().buffer()[(0, 0)].clone();
         assert_eq!(cell.fg, theme::YELLOW);
+    }
+
+    #[test]
+    fn the_status_bar_says_when_no_model_is_set() {
+        let mut c = Cockpit::new();
+        assert_eq!(c.model, None);
+        let text: String = status_line(&c).spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(text.contains("no model"), "an unset model must be visible, not a surprise: {text}");
+        assert!(text.contains("/login"), "and it must say how to fix it");
+        assert_eq!(status_line(&c).spans[1].style.fg, Some(theme::RED));
+
+        c.model = Some(("anthropic".into(), "claude-opus-5".into()));
+        let text: String = status_line(&c).spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(text.contains("anthropic/claude-opus-5"));
+        assert!(!text.contains("no model"));
     }
 
     #[test]

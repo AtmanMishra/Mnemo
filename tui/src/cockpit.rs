@@ -6,6 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pane {
     Chat,
+    Sessions,
     Memory,
     Agents,
     Skills,
@@ -13,11 +14,13 @@ pub enum Pane {
 }
 
 impl Pane {
-    pub const ALL: [Pane; 5] = [Pane::Chat, Pane::Memory, Pane::Agents, Pane::Skills, Pane::Logs];
+    pub const ALL: [Pane; 6] =
+        [Pane::Chat, Pane::Sessions, Pane::Memory, Pane::Agents, Pane::Skills, Pane::Logs];
 
     pub fn label(self) -> &'static str {
         match self {
             Pane::Chat => "Chat",
+            Pane::Sessions => "Sessions",
             Pane::Memory => "Memory",
             Pane::Agents => "Agents",
             Pane::Skills => "Skills",
@@ -74,6 +77,9 @@ pub struct Cockpit {
     pub busy: bool,
     /// Alternating flag for the cursor pulse.
     pub pulse: bool,
+    /// provider/model this session will run on; None means nothing is set yet
+    /// and prompting will fail with a readable error rather than a crash (8.6).
+    pub model: Option<(String, String)>,
 }
 
 impl Default for Cockpit {
@@ -87,6 +93,7 @@ impl Default for Cockpit {
             show_help: false,
             busy: false,
             pulse: false,
+            model: None,
         }
     }
 }
@@ -159,19 +166,20 @@ mod tests {
     fn with(k: KeyCode, m: KeyModifiers) -> KeyEvent { KeyEvent::new(k, m) }
 
     #[test]
-    fn rail_has_the_five_planned_panes_in_order() {
+    fn rail_has_the_planned_panes_in_order() {
         let labels: Vec<&str> = Pane::ALL.iter().map(|p| p.label()).collect();
-        assert_eq!(labels, ["Chat", "Memory", "Agents", "Skills", "Logs"]);
+        assert_eq!(labels, ["Chat", "Sessions", "Memory", "Agents", "Skills", "Logs"]);
         assert_eq!(Pane::from_digit('1'), Some(Pane::Chat));
-        assert_eq!(Pane::from_digit('5'), Some(Pane::Logs));
+        assert_eq!(Pane::from_digit('2'), Some(Pane::Sessions));
+        assert_eq!(Pane::from_digit('6'), Some(Pane::Logs));
         assert_eq!(Pane::from_digit('0'), None);
-        assert_eq!(Pane::from_digit('6'), None);
+        assert_eq!(Pane::from_digit('7'), None);
     }
 
     #[test]
     fn tab_cycles_panes_and_wraps_both_ways() {
         let mut c = Cockpit::new();
-        for want in [Pane::Memory, Pane::Agents, Pane::Skills, Pane::Logs, Pane::Chat] {
+        for want in [Pane::Sessions, Pane::Memory, Pane::Agents, Pane::Skills, Pane::Logs, Pane::Chat] {
             c.on_key(code(KeyCode::Tab));
             assert_eq!(c.pane, want);
         }
@@ -183,7 +191,7 @@ mod tests {
     fn pane_switching_works_while_typing() {
         let mut c = Cockpit::new();
         for ch in "hello".chars() { c.on_key(key(ch)); }
-        c.on_key(with(KeyCode::Char('3'), KeyModifiers::ALT));
+        c.on_key(with(KeyCode::Char('4'), KeyModifiers::ALT));
         assert_eq!(c.pane, Pane::Agents);
         assert_eq!(c.input, "hello", "switching panes must not eat the draft");
         // a bare digit while typing is text, not navigation
@@ -197,7 +205,7 @@ mod tests {
         let mut c = Cockpit::new();
         c.on_key(code(KeyCode::Esc));
         assert_eq!(c.focus, Focus::Main);
-        c.on_key(key('4'));
+        c.on_key(key('5'));
         assert_eq!(c.pane, Pane::Skills);
         assert!(c.input.is_empty());
     }
@@ -252,7 +260,7 @@ mod tests {
         // with no command open, tab is navigation again
         c.input.clear();
         c.on_key(code(KeyCode::Tab));
-        assert_eq!(c.pane, Pane::Memory);
+        assert_eq!(c.pane, Pane::Sessions);
     }
 
     #[test]

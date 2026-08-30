@@ -8,6 +8,9 @@ pub struct Cmd {
 
 pub const COMMANDS: &[Cmd] = &[
     Cmd { name: "/help", help: "show keybindings and commands" },
+    Cmd { name: "/login", help: "add or switch provider without leaving the session" },
+    Cmd { name: "/model", help: "pick the model this session runs on" },
+    Cmd { name: "/sessions", help: "jump to projects and sessions" },
     Cmd { name: "/clear", help: "clear the chat transcript" },
     Cmd { name: "/thinking", help: "expand or collapse thinking blocks" },
     Cmd { name: "/memory", help: "jump to the memory pane" },

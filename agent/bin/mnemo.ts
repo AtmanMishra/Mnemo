@@ -73,7 +73,7 @@ function realIO() {
   };
 }
 
-/** mnemo auth [login|status|logout <provider>] */
+/** mnemo auth [status|logout <provider>] — login lives in mnemo-agent (8.8) */
 async function handleAuth(args: string[]): Promise<void> {
   const sub = args[1] ?? "login";
   if (sub === "logout") {
@@ -143,7 +143,7 @@ async function ensureAuthenticated(): Promise<void> {
   // nothing anywhere -> first-run wizard (interactive only)
   if (!process.stdout.isTTY || !process.stdin.isTTY) {
     console.error(missingKeyMessage(selection));
-    console.error("or run: mnemo auth   (in an interactive terminal)");
+    console.error("or run: mnemo-agent   (log in from inside the app)");
     process.exit(1);
   }
   console.error("No provider configured. Starting setup...\n");
@@ -248,6 +248,13 @@ async function run(): Promise<void> {
   }
   // Help/version/pi subcommands must reach pi without a provider check.
   if (argv[0] === "auth") {
+    // 8.8: the interactive wizard now lives inside mnemo-agent. `status` and
+    // `logout` stay because they are useful from a script; `login` would be a
+    // second, divergent onboarding flow.
+    if ((argv[1] ?? "login") === "login") {
+      console.error("mnemo: run `mnemo-agent` and log in there (or /login inside a session).");
+      process.exit(1);
+    }
     await handleAuth(argv);
     return;
   }

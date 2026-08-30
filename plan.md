@@ -58,6 +58,18 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 - [x] 7.3 Learned steering policy experiment (log-replay training data)
 
 
+## AREA 8 — ONE APP: `mnemo-agent` (everything inside the runtime)
+Decision: the cockpit IS the product. Chat runs in the Rust app over pi's RPC;
+the `mnemo` CLI survives only for scripting (traces/consolidate/one-shot).
+- [x] 8.1 `mnemo-agent` binary + screen routing (Onboarding -> Projects -> Sessions -> Chat) over the existing nav rail
+- [x] 8.2 Rust auth store: read/write ~/.mnemo/auth.json (same schema as src/auth/store.ts), model catalog per provider
+- [x] 8.3 Pixel onboarding on first run, in-runtime: provider picker -> key entry -> default model -> done
+- [x] 8.4 Projects screen: cwd is the current project; others read from pi's ~/.pi/agent/sessions/<encoded-cwd>/
+- [x] 8.5 Sessions screen: sessions per project, subagents nested under each (from trace spans + journal episodes), open/resume
+- [x] 8.6 In-session `/login`: authenticate without leaving the session; unset model is a clear error, not a crash
+- [x] 8.7 Multi-model: spawn_subagent takes an optional model; child inherits the parent's unless told otherwise; only logged-in providers offered
+- [x] 8.8 Retire `mnemo auth`, seatui and memtui now that auth and both dashboards live in the one app
+
 ## DONE (reference)
 [x] Memory layer core+steering+sidecar (19+2 tests)
 [x] Harness engine (19 tests)
