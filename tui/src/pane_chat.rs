@@ -5,6 +5,7 @@ use crate::cockpit::Pane;
 use crate::md::{self, SegStyle};
 use crate::pane::PaneView;
 use crate::rpc::{AgentEvent, TurnStats};
+use crate::sessions::Msg;
 use crate::theme;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -34,6 +35,25 @@ pub struct ChatPane {
 
 impl ChatPane {
     pub fn new() -> Self { Self::default() }
+
+    /// Rebuild the transcript from a stored session (gap 1: resume).
+    ///
+    /// A resumed session must LOOK resumed — the same entries a live run would
+    /// have produced, not an empty pane with a status line claiming otherwise.
+    pub fn from_transcript(msgs: &[Msg]) -> Self {
+        let mut pane = Self::new();
+        for m in msgs {
+            pane.entries.push(match m {
+                Msg::User(t) => Entry::User(t.clone()),
+                Msg::Assistant(t) => Entry::Assistant { text: t.clone(), streaming: false },
+                Msg::Thinking(t) => Entry::Thinking(t.clone()),
+                Msg::Tool { id, name, args, ok } => Entry::Tool {
+                    id: id.clone(), name: name.clone(), args: args.clone(), ok: *ok,
+                },
+            });
+        }
+        pane
+    }
 
     pub fn push_user(&mut self, text: &str) {
         self.entries.push(Entry::User(text.to_string()));

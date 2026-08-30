@@ -23,7 +23,7 @@ use seatui::pane_memory::MemoryPane;
 use seatui::pane_sessions::{Intent, SessionsPane};
 use seatui::pane_skills::SkillsPane;
 use seatui::rpc::RpcSession;
-use seatui::sessions::{attach_subagents, list_projects, list_sessions, subagents_from_traces};
+use seatui::sessions::{attach_subagents, list_projects, list_sessions, spans_for, subagents_from_traces, transcript};
 use seatui::theme;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -96,6 +96,19 @@ fn main() -> io::Result<()> {
         print_projects(&home, &cwd);
         return Ok(());
     }
+    // a TUI is the one thing a script cannot inspect, so the readers it
+    // depends on are runnable on their own against real files
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--transcript") {
+        let Some(file) = args.get(i + 1) else {
+            eprintln!("mnemo-agent --transcript <session.jsonl>");
+            return Ok(());
+        };
+        for m in transcript(Path::new(file)) {
+            println!("{m:?}");
+        }
+        return Ok(());
+    }
 
     let root = repo_root();
     let journal = memclient::default_journal();
@@ -125,7 +138,7 @@ fn main() -> io::Result<()> {
     };
 
     // the agent only starts once there is something to talk to
-    let mut agent = if stored.is_configured() { spawn_agent(&root, &mut cockpit) } else { None };
+    let mut agent = if stored.is_configured() { spawn_agent(&root, &cwd, None, &mut cockpit) } else { None };
     let mut mem = MemSession::open(&journal).ok();
     refresh_memory(&mut panes, mem.as_mut());
 
@@ -135,7 +148,7 @@ fn main() -> io::Result<()> {
     let mut term = Terminal::new(CrosstermBackend::new(out))?;
 
     let result = run(&mut term, &mut cockpit, &mut panes, &mut overlay, &mut stored,
-                     &mut agent, mem.as_mut(), &home, &root);
+                     &mut agent, mem.as_mut(), &home, &root, &cwd);
 
     disable_raw_mode()?;
     execute!(term.backend_mut(), LeaveAlternateScreen)?;
@@ -152,11 +165,34 @@ fn today() -> String {
         .unwrap_or_default()
 }
 
-fn spawn_agent(root: &Path, cockpit: &mut Cockpit) -> Option<RpcSession> {
-    match RpcSession::spawn(root) {
+/// Start (or restart) the agent in `cwd`, resuming `session` if given.
+///
+/// The launch directory is the project, so the agent runs THERE — running it
+/// in the mnemo repo would file every session under the wrong project and give
+/// the model the wrong tree to read.
+fn spawn_agent(root: &Path, cwd: &Path, session: Option<&Path>, cockpit: &mut Cockpit)
+    -> Option<RpcSession>
+{
+    match RpcSession::spawn_in(root, cwd, session) {
         Ok(s) => Some(s),
         Err(e) => { cockpit.status = format!("agent unavailable: {e}"); None }
     }
+}
+
+/// Swap the running agent for one in another project, replacing the chat
+/// transcript with whatever that session already contains.
+fn switch_to(
+    root: &Path, cwd: &Path, session: Option<&Path>,
+    cockpit: &mut Cockpit, panes: &mut Panes, agent: &mut Option<RpcSession>,
+) {
+    if let Some(a) = agent.as_mut() { a.stop(); }
+    *agent = spawn_agent(root, cwd, session, cockpit);
+    panes.chat = match session {
+        Some(f) => ChatPane::from_transcript(&transcript(f)),
+        None => ChatPane::new(),
+    };
+    cockpit.pane = Pane::Chat;
+    cockpit.busy = false;
 }
 
 /// Reflect the stored credential in the status bar (8.6).
@@ -206,6 +242,7 @@ fn run<B: ratatui::backend::Backend>(
     mut mem: Option<&mut MemSession>,
     home: &Path,
     root: &Path,
+    cwd: &Path,
 ) -> io::Result<()> {
     let mut spin = 0usize;
     let mut body_height = 10usize;
@@ -225,7 +262,7 @@ fn run<B: ratatui::backend::Backend>(
                 apply_model(cockpit, stored);
                 // the agent could not start without a provider; start it now
                 if agent.is_none() && stored.is_configured() {
-                    *agent = spawn_agent(root, cockpit);
+                    *agent = spawn_agent(root, cwd, None, cockpit);
                 }
                 *overlay = None;
             }
@@ -268,16 +305,22 @@ fn run<B: ratatui::backend::Backend>(
         {
             match panes.sessions.enter() {
                 Intent::OpenSession(s) => {
-                    cockpit.pane = Pane::Chat;
-                    cockpit.status = format!("resumed: {}", s.title);
+                    // the session's OWN cwd, not ours: resuming from the
+                    // wrong directory makes pi fork it into another project
+                    let dir = if s.cwd.as_os_str().is_empty() { cwd.to_path_buf() } else { s.cwd.clone() };
+                    switch_to(root, &dir, Some(&s.file), cockpit, panes, agent);
                     if let (Some(p), Some(m)) = (s.provider.clone(), s.model.clone()) {
                         cockpit.model = Some((p, m));
                     }
+                    cockpit.status = format!("resumed: {}", s.title);
                 }
                 Intent::NewSession(path) => {
-                    cockpit.pane = Pane::Chat;
-                    panes.chat = ChatPane::new();
+                    switch_to(root, &path, None, cockpit, panes, agent);
                     cockpit.status = format!("new session in {}", path.display());
+                }
+                Intent::OpenSubagent(sub) => {
+                    let spans = spans_for(home, &sub.session);
+                    panes.sessions.show_subagent(sub, spans);
                 }
                 Intent::None => {}
             }

@@ -131,7 +131,7 @@ pub fn parse_event(v: &Value) -> Option<AgentEvent> {
 }
 
 /// One-line rendering of tool arguments for a tool card.
-fn summarize_args(args: &Value) -> String {
+pub fn summarize_args(args: &Value) -> String {
     match args {
         Value::Object(map) => map.iter()
             .map(|(k, v)| {
@@ -157,15 +157,28 @@ pub struct RpcSession {
 }
 
 impl RpcSession {
-    /// Spawn `node <repo>/agent/bin/mnemo.ts --mode rpc`.
+    /// Spawn `node <repo>/agent/bin/mnemo.ts --mode rpc` in the repo itself.
     pub fn spawn(repo_root: &Path) -> std::io::Result<Self> {
+        Self::spawn_in(repo_root, repo_root, None)
+    }
+
+    /// Spawn the agent in `cwd`, optionally resuming a stored session file.
+    ///
+    /// `cwd` is what makes the agent work in the project you picked rather
+    /// than the one you launched in — pi derives its session directory from
+    /// the working directory, so resuming without it would fork the session
+    /// into the wrong project (and, worse, prompt for confirmation on a
+    /// stdin we are using for the protocol).
+    pub fn spawn_in(repo_root: &Path, cwd: &Path, session: Option<&Path>) -> std::io::Result<Self> {
         let entry = repo_root.join("agent").join("bin").join("mnemo.ts");
-        Self::spawn_command(
-            Command::new("node")
-                .arg(&entry)
-                .args(["--mode", "rpc", "--no-builtin-tools"])
-                .current_dir(repo_root),
-        )
+        let mut cmd = Command::new("node");
+        cmd.arg(&entry)
+            .args(["--mode", "rpc", "--no-builtin-tools"])
+            .current_dir(cwd);
+        if let Some(f) = session {
+            cmd.arg("--session").arg(f);
+        }
+        Self::spawn_command(&mut cmd)
     }
 
     /// Spawn an arbitrary command speaking the same protocol (tests use a fake).
@@ -326,6 +339,59 @@ mod tests {
     }
 
     /// Drives a real child process over the real protocol — no LLM involved.
+    #[test]
+    fn spawn_in_passes_the_project_cwd_and_the_session_file() {
+        // the flags and the working directory ARE the resume feature; a fake
+        // agent at the real entry path reports back what it was given
+        let root = std::env::temp_dir().join(format!("mnemo-spawn-in-{}", std::process::id()));
+        let bin = root.join("agent").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("mnemo.ts"), r#"
+const text = JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() });
+console.log(JSON.stringify({ type: "message_end",
+  message: { role: "assistant", content: [{ type: "text", text }] } }));
+"#).unwrap();
+        let project = root.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let session = project.join("s.jsonl");
+
+        let mut sess = RpcSession::spawn_in(&root, &project, Some(&session)).expect("spawn");
+        let mut got = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while std::time::Instant::now() < deadline {
+            got.extend(sess.poll());
+            if got.iter().any(|e| matches!(e, AgentEvent::Text { .. })) { break }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        sess.stop();
+        let Some(AgentEvent::Text { text, .. }) = got.iter()
+            .find(|e| matches!(e, AgentEvent::Text { .. })) else { panic!("got {got:?}") };
+        let v: Value = serde_json::from_str(text).unwrap();
+        let argv: Vec<String> = serde_json::from_value(v["argv"].clone()).unwrap();
+        assert!(argv.windows(2).any(|w| w[0] == "--session" && w[1] == session.to_string_lossy()),
+            "the stored session must be passed to pi, got {argv:?}");
+        assert!(argv.contains(&"rpc".to_string()), "still RPC mode: {argv:?}");
+        // canonicalize: macOS temp dirs are symlinked through /private
+        assert_eq!(std::fs::canonicalize(v["cwd"].as_str().unwrap()).unwrap(),
+            std::fs::canonicalize(&project).unwrap(),
+            "the agent must run in the project, not the repo");
+
+        // and a plain spawn asks for no session at all
+        let mut plain = RpcSession::spawn_in(&root, &project, None).expect("spawn");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let mut got = Vec::new();
+        while std::time::Instant::now() < deadline {
+            got.extend(plain.poll());
+            if got.iter().any(|e| matches!(e, AgentEvent::Text { .. })) { break }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        plain.stop();
+        let Some(AgentEvent::Text { text, .. }) = got.iter()
+            .find(|e| matches!(e, AgentEvent::Text { .. })) else { panic!("got {got:?}") };
+        assert!(!text.contains("--session"), "a new session must not resume one: {text}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn session_reads_events_from_a_child_process() {
         let script = r#"

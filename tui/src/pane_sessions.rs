@@ -2,11 +2,16 @@
 //! subagents each session spawned — one drill-down rather than three screens,
 //! so it lives in the nav rail like every other pane.
 //!
-//! Levels: Projects -> Sessions -> (a session, expanded to show its subagents).
+//! Levels: Projects -> Sessions (with subagents nested) -> one subagent's run.
 //! The project you launched in is pinned to the top and marked, because
 //! "wherever I open the agent, that folder is my project".
+//!
+//! Selection walks a FLAT row list rather than an index per level: a subagent
+//! row is on screen, so it has to be reachable with j/k like anything else,
+//! and one list means the highlight and the keystroke can never disagree.
 use crate::cockpit::Pane;
 use crate::pane::PaneView;
+use crate::pane_logs::{format_span, op_color};
 use crate::sessions::{Project, Session, Subagent};
 use crate::theme;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -19,16 +24,31 @@ pub enum Level {
     #[default]
     Projects,
     Sessions,
+    /// One subagent's run, read back from the trace store.
+    Subagent,
+}
+
+/// One selectable row at the current level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Row {
+    /// Index into `ordered_projects()`.
+    Project(usize),
+    /// Index into `sessions`.
+    Session(usize),
+    /// Session index, then subagent index within it.
+    Sub(usize, usize),
 }
 
 /// What the event loop should do after a keystroke here.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intent {
     None,
-    /// Open this session's transcript in the Chat pane.
+    /// Open this session's transcript in the Chat pane and resume it.
     OpenSession(Session),
     /// Start a fresh session in this project.
     NewSession(PathBuf),
+    /// Show what this subagent did. The loop supplies its spans.
+    OpenSubagent(Subagent),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -37,11 +57,15 @@ pub struct SessionsPane {
     /// Sessions of the project currently drilled into.
     pub sessions: Vec<Session>,
     pub level: Level,
+    /// Index into `rows()`.
     pub selected: usize,
     /// Index into `projects` once drilled in.
     pub project: Option<usize>,
     /// Session ids whose subagents are expanded.
     pub expanded: Vec<String>,
+    /// The subagent being viewed at `Level::Subagent`, with its trace spans.
+    pub subagent: Option<Subagent>,
+    pub spans: Vec<serde_json::Value>,
     /// The directory mnemo-agent was launched in.
     pub cwd: PathBuf,
     pub error: Option<String>,
@@ -76,12 +100,33 @@ impl SessionsPane {
         p.path == self.cwd
     }
 
-    /// Rows the user can move through at the current level.
-    pub fn row_count(&self) -> usize {
+    /// Every row the user can move through at the current level, in the order
+    /// they are drawn. Rendering and selection both read this, so a nested
+    /// subagent row cannot be visible-but-unreachable.
+    pub fn rows(&self) -> Vec<Row> {
         match self.level {
-            Level::Projects => self.ordered_projects().len(),
-            Level::Sessions => self.sessions.len(),
+            Level::Projects => (0..self.ordered_projects().len()).map(Row::Project).collect(),
+            Level::Sessions => {
+                let mut out = Vec::new();
+                for (i, s) in self.sessions.iter().enumerate() {
+                    out.push(Row::Session(i));
+                    if self.expanded.contains(&s.id) {
+                        out.extend((0..s.subagents.len()).map(|j| Row::Sub(i, j)));
+                    }
+                }
+                out
+            }
+            // a detail view: nothing to select, esc goes back
+            Level::Subagent => Vec::new(),
         }
+    }
+
+    pub fn row_count(&self) -> usize {
+        self.rows().len()
+    }
+
+    pub fn selected_row(&self) -> Option<Row> {
+        self.rows().get(self.selected).copied()
     }
 
     pub fn move_selection(&mut self, delta: isize) {
@@ -91,14 +136,39 @@ impl SessionsPane {
     }
 
     pub fn selected_project(&self) -> Option<Project> {
-        self.ordered_projects().get(self.selected).cloned()
+        match self.selected_row() {
+            Some(Row::Project(i)) => self.ordered_projects().get(i).cloned(),
+            _ => None,
+        }
     }
 
+    /// The session under the cursor — a subagent row counts as its parent, so
+    /// `o` collapses the group you are standing inside.
     pub fn selected_session(&self) -> Option<&Session> {
-        self.sessions.get(self.selected)
+        match self.selected_row() {
+            Some(Row::Session(i)) | Some(Row::Sub(i, _)) => self.sessions.get(i),
+            _ => None,
+        }
     }
 
-    /// Enter: drill into a project, or open the selected session.
+    pub fn selected_subagent(&self) -> Option<&Subagent> {
+        match self.selected_row() {
+            Some(Row::Sub(i, j)) => self.sessions.get(i)?.subagents.get(j),
+            _ => None,
+        }
+    }
+
+    /// The project we drilled into. Not `selected_project()`: once inside, the
+    /// cursor is on sessions, and a new session belongs to the folder we are
+    /// in, not to whatever row happens to be highlighted.
+    pub fn current_project_path(&self) -> PathBuf {
+        self.project
+            .and_then(|i| self.projects.get(i))
+            .map(|p| p.path.clone())
+            .unwrap_or_else(|| self.cwd.clone())
+    }
+
+    /// Enter: drill into a project, open a session, or open a subagent.
     pub fn enter(&mut self) -> Intent {
         match self.level {
             Level::Projects => {
@@ -109,35 +179,68 @@ impl SessionsPane {
                 self.sessions.clear(); // the loop refills from disk
                 Intent::None
             }
-            Level::Sessions => match self.selected_session() {
-                Some(s) => Intent::OpenSession(s.clone()),
+            Level::Sessions => match self.selected_row() {
+                Some(Row::Sub(i, j)) => match self.sessions.get(i)
+                    .and_then(|s| s.subagents.get(j)).cloned() {
+                    Some(sub) => Intent::OpenSubagent(sub),
+                    None => Intent::None,
+                },
+                Some(Row::Session(i)) => match self.sessions.get(i) {
+                    Some(s) => Intent::OpenSession(s.clone()),
+                    None => Intent::None,
+                },
                 // a project with no sessions yet: enter starts one
-                None => Intent::NewSession(
-                    self.selected_project().map(|p| p.path).unwrap_or_else(|| self.cwd.clone()),
-                ),
+                _ => Intent::NewSession(self.current_project_path()),
             },
+            Level::Subagent => Intent::None,
         }
     }
 
-    /// Escape / left: back out to the project list.
+    /// Show one subagent's run. Spans come from the loop, which owns the home
+    /// directory the trace store lives under.
+    pub fn show_subagent(&mut self, sub: Subagent, spans: Vec<serde_json::Value>) {
+        self.subagent = Some(sub);
+        self.spans = spans;
+        self.level = Level::Subagent;
+    }
+
+    /// Escape / left: back out one level.
     pub fn back(&mut self) -> bool {
-        if self.level == Level::Projects { return false; }
-        // `project` indexes self.projects, but the list on screen is
-        // ordered_projects() with the launch directory pinned first — look the
-        // path back up rather than reusing the index across two orderings
-        let path = self.project.and_then(|i| self.projects.get(i)).map(|p| p.path.clone());
-        self.level = Level::Projects;
-        self.selected = path
-            .and_then(|p| self.ordered_projects().iter().position(|x| x.path == p))
-            .unwrap_or(0);
-        self.sessions.clear();
-        true
+        match self.level {
+            Level::Projects => false,
+            // the cursor stayed on the subagent row we came from
+            Level::Subagent => {
+                self.level = Level::Sessions;
+                self.subagent = None;
+                self.spans.clear();
+                true
+            }
+            Level::Sessions => {
+                // `project` indexes self.projects, but the list on screen is
+                // ordered_projects() with the launch directory pinned first —
+                // look the path back up rather than reusing the index across
+                // two orderings
+                let path = self.project.and_then(|i| self.projects.get(i)).map(|p| p.path.clone());
+                self.level = Level::Projects;
+                self.selected = path
+                    .and_then(|p| self.ordered_projects().iter().position(|x| x.path == p))
+                    .unwrap_or(0);
+                self.sessions.clear();
+                true
+            }
+        }
     }
 
     pub fn toggle_expanded(&mut self) {
         let Some(id) = self.selected_session().map(|s| s.id.clone()) else { return };
         match self.expanded.iter().position(|x| *x == id) {
-            Some(i) => { self.expanded.remove(i); }
+            Some(i) => {
+                self.expanded.remove(i);
+                // the rows below just vanished; do not leave the cursor past
+                // the end of the list
+                let n = self.row_count();
+                self.selected = self.selected.min(n.saturating_sub(1));
+            }
             None => self.expanded.push(id),
         }
     }
@@ -147,14 +250,27 @@ impl SessionsPane {
         if self.level != Level::Sessions { return None; }
         self.project.and_then(|i| self.projects.get(i)).map(|p| p.dir.clone())
     }
+
+    /// The drilled-into project's name, for the Sessions header.
+    fn project_title(&self) -> String {
+        self.project.and_then(|i| self.projects.get(i))
+            .map(|p| p.name())
+            .unwrap_or_else(|| self.cwd.file_name()
+                .map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
+    }
 }
 
-fn subagent_line(s: &Subagent) -> Line<'static> {
-    let (dot, color) = if s.ok { ("●", theme::GREEN) } else { ("●", theme::RED) };
+fn subagent_line(s: &Subagent, on: bool) -> Line<'static> {
+    let color = if s.ok { theme::GREEN } else { theme::RED };
     let model = s.model.clone().unwrap_or_else(|| "same model".into());
+    let label = if on {
+        Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::WHITE)
+    };
     Line::from(vec![
-        Span::styled(format!("    └ {dot} "), Style::default().fg(color)),
-        Span::styled(s.label.clone(), Style::default().fg(theme::WHITE)),
+        Span::styled(format!("  {} └ ● ", if on { "▶" } else { " " }), Style::default().fg(color)),
+        Span::styled(s.label.clone(), label),
         Span::styled(format!("  [{model}]"), Style::default().fg(theme::PURPLE)),
     ])
 }
@@ -167,6 +283,7 @@ impl PaneView for SessionsPane {
             return vec![Line::from(Span::styled(format!("✖ {e}"), Style::default().fg(theme::RED)))];
         }
         let mut out: Vec<Line<'static>> = Vec::new();
+        let mut row = 0usize;
         match self.level {
             Level::Projects => {
                 let projects = self.ordered_projects();
@@ -177,8 +294,9 @@ impl PaneView for SessionsPane {
                 if projects.is_empty() {
                     out.push(Line::from(Span::styled("(no projects yet)", Style::default().fg(theme::GREY))));
                 }
-                for (i, p) in projects.iter().enumerate() {
-                    let on = i == self.selected;
+                for p in projects.iter() {
+                    let on = row == self.selected;
+                    row += 1;
                     let style = if on {
                         Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)
                     } else {
@@ -199,20 +317,17 @@ impl PaneView for SessionsPane {
                 }
             }
             Level::Sessions => {
-                let name = self.projects.get(self.project.unwrap_or(0))
-                    .map(|p| p.name())
-                    .unwrap_or_else(|| self.cwd.file_name()
-                        .map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
                 out.push(Line::from(Span::styled(
-                    format!("{} — SESSIONS ({})", name.to_uppercase(), self.sessions.len()),
+                    format!("{} — SESSIONS ({})", self.project_title().to_uppercase(), self.sessions.len()),
                     Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD),
                 )));
                 if self.sessions.is_empty() {
                     out.push(Line::from(Span::styled(
                         "(no sessions yet — enter starts one)", Style::default().fg(theme::GREY))));
                 }
-                for (i, s) in self.sessions.iter().enumerate() {
-                    let on = i == self.selected;
+                for s in self.sessions.iter() {
+                    let on = row == self.selected;
+                    row += 1;
                     let style = if on {
                         Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)
                     } else {
@@ -225,16 +340,45 @@ impl PaneView for SessionsPane {
                         Span::styled(format!("  {} msgs", s.messages), Style::default().fg(theme::GREY)),
                         Span::styled(format!("  [{model}]"), Style::default().fg(theme::BLUE)),
                     ]));
-                    if !s.subagents.is_empty() {
-                        if self.expanded.contains(&s.id) {
-                            out.extend(s.subagents.iter().map(subagent_line));
-                        } else {
-                            out.push(Line::from(Span::styled(
-                                format!("    └ {} subagent(s) — o to expand", s.subagents.len()),
-                                Style::default().fg(theme::GREY),
-                            )));
+                    if s.subagents.is_empty() { continue }
+                    if self.expanded.contains(&s.id) {
+                        for sub in s.subagents.iter() {
+                            let on = row == self.selected;
+                            row += 1;
+                            out.push(subagent_line(sub, on));
                         }
+                    } else {
+                        out.push(Line::from(Span::styled(
+                            format!("    └ {} subagent(s) — o to expand", s.subagents.len()),
+                            Style::default().fg(theme::GREY),
+                        )));
                     }
+                }
+            }
+            Level::Subagent => {
+                let Some(sub) = &self.subagent else { return out };
+                let model = sub.model.clone().unwrap_or_else(|| "same model as parent".into());
+                out.push(Line::from(vec![
+                    Span::styled(format!("SUBAGENT — {}", sub.label.to_uppercase()),
+                        Style::default().fg(theme::YELLOW).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("  [{model}]"), Style::default().fg(theme::PURPLE)),
+                    Span::styled(
+                        if sub.ok { "  ok" } else { "  failed" },
+                        Style::default().fg(if sub.ok { theme::GREEN } else { theme::RED }),
+                    ),
+                ]));
+                if self.spans.is_empty() {
+                    out.push(Line::from(Span::styled(
+                        "(no trace for this run — the log may have been pruned)",
+                        Style::default().fg(theme::GREY))));
+                }
+                for v in self.spans.iter() {
+                    let Some(o) = format_span(v) else { continue };
+                    out.push(Line::from(vec![
+                        Span::styled(format!("{:<14} ", o.kind),
+                            Style::default().fg(op_color(&o.kind)).add_modifier(Modifier::BOLD)),
+                        Span::styled(o.detail, Style::default().fg(theme::WHITE)),
+                    ]));
                 }
             }
         }
@@ -258,13 +402,14 @@ impl PaneView for SessionsPane {
         match self.level {
             Level::Projects => format!("{} project(s)", self.ordered_projects().len()),
             Level::Sessions => format!("{} session(s) · esc back", self.sessions.len()),
+            Level::Subagent => format!("{} span(s) · esc back", self.spans.len()),
         }
     }
 
     fn help(&self) -> Vec<(&'static str, &'static str)> {
         vec![
-            ("enter", "open project / resume session"),
-            ("esc", "back to projects"),
+            ("enter", "open project / resume session / open subagent"),
+            ("esc", "back one level"),
             ("o", "expand subagents"),
             ("j/k", "move selection"),
         ]
@@ -285,6 +430,13 @@ mod tests {
             provider: Some("anthropic".into()), model: Some("claude-opus-5".into()),
             messages: 3, title: title.into(), subagents: subs,
         }
+    }
+    fn subs() -> Vec<Subagent> {
+        vec![
+            Subagent { session: "c1".into(), label: "audit tests".into(), ok: true,
+                       model: Some("kimi-k2.6".into()) },
+            Subagent { session: "c2".into(), label: "write docs".into(), ok: false, model: None },
+        ]
     }
     fn key(c: char) -> KeyEvent { KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE) }
     fn text(l: &Line) -> String { l.spans.iter().map(|s| s.content.to_string()).collect() }
@@ -343,25 +495,27 @@ mod tests {
     }
 
     #[test]
-    fn a_project_with_no_sessions_starts_one_on_enter() {
+    fn a_project_with_no_sessions_starts_one_in_that_project() {
         let mut p = pane();
-        p.enter();
+        p.enter(); // /work/here, the pinned launch directory
         p.sessions.clear();
         match p.enter() {
             Intent::NewSession(path) => assert_eq!(path, PathBuf::from("/work/here")),
             other => panic!("expected a new session, got {other:?}"),
         }
+        // a different project starts its session in ITS folder, not the cwd
+        p.back();
+        p.move_selection(1);
+        p.enter();
+        p.sessions.clear();
+        assert_eq!(p.enter(), Intent::NewSession(PathBuf::from("/work/other")));
     }
 
     #[test]
     fn subagents_collapse_until_asked_for() {
         let mut p = pane();
         p.enter();
-        p.sessions = vec![session("s1", "fix the build", vec![
-            Subagent { session: "c1".into(), label: "audit tests".into(), ok: true,
-                       model: Some("kimi-k2.6".into()) },
-            Subagent { session: "c2".into(), label: "write docs".into(), ok: false, model: None },
-        ])];
+        p.sessions = vec![session("s1", "fix the build", subs())];
 
         let collapsed: Vec<String> = p.lines(0).iter().map(text).collect();
         assert!(collapsed.iter().any(|l| l.contains("2 subagent(s)")), "{collapsed:?}");
@@ -376,6 +530,82 @@ mod tests {
         // and a failed child is visibly failed
         let failed = p.lines(0).into_iter().find(|l| text(l).contains("write docs")).unwrap();
         assert_eq!(failed.spans[0].style.fg, Some(theme::RED));
+    }
+
+    #[test]
+    fn expanded_subagents_are_selectable_rows() {
+        // they are drawn, so j/k must reach them — a visible row the cursor
+        // skips is exactly the bug the flat row list replaced
+        let mut p = pane();
+        p.enter();
+        p.sessions = vec![session("s1", "fix the build", subs()), session("s2", "other", vec![])];
+        assert_eq!(p.row_count(), 2, "collapsed: two sessions");
+
+        p.on_key(key('o'), 20);
+        assert_eq!(p.row_count(), 4, "expanded: two sessions plus two children");
+        p.move_selection(1);
+        assert_eq!(p.selected_subagent().map(|s| s.label.clone()), Some("audit tests".into()));
+        assert_eq!(p.selected_session().map(|s| s.id.clone()), Some("s1".into()),
+            "standing on a child, `o` still targets its parent");
+        p.move_selection(1);
+        assert_eq!(p.selected_subagent().map(|s| s.label.clone()), Some("write docs".into()));
+        p.move_selection(1);
+        assert_eq!(p.selected_row(), Some(Row::Session(1)), "past the children is the next session");
+    }
+
+    #[test]
+    fn collapsing_under_the_cursor_does_not_strand_it() {
+        let mut p = pane();
+        p.enter();
+        p.sessions = vec![session("s1", "fix the build", subs())];
+        p.on_key(key('o'), 20);
+        p.move_selection(2); // the last child
+        p.on_key(key('o'), 20); // collapse from underneath
+        assert_eq!(p.selected, 0, "the cursor falls back onto the session");
+        assert!(p.selected_subagent().is_none());
+    }
+
+    #[test]
+    fn enter_on_a_subagent_opens_its_run_and_esc_returns() {
+        let mut p = pane();
+        p.enter();
+        p.sessions = vec![session("s1", "fix the build", subs())];
+        p.on_key(key('o'), 20);
+        p.move_selection(1);
+        let Intent::OpenSubagent(sub) = p.enter() else { panic!("expected a subagent") };
+        assert_eq!(sub.session, "c1", "the loop is told which trace session to read");
+
+        p.show_subagent(sub, vec![
+            serde_json::json!({"kind":"tool","name":"bash_exec","start":100,"duration_ms":12,
+                               "ok":true,"attrs":{"command":"make"}}),
+            serde_json::json!({"kind":"llm","name":"model round trip","start":200,"ok":false,
+                               "attrs":{"model":"kimi-k2.6"}}),
+        ]);
+        assert_eq!(p.level, Level::Subagent);
+        let rendered: Vec<String> = p.lines(0).iter().map(text).collect();
+        assert!(rendered[0].contains("AUDIT TESTS"), "{rendered:?}");
+        assert!(rendered[0].contains("kimi-k2.6"), "the model it actually ran on");
+        assert!(rendered.iter().any(|l| l.contains("bash_exec") && l.contains("command=make")),
+            "the run's spans are what there is to see: {rendered:?}");
+        assert!(rendered.iter().any(|l| l.contains("!llm")), "a failed span reads as failed");
+
+        assert!(p.on_key(key('h'), 20));
+        assert_eq!(p.level, Level::Sessions);
+        assert!(p.spans.is_empty());
+        assert_eq!(p.selected_subagent().map(|s| s.label.clone()), Some("audit tests".into()),
+            "back leaves the cursor where it was");
+    }
+
+    #[test]
+    fn a_subagent_with_no_surviving_trace_says_so() {
+        let mut p = pane();
+        p.enter();
+        p.sessions = vec![session("s1", "t", subs())];
+        p.show_subagent(subs()[1].clone(), vec![]);
+        let rendered: Vec<String> = p.lines(0).iter().map(text).collect();
+        assert!(rendered[0].contains("failed"), "{rendered:?}");
+        assert!(rendered[0].contains("same model as parent"));
+        assert!(rendered[1].contains("no trace"), "{rendered:?}");
     }
 
     #[test]

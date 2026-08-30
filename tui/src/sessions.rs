@@ -188,6 +188,115 @@ pub fn read_session(file: &Path) -> Option<Session> {
     })
 }
 
+/// One message of a stored session, in the order it was written.
+///
+/// This mirrors what `AgentEvent` carries for a *live* run, so a resumed
+/// transcript and a running one render through the same chat entries.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Msg {
+    User(String),
+    Assistant(String),
+    Thinking(String),
+    /// `ok` is None only when the session file ends before the result arrived.
+    Tool { id: String, name: String, args: String, ok: Option<bool> },
+}
+
+/// Replay a stored session file into messages.
+///
+/// pi writes the tool call and its result as two separate lines, so a result
+/// is matched back onto its call by `toolCallId` rather than appended — a
+/// resumed transcript has to read like the live one, not like a log.
+pub fn transcript(file: &Path) -> Vec<Msg> {
+    let Ok(text) = std::fs::read_to_string(file) else { return Vec::new() };
+    let mut out: Vec<Msg> = Vec::new();
+    for line in text.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        if v.get("type").and_then(|t| t.as_str()) != Some("message") { continue }
+        let Some(msg) = v.get("message") else { continue };
+        match msg.get("role").and_then(|r| r.as_str()) {
+            Some("user") => {
+                let t = content_text(msg);
+                if !t.is_empty() { out.push(Msg::User(t)); }
+            }
+            Some("assistant") => {
+                let Some(parts) = msg.get("content").and_then(|c| c.as_array()) else { continue };
+                for p in parts {
+                    match p.get("type").and_then(|t| t.as_str()) {
+                        Some("text") => if let Some(t) = str_at(p, "text") { out.push(Msg::Assistant(t)) },
+                        Some("thinking") => if let Some(t) = str_at(p, "thinking") { out.push(Msg::Thinking(t)) },
+                        Some("toolCall") => out.push(Msg::Tool {
+                            id: p.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string(),
+                            name: p.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string(),
+                            args: p.get("arguments").map(crate::rpc::summarize_args).unwrap_or_default(),
+                            ok: None,
+                        }),
+                        _ => {}
+                    }
+                }
+            }
+            Some("toolResult") => {
+                let id = msg.get("toolCallId").and_then(|i| i.as_str()).unwrap_or("");
+                let ok = !msg.get("isError").and_then(|b| b.as_bool()).unwrap_or(false);
+                match out.iter_mut().rev().find(|m| matches!(m, Msg::Tool { id: i, .. } if i == id)) {
+                    Some(Msg::Tool { ok: slot, .. }) => *slot = Some(ok),
+                    // a result with no matching call still has to be visible
+                    _ => out.push(Msg::Tool {
+                        id: id.to_string(),
+                        name: msg.get("toolName").and_then(|n| n.as_str()).unwrap_or("").to_string(),
+                        args: String::new(),
+                        ok: Some(ok),
+                    }),
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn str_at(v: &serde_json::Value, key: &str) -> Option<String> {
+    let s = v.get(key)?.as_str()?;
+    if s.is_empty() { None } else { Some(s.to_string()) }
+}
+
+/// pi writes user content as an array of parts, but older lines used a bare
+/// string; both have to read back.
+fn content_text(msg: &serde_json::Value) -> String {
+    match msg.get("content") {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Array(parts)) => parts.iter()
+            .filter(|c| c.get("type").and_then(|t| t.as_str()) == Some("text"))
+            .filter_map(|c| c.get("text").and_then(|t| t.as_str()))
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
+}
+
+/// Every span the trace store holds for one run, oldest first.
+///
+/// A subagent is a separate process with its own trace session, so this is the
+/// only record of what it actually did — there is no pi session we can
+/// correlate it back to.
+pub fn spans_for(home: &Path, session: &str) -> Vec<serde_json::Value> {
+    let dir = home.join(".mnemo").join("logs");
+    let Ok(entries) = std::fs::read_dir(&dir) else { return Vec::new() };
+    let mut files: Vec<PathBuf> = entries.flatten().map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "jsonl").unwrap_or(false))
+        .collect();
+    files.sort();
+    let mut out = Vec::new();
+    for f in files {
+        let Ok(text) = std::fs::read_to_string(&f) else { continue };
+        for line in text.lines() {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+            if v.get("session").and_then(|s| s.as_str()) == Some(session) { out.push(v); }
+        }
+    }
+    out.sort_by_key(|v| v.get("start").and_then(|s| s.as_u64()).unwrap_or(0));
+    out
+}
+
 fn first_user_text(v: &serde_json::Value) -> Option<String> {
     let msg = v.get("message")?;
     if msg.get("role")?.as_str()? != "user" { return None; }
@@ -387,6 +496,86 @@ mod tests {
         assert_eq!(sessions[0].subagents[0].model.as_deref(), Some("claude-opus-5"),
             "a child running on a different model shows which one");
         assert!(!sessions[0].subagents[1].ok, "a failed child reads as failed");
+    }
+
+    fn assistant(parts: serde_json::Value) -> String {
+        serde_json::json!({"type":"message","message":{"role":"assistant","content":parts}}).to_string()
+    }
+    fn tool_result(id: &str, is_error: bool) -> String {
+        serde_json::json!({"type":"message","message":{"role":"toolResult","toolCallId":id,
+            "toolName":"bash_exec","isError":is_error,
+            "content":[{"type":"text","text":"out"}]}}).to_string()
+    }
+
+    #[test]
+    fn a_stored_session_replays_into_messages_in_order() {
+        let home = tmp("transcript");
+        let f = write_session(&home, "--p--", "s", &[
+            header("abc", "/p", "2026-08-25T13:06:47.745Z"),
+            user_msg("fix the build"),
+            assistant(serde_json::json!([
+                {"type":"thinking","thinking":"let me look"},
+                {"type":"text","text":"Running the build."},
+                {"type":"toolCall","id":"call_1","name":"bash_exec","arguments":{"command":"make"}},
+            ])),
+            tool_result("call_1", false),
+            assistant(serde_json::json!([{"type":"text","text":"Fixed."}])),
+        ]);
+        let t = transcript(&f);
+        assert_eq!(t, vec![
+            Msg::User("fix the build".into()),
+            Msg::Thinking("let me look".into()),
+            Msg::Assistant("Running the build.".into()),
+            Msg::Tool { id: "call_1".into(), name: "bash_exec".into(),
+                        args: "command=make".into(), ok: Some(true) },
+            Msg::Assistant("Fixed.".into()),
+        ]);
+    }
+
+    #[test]
+    fn a_tool_result_lands_on_its_own_call_not_the_last_one() {
+        // two calls in flight: matching by position would mark the wrong one
+        let home = tmp("tool-match");
+        let f = write_session(&home, "--p--", "s", &[
+            header("abc", "/p", "2026-08-25T13:06:47.745Z"),
+            assistant(serde_json::json!([
+                {"type":"toolCall","id":"a","name":"read_file","arguments":{"path":"x"}},
+                {"type":"toolCall","id":"b","name":"bash_exec","arguments":{"command":"y"}},
+            ])),
+            tool_result("b", true),
+        ]);
+        let t = transcript(&f);
+        assert_eq!(t[0], Msg::Tool { id: "a".into(), name: "read_file".into(),
+                                     args: "path=x".into(), ok: None },
+            "the call with no result yet stays unresolved");
+        assert!(matches!(&t[1], Msg::Tool { id, ok: Some(false), .. } if id == "b"),
+            "the failure lands on b, got {:?}", t[1]);
+    }
+
+    #[test]
+    fn an_unreadable_or_empty_session_replays_as_nothing() {
+        let home = tmp("no-transcript");
+        assert!(transcript(&home.join("nope.jsonl")).is_empty());
+        let f = write_session(&home, "--p--", "s",
+            &[header("abc", "/p", "2026-08-25T13:06:47.745Z")]);
+        assert!(transcript(&f).is_empty());
+    }
+
+    #[test]
+    fn spans_of_one_run_come_back_oldest_first() {
+        let home = tmp("spans");
+        let logs = home.join(".mnemo").join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("2026-08-30.jsonl"), [
+            serde_json::json!({"kind":"llm","name":"model round trip","session":"child-1","start":200}).to_string(),
+            serde_json::json!({"kind":"session","name":"session","session":"child-1","start":100}).to_string(),
+            serde_json::json!({"kind":"tool","name":"bash_exec","session":"other","start":150}).to_string(),
+        ].join("\n")).unwrap();
+
+        let spans = spans_for(&home, "child-1");
+        assert_eq!(spans.len(), 2, "only this run's spans");
+        assert_eq!(spans[0].get("start").unwrap().as_u64(), Some(100), "oldest first");
+        assert!(spans_for(&home, "nobody").is_empty());
     }
 
     #[test]
