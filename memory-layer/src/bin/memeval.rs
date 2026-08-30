@@ -7,7 +7,7 @@
 use memory_layer::model::*;
 use memory_layer::persist::Journal;
 use memory_layer::remote::OpenRouterEmbedder;
-use memory_layer::search::{build_vectors, search};
+use memory_layer::search::{build_vectors, search, SearchOpts};
 use memory_layer::store::StoreData;
 use memory_layer::vec::{Embedder, HashingEmbedder};
 
@@ -120,7 +120,7 @@ fn main() {
     let mut hits1 = 0; let mut hits3 = 0; let mut rr_sum = 0.0;
     println!("{:<42} {:<22} {}", "query", "top hit", "rank");
     for (q, want) in cases {
-        let results = search(&s, &vectors, emb.as_ref(), q, 5, t() + 200, Some(NodeKind::Aspect));
+        let results = search(&s, &vectors, emb.as_ref(), q, 5, t() + 200, &SearchOpts::kind(NodeKind::Aspect));
         let labels: Vec<String> = results.iter()
             .filter_map(|r| s.nodes.get(&r.node).map(|n| n.label.clone())).collect();
         let rank = labels.iter().position(|l| l.contains(want))

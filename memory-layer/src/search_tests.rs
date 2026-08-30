@@ -2,7 +2,7 @@
 #[cfg(test)]
 mod p1 {
     use crate::model::*;
-    use crate::search::{build_vectors, search};
+    use crate::search::{build_vectors, route_query, search, SearchOpts};
     use crate::store::StoreData;
     use crate::vec::{cosine, Embedder, HashingEmbedder};
 
@@ -47,11 +47,11 @@ mod p1 {
         let emb = HashingEmbedder;
         let vectors = build_vectors(&s, &emb);
         // query about broken path routing should hit ingress node first
-        let r = search(&s, &vectors, &emb, "path rewrite annotation broken", 5, t(), None);
+        let r = search(&s, &vectors, &emb, "path rewrite annotation broken", 5, t(), &SearchOpts::default());
         assert!(!r.is_empty());
         assert_eq!(r[0].node, 1, "expected ingress node top, got {:?}", r.iter().map(|x| (x.node, x.score)).collect::<Vec<_>>());
         // unrelated query hits python node
-        let r2 = search(&s, &vectors, &emb, "virtualenv python environment", 5, t(), None);
+        let r2 = search(&s, &vectors, &emb, "virtualenv python environment", 5, t(), &SearchOpts::default());
         assert_eq!(r2[0].node, 3, "expected venv node top, got {:?}", r2.iter().map(|x| x.node).collect::<Vec<_>>());
     }
 
@@ -62,7 +62,7 @@ mod p1 {
         let vectors = build_vectors(&s, &emb);
         // query about helm rollback: node 2 is direct hit; its PartOf neighbor 1
         // should appear via graph even though it talks about ingress
-        let r = search(&s, &vectors, &emb, "helm rollback wait", 5, t(), None);
+        let r = search(&s, &vectors, &emb, "helm rollback wait", 5, t(), &SearchOpts::default());
         assert_eq!(r[0].node, 2);
         assert!(r.iter().any(|x| x.node == 1 && x.via_graph), "cluster neighbor not expanded: {:?}", r);
     }
@@ -73,7 +73,7 @@ mod p1 {
         let emb = HashingEmbedder;
         let vectors = build_vectors(&s, &emb);
         let now = t() + 200;
-        let r = search(&s, &vectors, &emb, "helm rollback wait", 5, now, None);
+        let r = search(&s, &vectors, &emb, "helm rollback wait", 5, now, &SearchOpts::default());
         assert_eq!(r[0].node, 2);
         assert!(!r.iter().any(|x| x.node == 1 && x.via_graph),
             "dead edge must not propagate: {:?}", r);
@@ -86,7 +86,7 @@ mod p1 {
         let emb = HashingEmbedder;
         let vectors = build_vectors(&s, &emb);
         let r = search(&s, &vectors, &emb, "nginx rewrite annotation", 5, t(),
-            Some(NodeKind::TaskEpisode));
+            &SearchOpts::kind(NodeKind::TaskEpisode));
         assert!(r.iter().all(|x| s.nodes[&x.node].kind == NodeKind::TaskEpisode));
         assert_eq!(r[0].node, 9);
     }
@@ -113,11 +113,45 @@ mod p1 {
         let vectors = build_vectors(&s, &emb);
         let index = AnnIndex::build(&vectors.iter().map(|(k, v)| (*k as u64, v.clone())).collect());
         for q in ["path rewrite annotation broken", "helm rollback wait", "virtualenv python environment"] {
-            let brute = search(&s, &vectors, &emb, q, 3, t(), None);
-            let ann = crate::search::search_ann(&s, &index, &emb, q, 3, t(), None);
+            let brute = search(&s, &vectors, &emb, q, 3, t(), &SearchOpts::default());
+            let ann = crate::search::search_ann(&s, &index, &emb, q, 3, t(), &SearchOpts::default());
             // top-1 must agree; ANN is approximate so full order may vary
             assert_eq!(brute[0].node, ann[0].node,
                 "query {q}: ann top1 {} != brute top1 {}", ann[0].node, brute[0].node);
         }
+    }
+
+    #[test]
+    fn area_filter_narrows_hits() {
+        // same text, different areas: the filter must pick the right one
+        let s = store_with(&[
+            Op::CreateNode { id: 20, kind: NodeKind::Aspect, label: "helm rollback pain".into(), at: t() },
+            Op::SetArea { node: 20, area: Area::Salience, at: t() + 1 },
+        ]);
+        let emb = HashingEmbedder;
+        let vectors = build_vectors(&s, &emb);
+
+        let all = search(&s, &vectors, &emb, "helm rollback", 5, t() + 2, &SearchOpts::default());
+        assert!(all.len() > 1, "unfiltered search should see both areas");
+
+        let only = search(&s, &vectors, &emb, "helm rollback", 5, t() + 2,
+            &SearchOpts::areas(vec![Area::Salience]));
+        assert!(!only.is_empty(), "salience node must still be reachable");
+        assert!(only.iter().all(|r| s.nodes[&r.node].area == Area::Salience),
+            "area filter leaked other areas: {only:?}");
+    }
+
+    #[test]
+    fn router_maps_keywords_to_areas() {
+        assert_eq!(route_query("the deploy failed with a 500 error")[0], Area::Salience);
+        assert_eq!(route_query("how to run the lint harness")[0], Area::Procedural);
+        assert_eq!(route_query("which repo holds the checkout service")[0], Area::Spatial);
+        assert_eq!(route_query("what did we do last time we deployed")[0], Area::Episodic);
+        assert_eq!(route_query("what is a rewrite-target annotation")[0], Area::Semantic);
+        assert_eq!(route_query("plan the migration strategy")[0], Area::Executive);
+        // no cue words -> no routing, search everywhere
+        assert!(route_query("nginx ingress").is_empty());
+        // never guesses more than two areas
+        assert!(route_query("plan how to fix the failed build in the repo last time").len() <= 2);
     }
 }

@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let emb = memory_layer::vec::HashingEmbedder;
     let vectors = memory_layer::search::build_vectors(&s, &emb);
     println!("\n== search: 'path rewrite 404 routing' ==");
-    for r in memory_layer::search::search(&s, &vectors, &emb, "path rewrite 404 routing", 3, t, None) {
+    for r in memory_layer::search::search(&s, &vectors, &emb, "path rewrite 404 routing", 3, t, &memory_layer::search::SearchOpts::default()) {
         let label = s.nodes.get(&r.node).map(|n| n.label.as_str()).unwrap_or("?");
         println!("  #{} {:<24} score={:.3} via_graph={}", r.node, label, r.score, r.via_graph);
     }

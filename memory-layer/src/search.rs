@@ -1,6 +1,6 @@
 //! Vector search over node embeddings + graph-aware rerank.
 //! Node vectors are DERIVED (label + active facts + recent log) -> never journaled.
-use crate::model::{EdgeKind, Millis, NodeId, NodeKind};
+use crate::model::{Area, EdgeKind, Millis, NodeId, NodeKind};
 use crate::store::StoreData;
 use crate::vec::{cosine, Embedder};
 use std::collections::HashMap;
@@ -70,9 +70,56 @@ fn expand(
     results
 }
 
-fn passes_filter(store: &StoreData, id: NodeId, kf: Option<NodeKind>) -> bool {
+/// Search filters. `Default` = unfiltered, which is what most callers want.
+#[derive(Debug, Clone, Default)]
+pub struct SearchOpts {
+    pub kind: Option<NodeKind>,
+    /// Restrict to these brain areas. Empty = every area.
+    pub areas: Vec<Area>,
+}
+
+impl SearchOpts {
+    pub fn kind(k: NodeKind) -> Self {
+        Self { kind: Some(k), ..Default::default() }
+    }
+    pub fn areas(areas: Vec<Area>) -> Self {
+        Self { areas, ..Default::default() }
+    }
+}
+
+/// Query router v0: keyword -> brain area. Returns at most 2 areas, best first;
+/// empty means "nothing distinctive, search everywhere". Deliberately dumb —
+/// the point is to bias retrieval, not to classify correctly every time.
+pub fn route_query(query: &str) -> Vec<Area> {
+    const CUES: &[(Area, &[&str])] = &[
+        (Area::Salience, &["fail", "failed", "failure", "error", "broke", "broken",
+                           "bug", "crash", "regression", "wrong", "hurt"]),
+        (Area::Procedural, &["how to", "harness", "skill", "tool", "command",
+                             "script", "run ", "build ", "install", "procedure", "steps"]),
+        (Area::Spatial, &["repo", "path", "file", "directory", "folder",
+                          "service", "package", "module", "endpoint"]),
+        (Area::Episodic, &["last time", "previously", "yesterday", "episode",
+                           "session", "earlier", "when i", "we did", "history"]),
+        (Area::Executive, &["plan", "decide", "decision", "strategy", "steer",
+                            "correction", "approach", "policy"]),
+        (Area::Semantic, &["what is", "define", "definition", "means", "concept",
+                           "fact", "explain"]),
+    ];
+    let q = query.to_ascii_lowercase();
+    let mut hits: Vec<(Area, usize)> = CUES.iter()
+        .map(|(area, cues)| (*area, cues.iter().filter(|c| q.contains(**c)).count()))
+        .filter(|(_, n)| *n > 0)
+        .collect();
+    hits.sort_by(|a, b| b.1.cmp(&a.1));
+    hits.truncate(2);
+    hits.into_iter().map(|(a, _)| a).collect()
+}
+
+fn passes_filter(store: &StoreData, id: NodeId, opts: &SearchOpts) -> bool {
     store.nodes.get(&id)
-        .map(|n| !n.deleted && kf.map_or(true, |k| n.kind == k))
+        .map(|n| !n.deleted
+            && opts.kind.map_or(true, |k| n.kind == k)
+            && (opts.areas.is_empty() || opts.areas.contains(&n.area)))
         .unwrap_or(false)
 }
 
@@ -85,11 +132,11 @@ pub fn search(
     query: &str,
     k: usize,
     now: Millis,
-    type_filter: Option<NodeKind>,
+    opts: &SearchOpts,
 ) -> Vec<SearchResult> {
     let q = emb.embed(query);
     let mut scored: Vec<(NodeId, f32)> = vectors.iter()
-        .filter(|(id, _)| passes_filter(store, **id, type_filter))
+        .filter(|(id, _)| passes_filter(store, **id, opts))
         .map(|(id, v)| (*id, cosine(&q, v)))
         .filter(|(_, s)| *s > 1e-6)
         .collect();
@@ -105,12 +152,12 @@ pub fn search_ann(
     query: &str,
     k: usize,
     now: Millis,
-    type_filter: Option<NodeKind>,
+    opts: &SearchOpts,
 ) -> Vec<SearchResult> {
     let q = emb.embed(query);
     let seeds: Vec<(NodeId, f32)> = index.search(&q, k * 4).into_iter()
         .map(|(id, s)| (id as NodeId, s))
-        .filter(|(id, _)| passes_filter(store, *id, type_filter))
+        .filter(|(id, _)| passes_filter(store, *id, opts))
         .collect();
     expand(store, seeds, k, now)
 }

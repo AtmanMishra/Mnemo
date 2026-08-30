@@ -192,3 +192,67 @@ fn memsrv_persists_and_returns_area() {
     assert_eq!(s.nodes[&harness].area, Area::Executive);
     assert_eq!(s.nodes[&pain].area, Area::Salience);
 }
+
+/// 3.2: memsrv search takes an `areas` filter and reports where the router looked.
+#[test]
+fn memsrv_search_filters_and_routes_by_area() {
+    let dir = std::env::temp_dir().join("memlayer-rpc-route");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let jpath = dir.join("journal.jsonl");
+
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_memsrv"))
+        .arg(&jpath)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn memsrv");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut reader = std::io::BufReader::new(child.stdout.take().unwrap());
+
+    let mut send = |id: u32, method: &str, params: serde_json::Value| {
+        use std::io::Write;
+        writeln!(stdin, "{}", serde_json::json!({"id": id, "method": method, "params": params})).unwrap();
+        stdin.flush().unwrap();
+    };
+    fn read_line_json(reader: &mut std::io::BufReader<std::process::ChildStdout>) -> serde_json::Value {
+        use std::io::BufRead;
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("read rpc line");
+        serde_json::from_str(line.trim()).expect("valid json response")
+    }
+
+    send(1, "create_node", serde_json::json!({"kind": "aspect", "label": "helm rollback needs --wait"}));
+    let semantic = read_line_json(&mut reader)["result"]["node"].as_u64().unwrap();
+    send(2, "create_node", serde_json::json!({"kind": "aspect", "label": "helm rollback broke prod", "area": "salience"}));
+    let pain = read_line_json(&mut reader)["result"]["node"].as_u64().unwrap();
+
+    // unfiltered: both areas are candidates
+    send(3, "search", serde_json::json!({"query": "helm rollback", "k": 5}));
+    let r = read_line_json(&mut reader);
+    assert_eq!(r["ok"], true, "search failed: {}", r["error"]);
+    let seen: Vec<u64> = r["result"]["results"].as_array().unwrap().iter()
+        .map(|h| h["node"].as_u64().unwrap()).collect();
+    assert!(seen.contains(&semantic) && seen.contains(&pain));
+
+    // explicit areas filter restricts the candidate set
+    send(4, "search", serde_json::json!({"query": "helm rollback", "k": 5, "areas": ["salience"]}));
+    let r = read_line_json(&mut reader);
+    let hits = r["result"]["results"].as_array().unwrap();
+    assert!(!hits.is_empty());
+    assert!(hits.iter().all(|h| h["area"] == "Salience"), "areas filter leaked: {hits:?}");
+    assert_eq!(r["result"]["routed"][0], "Salience", "explicit areas are what got searched");
+
+    // no explicit areas: the router reports where the query points
+    send(5, "search", serde_json::json!({"query": "the rollback failed and broke prod", "k": 5}));
+    let r = read_line_json(&mut reader);
+    assert_eq!(r["result"]["routed"][0], "Salience", "router should smell a failure query");
+
+    send(6, "search", serde_json::json!({"query": "helm rollback", "k": 5, "areas": ["hippocampus"]}));
+    let r = read_line_json(&mut reader);
+    assert_eq!(r["ok"], false, "unknown area names must be rejected");
+
+    drop(stdin);
+    child.wait().unwrap();
+}

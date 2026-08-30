@@ -7,7 +7,7 @@
 use memory_layer::model::*;
 use memory_layer::persist::{self, Journal};
 use memory_layer::remote::OpenRouterEmbedder;
-use memory_layer::search::{build_vectors, search};
+use memory_layer::search::{build_vectors, route_query, search, SearchOpts};
 use memory_layer::steering::{reinforce, steer, Correction};
 use memory_layer::store::StoreData;
 use memory_layer::vec::{Embedder, HashingEmbedder};
@@ -104,6 +104,15 @@ fn p_node(params: &serde_json::Value, key: &str) -> Result<NodeId, String> {
         .ok_or_else(|| format!("missing numeric param '{key}'"))
 }
 
+/// `areas: ["semantic", ...]` search filter. Absent/empty = every area.
+fn parse_areas(params: &serde_json::Value) -> Result<Vec<Area>, String> {
+    let Some(list) = params.get("areas").and_then(|a| a.as_array()) else { return Ok(vec![]) };
+    list.iter()
+        .map(|v| v.as_str().ok_or_else(|| "areas must be strings".to_string())
+            .and_then(|raw| Area::parse(raw).ok_or_else(|| format!("unknown area '{raw}'"))))
+        .collect()
+}
+
 /// Optional `area` override on create_node/episode. Returns the node's area name.
 fn set_area_param(
     s: &mut StoreData,
@@ -192,8 +201,13 @@ fn handle(
         "search" => {
             let query = params.get("query").and_then(|q| q.as_str()).ok_or("missing 'query'")?;
             let k = params.get("k").and_then(|k| k.as_u64()).unwrap_or(5) as usize;
+            // explicit areas restrict the search; otherwise the router only
+            // reports where it would look (biasing lands in 3.3)
+            let asked = parse_areas(params)?;
+            let routed = if asked.is_empty() { route_query(query) } else { asked.clone() };
+            let opts = SearchOpts::areas(asked);
             let vectors = build_vectors(s, emb);
-            let results = search(s, &vectors, emb, query, k, *clock, None);
+            let results = search(s, &vectors, emb, query, k, *clock, &opts);
             // enrich hits with label + derived state so the caller can READ
             // what was found (scores alone are useless to an LLM)
             let enriched: Vec<serde_json::Value> = results.iter().map(|r| {
@@ -207,7 +221,10 @@ fn handle(
                     "state": s.state_of(r.node).unwrap_or_default(),
                 })
             }).collect();
-            Ok(json!({ "results": enriched }))
+            Ok(json!({
+                "results": enriched,
+                "routed": routed.iter().map(|a| format!("{a:?}")).collect::<Vec<_>>(),
+            }))
         }
 
         "steer" => {

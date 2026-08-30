@@ -5,7 +5,7 @@
 use memory_layer::model::{Millis, NodeId, NodeKind, Op};
 use memory_layer::persist::Journal;
 use memory_layer::remote::OpenRouterEmbedder;
-use memory_layer::search::{build_vectors, search, SearchResult};
+use memory_layer::search::{build_vectors, search, SearchOpts, SearchResult};
 use memory_layer::store::StoreData;
 use memory_layer::vec::{Embedder, HashingEmbedder};
 use std::io::Write;
@@ -148,7 +148,7 @@ impl App {
         }
         let vectors = build_vectors(&self.store, self.embedder.as_ref());
         self.results = search(
-            &self.store, &vectors, self.embedder.as_ref(), &q, 8, self.clock, None,
+            &self.store, &vectors, self.embedder.as_ref(), &q, 8, self.clock, &SearchOpts::default(),
         );
         self.result_sel = 0;
         self.status = format!(

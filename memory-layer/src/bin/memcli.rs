@@ -3,7 +3,7 @@
 //! State persists across runs via the journal (full replay on start).
 use memory_layer::model::*;
 use memory_layer::persist::{self, Journal};
-use memory_layer::search::{build_vectors, search};
+use memory_layer::search::{build_vectors, search, SearchOpts};
 use memory_layer::steering::{reinforce, steer, Correction};
 use memory_layer::store::StoreData;
 use memory_layer::remote::OpenRouterEmbedder;
@@ -135,7 +135,7 @@ fn main() {
             }
             "search" if toks.len() >= 2 => {
                 let vectors = build_vectors(&s, embedder.as_ref());
-                for r in search(&s, &vectors, embedder.as_ref(), &rest(1), 5, clock, None) {
+                for r in search(&s, &vectors, embedder.as_ref(), &rest(1), 5, clock, &SearchOpts::default()) {
                     let lbl = s.nodes.get(&r.node).map(|n| n.label.as_str()).unwrap_or("?");
                     println!("  #{} {:<28} score={:.3}{}", r.node, lbl, r.score,
                         if r.via_graph {" (via graph)"} else {""});
