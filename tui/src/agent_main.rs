@@ -271,9 +271,11 @@ fn run<B: ratatui::backend::Backend>(
         // --- onboarding takes the whole screen while it is open -------------
         if let Some(ob) = overlay.as_mut() {
             let cols = term.size().map(|s| s.width as usize).unwrap_or(100);
+            ob.tick = ob.tick.wrapping_add(1);
             let body = onboarding::lines_in(ob, stored, cols);
             term.draw(|f| cockpit_ui::draw_onboarding(f, body))?;
-            if !event::poll(Duration::from_millis(120))? { continue; }
+            // the same cadence as the rest of the app, so Nyx walks at one speed
+            if !event::poll(Duration::from_millis(theme::SPINNER_INTERVAL_MS))? { continue; }
             let Event::Key(key) = event::read()? else { continue };
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 return Ok(());

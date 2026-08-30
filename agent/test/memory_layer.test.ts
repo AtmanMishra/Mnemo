@@ -93,7 +93,7 @@ test("consolidate distils repeated failures into a semantic lesson", async () =>
   // two episodes failing on the same theme -> one lesson
   for (const svc of ["checkout", "cart"]) {
     const ep = await client.request("episode", { label: `deploy ${svc}` });
-    assert.equal(ep.ok, true);
+    assert.equal(ep.ok, true, ep.error ?? "episode failed with no error");
     const steered = await client.request("steer", {
       episode: Number(ep.result.episode),
       failure: `helm rollback timed out on ${svc}`,
@@ -141,4 +141,15 @@ test("recall pulls the right node out of a real journal, and skips the rest", as
   assert.doesNotMatch(block, /unrelated-thing/, "and the rest of the graph is not");
 
   assert.equal(await recallFor(client, "hi"), "", "a greeting recalls nothing");
+});
+
+test("a stopped client restarts, and the dead process does not fail the new one", async () => {
+  // the ~1-in-8 flake: stop() kills the child, the next request spawns a
+  // fresh one, and then the OLD child's exit event arrives and resolves the
+  // NEW child's in-flight request with "memsrv exited before responding"
+  for (let i = 0; i < 25; i++) {
+    client.stop();
+    const res = await client.request("episode", { label: `restart ${i}` });
+    assert.equal(res.ok, true, res.error ?? "restart failed");
+  }
 });

@@ -59,12 +59,12 @@ Environment variables:
 
 ## Development
 
-All four codebases must be green (446 passing, 0 failing total):
+All four codebases must be green (479 passing, 0 failing total):
 
 ```bash
 cd agent && npm test && npx tsc --noEmit        # 195 passing, 0 failing
 cd ../memory-layer && cargo test                # 44 passing, 0 failing
-cd ../tui && cargo test                         # 179 passing, 0 failing
+cd ../tui && cargo test                         # 204 passing, 0 failing
 cd ../harness-engine && npm test                # 19 passing, 0 failing
 ```
 

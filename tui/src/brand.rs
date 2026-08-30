@@ -52,28 +52,35 @@ pub const COAT: Color = theme::ORANGE;
 /// breed standard asks for, without going to flat black.
 pub const ROSETTE: Color = theme::BROWN;
 
-/// Nyx sitting, tail curled. The full mascot — first run, and nowhere else.
+/// Nyx sitting, tail curled — the full mascot, first run and the empty Chat
+/// pane only.
+///
+/// Solid blocks carry the mass; box-drawing carries the detail that blocks
+/// cannot hold at this size — whiskers, a mouth, an eye with a real shape.
+/// That mix is the whole trick: pixels for the animal, ASCII for the face.
 pub const CAT_SIT: &[&str] = &[
-    "..##..........##........",
-    ".####........####.......",
-    ".################.......",
-    "##################......",
-    "##R##..####..##R##......",
-    "##################......",
-    ".######nnnn######.......",
-    "..####......####........",
-    "...############.........",
-    "....##########.......##.",
-    "...############.....##R#",
-    "..##r####R####r##...##r#",
-    "..##R####r####R##...##R#",
-    "..##r####R####r##...##r#",
-    "..##R####r####R##..##R##",
-    "..################.##r##",
-    "..################.##R##",
-    "...##############.##r###",
-    "....############.######.",
-    "....##......##...####...",
+    "..##..........##............",
+    ".####........####...........",
+    ".#pp#........#pp#...........",
+    "..################..........",
+    ".##################.........",
+    ".##R#O######O#R####.........",
+    ".##################.........",
+    "-.###ppnnnnpp###.-..........",
+    "-.###pp.m..pp###.-..........",
+    "..###pppppppp###............",
+    "...##############...........",
+    "....############.......##...",
+    "...##############.....##R#..",
+    "..##r####R####r###....##r#..",
+    "..##R####r####R###....##R#..",
+    "..##r##pppppp#r###....##r#..",
+    "..##R##pppppp#R###...##R##..",
+    "..###pppppppppp###...##r##..",
+    "..################..##R##...",
+    "..################.##r###...",
+    "...##############.######....",
+    "...##.##..##.##...####......",
 ];
 
 /// Nyx's head, for the welcome card. Seven rows is as small as the breed
@@ -96,6 +103,93 @@ pub const CAT_TINY: &[&str] = &[
     ".########.",
     "##.####.##",
 ];
+
+/// Nyx walking, seen from the side. Four frames: the legs gather, spread and
+/// gather again, so the cycle loops without a jump.
+///
+/// A side view is not vanity — a cat walking towards you does not read as
+/// walking. The tail is raised and ringed, which is the breed's tell and also
+/// the only part with room to show rosettes at this size.
+pub const WALK: [&[&str]; 4] = [&WALK_A, &WALK_B, &WALK_C, &WALK_B];
+
+const WALK_BODY: [&str; 7] = [
+    "..##.......##..##...",
+    ".#rr#.....########..",
+    ".#R#.....###O####n#.",
+    ".###...###########m.",
+    "..#####R##########..",
+    "..###r####R#######..",
+    "..################..",
+];
+const WALK_A: [&str; 8] = [
+    WALK_BODY[0], WALK_BODY[1], WALK_BODY[2], WALK_BODY[3],
+    WALK_BODY[4], WALK_BODY[5], WALK_BODY[6],
+    "..##..##....##..##..",
+];
+const WALK_B: [&str; 8] = [
+    WALK_BODY[0], WALK_BODY[1], WALK_BODY[2], WALK_BODY[3],
+    WALK_BODY[4], WALK_BODY[5], WALK_BODY[6],
+    "...##..##..##..##...",
+];
+const WALK_C: [&str; 8] = [
+    WALK_BODY[0], WALK_BODY[1], WALK_BODY[2], WALK_BODY[3],
+    WALK_BODY[4], WALK_BODY[5], WALK_BODY[6],
+    "..##...##...##...##.",
+];
+
+/// How many ticks between leg changes, and how long a blink lasts.
+pub const WALK_EVERY: usize = 3;
+pub const BLINK_EVERY: usize = 47;
+pub const BLINK_FOR: usize = 2;
+
+/// Flip art left-to-right. Directional glyphs swap with it, or the cat walks
+/// one way with its whiskers pointing the other.
+pub fn mirror(art: &[&str]) -> Vec<String> {
+    art.iter().map(|row| row.chars().rev().map(|c| match c {
+        '/' => '\\',
+        '\\' => '/',
+        other => other,
+    }).collect()).collect()
+}
+
+/// One frame of Nyx pacing: which art, and how far from the left margin.
+///
+/// Everything is derived from a tick count, so the animation is a pure
+/// function — the whole walk can be asserted in a test instead of watched.
+pub fn pace(tick: usize, cols: usize) -> (Vec<String>, usize) {
+    let w = width(WALK[0], SCALE_MASCOT);
+    let travel = cols.saturating_sub(w).max(1);
+    // out and back, so it turns around rather than teleporting to the left
+    let pos = tick % (travel * 2);
+    let (x, rightwards) = if pos < travel { (pos, true) } else { (travel * 2 - pos, false) };
+
+    let mut art: Vec<String> = WALK[(tick / WALK_EVERY) % WALK.len()]
+        .iter().map(|s| s.to_string()).collect();
+    if tick % BLINK_EVERY < BLINK_FOR {
+        art = art.into_iter().map(|r| r.replace('O', "_")).collect();
+    }
+    if !rightwards {
+        let refs: Vec<&str> = art.iter().map(|s| s.as_str()).collect();
+        art = mirror(&refs);
+    }
+    (art, x)
+}
+
+/// Nyx pacing, rendered as lines padded to `x`, ready to draw.
+///
+/// Empty when she does not fit. The same rule as the wordmark: shrink before
+/// overflowing, and when there is nothing left to shrink to, do not draw. A
+/// cat sheared off by the right edge is worse than no cat.
+pub fn pace_lines(tick: usize, cols: usize) -> Vec<Line<'static>> {
+    if cols < width(WALK[0], SCALE_MASCOT) { return Vec::new() }
+    let (art, x) = pace(tick, cols);
+    let refs: Vec<&str> = art.iter().map(|s| s.as_str()).collect();
+    paint(&refs).into_iter().map(|line| {
+        let mut spans = vec![Span::raw(" ".repeat(x))];
+        spans.extend(line.spans);
+        Line::from(spans)
+    }).collect()
+}
 
 /// MNEMO at cell resolution: strokes three cells thick, with the half-cell
 /// lip that gives the letterforms depth without needing a second colour.
@@ -127,29 +221,48 @@ pub fn width(art: &[&str], scale: usize) -> usize {
     art.iter().map(|r| r.chars().count()).max().unwrap_or(0) * scale
 }
 
+/// What one marker is drawn with, at each scale, and in what colour.
+///
+/// Detail markers are NOT a repeated fill character — a whisker drawn twice is
+/// two whiskers. Each marker carries its own two-cell and one-cell rendering,
+/// which is what lets box-drawing detail (whiskers, a mouth, an eye) live in
+/// the same grid as the solid coat.
+pub fn ink(marker: char) -> (&'static str, &'static str, Color) {
+    match marker {
+        '#' => ("██", "█", COAT),
+        'R' => ("▓▓", "▓", ROSETTE),
+        'r' => ("▒▒", "▒", ROSETTE),
+        // pale: muzzle, belly, inner ear
+        'p' => ("▒▒", "▒", theme::PEACH),
+        // an eye that reads as an eye even with the colour stripped
+        'O' => ("◗◖", "◖", theme::GREEN),
+        '_' => ("‾‾", "‾", ROSETTE),
+        'n' => ("▄▄", "▄", theme::ACCENT),
+        'm' => ("╰╯", "╰", ROSETTE),
+        '\\' => ("╲ ", "╲", theme::GREY),
+        '-' => ("──", "─", theme::GREY),
+        '/' => (" ╱", "╱", theme::GREY),
+        'e' => ("▒▒", "▒", ROSETTE),
+        _ => ("  ", " ", theme::BLACK),
+    }
+}
+
 /// Turn marker rows into coloured lines, `scale` cells per marker.
 pub fn paint_at(art: &[&str], scale: usize) -> Vec<Line<'static>> {
     art.iter().map(|row| {
         let mut spans: Vec<Span<'static>> = Vec::new();
         for c in row.chars() {
-            let (glyph, color) = match c {
-                '#' => ('█', COAT),
-                'R' => ('▓', ROSETTE),
-                'r' => ('▒', ROSETTE),
-                'n' => ('▄', theme::ACCENT),
-                'e' => ('▒', ROSETTE),
-                _ => (' ', theme::BLACK),
-            };
-            let glyph: String = std::iter::repeat(glyph).take(scale).collect();
+            let (wide, narrow, color) = ink(c);
+            let glyph = if scale >= 2 { wide } else { narrow };
             // merge into the previous span when the colour has not changed:
             // one span per pixel is a lot of allocation for a splash screen
             match spans.last_mut() {
                 Some(prev) if prev.style.fg == Some(color) => {
                     let mut s = prev.content.to_string();
-                    s.push_str(&glyph);
+                    s.push_str(glyph);
                     prev.content = s.into();
                 }
-                _ => spans.push(Span::styled(glyph, Style::default().fg(color))),
+                _ => spans.push(Span::styled(glyph.to_string(), Style::default().fg(color))),
             }
         }
         Line::from(spans)
@@ -234,11 +347,16 @@ mod tests {
     #[test]
     fn the_art_uses_only_markers_the_painter_knows() {
         // an unknown marker silently becomes a hole in the cat
-        let known = ['#', 'R', 'r', 'n', 'e', '.'];
-        for art in [CAT_SIT, CAT_HEAD, CAT_TINY, WORDMARK, WORDMARK_SMALL] {
+        let known = ['#', 'R', 'r', 'p', 'O', '_', 'n', 'm', '\\', '-', '/', 'e', '.'];
+        let mut arts: Vec<&[&str]> = vec![CAT_SIT, CAT_HEAD, CAT_TINY, WORDMARK, WORDMARK_SMALL];
+        arts.extend(WALK.iter().copied());
+        for art in arts {
             for row in art {
                 for c in row.chars() {
                     assert!(known.contains(&c), "unknown marker {c:?} in {row:?}");
+                    let (wide, narrow, _) = ink(c);
+                    assert_eq!(wide.chars().count(), 2, "{c:?} must be two cells wide");
+                    assert_eq!(narrow.chars().count(), 1, "{c:?} must have a one-cell form");
                 }
             }
         }
@@ -252,8 +370,14 @@ mod tests {
         assert!(body.contains('R') && body.contains('r'), "no rosettes");
         assert!(body.matches('R').count() >= 8, "rosettes must cluster, not appear once");
         assert!(body.contains('n'), "no nose");
-        // the head carries the mascara marks
-        assert!(CAT_SIT[4].contains('R'), "no mascara beside the eyes: {:?}", CAT_SIT[4]);
+        // and the detail that blocks cannot carry at this size
+        assert!(body.contains('O'), "no eyes with a shape");
+        assert!(body.contains('m'), "no mouth");
+        assert!(body.contains('-'), "no whiskers");
+        assert!(body.contains('p'), "no pale muzzle or belly");
+        // the mascara sits on the same row as the eyes, flanking them
+        let eyes = CAT_SIT.iter().find(|r| r.contains('O')).expect("an eye row");
+        assert!(eyes.contains('R'), "no mascara beside the eyes: {eyes:?}");
     }
 
     #[test]
@@ -270,14 +394,102 @@ mod tests {
 
     #[test]
     fn rosettes_are_drawn_from_the_thinking_animations_ramp() {
-        // one density vocabulary in the whole product, used twice
-        let glyphs: Vec<char> = paint(CAT_SIT).iter()
-            .flat_map(|l| l.spans.iter())
-            .filter(|s| s.style.fg == Some(ROSETTE))
-            .flat_map(|s| s.content.chars())
-            .collect();
-        assert!(!glyphs.is_empty());
-        assert!(glyphs.iter().all(|c| theme::DITHER.contains(c)), "{glyphs:?}");
+        // one density vocabulary in the whole product, used twice. Only the
+        // rosette markers make that claim — a mouth is line art, not density.
+        for m in ['R', 'r'] {
+            let (wide, narrow, color) = ink(m);
+            assert_eq!(color, ROSETTE);
+            assert!(wide.chars().all(|c| theme::DITHER.contains(&c)), "{m:?} -> {wide:?}");
+            assert!(narrow.chars().all(|c| theme::DITHER.contains(&c)), "{m:?} -> {narrow:?}");
+        }
+    }
+
+    #[test]
+    fn the_detail_markers_are_line_art_not_repeated_fill() {
+        // a whisker drawn twice is two whiskers; the two-cell form of a detail
+        // marker has to be the WHOLE mark, not the same glyph again
+        // Only the asymmetric marks can prove it: a level whisker and a flat
+        // nose genuinely ARE two of the same glyph.
+        for m in ['O', 'm', '/', '\\'] {
+            let (wide, _, _) = ink(m);
+            let chars: Vec<char> = wide.chars().collect();
+            assert_ne!(chars[0], chars[1], "{m:?} renders as repeated fill: {wide:?}");
+        }
+        // whereas the fills genuinely are repeated
+        for m in ['#', 'R', 'r', 'p'] {
+            let (wide, _, _) = ink(m);
+            let chars: Vec<char> = wide.chars().collect();
+            assert_eq!(chars[0], chars[1], "{m:?} should be a fill");
+        }
+    }
+
+    #[test]
+    fn the_walk_cycle_loops_without_a_jump() {
+        // frame 4 is frame 2 again, so the legs gather-spread-gather and the
+        // loop point is invisible
+        assert_eq!(WALK.len(), 4);
+        assert_eq!(WALK[1], WALK[3], "the cycle ping-pongs rather than snapping back");
+        // only the legs change; a body that shifts reads as a limp
+        for f in WALK.iter() {
+            assert_eq!(&f[..7], &WALK[0][..7], "only the last row may differ");
+        }
+        let legs: Vec<&str> = WALK.iter().map(|f| f[7]).collect();
+        assert_eq!(legs.iter().collect::<std::collections::HashSet<_>>().len(), 3,
+            "three distinct leg positions");
+    }
+
+    #[test]
+    fn nyx_walks_out_and_back_rather_than_teleporting() {
+        let cols = 80;
+        let w = width(WALK[0], SCALE_MASCOT);
+        let travel = cols - w;
+        let x = |t: usize| pace(t, cols).1;
+        assert_eq!(x(0), 0);
+        assert_eq!(x(travel), travel, "reaches the far side");
+        assert_eq!(x(travel + 1), travel - 1, "and turns around");
+        assert_eq!(x(travel * 2), 0, "back where it started");
+        // never off the edge, at any tick
+        for t in 0..travel * 4 {
+            assert!(x(t) + w <= cols, "tick {t} puts Nyx at {} in {cols}", x(t));
+        }
+    }
+
+    #[test]
+    fn she_faces_the_way_she_is_walking() {
+        let cols = 80;
+        let travel = cols - width(WALK[0], SCALE_MASCOT);
+        let out = pace(1, cols).0;
+        let back = pace(travel + 1, cols).0;
+        assert_ne!(out, back, "the art flips with the direction");
+        // mirroring is its own inverse
+        let refs: Vec<&str> = CAT_SIT.to_vec();
+        let once = mirror(&refs);
+        let once_refs: Vec<&str> = once.iter().map(|s| s.as_str()).collect();
+        assert_eq!(mirror(&once_refs), refs.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        // and a slanted whisker swaps hands, or she walks one way with her
+        // whiskers pointing the other
+        assert_eq!(mirror(&["/#\\"]), vec!["/#\\".to_string()]);
+        assert_eq!(mirror(&["/##."]), vec![".##\\".to_string()]);
+    }
+
+    #[test]
+    fn nyx_blinks_but_not_for_long() {
+        let open = (0..BLINK_EVERY).filter(|t| !pace(*t, 80).0.concat().contains('_')).count();
+        assert_eq!(open, BLINK_EVERY - BLINK_FOR, "eyes shut for {BLINK_FOR} of {BLINK_EVERY} frames");
+        assert!(pace(0, 80).0.concat().contains('_'), "a blink happens at all");
+    }
+
+    #[test]
+    fn a_narrow_terminal_does_not_push_her_off_the_screen() {
+        // a cat wider than the terminal must still render at x=0 rather than
+        // panicking on a subtraction
+        for cols in [0, 1, 10, 39, 40, 41] {
+            let (_, x) = pace(7, cols);
+            assert!(x <= 1, "cols={cols} gave x={x}");
+        }
+        // and she is simply not drawn when there is no room for her
+        assert!(pace_lines(3, 12).is_empty(), "a sheared cat is worse than none");
+        assert!(!pace_lines(3, 80).is_empty());
     }
 
     #[test]
@@ -344,5 +556,72 @@ pub fn sheet(cols: usize) -> Vec<Line<'static>> {
     out.extend(paint(CAT_HEAD));
     out.push(Line::from(""));
     out.extend(paint(CAT_TINY));
+    out.push(Line::from(""));
+    // the walk cycle, laid out as frames so it can be reviewed at a glance
+    for (i, f) in WALK.iter().enumerate().take(3) {
+        out.push(Line::from(format!("  frame {}", i + 1)));
+        out.extend(paint(f));
+    }
     out
+}
+
+#[cfg(test)]
+mod installer_sync_tests {
+    use super::*;
+
+    /// The installer duplicates the walk art because the Rust binary does not
+    /// exist yet at install time — there is nothing to ask. Duplication is
+    /// fine; SILENT duplication is not, so this reads the JavaScript and fails
+    /// the moment the two drift.
+    fn installer_source() -> String {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..").join("agent").join("bin").join("install.ts");
+        std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
+    }
+
+    fn array(src: &str, name: &str) -> Vec<String> {
+        let start = src.find(&format!("export const {name} = [")).unwrap_or_else(
+            || panic!("{name} is not exported from install.ts"));
+        let rest = &src[start..];
+        let end = rest.find("];").expect("unterminated array");
+        rest[..end].lines().skip(1)
+            .filter_map(|l| l.trim().trim_end_matches(',').strip_prefix('"'))
+            .filter_map(|l| l.strip_suffix('"'))
+            .map(|s| s.replace("\\\\", "\\"))
+            .collect()
+    }
+
+    #[test]
+    fn the_installers_walk_art_matches_this_one() {
+        let src = installer_source();
+        let body = array(&src, "WALK_BODY");
+        assert_eq!(body, WALK[0][..7].iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            "install.ts WALK_BODY has drifted from brand.rs");
+
+        let legs = array(&src, "WALK_LEGS");
+        let ours: Vec<String> = WALK.iter().map(|f| f[7].to_string()).collect();
+        assert_eq!(legs, ours, "install.ts WALK_LEGS has drifted from brand.rs");
+    }
+
+    #[test]
+    fn the_installers_wordmark_and_tagline_match() {
+        let src = installer_source();
+        assert_eq!(array(&src, "WORDMARK_SMALL"),
+            WORDMARK_SMALL.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert!(src.contains(&format!("TAGLINE = \"{TAGLINE}\"")),
+            "install.ts tagline has drifted");
+    }
+
+    #[test]
+    fn the_installers_palette_matches_the_theme() {
+        // a cat that is a different orange during install than after it is a
+        // cat the user notices, in the wrong way
+        let src = installer_source();
+        for (color, label) in [(COAT, "COAT"), (ROSETTE, "ROSETTE"), (theme::ACCENT, "ACCENT"),
+                               (theme::GREEN, "GREEN"), (theme::PEACH, "PEACH"), (theme::GREY, "GREY")] {
+            let hex = theme::hex_of(color).expect("an rgb colour");
+            let rgb = format!("RGB({}, {}, {})", hex >> 16, (hex >> 8) & 0xFF, hex & 0xFF);
+            assert!(src.contains(&rgb), "{label} ({rgb}) is missing from install.ts");
+        }
+    }
 }

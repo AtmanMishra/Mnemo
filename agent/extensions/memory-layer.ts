@@ -115,15 +115,22 @@ export class MemClient {
       this.stderrTail.push(chunk.toString("utf8"));
       if (this.stderrTail.length > 20) this.stderrTail.shift();
     });
+    // A dead child must only fail the requests that were riding on IT. After
+    // stop() + a fresh request, the OLD process's exit event arrives while a
+    // NEW one is already serving: draining unconditionally resolved that new
+    // request with "memsrv exited before responding". That was the ~1-in-8
+    // flake in the memory suite.
     proc.once("exit", () => {
-      if (this.proc === proc) this.proc = null;
+      if (this.proc !== proc) return;
+      this.proc = null;
       for (const [, p] of [...this.pending.entries()]) {
         p.resolve({ ok: false, error: "memsrv exited before responding" });
       }
       this.pending.clear();
     });
     proc.once("error", (err) => {
-      if (this.proc === proc) this.proc = null;
+      if (this.proc !== proc) return;
+      this.proc = null;
       for (const [, p] of [...this.pending.entries()]) p.resolve({ ok: false, error: String(err) });
       this.pending.clear();
     });

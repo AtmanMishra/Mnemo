@@ -4,12 +4,14 @@
   "description": "Mnemo: a terminal-native agentic coding assistant whose memory works like a brain",
   "type": "module",
   "bin": {
-    "mnemo": "./bin/mnemo.ts"
+    "mnemo": "./bin/mnemo.ts",
+    "mnemo-install": "./bin/install.ts"
   },
   "scripts": {
     "test": "node --test \"test/*.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "start": "node ./bin/mnemo.ts"
+    "start": "node ./bin/mnemo.ts",
+    "install:mnemo": "node ./bin/install.ts"
   },
   "engines": {
     "node": ">=22.6"

@@ -79,24 +79,26 @@ and a thick **ringed tail**.
 ```
     ████                    ████
   ████████                ████████
-  ████████████████████████████████
-████████████████████████████████████
-████▓▓████    ████████    ████▓▓████      ← mascara beside the eyes
-████████████████████████████████████
-  ████████████▄▄▄▄▄▄▄▄████████████        ← the nose: the one accent pixel
-    ████████            ████████
-      ████████████████████████
-        ████████████████████              ████
-      ████████████████████████          ████▓▓██
-    ████▒▒████████▓▓████████▒▒████      ████▒▒██
-    ████▓▓████████▒▒████████▓▓████      ████▓▓██  ← ringed tail
-    ████▒▒████████▓▓████████▒▒████      ████▒▒██
-    ████▓▓████████▒▒████████▓▓████    ████▓▓████
-    ████████████████████████████████  ████▒▒████
-    ████████████████████████████████  ████▓▓████
-      ████████████████████████████  ████▒▒██████
-        ████████████████████████  ████████████
-        ████            ████      ████████
+  ██▒▒▒▒██                ██▒▒▒▒██
+    ████████████████████████████████
+  ████████████████████████████████████
+  ████▓▓██◗◖████████████◗◖██▓▓████████
+  ████████████████████████████████████
+──  ██████▒▒▒▒▄▄▄▄▄▄▄▄▒▒▒▒██████  ──
+──  ██████▒▒▒▒  ╰╯    ▒▒▒▒██████  ──
+    ██████▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒██████
+      ████████████████████████████
+        ████████████████████████              ████
+      ████████████████████████████          ████▓▓██
+    ████▒▒████████▓▓████████▒▒██████        ████▒▒██
+    ████▓▓████████▒▒████████▓▓██████        ████▓▓██
+    ████▒▒████▒▒▒▒▒▒▒▒▒▒▒▒██▒▒██████        ████▒▒██
+    ████▓▓████▒▒▒▒▒▒▒▒▒▒▒▒██▓▓██████      ████▓▓████
+    ██████▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒██████      ████▒▒████
+    ████████████████████████████████    ████▓▓████
+    ████████████████████████████████  ████▒▒██████
+      ████████████████████████████  ████████████
+      ████  ████    ████  ████      ████████
 ```
 
 **The rosettes are drawn from `theme::DITHER`** — the same density ramp as the
@@ -107,6 +109,69 @@ correct.
 **The nose is the only ACCENT-coloured pixel in the entire mascot.** The brand
 colour is the cat's nose. A test enforces exactly one accent run — more than
 one and it stops being a detail and becomes decoration.
+
+### Nyx walks
+
+She is not only a portrait. A side-view walk cycle runs during **installation**
+and through **every step of onboarding** — the two moments a new user is
+waiting on something they cannot hurry, and the two moments a still screen
+reads as a hang.
+
+```
+    ████              ████    ████
+  ██▒▒▒▒██          ████████████████
+  ██▓▓██          ██████◗◖████████▄▄██
+  ██████      ██████████████████████╰╯
+    ██████████▓▓████████████████████
+    ██████▒▒████████▓▓██████████████
+    ████████████████████████████████
+    ████    ████        ████    ████
+```
+```
+    ████              ████    ████
+  ██▒▒▒▒██          ████████████████
+  ██▓▓██          ██████◗◖████████▄▄██
+  ██████      ██████████████████████╰╯
+    ██████████▓▓████████████████████
+    ██████▒▒████████▓▓██████████████
+    ████████████████████████████████
+      ████    ████    ████    ████
+```
+
+Four frames, of which the fourth repeats the second: the legs gather, spread
+and gather again, so the loop point is invisible. **Only the last row differs
+between frames** — a body that shifts as well reads as a limp, and a test holds
+that.
+
+A side view is not vanity. A cat walking towards you does not read as walking.
+The raised ringed tail is the breed's tell and the only part with room for
+rosettes at this size.
+
+| Behaviour | Rule |
+|---|---|
+| Direction | She paces out and back, turning at the edge rather than teleporting left. |
+| Facing | The art mirrors with the direction, and slanted whiskers swap hands with it. |
+| Blink | Two frames in every forty-seven. Long enough to notice, short enough not to read as asleep. |
+| Speed | 80 ms a frame — the same clock as the thinking wave. One cadence in the product. |
+| Too narrow | Below 44 columns she is not drawn at all. A cat sheared off by the right edge is worse than no cat. |
+
+All of it is a pure function of a tick count, so the whole walk is asserted in
+tests rather than watched.
+
+#### The installer
+
+`bin/install.ts` runs the four slow steps of setup — two `npm install`s and two
+cargo builds — with Nyx pacing above a status line, and each step reporting
+what it did and how long it took. Slow is fine. Silent and slow is what makes
+people kill the process.
+
+The animation turns itself off wherever nobody is watching: no TTY, `CI`, or
+`NO_COLOR`. A redrawing cat in a CI log is thousands of lines of escape codes.
+
+The art is **duplicated** there on purpose — the Rust binary does not exist yet
+at install time, so there is nothing to ask. A test in the tui crate reads
+`bin/install.ts` and fails the moment the two drift, including if the palette
+diverges.
 
 #### Three sizes
 
@@ -140,12 +205,17 @@ you cannot screenshot from a script.
 | Role | Token | Hex |
 |---|---|---|
 | Coat (golden Bengal ground) | `COAT` = `ORANGE` | `FFA300` |
-| Rosettes and the wordmark lip | `ROSETTE` = `BROWN` | `AB5236` |
+| Rosettes, mouth, closed eyes, wordmark lip | `ROSETTE` = `BROWN` | `AB5236` |
+| Muzzle, belly, inner ear | `PEACH` | `FFCCAA` |
+| Eyes | `GREEN` | `00E436` |
+| Whiskers | `GREY` | `5F574F` |
 | Nose | `ACCENT` | `FF77A8` |
-| Eyes | *negative space* | — |
 
-The eyes are holes in the coat, not drawn pixels. At this resolution a drawn
-eye becomes a smudge; a gap stays sharp at every size and needs no colour.
+The eyes are `◗◖` — two half-discs meeting — so they read as eyes even with
+every colour stripped. That matters more than it sounds: the art is quoted in
+plain text in this document, in commit messages, and in `--brand` output piped
+to a file, and a mascot that only works in colour is a mascot with no
+reproduction.
 
 The coat is golden rather than silver or charcoal — the golden brown Bengal is
 the archetype, and its rosettes carry the most contrast. Pink chrome over a
@@ -156,14 +226,24 @@ golden mascot is also simply not a combination another terminal tool is using.
 Art lives in [tui/src/brand.rs](tui/src/brand.rs) as **marker strings**, never
 as pre-coloured spans, so shape and palette stay one thing each:
 
-| marker | is | drawn as |
-|---|---|---|
-| `#` | coat / letterform | `█` in COAT |
-| `R` | rosette core | `▓` in ROSETTE |
-| `r` | rosette edge | `▒` in ROSETTE |
-| `n` | nose | `▄` in ACCENT |
-| `e` | wordmark lip | `▒` in ROSETTE |
-| `.` | nothing | a space |
+| marker | is | two cells | one cell |
+|---|---|---|---|
+| `#` | coat / letterform | `██` COAT | `█` |
+| `R` | rosette core | `▓▓` ROSETTE | `▓` |
+| `r` | rosette edge | `▒▒` ROSETTE | `▒` |
+| `p` | pale: muzzle, belly, inner ear | `▒▒` PEACH | `▒` |
+| `O` | eye, open | `◗◖` GREEN | `◖` |
+| `_` | eye, blinking | `‾‾` ROSETTE | `‾` |
+| `n` | nose | `▄▄` ACCENT | `▄` |
+| `m` | mouth | `╰╯` ROSETTE | `╰` |
+| `\` `-` `/` | whiskers | `╲ ` `──` ` ╱` GREY | `╲` `─` `╱` |
+| `e` | wordmark lip | `▒▒` ROSETTE | `▒` |
+| `.` | nothing | two spaces | a space |
+
+**Detail markers are not a repeated fill character.** A whisker drawn twice is
+two whiskers, so each marker carries its own two-cell rendering rather than
+doubling one glyph. That is what lets box-drawing line art live in the same
+grid as the solid coat — pixels for the animal, ASCII for the face.
 
 `paint_at(art, scale)` is the only place a glyph becomes a colour. Two scales
 exist: the **mascot** is stored as pixels and drawn 2 cells wide (a terminal

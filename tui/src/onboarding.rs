@@ -56,6 +56,10 @@ pub struct Onboarding {
     pub models_error: Option<String>,
     /// Cursor into `visible_models()`.
     pub model_index: usize,
+    /// Frames elapsed since the overlay opened. Drives Nyx pacing along the
+    /// bottom — the whole point is that she is there for the WHOLE of setup,
+    /// not just the first screen.
+    pub tick: usize,
     home: PathBuf,
 }
 
@@ -72,6 +76,7 @@ impl Onboarding {
             models: Vec::new(),
             models_error: None,
             model_index: 0,
+            tick: 0,
             home,
         }
     }
@@ -388,6 +393,11 @@ pub fn lines_in(o: &Onboarding, existing: &AuthFile, cols: usize) -> Vec<Line<'s
             Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
         )));
     }
+    // Nyx paces along the bottom for every step of setup. Onboarding is the
+    // one moment a new user is waiting on something they cannot hurry; a
+    // still screen during it reads as a hang.
+    out.push(Line::from(""));
+    out.extend(brand::pace_lines(o.tick, cols.saturating_sub(2)));
     out
 }
 
@@ -699,5 +709,79 @@ mod model_picker_tests {
         let mut first = Onboarding::new(home, Reason::FirstRun);
         assert!(!first.dismissable());
         assert!(!first.on_key(key(KeyCode::Esc), 1));
+    }
+}
+
+#[cfg(test)]
+mod pacing_tests {
+    use super::*;
+
+    fn text(l: &Line) -> String { l.spans.iter().map(|s| s.content.to_string()).collect() }
+
+    fn tmp2(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("mnemo-pace-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn nyx_is_on_screen_for_every_step_of_setup() {
+        // "she is there through the WHOLE onboarding process" — not just the
+        // first screen
+        let home = tmp2("every-step");
+        let auth = auth::load(&home);
+        for step in [Step::Provider, Step::Key, Step::Model] {
+            let mut o = Onboarding::new(home.clone(), Reason::FirstRun);
+            o.step = step;
+            let rendered: Vec<String> = lines_in(&o, &auth, 120).iter().map(text).collect();
+            let joined = rendered.join("\n");
+            assert!(joined.contains("◗◖") || joined.contains("‾‾"),
+                "no cat on {step:?}: {joined}");
+        }
+    }
+
+    #[test]
+    fn she_moves_between_frames() {
+        let home = tmp2("moves");
+        let auth = auth::load(&home);
+        let frame = |t: usize| {
+            let mut o = Onboarding::new(home.clone(), Reason::Login);
+            o.tick = t;
+            lines_in(&o, &auth, 120).iter().map(text).collect::<Vec<_>>().join("\n")
+        };
+        assert_ne!(frame(0), frame(4), "the animation is not animating");
+        // and the mascot is drawn at two cells per pixel, like everywhere else
+        let mut o = Onboarding::new(home, Reason::Login);
+        o.tick = 6;
+        let cat = lines_in(&o, &auth, 120);
+        let coat = cat.iter().flat_map(|l| l.spans.iter())
+            .find(|s| s.style.fg == Some(brand::COAT) && s.content.contains('█'))
+            .expect("a coat span");
+        assert!(coat.content.contains("██"), "drawn at the wrong scale: {:?}", coat.content);
+    }
+
+    #[test]
+    fn a_narrow_terminal_still_gets_a_whole_cat() {
+        let home = tmp2("narrow");
+        let auth = auth::load(&home);
+        let mut o = Onboarding::new(home, Reason::Login);
+        o.tick = 3;
+        // Prose is clipped by the renderer and reads fine clipped. ART does
+        // not: a cat cut in half by the right edge is a bug, so only the
+        // drawn rows are held to the width.
+        for cols in [30usize, 44, 80, 200] {
+            let widest = lines_in(&o, &auth, cols).iter()
+                .filter(|l| text(l).contains('█'))
+                .map(|l| text(l).chars().count())
+                .max().unwrap_or(0);
+            assert!(widest <= cols, "cols={cols} drew art {widest} wide");
+        }
+        // she fits from 44 columns up, and is dropped below that rather than
+        // being cut off by the right edge
+        let has_cat = |cols: usize| lines_in(&o, &auth, cols).iter()
+            .any(|l| text(l).contains("◗◖") || text(l).contains("‾‾"));
+        assert!(!has_cat(30));
+        assert!(has_cat(80));
     }
 }
