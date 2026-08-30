@@ -1,4 +1,5 @@
 pub mod ann;
+pub mod consolidate;
 pub mod model;
 pub mod persist;
 pub mod remote;
@@ -13,3 +14,5 @@ mod p0_tests;
 mod steering_tests;
 #[cfg(test)]
 mod search_tests;
+#[cfg(test)]
+mod consolidate_tests;

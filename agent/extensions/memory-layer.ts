@@ -222,6 +222,31 @@ const steerParams = Type.Object({
  * the before_agent_start hook (small models need an explicit instruction to
  * consult/store memory proactively; validated by eval/memory-eval.mjs).
  */
+/** One consolidation pass: distil recurring episodes into semantic lessons.
+ * Returns the number of lessons standing after the pass. */
+export async function runConsolidate(
+  client: Pick<MemClient, "request">,
+  log: (line: string) => void = console.log,
+): Promise<number> {
+  const res = await client.request("consolidate");
+  if (!res.ok) {
+    log(`consolidate failed: ${res.error ?? "unknown error"}`);
+    return -1;
+  }
+  const lessons: Array<{ label: string; occurrences: number; sources: number[] }> =
+    res.result?.lessons ?? [];
+  for (const l of lessons) {
+    log(`${l.label}  x${l.occurrences}  (from ${l.sources.map((s) => `#${s}`).join(" ")})`);
+  }
+  const applied = Number(res.result?.applied ?? 0);
+  log(
+    lessons.length === 0
+      ? "nothing to consolidate yet (a theme needs at least two episodes)"
+      : `${lessons.length} lesson(s), ${applied} op(s) written`,
+  );
+  return lessons.length;
+}
+
 export const MEMORY_DIRECTIVE = [
   "",
   "## Persistent memory",

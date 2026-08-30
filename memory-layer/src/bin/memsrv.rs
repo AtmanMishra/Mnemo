@@ -8,6 +8,7 @@ use memory_layer::model::*;
 use memory_layer::persist::{self, Journal};
 use memory_layer::remote::OpenRouterEmbedder;
 use memory_layer::search::{build_vectors, route_query, search, SearchOpts};
+use memory_layer::consolidate::consolidate;
 use memory_layer::steering::{reinforce, steer, Correction};
 use memory_layer::store::StoreData;
 use memory_layer::vec::{Embedder, HashingEmbedder};
@@ -255,6 +256,13 @@ fn handle(
             }))
         }
 
+        "consolidate" => {
+            let (ops, lessons) = consolidate(s, *clock);
+            let applied = ops.len();
+            for op in ops { apply(s, j, op)?; }
+            Ok(json!({ "applied": applied, "lessons": lessons }))
+        }
+
         "commit_log" => {
             let node = p_node(params, "node")?;
             let kind = params.get("kind").and_then(|k| k.as_str()).ok_or("missing 'kind'")?;
@@ -279,6 +287,6 @@ fn handle(
             Ok(json!({ "area": format!("{area:?}") }))
         }
 
-        other => Err(format!("unknown method '{other}' (supported: ping dump state create_node episode fact link search set_area steer good)")),
+        other => Err(format!("unknown method '{other}' (supported: ping dump state create_node episode fact link search set_area steer good consolidate)")),
     }
 }

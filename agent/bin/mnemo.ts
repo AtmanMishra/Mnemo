@@ -4,6 +4,7 @@
 // Usage:
 //   mnemo "<prompt>"          one-shot prompt (pi print mode when non-TTY)
 //   mnemo                     interactive TUI (pi interactive mode)
+//   mnemo consolidate         distil recurring episodes into semantic lessons
 //   mnemo --list-sessions     list saved sessions from ~/.sea/sessions and exit
 //   mnemo --help              pi's own help
 //
@@ -27,7 +28,7 @@ import {
 } from "../src/auth/store.ts";
 import { runWizard } from "../src/auth/wizard.ts";
 import { seaToolsInline } from "../extensions/sea-tools-inline.ts";
-import { memoryLayerHooks } from "../extensions/memory-layer.ts";
+import { memoryLayerHooks, runConsolidate, sharedMem } from "../extensions/memory-layer.ts";
 import approvalExt from "../extensions/approval-gate.ts";
 
 const invokedDirectly = (() => {
@@ -187,6 +188,15 @@ async function run(): Promise<void> {
   // Help/version/pi subcommands must reach pi without a provider check.
   if (argv[0] === "auth") {
     await handleAuth(argv);
+    return;
+  }
+  // consolidation is pure memory-layer work: no provider, no model, no LLM
+  if (argv[0] === "consolidate") {
+    try {
+      await runConsolidate(sharedMem);
+    } finally {
+      sharedMem.stop();
+    }
     return;
   }
   const PI_SUBCOMMANDS = ["install", "remove", "uninstall", "update", "list", "config"];

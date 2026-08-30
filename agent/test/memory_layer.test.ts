@@ -7,7 +7,7 @@ import assert from "node:assert";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { MemClient } from "../extensions/memory-layer.ts";
+import { MemClient, runConsolidate } from "../extensions/memory-layer.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sea-mem-test-"));
 const journal = path.join(tmp, "journal.jsonl");
@@ -87,4 +87,41 @@ test("journal persists: a fresh client replays state", async () => {
   } finally {
     second.stop();
   }
+});
+
+test("consolidate distils repeated failures into a semantic lesson", async () => {
+  // two episodes failing on the same theme -> one lesson
+  for (const svc of ["checkout", "cart"]) {
+    const ep = await client.request("episode", { label: `deploy ${svc}` });
+    assert.equal(ep.ok, true);
+    const steered = await client.request("steer", {
+      episode: Number(ep.result.episode),
+      failure: `helm rollback timed out on ${svc}`,
+    });
+    assert.equal(steered.ok, true, steered.error);
+    assert.ok(steered.result.pain_node, "steer must leave a salience pain marker");
+  }
+
+  const lines: string[] = [];
+  const count = await runConsolidate(client, (l) => lines.push(l));
+  assert.ok(count >= 1, `expected a lesson, got: ${lines.join(" | ")}`);
+  assert.ok(
+    lines.some((l) => l.startsWith("lesson: ") && /helm|rollback/.test(l)),
+    `lesson should name the shared theme: ${lines.join(" | ")}`,
+  );
+
+  // second pass writes nothing new
+  const again: string[] = [];
+  await runConsolidate(client, (l) => again.push(l));
+  assert.match(again.at(-1)!, /0 op\(s\) written/);
+});
+
+test("consolidate reports the failure instead of throwing", async () => {
+  const lines: string[] = [];
+  const n = await runConsolidate(
+    { request: async () => ({ ok: false, error: "memsrv is not running" }) },
+    (l) => lines.push(l),
+  );
+  assert.equal(n, -1);
+  assert.match(lines[0]!, /memsrv is not running/);
 });
