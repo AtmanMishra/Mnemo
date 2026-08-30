@@ -192,6 +192,16 @@ type Theme struct {
 	Label    lipgloss.Style
 	Selected lipgloss.Style
 	Key      lipgloss.Style
+
+	// Texture is the header band at rest. It is drawn in the mascot's own
+	// rosette brown rather than in near-black: a band nobody can see is not
+	// restraint, it is a missing element, and the screen reads as unfinished.
+	Texture lipgloss.Style
+
+	// Said is a line the user typed. It carries a background rather than a
+	// colour, because the strongest distinction a terminal can draw between
+	// two speakers is one of them sitting on a different ground.
+	Said lipgloss.Style
 }
 
 // New builds a theme. isDark comes from the terminal, reported as a message
@@ -221,7 +231,12 @@ func New(p Palette, g Glyphs, isDark bool) *Theme {
 	t.Coat = s().Foreground(t.P.Coat)
 	t.Rosette = s().Foreground(t.P.Rosette)
 
-	t.Rule = s().Foreground(t.P.Faint)
+	// GREY, not FAINT. The chrome was drawn a shade above the background and
+	// the whole interface read as bland — the structure was there and
+	// invisible, which is the worst of both.
+	t.Rule = s().Foreground(t.P.Muted)
+	t.Texture = s().Foreground(t.P.Rosette)
+	t.Said = s().Foreground(t.P.Ink).Background(t.P.Faint).Bold(true)
 	t.Label = s().Foreground(t.P.Accent).Bold(true)
 	t.Selected = s().Foreground(t.P.Ground).Background(t.P.Accent)
 	t.Key = s().Foreground(t.P.Accent)

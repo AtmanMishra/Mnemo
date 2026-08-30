@@ -46,6 +46,8 @@ type Map struct {
 	AllBlocks key.Binding
 	Find      key.Binding
 	MouseOff  key.Binding
+	Cycle     key.Binding
+	CycleBack key.Binding
 	KeysHelp  key.Binding
 	Interrupt key.Binding
 	Quit      key.Binding
@@ -74,6 +76,8 @@ type Map struct {
 	Insert   key.Binding
 
 	// Browse — a tree with focus.
+	Next        key.Binding
+	Prev        key.Binding
 	Open        key.Binding
 	Close       key.Binding
 	ExpandAll   key.Binding
@@ -103,6 +107,8 @@ func New() Map {
 		AllBlocks: b("^a", "open everything", "ctrl+a"),
 		Find:      b("^f", "find in transcript", "ctrl+f"),
 		MouseOff:  b("^g", "hand drag-select back to the terminal", "ctrl+g"),
+		Cycle:     b("tab", "prompt · transcript · explorer", "tab"),
+		CycleBack: b("shift+tab", "the other way", "shift+tab"),
 		KeysHelp:  b("^h", "keys", "ctrl+h", "f1"),
 		Interrupt: b("^c", "interrupt, twice to quit", "ctrl+c"),
 		Quit:      b("^d", "quit", "ctrl+d"),
@@ -115,21 +121,26 @@ func New() Map {
 		HistPrev: b("up", "previous prompt", "up"),
 		HistNext: b("down", "next prompt", "down"),
 
-		Down:     b("j", "down", "j", "down"),
-		Up:       b("k", "up", "k", "up"),
+		Down:     b("j", "scroll down a line", "j"),
+		Up:       b("k", "scroll up a line", "k"),
 		HalfDown: b("^d", "half page down", "ctrl+d"),
 		HalfUp:   b("^u", "half page up", "ctrl+u"),
 		Top:      b("g", "top", "g", "home"),
 		Bottom:   b("G", "bottom", "G", "end"),
-		NextBlk:  b("J", "next block", "J", "tab"),
-		PrevBlk:  b("K", "previous block", "K", "shift+tab"),
-		Toggle:   b("enter", "fold or unfold", "enter", " "),
-		Yank:     b("y", "copy this block", "y"),
-		YankAll:  b("Y", "copy the transcript", "Y"),
-		Insert:   b("i", "back to the prompt", "i", "a"),
+		// The arrows move by BLOCK, not by line. A transcript is a list of
+		// blocks, and the unit you actually want to step through is the one
+		// the arrow keys should give you without a modifier.
+		NextBlk: b("↓", "next block", "down", "J"),
+		PrevBlk: b("↑", "previous block", "up", "K"),
+		Toggle:  b("enter", "fold or unfold", "enter", " "),
+		Yank:    b("y", "copy this block", "y"),
+		YankAll: b("Y", "copy the transcript", "Y"),
+		Insert:  b("i", "back to the prompt", "i", "a"),
 
-		Open:        b("l", "open, then go deeper", "l", "right"),
-		Close:       b("h", "close, or jump to the parent", "h", "left"),
+		Next:        b("↓", "down", "down", "j"),
+		Prev:        b("↑", "up", "up", "k"),
+		Open:        b("→", "open, then go deeper", "right", "l"),
+		Close:       b("←", "close, or jump to the parent", "left", "h"),
 		ExpandAll:   b("E", "expand everything", "E"),
 		CollapseAll: b("C", "collapse everything", "C"),
 		Choose:      b("enter", "use this", "enter"),
@@ -159,11 +170,12 @@ func (m Map) Help() []Entry {
 	var out []Entry
 	// Global first: these are the ones that remove the most keystrokes.
 	out = append(out, group(Insert, m.Palette, m.Explorer, m.Sessions, m.Memory, m.Logs,
-		m.AllThink, m.AllTools, m.AllBlocks, m.Find, m.MouseOff, m.KeysHelp, m.Interrupt, m.Quit, m.Back)...)
+		m.AllThink, m.AllTools, m.AllBlocks, m.Find, m.MouseOff, m.Cycle, m.CycleBack,
+		m.KeysHelp, m.Interrupt, m.Quit, m.Back)...)
 	out = append(out, group(Insert, m.Send, m.Steer, m.Newline, m.Complete, m.HistPrev, m.HistNext)...)
 	out = append(out, group(Read, m.Down, m.Up, m.HalfDown, m.HalfUp, m.Top, m.Bottom,
 		m.NextBlk, m.PrevBlk, m.Toggle, m.Yank, m.YankAll, m.Insert)...)
-	out = append(out, group(Browse, m.Open, m.Close, m.ExpandAll, m.CollapseAll, m.Choose, m.Filter)...)
+	out = append(out, group(Browse, m.Next, m.Prev, m.Open, m.Close, m.ExpandAll, m.CollapseAll, m.Choose, m.Filter)...)
 	return out
 }
 
@@ -176,7 +188,7 @@ func (m Map) OverlayHints(isTree bool) []Entry {
 		return Entry{Mode: Browse, Key: h.Key, Desc: h.Desc}
 	}
 	if isTree {
-		return []Entry{e(m.Open), e(m.Close), e(m.Choose), e(m.Back)}
+		return []Entry{e(m.Next), e(m.Open), e(m.Choose), e(m.Back)}
 	}
 	return []Entry{{Mode: Browse, Key: "type", Desc: "filter"}, e(m.Choose), e(m.Back)}
 }
@@ -190,15 +202,15 @@ func (m Map) Hints(mode Mode, busy bool) []Entry {
 	}
 	switch mode {
 	case Read:
-		return []Entry{e(m.NextBlk), e(m.Toggle), e(m.AllThink), e(m.Insert)}
+		return []Entry{e(m.NextBlk), e(m.Open), e(m.Yank), e(m.Insert)}
 	case Browse:
-		return []Entry{e(m.Open), e(m.Close), e(m.Choose), e(m.Back)}
+		return []Entry{e(m.Next), e(m.Open), e(m.Choose), e(m.Back)}
 	default:
 		if busy {
 			// While the agent is working the two enter keys mean different
 			// things, and guessing wrong is expensive. Say so.
 			return []Entry{e(m.Send), e(m.Steer), e(m.Interrupt), e(m.Palette)}
 		}
-		return []Entry{e(m.Send), e(m.Back), e(m.AllThink), e(m.Palette)}
+		return []Entry{e(m.Send), e(m.Cycle), e(m.Back), e(m.Palette)}
 	}
 }

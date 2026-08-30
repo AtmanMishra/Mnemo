@@ -48,6 +48,12 @@ func press(t *testing.T, m *Model, keystroke string) {
 		k = tea.Key{Code: tea.KeyDown}
 	case "tab":
 		k = tea.Key{Code: tea.KeyTab}
+	case "shift+tab":
+		k = tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}
+	case "left":
+		k = tea.Key{Code: tea.KeyLeft}
+	case "right":
+		k = tea.Key{Code: tea.KeyRight}
 	case "backspace":
 		k = tea.Key{Code: tea.KeyBackspace}
 	default:
@@ -90,12 +96,16 @@ func TestTheScreenIsExactlyTheTerminal(t *testing.T) {
 func TestThePromptSitsAtTheBottomEvenWithAShortTranscript(t *testing.T) {
 	m := fixture(t, 80, 30)
 	lines := strings.Split(screen(m), "\n")
-	// second to last row is the prompt; last is the status band
-	if !strings.Contains(lines[len(lines)-2], "ask, or press") {
-		t.Fatalf("prompt is not above the status line:\n%s", strings.Join(lines[len(lines)-3:], "\n"))
-	}
+	// The status band is always the last row; the prompt sits just above it,
+	// separated by one blank row of air when the screen can afford one.
 	if !strings.Contains(lines[len(lines)-1], "INSERT") {
 		t.Fatalf("status band is not the last row: %q", lines[len(lines)-1])
+	}
+	if !strings.Contains(lines[len(lines)-3], "ask, or press") {
+		t.Fatalf("prompt is not just above the status line:\n%s", strings.Join(lines[len(lines)-4:], "\n"))
+	}
+	if strings.TrimSpace(lines[len(lines)-2]) != "" {
+		t.Fatalf("expected a blank row between the prompt and the status band, got %q", lines[len(lines)-2])
 	}
 }
 
@@ -289,7 +299,7 @@ func TestOverlaysAlwaysSayWhatTheyAreFor(t *testing.T) {
 		"ctrl+s": "every conversation pi has stored",
 		"ctrl+m": "what Mnemo has remembered",
 		"ctrl+l": "every run as a call graph",
-		"ctrl+k": "run anything by name",
+		"ctrl+k": "every command, skill and plugin",
 	} {
 		m := fixture(t, 100, 30)
 		press(t, m, chord)
@@ -314,9 +324,9 @@ func TestEmptyOverlaysSayWhatWouldFillThem(t *testing.T) {
 func TestThePaletteFindsAnyBindingByName(t *testing.T) {
 	m := fixture(t, 100, 30)
 	press(t, m, "ctrl+k")
-	typeIn(t, m, "folder")
+	typeIn(t, m, "explor")
 	s := screen(m)
-	if !strings.Contains(s, "folder explorer") {
+	if !strings.Contains(s, "/explorer") {
 		t.Fatalf("the palette did not filter:\n%s", s)
 	}
 	press(t, m, "enter")
@@ -518,5 +528,232 @@ func TestInterruptingAlsoStopsTheSpinners(t *testing.T) {
 		if b.State == chat.Running {
 			t.Fatal("interrupting must settle the transcript too")
 		}
+	}
+}
+
+// --- slash commands ------------------------------------------------------
+
+func TestTypingASlashOpensTheMenu(t *testing.T) {
+	m := fixture(t, 100, 30)
+	press(t, m, "/")
+	s := screen(m)
+	if !strings.Contains(s, "/sessions") {
+		t.Fatalf("the slash menu did not open:\n%s", s)
+	}
+	if !strings.Contains(s, "↑ ↓ pick") {
+		t.Fatal("an unlabelled list gives no reason to reach for the arrow keys")
+	}
+}
+
+func TestTheMenuNarrowsAsYouType(t *testing.T) {
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "/mem")
+	s := screen(m)
+	if !strings.Contains(s, "/memory") {
+		t.Fatalf("expected /memory:\n%s", s)
+	}
+	if strings.Contains(s, "/sessions") {
+		t.Fatalf("the menu did not narrow:\n%s", s)
+	}
+}
+
+func TestArrowsPickFromTheMenuInsteadOfBrowsingHistory(t *testing.T) {
+	m := fixture(t, 100, 30)
+	press(t, m, "/")
+	before := m.prompt.SugIndex()
+	press(t, m, "down")
+	if m.prompt.SugIndex() == before {
+		t.Fatal("↓ must move the selection while the menu is open")
+	}
+	press(t, m, "up")
+	if m.prompt.SugIndex() != before {
+		t.Fatal("↑ must move it back")
+	}
+}
+
+func TestTabCompletesAndEnterRuns(t *testing.T) {
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "/expl")
+	press(t, m, "tab")
+	if got := m.prompt.Value(); got != "/explorer " {
+		t.Fatalf("tab should complete the name and leave room for arguments, got %q", got)
+	}
+	typeIn(t, m, "/expl")
+	press(t, m, "enter")
+	if !m.ExplorerOpen() {
+		t.Fatal("enter on a highlighted command must run it")
+	}
+}
+
+func TestEscClosesTheMenuWithoutLeavingTheProrompt(t *testing.T) {
+	m := fixture(t, 100, 30)
+	press(t, m, "/")
+	press(t, m, "esc")
+	if m.prompt.MenuOpen() {
+		t.Fatal("esc must close the menu")
+	}
+	if m.Mode() != keymap.Insert {
+		t.Fatal("the first esc closes the menu; it does not also leave the prompt")
+	}
+}
+
+func TestTheMenuClosesOnceArgumentsStart(t *testing.T) {
+	// After the name, what follows is arguments; a menu still filtering on
+	// them would be filtering on the wrong thing.
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "/memory ")
+	if m.prompt.MenuOpen() {
+		t.Fatal("a space ends the name")
+	}
+}
+
+func TestAnUnknownSlashCommandIsRefusedNotSentAsProse(t *testing.T) {
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "/nosuchthing x")
+	press(t, m, "enter")
+	if !strings.Contains(screen(m), "no command called /nosuchthing") {
+		t.Fatalf("it must say so:\n%s", lastLine(screen(m)))
+	}
+	if m.Chat().Len() != 1 {
+		t.Fatal("an unknown command must not reach the model as a question about a slash")
+	}
+}
+
+func TestASkillBecomesAPromptThatNamesItsFile(t *testing.T) {
+	m := fixture(t, 120, 30)
+	dir := filepath.Join(m.CWD(), ".claude", "skills", "tidy")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"),
+		[]byte("---\nname: tidy\ndescription: clean up\n---\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Rebuild so the new skill is discovered the way a fresh start would.
+	m2 := New(Config{Home: m.Home(), CWD: m.CWD(), Dark: true, Agent: agent.Offline{Reason: "test"}})
+	m2.Resize(120, 30)
+	found := false
+	for _, c := range m2.Commands() {
+		if c.Name == "tidy" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a SKILL.md in the project must be reachable as a slash command")
+	}
+	typeIn(t, m2, "/tidy the imports")
+	press(t, m2, "enter")
+	got := screen(m2)
+	if !strings.Contains(got, "SKILL.md") {
+		t.Fatalf("the prompt must name the file so the agent can read it:\n%s", got)
+	}
+	if !strings.Contains(got, "the imports") {
+		t.Fatalf("arguments must survive:\n%s", got)
+	}
+}
+
+// --- navigation ----------------------------------------------------------
+
+func TestTabWalksTheThreeSurfaces(t *testing.T) {
+	// One unmodified key that always moves to the next thing is what makes
+	// this navigable without memorising anything.
+	m := fixture(t, 120, 30)
+	press(t, m, "ctrl+t") // explorer open, and focused
+	press(t, m, "tab")
+	if m.Mode() != keymap.Insert {
+		t.Fatalf("tab from the explorer returns to the prompt, got %v", m.Mode())
+	}
+	press(t, m, "tab")
+	if m.Mode() != keymap.Read {
+		t.Fatalf("then the transcript, got %v", m.Mode())
+	}
+	press(t, m, "tab")
+	if m.Mode() != keymap.Browse {
+		t.Fatalf("then the explorer, got %v", m.Mode())
+	}
+	press(t, m, "shift+tab")
+	if m.Mode() != keymap.Read {
+		t.Fatalf("shift+tab goes the other way, got %v", m.Mode())
+	}
+}
+
+func TestTabSkipsTheExplorerWhenItIsClosed(t *testing.T) {
+	m := fixture(t, 120, 30)
+	press(t, m, "tab")
+	press(t, m, "tab")
+	if m.Mode() != keymap.Insert {
+		t.Fatalf("with no explorer there are two stops, got %v", m.Mode())
+	}
+}
+
+func TestArrowsMeanTheSameThingEverywhere(t *testing.T) {
+	// ↑ ↓ move, → opens, ← closes — in the transcript and in every tree.
+	m := fixture(t, 120, 30)
+	for i := 0; i < 3; i++ {
+		m.Chat().Append(&chat.Block{Kind: chat.Think, Title: "thinking", Body: []string{"x"}})
+	}
+	press(t, m, "esc") // read mode
+	press(t, m, "up")
+	if m.Chat().Focus() < 0 {
+		t.Fatal("↑ must move by block")
+	}
+	press(t, m, "right")
+	if b := m.Chat().Focused(); b == nil || !b.Open {
+		t.Fatal("→ must open the focused block")
+	}
+	press(t, m, "left")
+	if b := m.Chat().Focused(); b == nil || b.Open {
+		t.Fatal("← must close it")
+	}
+}
+
+func TestArrowsMoveInTheExplorerToo(t *testing.T) {
+	m := fixture(t, 120, 30)
+	press(t, m, "ctrl+t")
+	before := m.explorer.Cursor()
+	press(t, m, "down")
+	if m.explorer.Cursor() == before {
+		t.Fatal("↓ must move in the explorer")
+	}
+}
+
+// --- space ---------------------------------------------------------------
+
+func TestTheScreenHasAMarginAndBreathingRoom(t *testing.T) {
+	m := fixture(t, 100, 30)
+	lines := strings.Split(screen(m), "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		if !strings.HasPrefix(l, "  ") {
+			t.Fatalf("row %d starts at column 0: %q — the glyphs sit against the window frame", i, l)
+		}
+	}
+	if strings.TrimSpace(lines[1]) != "" {
+		t.Fatalf("expected a blank row under the header, got %q", lines[1])
+	}
+}
+
+func TestTheMarginShrinksRatherThanEatingANarrowScreen(t *testing.T) {
+	// At forty columns, two spent on each side is a tenth of the screen.
+	wide := fixture(t, 100, 30)
+	narrow := fixture(t, 30, 20)
+	if !strings.HasPrefix(strings.Split(screen(wide), "\n")[0], "  ") {
+		t.Fatal("a wide screen gets the full margin")
+	}
+	if strings.HasPrefix(strings.Split(screen(narrow), "\n")[0], " ") {
+		t.Fatal("a narrow screen gives its columns to content")
+	}
+}
+
+func TestAShortTerminalDropsTheAirBeforeTheContent(t *testing.T) {
+	m := fixture(t, 100, 12)
+	lines := strings.Split(screen(m), "\n")
+	if strings.TrimSpace(lines[1]) == "" {
+		t.Fatal("air is worth less than a line of transcript; below 18 rows it goes")
+	}
+	if len(lines) != 12 {
+		t.Fatalf("drew %d rows", len(lines))
 	}
 }

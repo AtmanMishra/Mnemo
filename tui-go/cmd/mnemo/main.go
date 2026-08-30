@@ -25,10 +25,11 @@ func main() {
 		sess = flag.String("session", "", "resume this pi session file")
 		msrv = flag.String("memsrv", "", "path to the built memsrv binary")
 		jrnl = flag.String("journal", "", "path to the memory journal memsrv should open")
+		hdir = flag.String("bundles", "", "directory of harness tool bundles")
 	)
 	flag.Parse()
 
-	cfg := app.Config{Home: *home, CWD: *cwd, Dark: true, MemsrvBin: *msrv, MemJournal: *jrnl}
+	cfg := app.Config{Home: *home, CWD: *cwd, Dark: true, MemsrvBin: *msrv, MemJournal: *jrnl, HarnessDir: *hdir}
 
 	// The live backend is opt-in by path rather than discovered, so running
 	// the interface never silently spawns a node process somebody did not ask

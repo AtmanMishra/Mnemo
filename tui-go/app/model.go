@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/chat"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/command"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/filetree"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/memory"
@@ -40,6 +41,9 @@ type Config struct {
 	// that, in a test, finds the real one.
 	MemsrvBin  string
 	MemJournal string
+
+	// HarnessDir holds tool bundles. A parameter for the same reason.
+	HarnessDir string
 }
 
 // NoticeFor is how long a one-off message stays in the status line.
@@ -82,6 +86,10 @@ type Model struct {
 	openTool map[string]*chat.Block
 
 	mem *memory.Client
+
+	// cmds is every slash command: built-ins, skills, plugins, bundles.
+	// Loaded once at start; /reload picks up a skill you just wrote.
+	cmds []command.Command
 }
 
 // New builds the application.
@@ -110,10 +118,14 @@ func New(cfg Config) *Model {
 		mouse:    true,
 		openTool: map[string]*chat.Block{},
 	}
+	m.cmds = command.Load(cfg.CWD, cfg.Home, cfg.HarnessDir)
 	m.welcome()
 	m.layout()
 	return m
 }
+
+// Commands is every slash command, for tests.
+func (m *Model) Commands() []command.Command { return m.cmds }
 
 // welcome is what an empty transcript says.
 //
@@ -124,13 +136,17 @@ func (m *Model) welcome() {
 	m.chat.Append(&chat.Block{Kind: chat.Agent, Body: []string{
 		"ready.",
 		"",
-		"^k   anything, by name",
+		"/    commands, skills and plugins — start typing and pick with ↑ ↓",
+		"^k   the same list, as a palette",
+		"",
 		"^e   open every thinking block at once",
 		"^t   the folder explorer, on the right",
-		"^s   sessions and the sub-agents under them",
+		"^s   sessions, and the sub-agents under them",
 		"",
-		"esc leaves the prompt and hands the transcript single-letter keys.",
-		"esc again comes back. That is the whole navigation model.",
+		"tab  moves between the prompt, the transcript and the explorer.",
+		"esc  goes up one level, from anywhere. That is the whole model.",
+		"",
+		"In the transcript and in any tree: ↑ ↓ move, → opens, ← closes.",
 	}})
 }
 
@@ -175,18 +191,18 @@ func (m *Model) layout() {
 	body := m.bodyHeight()
 
 	right := m.explorerWidth()
-	left := m.w - right
+	left := m.inner()
 	if right > 0 {
-		left--
+		left = m.inner() - right - 3
 	}
 
 	m.chat.SetSize(left, body)
-	m.prompt.SetWidth(m.w - 2)
+	m.prompt.SetWidth(m.inner() - 2)
 	if right > 0 {
 		m.explorer.SetSize(right, body)
 	}
 	if m.ov != nil {
-		m.ov.SetSize(m.w, body+1)
+		m.ov.SetSize(m.inner(), body+1)
 	}
 }
 
@@ -196,14 +212,14 @@ func (m *Model) explorerWidth() int {
 	if !m.explorerOpen {
 		return 0
 	}
-	w := m.w / 3
+	w := m.inner() / 3
 	if w > 40 {
 		w = 40
 	}
 	if w < 20 {
 		w = 20
 	}
-	if m.w-w < 30 {
+	if m.inner()-w < 30 {
 		// Too narrow to hold both. The transcript wins: it is the
 		// application, and the explorer is a convenience.
 		return 0
@@ -275,6 +291,8 @@ func parseKey(s string) tea.Key {
 		return tea.Key{Code: tea.KeyRight}
 	case "tab":
 		return tea.Key{Code: tea.KeyTab}
+	case "shift+tab":
+		return tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}
 	case "backspace":
 		return tea.Key{Code: tea.KeyBackspace}
 	case "space":

@@ -40,25 +40,61 @@ func (m *Model) promptCursor() *tea.Cursor {
 	if c == nil {
 		return nil
 	}
-	c.Position.X += 2 // past the accent bar and its space
+	c.Position.X += m.margin() + 2 // past the margin, the accent bar and its space
 	c.Position.Y += m.promptTop()
 	return c
 }
 
 func (m *Model) promptTop() int {
-	return m.h - 1 - m.prompt.Rows() - len(m.prompt.Queued())
+	top := m.h - 1 - m.prompt.Rows() - len(m.prompt.Queued())
+	if m.spacious() {
+		top-- // the blank row above the status band
+	}
+	return top + m.prompt.MenuTopOffset()
 }
+
+// margin is the air down each side of the screen.
+//
+// A terminal interface that starts at column 0 and ends at the last cell
+// reads as cramped no matter what is in it — the glyphs sit against the
+// window frame with nothing between them. Two columns fixes that. It shrinks
+// on a narrow terminal, because at forty columns two spent on each side is
+// a tenth of the screen given to air.
+func (m *Model) margin() int {
+	switch {
+	case m.w >= 60:
+		return 2
+	case m.w >= 34:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// spacious reports whether the screen is tall enough to afford blank rows
+// between the regions. Below that they are the first thing to go: air is
+// worth less than a line of transcript.
+func (m *Model) spacious() bool { return m.h >= 18 }
 
 func (m *Model) compose() string {
 	rows := make([]string, 0, m.h)
 	rows = append(rows, m.header())
+	if m.spacious() {
+		rows = append(rows, "")
+	}
 	// An overlay draws its own labelled rule, so the region rule would be a
 	// blank row above it. A wasted row is a row of transcript.
 	if m.ov == nil {
 		rows = append(rows, m.bodyRule())
 	}
 	rows = append(rows, strings.Split(m.body(), "\n")...)
+	if m.spacious() {
+		rows = append(rows, "")
+	}
 	rows = append(rows, strings.Split(m.prompt.View(m.th, m.mode == keymap.Insert && m.ov == nil && !m.explorerFocus), "\n")...)
+	if m.spacious() {
+		rows = append(rows, "")
+	}
 	rows = append(rows, m.status())
 
 	// The screen is exactly h rows, and the status band is always the last
@@ -70,7 +106,22 @@ func (m *Model) compose() string {
 	for len(rows) < m.h {
 		rows = append(rows[:len(rows)-1], "", rows[len(rows)-1])
 	}
+	// The margin goes on last, so every region is laid out at the inner width
+	// and none of them has to know about it.
+	pad := strings.Repeat(" ", m.margin())
+	for i, r := range rows {
+		rows[i] = pad + r
+	}
 	return strings.Join(rows, "\n")
+}
+
+// inner is the drawable width once the margins are taken out.
+func (m *Model) inner() int {
+	w := m.w - m.margin()*2
+	if w < 8 {
+		w = 8
+	}
+	return w
 }
 
 func (m *Model) header() string {
@@ -81,7 +132,7 @@ func (m *Model) header() string {
 	if !m.mouse {
 		facts = append(facts, ui.Seg{Text: "mouse off", Style: m.th.Warn})
 	}
-	return ui.Header(m.th, m.w, m.tick, m.working, facts)
+	return ui.Header(m.th, m.inner(), m.tick, m.working, facts)
 }
 
 // bodyRule labels the regions. Two labels when the explorer is open, so
@@ -89,10 +140,11 @@ func (m *Model) header() string {
 func (m *Model) bodyRule() string {
 	right := m.explorerWidth()
 	if right == 0 {
-		return ui.Rule(m.th, m.w, m.transcriptLabel())
+		return ui.Rule(m.th, m.inner(), m.transcriptLabel())
 	}
-	return ui.Pad(ui.Rule(m.th, m.w-right-1, m.transcriptLabel()), m.w-right-1) +
-		m.th.Rule.Render(m.th.G.V) +
+	left := m.inner() - right - 3
+	return ui.Pad(ui.Rule(m.th, left, m.transcriptLabel()), left) +
+		"  " + m.th.Rule.Render(m.th.G.V) + " " +
 		ui.Rule(m.th, right, "explorer")
 }
 
@@ -110,20 +162,22 @@ func (m *Model) transcriptLabel() string {
 func (m *Model) body() string {
 	h := m.bodyHeight()
 	if m.ov != nil {
-		m.ov.SetSize(m.w, h+1)
-		return ui.Pad(ui.PadTo(m.ov.View(m.th), h), m.w)
+		m.ov.SetSize(m.inner(), h+1)
+		return ui.Pad(ui.PadTo(m.ov.View(m.th), h), m.inner())
 	}
 	left := m.chatOrWelcome(h)
 	right := m.explorerWidth()
 	if right == 0 {
-		return ui.Pad(ui.PadTo(left, h), m.w)
+		return ui.Pad(ui.PadTo(left, h), m.inner())
 	}
 	// Pad to height FIRST, then to width: padding to width first leaves the
 	// rows added afterwards empty, and the divider then runs down a ragged
-	// edge of nothing.
+	// edge of nothing. The divider gets a column of air either side, so the
+	// two columns read as two columns rather than as one wall of text.
+	lw := m.inner() - right - 3
 	return ui.SideBySide(m.th, h,
-		ui.Pad(ui.PadTo(left, h), m.w-right-1),
-		ui.Pad(ui.PadTo(m.explorer.View(m.th, m.explorerFocus), h), right))
+		ui.Pad(ui.PadTo(left, h), lw)+" ",
+		" "+ui.Pad(ui.PadTo(m.explorer.View(m.th, m.explorerFocus), h), right))
 }
 
 // bodyHeight is whatever is left after the rows that are never negotiable —
@@ -136,6 +190,9 @@ func (m *Model) bodyHeight() int {
 	chrome := 3
 	if m.ov != nil {
 		chrome = 2
+	}
+	if m.spacious() {
+		chrome += 3 // a blank row under the header, over the prompt, over the status
 	}
 	h := m.h - chrome - m.prompt.Rows() - len(m.prompt.Queued())
 	if h < 3 {
@@ -176,7 +233,7 @@ func (m *Model) status() string {
 		// it outranks the counts. Sharing the row means a narrow terminal
 		// truncates the answer to "terminal …", which is worse than silence.
 		left = append(left, ui.Seg{Text: n, Style: m.th.Accent})
-		return ui.Band(m.th, m.w, left, nil)
+		return ui.Band(m.th, m.inner(), left, nil)
 	}
 	{
 		hints := m.keys.Hints(m.hintMode(), m.working)
@@ -207,7 +264,7 @@ func (m *Model) status() string {
 	if n := m.stats.TokensIn + m.stats.TokensOut; n > 0 {
 		right = append(right, ui.Seg{Text: short(n) + " tok", Style: m.th.Muted})
 	}
-	return ui.Band(m.th, m.w, left, right)
+	return ui.Band(m.th, m.inner(), left, right)
 }
 
 // hintMode is which key table the status line should advertise. An overlay

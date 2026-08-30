@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/chat"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/command"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/memory"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
@@ -287,6 +288,15 @@ func (m *Model) global(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		opened := m.chat.ToggleEverything()
 		return m.notify(openedWord(opened) + " every block"), true
 
+	case key.Matches(msg, k.Cycle):
+		if m.prompt.MenuOpen() {
+			return nil, false // tab completes the highlighted command instead
+		}
+		return m.cycleFocus(1), true
+
+	case key.Matches(msg, k.CycleBack):
+		return m.cycleFocus(-1), true
+
 	case key.Matches(msg, k.MouseOff):
 		m.mouse = !m.mouse
 		if m.mouse {
@@ -316,8 +326,76 @@ func openedWord(opened bool) string {
 	return "closed"
 }
 
+// cycleFocus moves between the prompt, the transcript and the explorer.
+//
+// One unmodified key that always moves to the next thing is what makes the
+// interface navigable without memorising anything: you press tab until you
+// are where you meant to be. Chords are for jumping straight there.
+func (m *Model) cycleFocus(d int) tea.Cmd {
+	if m.ov != nil {
+		return nil // a modal has the screen; tab inside it belongs to the modal
+	}
+	stops := []keymap.Mode{keymap.Insert, keymap.Read}
+	if m.explorerOpen {
+		stops = append(stops, keymap.Browse)
+	}
+	cur := 0
+	switch {
+	case m.explorerFocus:
+		cur = len(stops) - 1
+	case m.mode == keymap.Read:
+		cur = 1
+	}
+	next := stops[(cur+d+len(stops))%len(stops)]
+	switch next {
+	case keymap.Read:
+		m.mode, m.explorerFocus = keymap.Read, false
+		m.prompt.Blur()
+		return m.notify("transcript · ↑ ↓ move by block · → opens · esc back")
+	case keymap.Browse:
+		m.mode, m.explorerFocus = keymap.Browse, true
+		m.prompt.Blur()
+		return m.notify("explorer · ↑ ↓ move · → opens · enter puts a path in the prompt")
+	default:
+		m.mode, m.explorerFocus = keymap.Insert, false
+		m.chat.ClearFocus()
+		return tea.Batch(m.prompt.Focus(), m.notify("prompt"))
+	}
+}
+
 func (m *Model) insertKey(msg tea.KeyPressMsg) tea.Cmd {
 	k := m.keys
+
+	// The slash menu owns the arrows and tab while it is open. It closes on
+	// esc or as soon as the text stops looking like a command, so it can
+	// never hold a key hostage.
+	if m.prompt.MenuOpen() {
+		switch {
+		case key.Matches(msg, k.Back):
+			m.prompt.Suggest(nil)
+			m.layout()
+			return nil
+		case key.Matches(msg, k.HistPrev):
+			m.prompt.SugMove(-1)
+			return nil
+		case key.Matches(msg, k.HistNext):
+			m.prompt.SugMove(1)
+			return nil
+		case key.Matches(msg, k.Complete):
+			m.prompt.Complete()
+			m.suggest()
+			m.layout()
+			return nil
+		case key.Matches(msg, k.Send):
+			if c, ok := m.prompt.SugSelected(); ok {
+				m.prompt.Suggest(nil)
+				rest := argsAfter(m.prompt.Take())
+				m.layout()
+				return m.runSlash(c, rest)
+			}
+		}
+	}
+
 	switch {
 	case key.Matches(msg, k.Back):
 		m.mode = keymap.Read
@@ -339,6 +417,9 @@ func (m *Model) insertKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.layout()
+		if strings.HasPrefix(text, "/") {
+			return m.slash(text)
+		}
 		if m.working {
 			m.prompt.Queue(text)
 			m.layout()
@@ -359,8 +440,92 @@ func (m *Model) insertKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 	cmd := m.prompt.Update(msg)
+	m.suggest()
 	m.layout()
 	return cmd
+}
+
+// suggest recomputes the slash menu from what is in the prompt.
+//
+// It opens on a leading "/" and closes the moment a space is typed: after the
+// name, what follows is arguments, and a menu still filtering on them would
+// be filtering on the wrong thing.
+func (m *Model) suggest() {
+	v := m.prompt.Value()
+	if !strings.HasPrefix(v, "/") || strings.ContainsAny(v, " \n") {
+		m.prompt.Suggest(nil)
+		return
+	}
+	m.prompt.Suggest(command.Match(m.cmds, v))
+}
+
+// argsAfter is everything after the command name on the line.
+func argsAfter(line string) string {
+	if i := strings.IndexAny(line, " \n"); i >= 0 {
+		return strings.TrimSpace(line[i+1:])
+	}
+	return ""
+}
+
+// slash runs a typed command line.
+func (m *Model) slash(line string) tea.Cmd {
+	name := strings.TrimPrefix(line, "/")
+	if i := strings.IndexAny(name, " \n"); i >= 0 {
+		name = name[:i]
+	}
+	c, ok := command.Find(m.cmds, name)
+	if !ok {
+		// Never silently send an unknown command to the model as prose: it
+		// would answer a question about a slash you meant as an instruction.
+		return m.notify("no command called /" + name + " · ^k lists them all")
+	}
+	return m.runSlash(c, argsAfter(line))
+}
+
+// runSlash executes one command. Built-ins are handled here; a skill, plugin
+// or bundle becomes a prompt that names it and its file, so the agent can
+// read the instructions rather than guess at them.
+func (m *Model) runSlash(c command.Command, args string) tea.Cmd {
+	if c.Kind != command.Builtin {
+		if m.working {
+			m.prompt.Queue(c.Prompt(args))
+			m.layout()
+			return m.notify("queued /" + c.Name)
+		}
+		return tea.Batch(m.send(c.Prompt(args)), m.notify("running /"+c.Name))
+	}
+	switch c.Name {
+	case "help":
+		return m.openHelp()
+	case "explorer":
+		return m.toggleExplorer()
+	case "sessions":
+		return m.openSessions()
+	case "memory":
+		return m.openMemory()
+	case "logs":
+		return m.openLogs()
+	case "thinking":
+		return m.toggleAll(chat.Think, "thinking")
+	case "tools":
+		return m.toggleAll(chat.Tool, "tool")
+	case "expand", "collapse":
+		return m.notify(openedWord(m.chat.ToggleEverything()) + " every block")
+	case "copy":
+		m.chat.ClearFocus()
+		return m.copy(m.chat.YankFocused(), "transcript")
+	case "mouse":
+		m.mouse = !m.mouse
+		return m.notify("mouse " + onOff(m.mouse))
+	case "clear":
+		m.chat.Clear()
+		m.welcome()
+		return m.notify("new session")
+	case "quit":
+		m.quitting = true
+		return tea.Quit
+	}
+	return nil
 }
 
 func (m *Model) send(text string) tea.Cmd {
@@ -392,6 +557,20 @@ func (m *Model) readKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.chat.FocusNext()
 	case key.Matches(msg, k.PrevBlk):
 		m.chat.FocusPrev()
+	case key.Matches(msg, k.Open):
+		// → and ← mean the same thing everywhere: open, close. A transcript
+		// block folds the way a tree node does.
+		if b := m.chat.Focused(); b != nil && b.Foldable() && !b.Open {
+			m.chat.ToggleFocused()
+		} else {
+			m.chat.FocusNext()
+		}
+	case key.Matches(msg, k.Close):
+		if b := m.chat.Focused(); b != nil && b.Foldable() && b.Open {
+			m.chat.ToggleFocused()
+		} else {
+			m.chat.FocusPrev()
+		}
 	case key.Matches(msg, k.Toggle):
 		if !m.chat.ToggleFocused() {
 			return m.notify("nothing folded here — J and K step between blocks")
@@ -421,9 +600,9 @@ func (m *Model) explorerKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.explorerFocus = false
 		m.mode = keymap.Insert
 		return m.prompt.Focus()
-	case key.Matches(msg, k.Down):
+	case key.Matches(msg, k.Next):
 		m.explorer.Move(1)
-	case key.Matches(msg, k.Up):
+	case key.Matches(msg, k.Prev):
 		m.explorer.Move(-1)
 	case key.Matches(msg, k.Open):
 		m.explorer.Open()
@@ -481,10 +660,10 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 	// with an extra keystroke in front of every use.
 	if ov.IsTree() && !ov.Typing() {
 		switch {
-		case key.Matches(msg, k.Down):
+		case key.Matches(msg, k.Next):
 			ov.Tree().Move(1)
 			return nil
-		case key.Matches(msg, k.Up):
+		case key.Matches(msg, k.Prev):
 			ov.Tree().Move(-1)
 			return nil
 		case key.Matches(msg, k.Open):
@@ -669,18 +848,34 @@ func (m *Model) actions() []action {
 	}
 }
 
+// openPalette lists everything: the built-in actions and every skill, plugin
+// and bundle on disk. One surface, so there is nowhere a command can hide.
 func (m *Model) openPalette() tea.Cmd {
-	acts := m.actions()
-	items := make([]overlay.Item, 0, len(acts))
-	for _, a := range acts {
-		items = append(items, overlay.Item{Label: a.label, Detail: a.chord, ID: a.id})
+	items := make([]overlay.Item, 0, len(m.cmds))
+	for _, c := range m.cmds {
+		// The group heading already says what kind it is; the row should
+		// spend its width on what the thing DOES.
+		detail := c.Desc
+		if c.Chord != "" {
+			detail = c.Chord + "  " + c.Desc
+		}
+		items = append(items, overlay.Item{
+			Label: "/" + c.Name, Detail: detail, Group: c.Kind.String(), ID: "cmd:" + c.Name,
+		})
 	}
-	m.ov = overlay.NewList(overlay.Palette, "run anything by name — this is the whole surface area", items)
+	m.ov = overlay.NewList(overlay.Palette,
+		"every command, skill and plugin — type to filter, enter to run", items)
 	m.armOverlay()
 	return nil
 }
 
 func (m *Model) runCommand(id string) tea.Cmd {
+	if name, ok := strings.CutPrefix(id, "cmd:"); ok {
+		if c, found := command.Find(m.cmds, name); found {
+			return m.runSlash(c, "")
+		}
+		return nil
+	}
 	for _, a := range m.actions() {
 		if a.id == id {
 			return a.run(m)

@@ -90,7 +90,9 @@ func TestLightThemeMovesOnlyTheGreys(t *testing.T) {
 
 func TestPaletteIsFourteenDistinctColours(t *testing.T) {
 	seen := map[string]string{}
-	for name, c := range map[string]interface{ RGBA() (uint32, uint32, uint32, uint32) }{
+	for name, c := range map[string]interface {
+		RGBA() (uint32, uint32, uint32, uint32)
+	}{
 		"Ground": PICO8.Ground, "Ink": PICO8.Ink, "Muted": PICO8.Muted, "Faint": PICO8.Faint,
 		"Accent": PICO8.Accent, "Thinking": PICO8.Thinking, "Coat": PICO8.Coat,
 		"Rosette": PICO8.Rosette, "Peach": PICO8.Peach, "OK": PICO8.OK, "Fail": PICO8.Fail,

@@ -307,3 +307,64 @@ func TestAThinkingBlockShowsTheRampNotASpinner(t *testing.T) {
 		t.Fatalf("thinking should draw the density ramp:\n%s", got)
 	}
 }
+
+func TestTheTwoSpeakersAreToldApartWithoutReadingTheGlyph(t *testing.T) {
+	// Before this the agent's gutter was drawn a shade above the background,
+	// so the only thing separating the speakers was a character nobody could
+	// see. The user's words now sit on their own ground; Mnemo answers in the
+	// mascot's colour.
+	m := New()
+	m.SetSize(50, 10)
+	m.Append(&Block{Kind: User, Body: []string{"a question"}})
+	m.Append(&Block{Kind: Agent, Body: []string{"an answer"}})
+	rows := m.Lines(th())
+
+	var user, agent string
+	for _, r := range rows {
+		if strings.Contains(ansi.Strip(r), "a question") {
+			user = r
+		}
+		if strings.Contains(ansi.Strip(r), "an answer") {
+			agent = r
+		}
+	}
+	if user == "" || agent == "" {
+		t.Fatal("both lines must render")
+	}
+	if !strings.Contains(user, "\x1b[48") && !strings.Contains(user, ";48;") {
+		t.Fatalf("the user's line must carry a background: %q", user)
+	}
+	if strings.Contains(agent, "\x1b[48") || strings.Contains(agent, ";48;") {
+		t.Fatalf("the agent's line must not: %q", agent)
+	}
+	if user == agent {
+		t.Fatal("the two speakers must not render identically")
+	}
+}
+
+func TestTheUserBandRunsToTheMargin(t *testing.T) {
+	// A background only reads as a band if it reaches the edge; a ragged
+	// right looks like a highlight that failed.
+	m := New()
+	m.SetSize(40, 10)
+	m.Append(&Block{Kind: User, Body: []string{"short"}})
+	got := ansi.Strip(m.Lines(th())[0])
+	if ansi.StringWidth(got) < 30 {
+		t.Fatalf("the band stops at %d cells: %q", ansi.StringWidth(got), got)
+	}
+}
+
+func TestALeadingChordIsDrawnAsAKey(t *testing.T) {
+	m := New()
+	m.SetSize(60, 10)
+	m.Append(&Block{Kind: Agent, Body: []string{"^e   open every thinking block", "just prose here"}})
+	rows := m.Lines(th())
+	if !strings.Contains(rows[0], "\x1b[") {
+		t.Fatal("a line that starts with a chord must draw the chord differently")
+	}
+	// And the rule must be narrow enough not to colour ordinary sentences.
+	before, after := ansi.Strip(rows[1]), rows[1]
+	if strings.Count(after, "\x1b[") > 2 {
+		t.Fatalf("prose was over-styled: %q (%q)", after, before)
+	}
+}

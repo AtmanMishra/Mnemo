@@ -12,6 +12,7 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/command"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/theme"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -24,13 +25,20 @@ const (
 	MaxRows = 6
 )
 
-// Model is the prompt plus its queue.
+// MenuRows is the most suggestions shown at once. Eight is enough to pick
+// from and short enough that the menu never swallows the transcript.
+const MenuRows = 8
+
+// Model is the prompt, its queue, and the slash menu.
 type Model struct {
 	ta      textarea.Model
 	queue   []string
 	history []string
 	histAt  int // len(history) means "not browsing"
 	width   int
+
+	sug    []command.Command
+	sugSel int
 }
 
 // New builds a focused prompt.
@@ -78,6 +86,69 @@ func (m *Model) Value() string { return m.ta.Value() }
 // Empty reports whether there is nothing to send.
 func (m *Model) Empty() bool { return strings.TrimSpace(m.ta.Value()) == "" }
 
+// Suggest replaces the slash menu. Passing nothing closes it.
+func (m *Model) Suggest(cs []command.Command) {
+	m.sug = cs
+	if m.sugSel >= len(cs) {
+		m.sugSel = len(cs) - 1
+	}
+	if m.sugSel < 0 {
+		m.sugSel = 0
+	}
+}
+
+// Suggestions is what the menu is showing.
+func (m *Model) Suggestions() []command.Command { return m.sug }
+
+// MenuOpen reports whether the slash menu has the arrow keys.
+func (m *Model) MenuOpen() bool { return len(m.sug) > 0 }
+
+// SugMove walks the menu, wrapping — a menu you can fall off the end of makes
+// you look at it to use it.
+func (m *Model) SugMove(d int) {
+	if len(m.sug) == 0 {
+		return
+	}
+	m.sugSel = (m.sugSel + d + len(m.sug)) % len(m.sug)
+}
+
+// SugSelected is the highlighted command.
+func (m *Model) SugSelected() (command.Command, bool) {
+	if m.sugSel < 0 || m.sugSel >= len(m.sug) {
+		return command.Command{}, false
+	}
+	return m.sug[m.sugSel], true
+}
+
+// SugIndex is the highlighted row, for tests.
+func (m *Model) SugIndex() int { return m.sugSel }
+
+// Complete writes the highlighted command's name into the prompt, leaving the
+// cursor after it so arguments can follow.
+func (m *Model) Complete() bool {
+	c, ok := m.SugSelected()
+	if !ok {
+		return false
+	}
+	m.SetValue("/" + c.Name + " ")
+	m.sug = nil
+	return true
+}
+
+// menuHeight is how many rows the menu occupies: the rows themselves plus
+// the line that says the arrows work. That line earns its row — an unlabelled
+// list gives no reason to reach for the arrow keys.
+func (m *Model) menuHeight() int {
+	if len(m.sug) == 0 {
+		return 0
+	}
+	n := len(m.sug)
+	if n > MenuRows {
+		n = MenuRows
+	}
+	return n + 1
+}
+
 // Rows is how many rows the input currently occupies.
 func (m *Model) Rows() int {
 	h := m.ta.Height()
@@ -87,8 +158,26 @@ func (m *Model) Rows() int {
 	if h > MaxRows {
 		h = MaxRows
 	}
+	return h + m.menuHeight()
+}
+
+// InputRows is the text area alone, without the menu — the cursor sits inside
+// this part.
+func (m *Model) InputRows() int {
+	h := m.ta.Height()
+	if h < MinRows {
+		h = MinRows
+	}
+	if h > MaxRows {
+		h = MaxRows
+	}
 	return h
 }
+
+// MenuTopOffset is how far below the prompt's first row the input starts. The
+// menu is drawn ABOVE the input, because a menu below it would be under the
+// status line, off the bottom of the screen.
+func (m *Model) MenuTopOffset() int { return m.menuHeight() }
 
 // Cursor is where the terminal cursor should sit, or nil when the prompt does
 // not have it. Hiding the cursor is how the reader knows, without reading
@@ -194,11 +283,81 @@ func (m *Model) View(t *theme.Theme, focused bool) string {
 		}
 	}
 	out := strings.Join(lines, "\n")
+	if menu := m.menuView(t); menu != "" {
+		out = menu + "\n" + out
+	}
 	for i, q := range m.queue {
 		out += "\n" + t.Faint.Render(ansi.Truncate(
 			"  "+itoa(i+1)+"· "+strings.ReplaceAll(q, "\n", " "), m.width, "…"))
 	}
 	return out
+}
+
+// menuView draws the slash menu: name, kind, description.
+//
+// The kind is shown because "/review" from a plugin and "/review" from this
+// project are different things, and which one you are about to run is not
+// guessable from the name.
+func (m *Model) menuView(t *theme.Theme) string {
+	if len(m.sug) == 0 {
+		return ""
+	}
+	start := 0
+	if m.sugSel >= MenuRows {
+		start = m.sugSel - MenuRows + 1
+	}
+	end := start + MenuRows
+	if end > len(m.sug) {
+		end = len(m.sug)
+	}
+	// One column width for every name on screen, so the descriptions line up
+	// and the menu can be read down rather than across. Without it the eye
+	// has to find the start of each description separately.
+	nameCol := 0
+	for i := start; i < end; i++ {
+		if n := len(m.sug[i].Name) + 1; n > nameCol {
+			nameCol = n
+		}
+	}
+	if nameCol > 26 {
+		nameCol = 26
+	}
+
+	rows := make([]string, 0, end-start+1)
+	rows = append(rows, t.Faint.Render(strings.Repeat(" ", 2)+
+		itoa(len(m.sug))+" matching · ↑ ↓ pick · tab completes · enter runs"))
+
+	for i := start; i < end; i++ {
+		c := m.sug[i]
+		name := ansi.Truncate("/"+c.Name, nameCol, "…")
+		mark, nameStyle := "  ", t.Ink
+		if i == m.sugSel {
+			mark, nameStyle = t.Accent.Render(t.G.Seg)+" ", t.Accent
+		}
+		line := mark + nameStyle.Render(name) +
+			strings.Repeat(" ", nameCol-ansi.StringWidth(name)+2)
+		tag := c.Kind.String()
+		if c.Chord != "" {
+			tag = c.Chord
+		}
+		line += t.Faint.Render(pad(tag, 9))
+		if c.Desc != "" {
+			room := m.width - ansi.StringWidth(line) - 1
+			if room > 8 {
+				line += t.Muted.Render(ansi.Truncate(c.Desc, room, "…"))
+			}
+		}
+		rows = append(rows, ansi.Truncate(line, m.width, "…"))
+	}
+	return strings.Join(rows, "\n")
+}
+
+// pad right-fills to a column width.
+func pad(s string, w int) string {
+	if n := w - ansi.StringWidth(s); n > 0 {
+		return s + strings.Repeat(" ", n)
+	}
+	return s
 }
 
 func itoa(n int) string {

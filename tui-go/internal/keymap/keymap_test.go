@@ -127,7 +127,7 @@ func TestAFlatOverlayIsNotAdvertisedTreeKeys(t *testing.T) {
 	for _, e := range New().OverlayHints(true) {
 		tree = append(tree, e.Key)
 	}
-	if len(tree) != 4 || tree[0] != "l" {
+	if len(tree) != 4 || tree[0] != "↓" {
 		t.Fatalf("a tree overlay should advertise movement, got %v", tree)
 	}
 }

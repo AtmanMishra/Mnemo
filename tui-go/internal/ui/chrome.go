@@ -120,10 +120,10 @@ func Header(t *theme.Theme, width, phase int, working bool, facts []Seg) string 
 	if working {
 		tex = t.Thinking.Render(theme.Wave(phase, fill))
 	} else {
-		// Idle: the lightest step of the same ramp, so the band is present
-		// but silent. A still screen is what "nothing is happening" looks
-		// like here.
-		tex = t.Faint.Render(strings.Repeat(string(theme.Dither[1]), fill))
+		// Idle: the lightest step of the same ramp, in the mascot's rosette
+		// brown. Present but silent. Drawn a shade above the background it
+		// was neither — the band was simply missing.
+		tex = t.Texture.Render(strings.Repeat(string(theme.Dither[1]), fill))
 	}
 	return mark + " " + tex + " " + right
 }

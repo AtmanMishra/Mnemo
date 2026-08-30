@@ -409,12 +409,19 @@ func (m *Model) renderBlock(t *theme.Theme, b *Block, idx, depth int) []row {
 	}
 
 	mark, style := m.gutterFor(t, b)
+	markStyle := style
+	if b.Kind == User {
+		markStyle = t.Accent // the bar is yours; the words sit on their own ground
+	}
+	if b.Kind == Agent {
+		style = t.Ink // the coat colours the gutter, not the prose
+	}
 	focused := idx == m.focus && depth == 0
 	if focused {
 		mark = t.G.Seg
-		style = t.Accent
+		markStyle = t.Accent
 	}
-	lead := indent + style.Render(mark) + " "
+	lead := indent + markStyle.Render(mark) + " "
 	cont := indent + strings.Repeat(" ", gutterWidth)
 
 	var out []row
@@ -439,11 +446,26 @@ func (m *Model) renderBlock(t *theme.Theme, b *Block, idx, depth int) []row {
 		body = append([]string{b.Title}, body...)
 	}
 	lines := wrap(body, avail)
+	pad := func(l string) string {
+		// A background only reads as a band if it runs to the margin; a
+		// ragged right edge looks like a highlight that failed.
+		if b.Kind != User {
+			return l
+		}
+		if n := avail - ansi.StringWidth(l); n > 0 {
+			return l + strings.Repeat(" ", n)
+		}
+		return l
+	}
 	for i, l := range lines {
+		text := style.Render(pad(l))
+		if b.Kind == Agent || b.Kind == Notice {
+			text = chord(t, style, l)
+		}
 		if i == 0 {
-			add(lead + style.Render(l))
+			add(lead + text)
 		} else {
-			add(cont + style.Render(l))
+			add(cont + text)
 		}
 	}
 	if len(lines) == 0 {
@@ -484,10 +506,15 @@ func (m *Model) gutterFor(t *theme.Theme, b *Block) (string, styler) {
 	return gutter(t, b)
 }
 
+// gutter is the two cells that say who is speaking.
+//
+// Mnemo answers in the mascot's own colour. That is not decoration: before
+// this the agent's gutter was drawn a shade above the background, so the two
+// speakers were told apart only by a glyph nobody could see.
 func gutter(t *theme.Theme, b *Block) (string, styler) {
 	switch b.Kind {
 	case User:
-		return t.G.User, t.Accent
+		return t.G.User, t.Said
 	case Think:
 		return t.G.Think, t.Thinking
 	case Tool, Delegation:
@@ -495,7 +522,7 @@ func gutter(t *theme.Theme, b *Block) (string, styler) {
 	case Notice:
 		return t.G.Tool, t.Fail
 	default:
-		return t.G.Agent, t.Ink
+		return t.G.Agent, t.Coat
 	}
 }
 
@@ -515,6 +542,34 @@ func stateStyle(t *theme.Theme, b *Block) styler {
 }
 
 type styler interface{ Render(...string) string }
+
+// chord draws a leading key name in the accent, so a line of help reads as a
+// key and a description rather than as one grey sentence.
+//
+// The match is deliberately narrow — a chord at the start of the line,
+// followed by at least two spaces — because a rule that colours anything
+// resembling a key ends up colouring prose.
+func chord(t *theme.Theme, style styler, line string) string {
+	trimmed := strings.TrimLeft(line, " ")
+	indent := line[:len(line)-len(trimmed)]
+	i := strings.Index(trimmed, "  ")
+	if i <= 0 || i > 10 {
+		return style.Render(line)
+	}
+	head := trimmed[:i]
+	if !isChord(head) {
+		return style.Render(line)
+	}
+	return indent + t.Accent.Render(head) + style.Render(trimmed[i:])
+}
+
+func isChord(s string) bool {
+	switch s {
+	case "esc", "tab", "enter", "alt+enter", "space", "/":
+		return true
+	}
+	return len(s) == 2 && s[0] == '^' && s[1] >= 'a' && s[1] <= 'z'
+}
 
 // wrap breaks each logical line to width, preferring word boundaries and
 // cutting anything that has none — a path with no spaces must be cut, not
