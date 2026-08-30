@@ -1,10 +1,12 @@
-//! Shared cockpit internals. `seatui` (the legacy inline REPL) still compiles
-//! its own module tree from main.rs; everything the cockpit needs lives here.
+//! Shared internals of the `mnemo-agent` app. The binary is a thin event loop
+//! over these modules, so panes, auth, sessions and the RPC protocol are all
+//! testable without a terminal.
 pub mod auth;
 pub mod cockpit;
 pub mod cockpit_ui;
 pub mod md;
 pub mod memclient;
+pub mod models;
 pub mod onboarding;
 pub mod palette;
 pub mod pane;

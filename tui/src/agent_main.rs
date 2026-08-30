@@ -14,6 +14,7 @@ use seatui::auth::{self, AuthFile};
 use seatui::cockpit::{Action, Cockpit, Focus, Pane};
 use seatui::cockpit_ui;
 use seatui::memclient::{self, MemSession};
+use seatui::models;
 use seatui::onboarding::{self, Onboarding, Reason};
 use seatui::pane::PaneView;
 use seatui::pane_agents::AgentsPane;
@@ -257,6 +258,13 @@ fn run<B: ratatui::backend::Backend>(
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 return Ok(());
             }
+            // the catalog costs a process spawn, so fetch it once, the first
+            // time the model step is on screen
+            if ob.step == onboarding::Step::Model
+                && ob.models.is_empty() && ob.models_error.is_none()
+            {
+                ob.load_models(models::fetch_models(root));
+            }
             if ob.on_key(key, now_ms()) {
                 *stored = auth::load(home);
                 apply_model(cockpit, stored);
@@ -340,7 +348,7 @@ fn run<B: ratatui::backend::Backend>(
             Action::Submit(line) => {
                 if let Some(rest) = line.strip_prefix('/') {
                     command(rest, cockpit, panes, overlay, stored, agent.as_mut(),
-                            mem.as_deref_mut(), home);
+                            mem.as_deref_mut(), home, root);
                 } else if cockpit.model.is_none() {
                     // 8.6: an unset model is a readable error, not a crash
                     cockpit.status = "no model set — run /login, or /model to pick one".into();
@@ -394,6 +402,7 @@ fn command(
     agent: Option<&mut RpcSession>,
     mem: Option<&mut MemSession>,
     home: &Path,
+    root: &Path,
 ) {
     let (name, arg) = match cmd.split_once(' ') {
         Some((n, a)) => (n, a.trim()),
@@ -406,21 +415,32 @@ fn command(
         "login" => *overlay = Some(Onboarding::new(home.to_path_buf(), Reason::Login)),
         "model" => {
             *stored = auth::load(home);
-            let models = stored.available_models();
-            if arg.is_empty() {
-                cockpit.status = if models.is_empty() {
-                    "no models available — /login first".into()
-                } else {
-                    format!("/model <name> — available: {}",
-                        models.iter().map(|(p, m)| format!("{p}/{m}")).collect::<Vec<_>>().join(", "))
-                };
+            if stored.logged_in().is_empty() {
+                cockpit.status = "no provider logged in — /login first".into();
+            } else if arg.is_empty() {
+                // no argument: show what the logged-in providers actually
+                // offer. Asking someone to type a model name they have never
+                // seen is not a choice, it is a quiz.
+                let mut ob = Onboarding::for_model(home.to_path_buf());
+                ob.load_models(models::fetch_models(root));
+                *overlay = Some(ob);
             } else {
-                match models.iter().find(|(_, m)| m == arg) {
-                    Some((p, m)) => {
-                        cockpit.model = Some((p.clone(), m.clone()));
-                        cockpit.status = format!("model: {p}/{m}");
-                    }
-                    None => cockpit.status = format!("'{arg}' is not a model of a logged-in provider"),
+                match models::fetch_models(root) {
+                    Ok(catalog) => match catalog.iter().find(|(p, m)| m == arg || format!("{p}/{m}") == arg) {
+                        Some((p, m)) => match auth::set_default_model(home, p, m)
+                            .and_then(|_| auth::set_default_provider(home, p))
+                        {
+                            Ok(auth) => {
+                                *stored = auth;
+                                apply_model(cockpit, stored);
+                                cockpit.status = format!("model: {p}/{m}");
+                            }
+                            Err(e) => cockpit.status = format!("could not save: {e}"),
+                        },
+                        None => cockpit.status =
+                            format!("'{arg}' is not offered by any logged-in provider — /model to browse"),
+                    },
+                    Err(e) => cockpit.status = format!("could not read the model list: {e}"),
                 }
             }
         }
