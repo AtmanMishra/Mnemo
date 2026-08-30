@@ -35,8 +35,8 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 - [x] 4.3 Permission rule engine: ~/.mnemo/permissions.json allow/ask/deny patterns (extends approval gate)
 - [x] 4.4 Plan mode: read-only phase + tool allowlist switch
 - [ ] 4.5 Image/screenshot input surfacing through tools
-- [ ] 4.6 Programmatic tool calling (research/programmatic-tool-calling.md): `tools` proxy inside the ipy kernel + `tool_call` op on the existing stdio bridge, so the model writes ONE program instead of N tool_use round trips
-- [ ] 4.7 Route in-kernel tool calls through the approval gate + permission rules — without this, generated code bypasses the y/n gate on bash_exec/write_file/apply_edit (pairs with 4.3)
+- [x] 4.6 Programmatic tool calling (research/programmatic-tool-calling.md): `tools` proxy inside the ipy kernel + `tool_call` op on the existing stdio bridge, so the model writes ONE program instead of N tool_use round trips
+- [x] 4.7 Route in-kernel tool calls through the approval gate + permission rules — without this, generated code bypasses the y/n gate on bash_exec/write_file/apply_edit (pairs with 4.3)
 
 ## AREA 5 — LOGGING & TRACES
 - [ ] 5.1 Structured logger: level-filtered JSONL traces in ~/.mnemo/logs/<date>.jsonl (request_id spans)

@@ -29,6 +29,12 @@ interface Pending {
   resolve: (value: IpyResult) => void;
 }
 
+/**
+ * 4.6: how a `tools.<name>(...)` call from inside the kernel reaches the host.
+ * Returns whatever should become the Python return value.
+ */
+export type ToolDispatcher = (name: string, args: Record<string, unknown>) => Promise<unknown>;
+
 function drainPending(pending: Map<number, Pending>, value: IpyResult): void {
   const entries = [...pending.entries()];
   pending.clear();
@@ -44,6 +50,7 @@ export class IPyKernel {
   private buffer = "";
   private queue: Promise<unknown> = Promise.resolve();
   private stderrTail: string[] = [];
+  private dispatcher: ToolDispatcher | null = null;
   private readonly pythonBin: string;
   private readonly bridgePath: string;
 
@@ -58,6 +65,35 @@ export class IPyKernel {
     return this.proc !== null && this.proc.exitCode === null && this.proc.signalCode === null;
   }
 
+  /**
+   * Make host tools callable from submitted code as `tools.<name>(...)`.
+   * Without this the kernel has no `tools` object and code that reaches for
+   * one gets a plain NameError.
+   */
+  setToolDispatcher(fn: ToolDispatcher | null): void {
+    this.dispatcher = fn;
+  }
+
+  /**
+   * Answer one in-kernel tool call. This ALWAYS writes a reply, including on
+   * failure: the kernel is blocked on readline() and a missing reply would
+   * deadlock it for the rest of the session.
+   */
+  private async serveToolCall(msg: any): Promise<void> {
+    let reply: Record<string, unknown>;
+    try {
+      if (!this.dispatcher) throw new Error("no tools are available inside this kernel");
+      const name = String(msg?.name ?? "");
+      const args = (msg?.args ?? {}) as Record<string, unknown>;
+      reply = { op: "tool_result", ok: true, result: await this.dispatcher(name, args) };
+    } catch (err: any) {
+      reply = { op: "tool_result", ok: false, error: String(err?.message ?? err) };
+    }
+    // ponytail: no timeout - a tool that never returns hangs the kernel, the
+    // same way it would hang a normal tool call. Add one if that ever bites.
+    this.proc?.stdin?.write(JSON.stringify(reply) + "\n");
+  }
+
   private handleStdoutChunk(chunk: Buffer): void {
     this.buffer += chunk.toString("utf8");
     let newlineIndex: number;
@@ -70,6 +106,10 @@ export class IPyKernel {
         msg = JSON.parse(line);
       } catch {
         continue; // not a protocol line; ignore
+      }
+      if (msg.op === "tool_call") {
+        void this.serveToolCall(msg);
+        continue;
       }
       if (msg.id === 0) {
         // Response to the startup ping handshake.

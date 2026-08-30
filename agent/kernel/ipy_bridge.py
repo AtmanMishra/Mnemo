@@ -4,6 +4,17 @@
 Protocol (one JSON object per line, UTF-8):
   request : {"id": <int>, "op": "run",    "code": "<python source>"}
             {"id": <int>, "op": "ping"}
+
+Programmatic tool calling (plan 4.6): submitted code can call host tools as
+`tools.read_file(path="x")`. That writes an out-of-band line UP the same pipe
+  {"op": "tool_call", "name": "<tool>", "args": {...}}
+and blocks on the host's reply
+  {"op": "tool_result", "ok": true, "result": <json>}   (or ok:false + error)
+
+Two things make that safe: the request is written to the stdout buffer captured
+BEFORE contextlib.redirect_stdout, so it is not swallowed by the cell's output
+capture; and the reply is read from the same stdin object the main loop uses,
+which is idle because it is blocked inside this very call.
   response: {"id": <int>, "ok": true,  "result": "<repr of last expr>",
              "output": "<captured stdout+stderr>"}
             {"id": <int>, "ok": false, "error": "<traceback text>",
@@ -23,9 +34,51 @@ import sys
 import traceback
 
 
+class ToolError(RuntimeError):
+    """A host tool refused or failed. Catchable by the submitted program."""
+
+
+class ToolProxy:
+    """`tools.<name>(**kwargs)` -> one host tool call, synchronously."""
+
+    def __init__(self, stdin, stdout) -> None:
+        object.__setattr__(self, "_stdin", stdin)
+        object.__setattr__(self, "_stdout", stdout)
+
+    def __getattr__(self, name: str):
+        # dunder/private lookups are Python internals (repr, pickle, help),
+        # never tool calls - answering them with a callable breaks introspection
+        if name.startswith("_"):
+            raise AttributeError(name)
+
+        def call(**kwargs):
+            request = {"op": "tool_call", "name": name, "args": kwargs}
+            stdout = object.__getattribute__(self, "_stdout")
+            stdin = object.__getattribute__(self, "_stdin")
+            stdout.write((json.dumps(request) + "\n").encode("utf-8"))
+            stdout.flush()
+            line = stdin.readline()
+            if not line:
+                raise ToolError(f"bridge closed while calling {name}")
+            try:
+                reply = json.loads(line.decode("utf-8"))
+            except Exception as exc:
+                raise ToolError(f"unreadable reply for {name}: {exc}") from None
+            if not reply.get("ok"):
+                raise ToolError(reply.get("error") or f"tool {name} failed")
+            return reply.get("result")
+
+        call.__name__ = name
+        return call
+
+
 class SeaKernel:
-    def __init__(self) -> None:
+    def __init__(self, stdin=None, stdout=None) -> None:
         self.globals: dict = {"__name__": "__sea_kernel__", "__builtins__": __builtins__}
+        # tools are only reachable when the host wired up a pipe for them
+        if stdin is not None and stdout is not None:
+            self.globals["tools"] = ToolProxy(stdin, stdout)
+            self.globals["ToolError"] = ToolError
 
     def run(self, code: str) -> dict:
         stdout_buf = io.StringIO()
@@ -82,12 +135,20 @@ def handle(kernel: SeaKernel, request: dict) -> dict:
 
 
 def main() -> None:
-    kernel = SeaKernel()
     # Unbuffered binary wrappers so partial writes are visible immediately.
+    # Captured BEFORE any redirect_stdout, which is what lets a tool_call
+    # escape the cell's output capture.
     stdin = sys.stdin.buffer
     stdout = sys.stdout.buffer
+    kernel = SeaKernel(stdin, stdout)
 
-    for line in stdin:
+    # explicit readline() rather than `for line in stdin`: the tools proxy
+    # reads replies from this same object mid-call, and one obvious buffer is
+    # easier to reason about than an iterator's read-ahead
+    while True:
+        line = stdin.readline()
+        if not line:
+            break
         line = line.strip()
         if not line:
             continue

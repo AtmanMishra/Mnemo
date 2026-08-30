@@ -15,6 +15,10 @@
  */
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { allTools } from "../src/tools/index.ts";
+import { sharedKernel } from "../src/tools/ipy_run.ts";
+import { makeKernelDispatcher } from "../src/tools/kernel_tools.ts";
+import { decideApproval } from "./approval-gate.ts";
+import { loadPermissions } from "../src/permissions.ts";
 import { makeMemoryTools } from "./memory-layer.ts";
 
 /** All 14 tool names this extension registers (11 core + 3 memory). */
@@ -37,9 +41,22 @@ function toToolDefinition(tool: any): any {
 
 /** Factory: registers every sea tool onto an ExtensionAPI. */
 export function seaToolsFactory(pi: any): void {
-  for (const tool of [...allTools, ...makeMemoryTools()]) {
+  const tools = [...allTools, ...makeMemoryTools()];
+  for (const tool of tools) {
     pi.registerTool(toToolDefinition(tool));
   }
+
+  // 4.6/4.7: the same tools, callable as `tools.<name>(...)` from inside
+  // ipy_run, and gated by the same rules a normal tool call goes through.
+  // Prompting is impossible from in here (no ctx.ui), so an "ask" that would
+  // have prompted resolves to allow exactly as it does in a non-TTY run —
+  // while a deny rule and plan mode still block.
+  const perms = loadPermissions();
+  sharedKernel.setToolDispatcher(
+    makeKernelDispatcher(tools, (name, args) =>
+      decideApproval({ toolName: name, input: args },
+        { confirm: async () => true }, process.env, false, perms)),
+  );
 }
 
 /** Named inline extension so it shows as <inline:sea-tools> at startup. */
