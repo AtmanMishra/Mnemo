@@ -77,7 +77,8 @@ fn write_err(out: &mut dyn Write, id: &serde_json::Value, err: &str) {
 fn op_at(op: &Op) -> Millis {
     match op {
         Op::CreateNode { at, .. } | Op::AddFact { at, .. } | Op::SupersedeFact { at, .. }
-        | Op::DeleteNode { at, .. } | Op::Link { at, .. } | Op::Unlink { at, .. }
+        | Op::SetArea { at, .. } | Op::DeleteNode { at, .. }
+        | Op::Link { at, .. } | Op::Unlink { at, .. }
         | Op::Reweight { at, .. } | Op::RecordOutcome { at, .. }
         | Op::PushContext { at, .. } | Op::CommitLog { at, .. } => *at,
     }
@@ -103,6 +104,22 @@ fn p_node(params: &serde_json::Value, key: &str) -> Result<NodeId, String> {
         .ok_or_else(|| format!("missing numeric param '{key}'"))
 }
 
+/// Optional `area` override on create_node/episode. Returns the node's area name.
+fn set_area_param(
+    s: &mut StoreData,
+    j: &mut Journal,
+    apply: &mut impl FnMut(&mut StoreData, &mut Journal, Op) -> Result<(), String>,
+    node: NodeId,
+    params: &serde_json::Value,
+    at: Millis,
+) -> Result<String, String> {
+    if let Some(raw) = params.get("area").and_then(|a| a.as_str()) {
+        let area = Area::parse(raw).ok_or_else(|| format!("unknown area '{raw}'"))?;
+        apply(s, j, Op::SetArea { node, area, at })?;
+    }
+    Ok(format!("{:?}", s.nodes.get(&node).map(|n| n.area).unwrap_or_default()))
+}
+
 fn handle(
     method: &str,
     params: &serde_json::Value,
@@ -120,7 +137,7 @@ fn handle(
 
         "dump" => {
             let nodes: Vec<serde_json::Value> = s.nodes.values().map(|n| json!({
-                "id": n.id, "kind": n.kind, "label": n.label,
+                "id": n.id, "kind": n.kind, "area": n.area, "label": n.label,
                 "facts": n.active_facts().count(),
                 "feeders": s.feeders_of(n.id, *clock).len(),
             })).collect();
@@ -142,7 +159,8 @@ fn handle(
                 .ok_or("missing 'label'")?.to_string();
             let id = s.next_node;
             apply(s, j, Op::CreateNode { id, kind, label, at: *clock })?;
-            Ok(json!({ "node": id }))
+            let area = set_area_param(s, j, &mut apply, id, params, *clock)?;
+            Ok(json!({ "node": id, "area": area }))
         }
 
         "episode" => {
@@ -150,7 +168,8 @@ fn handle(
                 .ok_or("missing 'label'")?.to_string();
             let id = s.next_node;
             apply(s, j, Op::CreateNode { id, kind: NodeKind::TaskEpisode, label, at: *clock })?;
-            Ok(json!({ "episode": id }))
+            let area = set_area_param(s, j, &mut apply, id, params, *clock)?;
+            Ok(json!({ "episode": id, "area": area }))
         }
 
         "fact" => {
@@ -184,6 +203,7 @@ fn handle(
                     "via_graph": r.via_graph,
                     "label": s.nodes.get(&r.node).map(|n| n.label.clone()).unwrap_or_default(),
                     "kind": s.nodes.get(&r.node).map(|n| format!("{:?}", n.kind)).unwrap_or_default(),
+                    "area": s.nodes.get(&r.node).map(|n| format!("{:?}", n.area)).unwrap_or_default(),
                     "state": s.state_of(r.node).unwrap_or_default(),
                 })
             }).collect();
@@ -233,6 +253,14 @@ fn handle(
             Ok(json!({ "reinforced": true }))
         }
 
-        other => Err(format!("unknown method '{other}' (supported: ping dump state create_node episode fact link search steer good)")),
+        "set_area" => {
+            let node = p_node(params, "node")?;
+            let area = params.get("area").and_then(|a| a.as_str()).ok_or("missing 'area'")?;
+            let area = Area::parse(area).ok_or_else(|| format!("unknown area '{area}'"))?;
+            apply(s, j, Op::SetArea { node, area, at: *clock })?;
+            Ok(json!({ "area": format!("{area:?}") }))
+        }
+
+        other => Err(format!("unknown method '{other}' (supported: ping dump state create_node episode fact link search set_area steer good)")),
     }
 }

@@ -107,3 +107,88 @@ fn memsrv_rpc_roundtrip() {
     for op in &ops { s.apply(op).unwrap(); }
     assert!(s.nodes.len() >= 2);
 }
+
+/// 3.1: memsrv must persist and return the brain area of every node.
+#[test]
+fn memsrv_persists_and_returns_area() {
+    let dir = std::env::temp_dir().join("memlayer-rpc-area");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let jpath = dir.join("journal.jsonl");
+
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_memsrv"))
+        .arg(&jpath)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn memsrv");
+    let mut stdin = child.stdin.take().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut reader = std::io::BufReader::new(stdout);
+
+    let mut send = |id: u32, method: &str, params: serde_json::Value| {
+        use std::io::Write;
+        writeln!(stdin, "{}", serde_json::json!({"id": id, "method": method, "params": params})).unwrap();
+        stdin.flush().unwrap();
+    };
+    fn read_line_json(reader: &mut std::io::BufReader<std::process::ChildStdout>) -> serde_json::Value {
+        use std::io::BufRead;
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("read rpc line");
+        serde_json::from_str(line.trim()).expect("valid json response")
+    }
+
+    // default area comes from the kind
+    send(1, "create_node", serde_json::json!({"kind": "harness", "label": "lint-harness"}));
+    let r = read_line_json(&mut reader);
+    assert_eq!(r["result"]["area"], "Procedural");
+    let harness = r["result"]["node"].as_u64().unwrap();
+
+    // explicit override at creation time
+    send(2, "create_node", serde_json::json!({"kind": "aspect", "label": "404s hurt", "area": "salience"}));
+    let r = read_line_json(&mut reader);
+    assert_eq!(r["result"]["area"], "Salience");
+    let pain = r["result"]["node"].as_u64().unwrap();
+
+    send(3, "episode", serde_json::json!({"label": "deploy checkout-svc"}));
+    let r = read_line_json(&mut reader);
+    assert_eq!(r["result"]["area"], "Episodic");
+
+    // reassignment after the fact
+    send(4, "set_area", serde_json::json!({"node": harness, "area": "executive"}));
+    let r = read_line_json(&mut reader);
+    assert_eq!(r["ok"], true, "set_area failed: {}", r["error"]);
+    assert_eq!(r["result"]["area"], "Executive");
+
+    send(5, "set_area", serde_json::json!({"node": harness, "area": "amygdala"}));
+    let r = read_line_json(&mut reader);
+    assert_eq!(r["ok"], false, "unknown area names must be rejected");
+
+    // dump + state + search all surface the area
+    send(6, "dump", serde_json::json!({}));
+    let r = read_line_json(&mut reader);
+    let areas: Vec<String> = r["result"]["nodes"].as_array().unwrap().iter()
+        .map(|n| n["area"].as_str().unwrap().to_string()).collect();
+    assert!(areas.contains(&"Executive".to_string()) && areas.contains(&"Salience".to_string()),
+        "dump must report per-node areas, got {areas:?}");
+
+    send(7, "state", serde_json::json!({"node": pain}));
+    let r = read_line_json(&mut reader);
+    assert!(r["result"]["state"].as_str().unwrap().contains("Salience"));
+
+    send(8, "search", serde_json::json!({"query": "lint harness", "k": 3}));
+    let r = read_line_json(&mut reader);
+    assert!(r["result"]["results"][0]["area"].as_str().is_some(),
+        "search hits must carry area so the caller can route on it");
+
+    drop(stdin);
+    child.wait().unwrap();
+
+    // and it all survives a cold replay of the journal the server wrote
+    let ops = Journal::read_all(&jpath).unwrap();
+    let mut s = StoreData::new();
+    for op in &ops { s.apply(op).unwrap(); }
+    assert_eq!(s.nodes[&harness].area, Area::Executive);
+    assert_eq!(s.nodes[&pain].area, Area::Salience);
+}

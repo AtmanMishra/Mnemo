@@ -145,6 +145,13 @@ Task tracking moved to plan.md (7 areas). This file records outcomes/verificatio
 agent 102 · tui 23 (+31 self-checks) · memory-layer 19 (+2 integration) · harness-engine 19
 HEAD ac50ba7, working tree clean, all pushed.
 
+### AREA 3.1 — BRAIN-AREA MEMORY: COMPLETE
+- `Area` enum in memory-layer/src/model.rs with 6 regions (Episodic, Semantic, Procedural, Spatial, Salience, Executive) per research/brain-areas-design.md
+- `Node.area` is a stored column, defaulted at creation from NodeKind via `Area::for_kind` (TaskEpisode/Outcome→Episodic, Aspect→Semantic, Harness→Procedural, Entity→Spatial). Stored rather than derived because Salience and Executive nodes have no dedicated kind (needed by 3.4).
+- Reassignment via new journal op `Op::SetArea{node,area,at}` — chosen over adding a field to `Op::CreateNode` to keep every existing journal line replayable unchanged and give consolidation (3.5) a re-assignment path. Node serde field has `#[serde(default)]` so pre-area snapshots still load.
+- memsrv: `create_node` and `episode` accept optional `"area"` param and return the resulting area; new `set_area` method; `dump`, `state` and `search` hits all carry the area (search hits carry it so callers can route on it in 3.2). Unknown area names rejected.
+- Verification: `cargo test` in memory-layer/ = 24 passing / 0 failing (was 19). New tests: area_defaults_by_kind, set_area_survives_journal_replay, snapshot_without_area_field_still_loads, area_parse_round_trips, memsrv_persists_and_returns_area. Other suites re-run green: agent 102, tui 23, harness-engine 19.
+
 ### Next candidates
 Area 3.1-3.2 (brain-area column + routed search, Rust, no LLM needed) |
 Area 2.1 (RPC backbone -> cockpit) | Area 6 packaging quick wins

@@ -67,7 +67,7 @@ fn main() {
         if let Err(e) = s.apply(op) { eprintln!("journal error: {e}"); }
         let at = match op {
             Op::CreateNode { at, .. } | Op::AddFact { at, .. }
-            | Op::SupersedeFact { at, .. } | Op::DeleteNode { at, .. }
+            | Op::SupersedeFact { at, .. } | Op::SetArea { at, .. } | Op::DeleteNode { at, .. }
             | Op::Link { at, .. } | Op::Unlink { at, .. }
             | Op::Reweight { at, .. } | Op::RecordOutcome { at, .. }
             | Op::PushContext { at, .. } | Op::CommitLog { at, .. } => *at,
@@ -98,8 +98,8 @@ fn main() {
             }
             "dump" => {
                 for n in s.nodes.values() {
-                    println!("#{} {:?} {} [{} facts, {} edges in]",
-                        n.id, n.kind, n.label,
+                    println!("#{} {:?}/{:?} {} [{} facts, {} edges in]",
+                        n.id, n.kind, n.area, n.label,
                         n.active_facts().count(),
                         s.feeders_of(n.id, clock).len());
                 }

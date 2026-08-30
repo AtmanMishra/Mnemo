@@ -14,6 +14,43 @@ pub enum NodeKind {
     Outcome,     // record of applying knowledge: worked or not
 }
 
+/// Specialized memory region. See research/brain-areas-design.md.
+/// Derived from `NodeKind` at creation, but stored on the node so it can be
+/// reassigned (Salience/Executive nodes have no dedicated kind).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum Area {
+    Episodic,   // hippocampus: episodes + outcomes
+    #[default]
+    Semantic,   // neocortex: aspect facts
+    Procedural, // cerebellum: harnesses, skills
+    Spatial,    // parietal: repos, paths, services
+    Salience,   // amygdala: failure/pain markers
+    Executive,  // prefrontal: steering decisions, plans
+}
+
+impl Area {
+    pub fn for_kind(kind: NodeKind) -> Area {
+        match kind {
+            NodeKind::TaskEpisode | NodeKind::Outcome => Area::Episodic,
+            NodeKind::Aspect => Area::Semantic,
+            NodeKind::Harness => Area::Procedural,
+            NodeKind::Entity => Area::Spatial,
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Area> {
+        match s.to_ascii_lowercase().as_str() {
+            "episodic" => Some(Area::Episodic),
+            "semantic" => Some(Area::Semantic),
+            "procedural" => Some(Area::Procedural),
+            "spatial" => Some(Area::Spatial),
+            "salience" => Some(Area::Salience),
+            "executive" => Some(Area::Executive),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FactStatus {
     Active,
@@ -52,6 +89,10 @@ pub struct ContextChunk {
 pub struct Node {
     pub id: NodeId,
     pub kind: NodeKind,
+    /// Brain area. Defaults to `Area::for_kind(kind)`; `Op::SetArea` reassigns.
+    /// Old snapshots predate this field, hence serde default.
+    #[serde(default)]
+    pub area: Area,
     pub label: String,
     pub facts: Vec<Fact>,
     pub log: Vec<LogEntry>,
@@ -117,6 +158,11 @@ pub enum Op {
         new_key: String,
         new_value: String,
         new_fact_id: u64,
+        at: Millis,
+    },
+    SetArea {
+        node: NodeId,
+        area: Area,
         at: Millis,
     },
     DeleteNode {

@@ -25,7 +25,7 @@ impl StoreData {
                     return Err(format!("node {id} exists"));
                 }
                 self.nodes.insert(*id, Node {
-                    id: *id, kind: *kind, label: label.clone(),
+                    id: *id, kind: *kind, area: Area::for_kind(*kind), label: label.clone(),
                     facts: vec![], log: vec![LogEntry {
                         at: *at, kind: "created".into(),
                         detail: format!("node created as {label}"),
@@ -58,6 +58,15 @@ impl StoreData {
                     detail: format!("{} -> {}: {}", old_fact, new_fact_id, new_value),
                 });
                 self.next_fact = self.next_fact.max(new_fact_id + 1);
+            }
+            Op::SetArea { node, area, at } => {
+                let n = self.get_mut(*node)?;
+                let old = n.area;
+                n.area = *area;
+                n.log.push(LogEntry {
+                    at: *at, kind: "area_set".into(),
+                    detail: format!("{old:?} -> {area:?}"),
+                });
             }
             Op::DeleteNode { node, hard, at } => {
                 let n = self.get_mut(*node)?;
@@ -119,7 +128,7 @@ impl StoreData {
     /// DERIVED state snapshot for the agent to read cheaply.
     pub fn state_of(&self, id: NodeId) -> Result<String, String> {
         let n = self.nodes.get(&id).ok_or_else(|| format!("node {id} missing"))?;
-        let mut s = format!("[{:?}] {} #{}\n", n.kind, n.label, n.id);
+        let mut s = format!("[{:?}/{:?}] {} #{}\n", n.kind, n.area, n.label, n.id);
         s.push_str("facts:\n");
         for f in n.active_facts() {
             s.push_str(&format!("  - {}: {}\n", f.key, f.value));

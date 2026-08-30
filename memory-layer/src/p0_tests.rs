@@ -82,4 +82,73 @@ mod p0 {
         assert_eq!(a, b, "snapshot and journal replay must agree exactly");
         assert_eq!(from_journal.nodes.len(), 2);
     }
+
+    #[test]
+    fn area_defaults_by_kind() {
+        let mut s = StoreData::new();
+        let t = now();
+        let kinds = [
+            (1, NodeKind::Aspect, Area::Semantic),
+            (2, NodeKind::TaskEpisode, Area::Episodic),
+            (3, NodeKind::Outcome, Area::Episodic),
+            (4, NodeKind::Harness, Area::Procedural),
+            (5, NodeKind::Entity, Area::Spatial),
+        ];
+        for (id, kind, _) in kinds {
+            s.apply(&Op::CreateNode { id, kind, label: format!("n{id}"), at: t }).unwrap();
+        }
+        for (id, kind, want) in kinds {
+            assert_eq!(s.nodes[&id].area, want, "{kind:?} must default to {want:?}");
+            assert_eq!(Area::for_kind(kind), want);
+        }
+        // area is visible in the derived state the agent actually reads
+        assert!(s.state_of(4).unwrap().contains("Procedural"));
+    }
+
+    #[test]
+    fn set_area_survives_journal_replay() {
+        let dir = std::env::temp_dir().join("memlayer-area-replay");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let jpath = dir.join("journal.jsonl");
+        let t = now();
+        let ops = vec![
+            Op::CreateNode { id: 1, kind: NodeKind::Aspect, label: "ingress".into(), at: t },
+            Op::SetArea { node: 1, area: Area::Salience, at: t + 1 },
+        ];
+        {
+            let mut j = Journal::open(&jpath).unwrap();
+            for op in &ops { j.append(op).unwrap(); }
+        }
+        let s = persist::load(None, &Journal::read_all(&jpath).unwrap()).unwrap();
+        assert_eq!(s.nodes[&1].area, Area::Salience, "override must persist through the journal");
+        assert!(s.nodes[&1].log.iter().any(|l| l.kind == "area_set"));
+
+        let mut bad = StoreData::new();
+        assert!(bad.apply(&Op::SetArea { node: 99, area: Area::Executive, at: t }).is_err());
+    }
+
+    #[test]
+    fn snapshot_without_area_field_still_loads() {
+        // nodes written before `area` existed must not break replay
+        let legacy = serde_json::json!({
+            "nodes": {"1": {
+                "id": 1, "kind": "Aspect", "label": "old node",
+                "facts": [], "log": [], "context": [],
+                "created_at": now(), "deleted": false
+            }},
+            "edges": {}, "next_node": 2, "next_edge": 1, "next_fact": 1
+        });
+        let s: StoreData = serde_json::from_value(legacy).unwrap();
+        assert_eq!(s.nodes[&1].area, Area::Semantic);
+    }
+
+    #[test]
+    fn area_parse_round_trips() {
+        for a in [Area::Episodic, Area::Semantic, Area::Procedural,
+                  Area::Spatial, Area::Salience, Area::Executive] {
+            assert_eq!(Area::parse(&format!("{a:?}")), Some(a));
+        }
+        assert_eq!(Area::parse("hippocampus"), None);
+    }
 }

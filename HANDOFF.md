@@ -95,9 +95,9 @@ cd ../harness-engine && npm test                 # 19 tests (1 flaky, rerun if r
 Line-delimited JSON over stdio. `{"id":N,"method":"M","params":{...}}` ->
 `{"id":N,"ok":true,"result":...}` or `{"ok":false,"error":"..."}`.
 Methods: ping · dump · state{node} · search{query,k} (returns label+kind+state per
-hit, NOT just scores — this was a real bug once, see §6) · create_node{kind,label} ·
-episode{label} · fact{node,key,value} · link{src,dst} · commit_log{node,kind,detail} ·
-steer{episode,failure,fix?{node,fact,new_key,new_value}} · good{episode,detail} · exit.
+hit, NOT just scores — this was a real bug once, see §6) · create_node{kind,label,area?} ·
+episode{label,area?} · fact{node,key,value} · link{src,dst} · commit_log{node,kind,detail} ·
+steer{episode,failure,fix?{node,fact,new_key,new_value}} · set_area{node,area} · good{episode,detail} · exit.
 
 ## 6. Hard-won lessons (do not repeat these mistakes)
 1. NEVER hardcode API keys in any script/file, even "temporary" ones — one leaked

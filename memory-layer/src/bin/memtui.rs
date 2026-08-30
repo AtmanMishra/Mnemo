@@ -177,7 +177,7 @@ impl App {
 fn op_at(op: &Op) -> Millis {
     match op {
         Op::CreateNode { at, .. } | Op::AddFact { at, .. }
-        | Op::SupersedeFact { at, .. } | Op::DeleteNode { at, .. }
+        | Op::SupersedeFact { at, .. } | Op::SetArea { at, .. } | Op::DeleteNode { at, .. }
         | Op::Link { at, .. } | Op::Unlink { at, .. }
         | Op::Reweight { at, .. } | Op::RecordOutcome { at, .. }
         | Op::PushContext { at, .. } | Op::CommitLog { at, .. } => *at,
@@ -193,6 +193,8 @@ fn fmt_op(op: &Op) -> String {
             format!("[{at}] fact #{fid} on #{node}: {key}={value}", fid = fact_id),
         Op::SupersedeFact { node, old_fact, new_fact_id, new_value, at, .. } =>
             format!("[{at}] supersede #{old_fact} -> #{new_fact_id} on #{node}: {new_value}"),
+        Op::SetArea { node, area, at } =>
+            format!("[{at}] area #{node} = {:?}", area),
         Op::DeleteNode { node, hard, at } =>
             format!("[{at}] delete #{node} hard={hard}"),
         Op::Link { id, src, dst, kind, at } =>

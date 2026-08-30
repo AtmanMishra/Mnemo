@@ -22,7 +22,7 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 - [ ] 2.9 Deprecate seatui + memtui standalone binaries after panes reach parity
 
 ## AREA 3 — BRAIN-AREA MEMORY (research/brain-areas-design.md)
-- [ ] 3.1 model.rs: add `area` column to Node (default derived from kind); memsrv persists
+- [x] 3.1 model.rs: add `area` column to Node (default derived from kind); memsrv persists
 - [ ] 3.2 memsrv search: `areas` filter + query router heuristic v0 (keyword->area mapping)
 - [ ] 3.3 search.rs: cross-area discount weights; tune via memeval (no regression vs 80% hit@1 baseline)
 - [ ] 3.4 steer(): write SALIENCE pain markers before Executive correction
