@@ -130,6 +130,7 @@ Task tracking moved to plan.md (7 areas). This file records outcomes/verificatio
 | research/agent-tui-design.md | cockpit layout + feature parity table |
 | research/memory-design-spec.md / memory-layer-notes.md | memory core design + research |
 | research/pi-agent-report.md / deepseek-harness-and-scrapling-report.md | upstream studies |
+| research/programmatic-tool-calling.md | in-kernel tool dispatch to reduce round-trips (tasks 4.6-4.7) |
 
 ### AREA 1 — AUTH & ONBOARDING: COMPLETE (4/5)
 - ~/.mnemo/auth.json credential store (chmod 600); env > store precedence
