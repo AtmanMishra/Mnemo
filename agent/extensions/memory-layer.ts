@@ -247,11 +247,90 @@ export async function runConsolidate(
   return lessons.length;
 }
 
+/** One search hit as memsrv returns it. */
+export interface Recalled {
+  kind: string;
+  label: string;
+  node: number;
+  score: number;
+  state: string;
+}
+
+/** Prompts too short to carry a topic; searching on them returns noise. */
+function worthSearching(prompt: string): boolean {
+  const words = prompt.trim().split(/\s+/).filter(Boolean);
+  return words.length >= 3 && prompt.trim().length >= 12;
+}
+
+/**
+ * Pick which hits are worth spending context on.
+ *
+ * The score scale depends on the embedding backend (hashing vs OpenRouter), so
+ * an absolute floor would be tuned to whichever one happened to be configured.
+ * A RELATIVE cut is scale-free: keep what is close to the best hit, drop the
+ * long tail. Retrieval is still a guess, which is why the injected block says
+ * so rather than presenting hits as established fact.
+ */
+export function selectRecall(hits: Recalled[], k = 3, relative = 0.6): Recalled[] {
+  const scored = hits.filter((h) => Number.isFinite(h.score)).sort((a, b) => b.score - a.score);
+  const best = scored[0]?.score ?? 0;
+  if (best <= 0) return scored.slice(0, k);
+  return scored.filter((h) => h.score >= best * relative).slice(0, k);
+}
+
+/** Trim one node's state to a line budget so a fat node cannot eat the context. */
+export function summariseState(state: string, maxLines = 6, maxChars = 400): string {
+  const lines = state.split("\n").map((l) => l.trimEnd()).filter((l) => l.trim().length > 0);
+  const kept = lines.slice(0, maxLines).join("\n");
+  return kept.length > maxChars ? kept.slice(0, maxChars) + " …" : kept;
+}
+
+/**
+ * Retrieve memory for this prompt and render it as a system-prompt block.
+ *
+ * The directive alone asks the model to call memory_search before answering.
+ * That costs a whole extra round trip on every turn, and a small model simply
+ * ignores it — which is how the agent ends up confidently not knowing
+ * something it was told last week. Doing the search here spends one memsrv
+ * call (local, no LLM) and puts the answer in front of the model before it
+ * thinks, instead of hoping it asks.
+ *
+ * Returns "" whenever there is nothing worth saying: a short prompt, no hits,
+ * or a broken sidecar. Memory must never break the agent loop.
+ */
+export async function recallFor(
+  client: Pick<MemClient, "request">,
+  prompt: string,
+  k = 3,
+): Promise<string> {
+  if (!prompt || !worthSearching(prompt)) return "";
+  let hits: Recalled[] = [];
+  try {
+    const res = await client.request("search", { query: prompt, k: Math.max(k * 2, 6) });
+    if (!res.ok) return "";
+    hits = (res.result?.results ?? []) as Recalled[];
+  } catch {
+    return ""; // a dead sidecar is a missing convenience, not a failed turn
+  }
+  const picked = selectRecall(hits, k);
+  if (picked.length === 0) return "";
+  const body = picked
+    .map((h) => `- ${h.label} (${h.kind} #${h.node})\n${summariseState(h.state ?? "")}`)
+    .join("\n");
+  return [
+    "",
+    "## Recalled from memory for this message",
+    "Retrieved automatically by relevance — these are candidates, not established",
+    "fact. Use what fits, ignore what does not, and search for more if you need it.",
+    body,
+  ].join("\n");
+}
+
 export const MEMORY_DIRECTIVE = [
   "",
   "## Persistent memory",
   "You have long-term memory tools: memory_search, memory_write_fact, memory_steer.",
-  "- ALWAYS call memory_search BEFORE answering any question about this project, its services, ports, tooling, or past work. Never claim you lack information without searching first.",
+  "- Relevant memory is retrieved for you and appended below when there is any. Call memory_search yourself when that block is missing or does not cover what you need — never claim you lack information without searching first.",
   "- When you learn a durable fact (stack decisions, fixes that worked or failed, credentials locations), store it via memory_write_fact.",
 ].join("\n");
 
@@ -344,9 +423,11 @@ function registerLifecycle(pi: any): void {
     await ensureEpisode(client, sessionState);
   });
 
-  // Appenditive system-prompt chaining: officially recomputed each turn.
+  // Appenditive system-prompt chaining: officially recomputed each turn, which
+  // is what lets the recalled block be specific to THIS message.
   pi.on("before_agent_start", async (event: any) => ({
-    systemPrompt: event.systemPrompt + MEMORY_DIRECTIVE,
+    systemPrompt: event.systemPrompt + MEMORY_DIRECTIVE
+      + await recallFor(client, String(event.prompt ?? "")),
   }));
 
   pi.on("tool_execution_end", async (event: any) => {

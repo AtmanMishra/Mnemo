@@ -7,7 +7,7 @@ import assert from "node:assert";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { MemClient, runConsolidate } from "../extensions/memory-layer.ts";
+import { MemClient, recallFor, runConsolidate } from "../extensions/memory-layer.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sea-mem-test-"));
 const journal = path.join(tmp, "journal.jsonl");
@@ -124,4 +124,21 @@ test("consolidate reports the failure instead of throwing", async () => {
   );
   assert.equal(n, -1);
   assert.match(lines[0]!, /memsrv is not running/);
+});
+
+test("recall pulls the right node out of a real journal, and skips the rest", async () => {
+  // the unit tests cover selection with a fake client; this is the whole path
+  // through a real memsrv over a real journal, with real embeddings
+  const node = await client.request("create_node", { kind: "aspect", label: "alerting" });
+  await client.request("fact", {
+    node: node.result.node, key: "deploy-window", value: "Friday 5pm",
+  });
+  const other = await client.request("create_node", { kind: "aspect", label: "unrelated-thing" });
+  await client.request("fact", { node: other.result.node, key: "colour", value: "blue" });
+
+  const block = await recallFor(client, "when is the deploy window this week");
+  assert.match(block, /deploy-window: Friday 5pm/, "the answer is in front of the model");
+  assert.doesNotMatch(block, /unrelated-thing/, "and the rest of the graph is not");
+
+  assert.equal(await recallFor(client, "hi"), "", "a greeting recalls nothing");
 });
