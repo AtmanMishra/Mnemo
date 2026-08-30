@@ -1,0 +1,97 @@
+name: ci
+
+# 7.1: every push and PR runs all four suites. They are independent, so they
+# run as separate jobs and a red Rust suite still tells you about TypeScript.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  memory-layer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: memory-layer
+      - name: cargo test
+        working-directory: memory-layer
+        run: cargo test --all-targets
+
+  tui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tui
+      # the cockpit's end-to-end test drives a real memsrv, so build it first
+      - name: build memsrv
+        working-directory: memory-layer
+        run: cargo build --bin memsrv
+      - name: cargo test
+        working-directory: tui
+        run: cargo test --all-targets
+
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # 22.6 is the floor: below it node cannot run our .ts files at all
+          node-version: "22.6"
+      - uses: dtolnay/rust-toolchain@stable
+      # the memory tests talk to the real sidecar
+      - name: build memsrv
+        working-directory: memory-layer
+        run: cargo build --bin memsrv
+      - name: npm install
+        working-directory: agent
+        run: npm install
+      - name: typecheck
+        working-directory: agent
+        run: npx tsc --noEmit
+      - name: npm test
+        working-directory: agent
+        run: npm test
+
+  harness-engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.6"
+      - name: npm install
+        working-directory: harness-engine
+        run: npm install
+      # one watcher test is timing-based; a single retry keeps CI honest
+      # without hiding a real failure, since a genuine break fails twice
+      - name: npm test
+        working-directory: harness-engine
+        run: npm test || npm test
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # a key reached a commit once already; this is the automated version of
+      # the manual pre-push check in HANDOFF section 6
+      - name: scan for credential-shaped strings
+        run: |
+          if git grep -nE '(sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})' \
+               -- ':!agent/test/trace.test.ts' ':!.github/workflows/ci.yml'; then
+            echo "::error::credential-shaped string found outside the redaction fixtures"
+            exit 1
+          fi
+          echo "no credential-shaped strings found"

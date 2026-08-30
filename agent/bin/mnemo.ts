@@ -35,6 +35,7 @@ import { seaToolsInline } from "../extensions/sea-tools-inline.ts";
 import { memoryLayerHooks, runConsolidate, sharedMem } from "../extensions/memory-layer.ts";
 import { discoverMcpTools, loadMcpConfig, setMcpTools } from "../src/mcp.ts";
 import { formatTree, readSpans, sessionsOf } from "../src/trace.ts";
+import { checkNodeVersion } from "../src/runtime_check.ts";
 import approvalExt from "../extensions/approval-gate.ts";
 import tracingExt from "../extensions/tracing.ts";
 
@@ -230,6 +231,14 @@ function factories() {
 }
 
 async function run(): Promise<void> {
+  // 6.2: before anything else — on an old Node the next import would fail
+  // with a SyntaxError that explains nothing
+  const nodeProblem = checkNodeVersion();
+  if (nodeProblem) {
+    console.error(nodeProblem);
+    process.exit(1);
+  }
+
   const argv = process.argv.slice(2);
 
   // Legacy flag kept locally (skills-store backed); everything else forwards.

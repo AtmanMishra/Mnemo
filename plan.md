@@ -48,14 +48,14 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 - [x] 5.7 Log rotation + redaction (never write api keys / .env values into traces)
 
 ## AREA 6 — PACKAGING & DISTRIBUTION
-- [ ] 6.1 package.json files/engines fields; npm publish (scoped) or npm link quickstart
-- [ ] 6.2 node>=22.6 runtime check with friendly error
-- [ ] 6.3 README quickstart: install -> `mnemo` -> wizard -> done
+- [x] 6.1 package.json files/engines fields; npm publish (scoped) or npm link quickstart
+- [x] 6.2 node>=22.6 runtime check with friendly error
+- [x] 6.3 README quickstart: install -> `mnemo` -> wizard -> done
 
 ## AREA 7 — QUALITY
-- [ ] 7.1 CI: test matrix on push (agent/tui/memory-layer)
-- [ ] 7.2 Eval suite expansion: >15 retrieval cases + 5 LLM task pairs
-- [ ] 7.3 Learned steering policy experiment (log-replay training data)
+- [x] 7.1 CI: test matrix on push (agent/tui/memory-layer)
+- [x] 7.2 Eval suite expansion: >15 retrieval cases + 5 LLM task pairs
+- [x] 7.3 Learned steering policy experiment (log-replay training data)
 
 
 ## DONE (reference)

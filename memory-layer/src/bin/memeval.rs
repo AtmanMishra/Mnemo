@@ -38,6 +38,14 @@ fn build_graph(s: &mut StoreData) {
             ("db migrations", "alembic revision autogenerate; downgrade tested always"),
             ("testing", "pytest fixtures scope session; mock httpx with respx"),
         ]),
+        // 7.2: a fourth domain, so the corpus is not three clusters the
+        // embedder can separate by vocabulary alone
+        ("observability", &[
+            ("structured logging", "one json object per line; request id on every span"),
+            ("tracing spans", "parent span id links child work; sample head not tail"),
+            ("alert routing", "page on symptom not cause; runbook link in every alert"),
+            ("dashboards", "latency percentiles p50 p95 p99; never average a latency"),
+        ]),
     ];
     let mut domain_root: Vec<(u64, Vec<u64>)> = Vec::new();
     for (domain, aspects) in domains {
@@ -78,6 +86,25 @@ fn build_graph(s: &mut StoreData) {
         new_value: "v1 annotation removed in networking.k8s.io/v1".into(),
         new_fact_id: new_fid, at: t() + 100 });
 
+    // 7.2: brain areas in the corpus, so retrieval is measured against the
+    // routing that landed in Area 3 rather than a flat semantic graph
+    let pain = { nid += 1; nid };
+    apply(s, Op::CreateNode { id: pain, kind: NodeKind::Aspect,
+        label: "pain: cart deploy 404 after ingress change".into(), at: t() + 110 });
+    apply(s, Op::SetArea { node: pain, area: Area::Salience, at: t() + 110 });
+    let fid = s.next_fact;
+    apply(s, Op::AddFact { node: pain, fact_id: fid, key: "failure".into(),
+        value: "cart returned 404 when the rewrite-target annotation was dropped".into(),
+        at: t() + 110 });
+
+    let runbook = { nid += 1; nid };
+    apply(s, Op::CreateNode { id: runbook, kind: NodeKind::Harness,
+        label: "helm rollback runbook".into(), at: t() + 111 });
+    let fid = s.next_fact;
+    apply(s, Op::AddFact { node: runbook, fact_id: fid, key: "steps".into(),
+        value: "run helm history, pick the last good revision, roll back with wait".into(),
+        at: t() + 111 });
+
     // silence unused journal warning
     let _ = &j;
 }
@@ -97,35 +124,49 @@ fn main() {
         }
     };
 
-    // (query, expected top-1 label substring)
-    let cases: &[(&str, &str)] = &[
-        ("how do I route paths through nginx ingress", "ingress annotations"),
-        ("rollback a bad helm release", "helm rollback"),
-        ("pods getting OOM killed", "resource limits"),
-        ("store api keys safely in cluster", "secrets management"),
-        ("global state management in components", "react state"),
-        ("page grid and toolbar layout", "css layout"),
-        ("vite build chunks slow", "bundler config"),
-        ("modal focus keyboard trap", "a11y"),
-        ("isolated python environment setup", "venv setup"),
-        ("run coroutines concurrently", "async patterns"),
-        ("database schema change rollback", "db migrations"),
-        ("fixture scope for integration tests", "testing"),
-        ("deploy failed 404 on rewritten path", "ingress annotations"),   // episode context
-        ("what fixed the rewrite 404 last time", "ingress annotations"),  // post-supersede recall
-        ("split vendor bundle manually", "bundler config"),
+    // (query, any-of expected top-1 label substrings). Most cases have one
+    // right answer; a few became genuinely ambiguous once steer() started
+    // writing SALIENCE pain markers (3.4), and those list both.
+    let cases: &[(&str, &[&str])] = &[
+        ("how do I route paths through nginx ingress", &["ingress annotations"]),
+        ("rollback a bad helm release", &["helm rollback"]),
+        ("pods getting OOM killed", &["resource limits"]),
+        ("store api keys safely in cluster", &["secrets management"]),
+        ("global state management in components", &["react state"]),
+        ("page grid and toolbar layout", &["css layout"]),
+        ("vite build chunks slow", &["bundler config"]),
+        ("modal focus keyboard trap", &["a11y"]),
+        ("isolated python environment setup", &["venv setup"]),
+        ("run coroutines concurrently", &["async patterns"]),
+        ("database schema change rollback", &["db migrations"]),
+        ("fixture scope for integration tests", &["testing"]),
+        // both are defensible: the aspect explains the mechanism, the pain
+        // marker records that it actually bit us
+        ("deploy failed 404 on rewritten path", &["ingress annotations", "pain: cart deploy 404"]),   // episode context
+        ("what fixed the rewrite 404 last time", &["ingress annotations"]),  // post-supersede recall
+        ("split vendor bundle manually", &["bundler config"]),
+        // 7.2: the fourth domain
+        ("one json object per log line", &["structured logging"]),
+        ("link child work to a parent span", &["tracing spans"]),
+        ("who gets paged when latency spikes", &["alert routing"]),
+        ("p95 latency chart", &["dashboards"]),
+        // and two more angles on existing knowledge
+        ("kubeseal encrypted manifest", &["secrets management"]),
+        ("focus trap keyboard accessibility", &["a11y"]),
+        ("cpu and memory requests for a pod", &["resource limits"]),
     ];
 
     let vectors = build_vectors(&s, emb.as_ref());
     let mut hits1 = 0; let mut hits3 = 0; let mut rr_sum = 0.0;
     println!("{:<42} {:<22} {}", "query", "top hit", "rank");
-    for (q, want) in cases {
+    for (q, wants) in cases {
         // same path memsrv takes: kind filter + routed area preference
         let opts = SearchOpts::kind(NodeKind::Aspect).prefer(route_query(q));
         let results = search(&s, &vectors, emb.as_ref(), q, 5, t() + 200, &opts);
         let labels: Vec<String> = results.iter()
             .filter_map(|r| s.nodes.get(&r.node).map(|n| n.label.clone())).collect();
-        let rank = labels.iter().position(|l| l.contains(want))
+        let rank = labels.iter()
+            .position(|l| wants.iter().any(|w| l.contains(w)))
             .map(|i| i + 1)
             .unwrap_or(999);
         if rank == 1 { hits1 += 1; }

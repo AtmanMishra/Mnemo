@@ -12,3 +12,7 @@ ureq = { version = "3.4.0", features = ["json"] }
 ratatui = "0.29"
 crossterm = "0.28"
 fd-lock = "4.0.4"
+
+[[bin]]
+name = "mempolicy"
+path = "src/bin/mempolicy.rs"

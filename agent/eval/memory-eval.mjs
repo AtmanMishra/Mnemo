@@ -41,6 +41,19 @@ function seedMemory(journal) {
   const n3 = call("create_node", { kind: "aspect", label: "helm rollback" }).result.node;
   call("link", { src: n3, dst: ep3 });
   call("fact", { node: n3, key: "incident", value: "rollback failed because --wait flag was missing" });
+  // T4: a fact that was corrected, to test that the CURRENT value wins
+  const ep4 = call("episode", { label: "ci runner migration" }).result.episode;
+  const n4 = call("create_node", { kind: "aspect", label: "ci runners" }).result.node;
+  call("link", { src: n4, dst: ep4 });
+  const stale = call("fact", { node: n4, key: "runner", value: "ubuntu-20.04" }).result.fact;
+  call("steer", {
+    episode: ep4,
+    failure: "ci runner image was wrong, builds failed on ubuntu-20.04",
+    fix: { node: n4, fact: stale, new_key: "runner", new_value: "ubuntu-24.04" },
+  });
+  // T5: knowledge that only lives in the SALIENCE area, to exercise routing
+  const ep5 = call("episode", { label: "deploy cart" }).result.episode;
+  call("steer", { episode: ep5, failure: "cart deploy 404s because the ingress rewrite-target annotation was dropped" });
 }
 
 const TASKS = [
@@ -57,6 +70,19 @@ const TASKS = [
   {
     q: "Why did our last helm rollback fail? One short sentence.",
     expect: ["--wait", "wait flag"],
+    seed: true,
+  },
+  {
+    // the stored fact was superseded: answering with the old value is a fail
+    q: "Which CI runner image do we use now? Answer with just the image name.",
+    expect: ["ubuntu-24.04"],
+    reject: ["ubuntu-20.04"],
+    seed: true,
+  },
+  {
+    // only recorded as a salience pain marker by steer(), never as a plain fact
+    q: "What caused the cart deploy to return 404s? One short sentence.",
+    expect: ["rewrite-target", "rewrite target", "annotation"],
     seed: true,
   },
 ];
@@ -80,7 +106,11 @@ let withOk = 0, withoutOk = 0;
 TASKS.forEach((t, i) => {
   const aWith = askAgent(t.q, seeded);
   const aWithout = askAgent(t.q, empty);
-  const hit = (a) => t.expect.some((e) => a.toLowerCase().includes(e.toLowerCase()));
+  const hit = (a) => {
+    const low = a.toLowerCase();
+    if ((t.reject ?? []).some((r) => low.includes(r.toLowerCase()))) return false;
+    return t.expect.some((e) => low.includes(e.toLowerCase()));
+  };
   if (hit(aWith)) withOk++;
   if (hit(aWithout)) withoutOk++;
   console.log(

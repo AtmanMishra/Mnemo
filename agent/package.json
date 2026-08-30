@@ -1,7 +1,7 @@
 {
   "name": "mnemo",
   "version": "0.1.0",
-  "description": "Self-Evolving Agent runtime built on the pi framework (@earendil-works/*)",
+  "description": "Mnemo: a terminal-native agentic coding assistant whose memory works like a brain",
   "type": "module",
   "bin": {
     "mnemo": "./bin/mnemo.ts"
@@ -15,7 +15,15 @@
     "node": ">=22.6"
   },
   "license": "MIT",
-  "keywords": [],
+  "keywords": [
+    "agent",
+    "cli",
+    "coding-agent",
+    "memory",
+    "mcp",
+    "pi",
+    "tui"
+  ],
   "author": "",
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.84.3",
@@ -26,5 +34,12 @@
   "devDependencies": {
     "@types/node": "^26.3.0",
     "typescript": "^7.0.2"
-  }
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "extensions/",
+    "kernel/",
+    "README.md"
+  ]
 }

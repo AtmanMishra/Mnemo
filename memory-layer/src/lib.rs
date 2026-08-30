@@ -2,6 +2,7 @@ pub mod ann;
 pub mod consolidate;
 pub mod model;
 pub mod persist;
+pub mod policy;
 pub mod remote;
 pub mod search;
 pub mod steering;
@@ -16,3 +17,5 @@ mod steering_tests;
 mod search_tests;
 #[cfg(test)]
 mod consolidate_tests;
+#[cfg(test)]
+mod policy_tests;
