@@ -4,6 +4,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { readFileTool, writeFileTool, applyEditTool, globListTool, setWorkspaceRoot } from "../src/tools/index.ts";
+import { textOf } from "../src/tools/types.ts";
 
 let tmp: string;
 beforeEach(async () => {
@@ -15,15 +16,15 @@ test("write_file creates parents and writes content", async () => {
   const res = await writeFileTool.execute("w1", { path: "a/b/c.txt", content: "line1\nline2\nline3\n" });
   const onDisk = await fs.readFile(path.join(tmp, "a/b/c.txt"), "utf8");
   assert.equal(onDisk, "line1\nline2\nline3\n");
-  assert.match(res.content[0].text, /Wrote/);
+  assert.match(textOf(res), /Wrote/);
 });
 
 test("read_file returns full text and line slices", async () => {
   await fs.writeFile(path.join(tmp, "f.txt"), "one\ntwo\nthree\nfour\n", "utf8");
   const full = await readFileTool.execute("r1", { path: "f.txt" });
-  assert.match(full.content[0].text, /^one\ntwo\nthree\nfour$/);
+  assert.match(textOf(full), /^one\ntwo\nthree\nfour$/);
   const sliced = await readFileTool.execute("r2", { path: "f.txt", offset: 2, limit: 2 });
-  assert.equal(sliced.content[0].text, "two\nthree");
+  assert.equal(textOf(sliced), "two\nthree");
   assert.equal((sliced.details as any).truncated, true);
 });
 
@@ -62,8 +63,8 @@ test("glob_list matches relative patterns under root", async () => {
   await fs.writeFile(path.join(tmp, "src/sub/b.ts"), "", "utf8");
   await fs.writeFile(path.join(tmp, "README.md"), "", "utf8");
   const res = await globListTool.execute("g1", { pattern: "src/**/*.ts" });
-  const lines = res.content[0].text.split("\n").sort();
+  const lines = textOf(res).split("\n").sort();
   assert.deepEqual(lines.sort(), ["src/a.ts", "src/sub/b.ts"]);
   const none = await globListTool.execute("g2", { pattern: "*.xyz" });
-  assert.equal(none.content[0].text, "(no matches)");
+  assert.equal(textOf(none), "(no matches)");
 });

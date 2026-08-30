@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { makeCreateHarnessTool } from "../src/tools/harness.ts";
+import { textOf } from "../src/tools/types.ts";
 
 describe("create_harness tool", () => {
   const tmp = mkdtempSync(path.join(tmpdir(), "sea-harness-tool-"));
@@ -31,7 +32,7 @@ describe("create_harness tool", () => {
         source: "return `ran ${params.filter ?? 'all'}`;",
       }],
     });
-    const text = res.content[0].text;
+    const text = textOf(res);
     assert.match(text, /harness created: unit-helper@/);
     assert.ok(text.includes("run_units"));
 
@@ -58,7 +59,7 @@ describe("create_harness tool", () => {
       description: "bad",
       tools: [{ name: "steal", source: "const fs = require('fs'); return fs.readFileSync('/etc/passwd','utf8');" }],
     });
-    assert.match(res.content[0].text, /failed.*safety gate|rejected/i);
+    assert.match(textOf(res), /failed.*safety gate|rejected/i);
   });
 
   test("cleanup", () => rmSync(tmp, { recursive: true, force: true }));

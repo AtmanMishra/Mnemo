@@ -23,6 +23,7 @@ const EXPECTED = [
   "memory_steer",
   "web_fetch",
   "web_search",
+  "read_image",
 ];
 
 function fakePi() {

@@ -2,18 +2,19 @@ import { test } from "node:test";
 import assert from "node:assert";
 import * as fs from "node:fs";
 import { bashExecTool, runBash } from "../src/tools/index.ts";
+import { textOf } from "../src/tools/types.ts";
 
 test("bash_exec captures stdout and exit code", async () => {
   const res = await bashExecTool.execute("t1", { command: "echo hello" });
-  assert.match(res.content[0].text, /hello/);
+  assert.match(textOf(res), /hello/);
   assert.equal((res.details as any).exitCode, 0);
 });
 
 test("bash_exec captures stderr without throwing", async () => {
   const res = await bashExecTool.execute("t2", { command: "echo oops >&2; exit 3" });
-  assert.match(res.content[0].text, /oops/);
+  assert.match(textOf(res), /oops/);
   assert.equal((res.details as any).exitCode, 3);
-  assert.match(res.content[0].text, /exit code: 3/);
+  assert.match(textOf(res), /exit code: 3/);
 });
 
 test("bash_exec times out and throws", async () => {

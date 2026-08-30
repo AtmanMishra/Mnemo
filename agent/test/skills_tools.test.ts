@@ -13,6 +13,7 @@ import {
   globalSkillDir,
 } from "../src/tools/skills.ts";
 import { discoverSkills } from "../src/skills/discovery.ts";
+import { textOf } from "../src/tools/types.ts";
 
 let tmp: string;
 beforeEach(async () => {
@@ -52,8 +53,8 @@ test("load_skill returns full SKILL.md body", async () => {
     instructions: "Always greet warmly.",
   });
   const res = await loadSkillTool.execute("l1", { name: "greeter" });
-  assert.match(res.content[0].text, /name: greeter/);
-  assert.match(res.content[0].text, /Always greet warmly\./);
+  assert.match(textOf(res), /name: greeter/);
+  assert.match(textOf(res), /Always greet warmly\./);
 });
 
 test("load_skill errors with available names on unknown skill", async () => {
@@ -65,7 +66,7 @@ test("list_skills renders a table", async () => {
   await createSkillTool.execute("c4", { name: "aa", description: "First", instructions: "x" });
   await createSkillTool.execute("c5", { name: "bbb", description: "Second", instructions: "y" });
   const res = await listSkillsTool.execute("t1", {});
-  const lines = res.content[0].text.split("\n");
+  const lines = textOf(res).split("\n");
   assert.equal(lines.length, 2);
   assert.match(lines[0], /^aa {3}global {3}First$/);
   assert.match(lines[1], /^bbb +global +Second$/);
@@ -73,5 +74,5 @@ test("list_skills renders a table", async () => {
 
 test("list_skills on empty state", async () => {
   const res = await listSkillsTool.execute("t2", {});
-  assert.equal(res.content[0].text, "(no skills found)");
+  assert.equal(textOf(res), "(no skills found)");
 });

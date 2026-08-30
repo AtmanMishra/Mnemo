@@ -12,6 +12,7 @@ import {
   EMPTY_CONFIG, McpClient, discoverMcpTools, flattenContent, loadMcpConfig,
   mcpConfigFile, mcpToolName, toSeaTool, getMcpTools, setMcpTools,
 } from "../src/mcp.ts";
+import { textOf } from "../src/tools/types.ts";
 
 const clients: McpClient[] = [];
 after(() => { for (const c of clients) c.stop(); setMcpTools([]); });
@@ -116,7 +117,7 @@ test("an MCP tool becomes a Mnemo tool that actually calls the server", async ()
     "the server's own JSON Schema is passed through");
 
   const res = await tool.execute("call-1", { text: "hi" });
-  assert.equal(res.content[0]!.text, "echo: hi");
+  assert.equal(textOf(res), "echo: hi");
 });
 
 test("a server-side tool error becomes a thrown error, not a silent empty result", async () => {

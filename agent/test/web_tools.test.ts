@@ -9,6 +9,7 @@ import {
   NO_SEARCH_KEY_MESSAGE, assertFetchableUrl, fetchUrl, formatHits, htmlToText,
   pickSearchProvider, search, truncate, webSearchTool, type FetchLike,
 } from "../src/tools/web.ts";
+import { textOf } from "../src/tools/types.ts";
 
 function reply(body: string, contentType = "text/html", ok = true, status = 200) {
   return {
@@ -130,7 +131,7 @@ test("search without a key explains what to set instead of throwing at the model
   delete process.env.TAVILY_API_KEY;
   try {
     const res = await webSearchTool.execute("id", { query: "anything" });
-    assert.equal(res.content[0]!.text, NO_SEARCH_KEY_MESSAGE);
+    assert.equal(textOf(res), NO_SEARCH_KEY_MESSAGE);
   } finally {
     if (saved.b) process.env.BRAVE_API_KEY = saved.b;
     if (saved.t) process.env.TAVILY_API_KEY = saved.t;

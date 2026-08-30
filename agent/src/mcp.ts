@@ -14,7 +14,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { textResult, type SeaTool } from "./tools/types.ts";
+import { textResult, type ImageContent, type SeaTool, type ToolResult } from "./tools/types.ts";
 
 export interface McpServerConfig {
   command: string;
@@ -181,6 +181,15 @@ export class McpClient {
     return text;
   }
 
+  /** 4.5: keep image blocks as images instead of flattening them to a label. */
+  async callToolRich(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+    const res = await this.request("tools/call", { name, arguments: args });
+    if (res?.isError) {
+      throw new Error(flattenContent(res?.content) || `mcp tool ${name} reported an error`);
+    }
+    return { content: toToolContent(res?.content) };
+  }
+
   stop(): void {
     const proc = this.proc;
     this.proc = null;
@@ -202,6 +211,25 @@ export function flattenContent(content: unknown): string {
     .join("");
 }
 
+/**
+ * MCP content blocks -> pi tool-result blocks. Images survive as images;
+ * everything else is reduced to text.
+ */
+export function toToolContent(content: unknown): ToolResult["content"] {
+  if (!Array.isArray(content) || content.length === 0) {
+    return [{ type: "text", text: "" }];
+  }
+  const out: ToolResult["content"] = [];
+  for (const c of content as any[]) {
+    if (c?.type === "image" && typeof c?.data === "string") {
+      out.push({ type: "image", data: c.data, mimeType: String(c.mimeType ?? "image/png") } as ImageContent);
+    } else {
+      out.push({ type: "text", text: flattenContent([c]) });
+    }
+  }
+  return out;
+}
+
 /** Wrap one MCP tool descriptor as a Mnemo tool. */
 export function toSeaTool(client: McpClient, descriptor: any): SeaTool {
   const remoteName = String(descriptor?.name ?? "");
@@ -212,7 +240,7 @@ export function toSeaTool(client: McpClient, descriptor: any): SeaTool {
     // MCP inputSchema is already JSON Schema, which is what pi wants
     parameters: (descriptor?.inputSchema ?? { type: "object", properties: {} }) as any,
     async execute(_id, params) {
-      return textResult(await client.callTool(remoteName, (params ?? {}) as Record<string, unknown>));
+      return client.callToolRich(remoteName, (params ?? {}) as Record<string, unknown>);
     },
   };
 }

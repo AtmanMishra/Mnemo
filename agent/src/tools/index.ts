@@ -16,7 +16,9 @@ export {
 } from "./skills.ts";
 export { webFetchTool, webSearchTool, htmlToText, fetchUrl, search, formatHits,
   pickSearchProvider, NO_SEARCH_KEY_MESSAGE, type SearchHit } from "./web.ts";
-export { textResult, type SeaTool, type ToolResult, type TextContent } from "./types.ts";
+export { readImageTool, sniffMimeType, humanBytes, MAX_IMAGE_BYTES } from "./read_image.ts";
+export { textResult, imageResult, textOf, type SeaTool, type ToolResult,
+  type TextContent, type ImageContent } from "./types.ts";
 
 import { bashExecTool } from "./bash_exec.ts";
 import { readFileTool } from "./read_file.ts";
@@ -28,6 +30,7 @@ import { subagentSpawnTool } from "./subagent.ts";
 import { createHarnessTool } from "./harness.ts";
 import { listSkillsTool, loadSkillTool, createSkillTool } from "./skills.ts";
 import { webFetchTool, webSearchTool } from "./web.ts";
+import { readImageTool } from "./read_image.ts";
 import type { SeaTool } from "./types.ts";
 
 export const allTools: SeaTool[] = [
@@ -44,6 +47,7 @@ export const allTools: SeaTool[] = [
   createHarnessTool,
   webFetchTool,
   webSearchTool,
+  readImageTool,
 ];
 
 export const toolNames = allTools.map((t) => t.name);

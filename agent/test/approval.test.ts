@@ -14,6 +14,7 @@ import {
   isAlwaysAllowed,
 } from "../src/approval.ts";
 import { bashExecTool, writeFileTool, applyEditTool } from "../src/tools/index.ts";
+import { textOf } from "../src/tools/types.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const childFixture = path.join(here, "fixtures", "approval_child.ts");
@@ -151,9 +152,9 @@ test("wiring: bash_exec denied by user returns error result to model", async () 
   try {
     scripted("n");
     const res = await bashExecTool.execute("t1", { command: "echo should-not-run" });
-    assert.match(res.content[0].text, /user denied bash_exec/);
+    assert.match(textOf(res), /user denied bash_exec/);
     // The command must NOT have executed.
-    assert.doesNotMatch(res.content[0].text, /should-not-run\n/);
+    assert.doesNotMatch(textOf(res), /should-not-run\n/);
   } finally {
     restore();
   }
@@ -167,11 +168,11 @@ test("wiring: write_file 'a' allowlists then later writes proceed unprompted", a
     try {
       scripted("a");
       const res1 = await writeFileTool.execute("t2", { path: file, content: "one\ntwo\nthree" });
-      assert.match(res1.content[0].text, /Wrote/);
+      assert.match(textOf(res1), /Wrote/);
       approvalConfig.input = new PassThrough();
       approvalConfig.output = new PassThrough();
       const res2 = await writeFileTool.execute("t3", { path: file, content: "second write" });
-      assert.match(res2.content[0].text, /Wrote/);
+      assert.match(textOf(res2), /Wrote/);
       assert.equal(fs.readFileSync(file, "utf8"), "second write");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -190,7 +191,7 @@ test("wiring: apply_edit denied returns denial result", async () => {
       old_str: "aaa",
       new_str: "bbb",
     });
-    assert.match(res.content[0].text, /user denied apply_edit/);
+    assert.match(textOf(res), /user denied apply_edit/);
   } finally {
     restore();
   }
