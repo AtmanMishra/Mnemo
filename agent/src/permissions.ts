@@ -1,0 +1,108 @@
+/**
+ * 4.3 Permission rule engine: ~/.mnemo/permissions.json.
+ *
+ * Rules are ordered; the FIRST match wins. Each rule names a tool and a glob
+ * over that tool's subject (the command for bash_exec, the path for the file
+ * tools), and one of three actions:
+ *   allow - run it, no prompt
+ *   ask   - prompt (the existing approval-gate behaviour)
+ *   deny  - block it, never prompt
+ *
+ * `deny` is the one action that must hold in a non-TTY run. The approval gate
+ * deliberately fails OPEN without a TTY so piped/automated sessions keep
+ * working; a deny rule that also failed open would be decoration, so denies
+ * are enforced regardless of TTY.
+ */
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+export type Action = "allow" | "ask" | "deny";
+
+export interface Rule {
+  /** Tool name, or "*" for every tool. */
+  tool: string;
+  /** Glob over the tool's subject. "*" matches anything. */
+  pattern: string;
+  action: Action;
+}
+
+export interface Permissions {
+  version: 1;
+  rules: Rule[];
+  /** Applied when no rule matches. */
+  default: Action;
+}
+
+export const DEFAULT_PERMISSIONS: Permissions = { version: 1, rules: [], default: "ask" };
+
+export function permissionsFile(home = os.homedir()): string {
+  return path.join(home, ".mnemo", "permissions.json");
+}
+
+/** Read the rules file. A missing or unreadable file means "no rules". */
+export function loadPermissions(home = os.homedir()): Permissions {
+  try {
+    const raw = JSON.parse(fs.readFileSync(permissionsFile(home), "utf8"));
+    return normalize(raw);
+  } catch {
+    return DEFAULT_PERMISSIONS;
+  }
+}
+
+export function savePermissions(p: Permissions, home = os.homedir()): void {
+  const file = permissionsFile(home);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(normalize(p), null, 2) + "\n", { mode: 0o600 });
+}
+
+const ACTIONS: readonly string[] = ["allow", "ask", "deny"];
+
+/** Drop malformed rules rather than throwing: a broken file must not brick the CLI. */
+function normalize(raw: any): Permissions {
+  const rules: Rule[] = Array.isArray(raw?.rules)
+    ? raw.rules
+        .filter((r: any) => typeof r?.tool === "string" && typeof r?.pattern === "string"
+          && ACTIONS.includes(r?.action))
+        .map((r: any) => ({ tool: r.tool, pattern: r.pattern, action: r.action as Action }))
+    : [];
+  const fallback: Action = ACTIONS.includes(raw?.default) ? raw.default : "ask";
+  return { version: 1, rules, default: fallback };
+}
+
+/**
+ * The string a rule's glob is matched against. Deliberately the argument that
+ * decides whether a call is dangerous, not a summary of it.
+ */
+export function subjectOf(toolName: string, input: Record<string, unknown>): string {
+  switch (toolName) {
+    case "bash_exec": return String((input as any).command ?? "");
+    case "write_file":
+    case "apply_edit":
+    case "read_file": return String((input as any).path ?? "");
+    default: return "";
+  }
+}
+
+/** Tiny glob: `*` matches any run of characters. Everything else is literal. */
+export function globMatch(pattern: string, value: string): boolean {
+  const rx = "^" + pattern
+    .split("*")
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join(".*") + "$";
+  return new RegExp(rx, "s").test(value);
+}
+
+/** First matching rule wins; `default` applies when nothing matches. */
+export function resolveAction(
+  perms: Permissions,
+  toolName: string,
+  input: Record<string, unknown>,
+): Action {
+  const subject = subjectOf(toolName, input);
+  for (const r of perms.rules) {
+    if (r.tool !== "*" && r.tool !== toolName) continue;
+    if (globMatch(r.pattern, subject)) return r.action;
+  }
+  return perms.default;
+}

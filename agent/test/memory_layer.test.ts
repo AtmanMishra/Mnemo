@@ -98,7 +98,7 @@ test("consolidate distils repeated failures into a semantic lesson", async () =>
       episode: Number(ep.result.episode),
       failure: `helm rollback timed out on ${svc}`,
     });
-    assert.equal(steered.ok, true, steered.error);
+    assert.equal(steered.ok, true, steered.error ?? "steer failed");
     assert.ok(steered.result.pain_node, "steer must leave a salience pain marker");
   }
 

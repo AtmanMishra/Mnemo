@@ -17,6 +17,7 @@
  */
 import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
 import { setDelegatedApproval } from "../src/approval.ts";
+import { DEFAULT_PERMISSIONS, loadPermissions, resolveAction, type Permissions } from "../src/permissions.ts";
 
 export const GATED_TOOLS: ReadonlySet<string> = new Set(["bash_exec", "write_file", "apply_edit"]);
 
@@ -60,7 +61,24 @@ export async function decideApproval(
   ui: ConfirmUI,
   env: NodeJS.ProcessEnv = process.env,
   tty: boolean = Boolean(process.stdin.isTTY),
+  // NOT loadPermissions(): a default that reads $HOME would make every test
+  // that calls this depend on the developer's real machine state.
+  perms: Permissions = DEFAULT_PERMISSIONS,
 ): Promise<ApprovalDecision> {
+  // 4.3: rules are consulted for EVERY tool, not just the gated three — a deny
+  // rule is the only way to forbid a tool outright.
+  const action = resolveAction(perms, ev.toolName, ev.input);
+  if (action === "deny") {
+    // enforced with or without a TTY: a deny that failed open would be theatre
+    const summary = summarizeToolCall(ev.toolName, ev.input);
+    return {
+      block: true,
+      reason: `ERROR: ${ev.toolName} is denied by ~/.mnemo/permissions.json. ` +
+        `Action was NOT executed: ${summary}`,
+    };
+  }
+  if (action === "allow") return {};
+
   if (!GATED_TOOLS.has(ev.toolName)) return {}; // not gated
   if ((env.MNEMO_APPROVAL_MODE ?? env.SEA_APPROVAL_MODE ?? "") !== "interactive") return {}; // mode off
   if (!tty) return {}; // non-TTY: fail open like the old gate
@@ -74,11 +92,15 @@ export async function decideApproval(
   };
 }
 
-/** Factory: delegate the in-tool gate, then prompt via ctx.ui.confirm. */
+/** Factory: delegate the in-tool gate, then apply rules + prompt via ctx.ui. */
 export function approvalExtensionFactory(pi: ExtensionAPI): void {
   setDelegatedApproval(true);
+  // read once per session: a mid-session edit should not change the rules
+  // under a run that is already executing
+  const perms = loadPermissions();
   pi.on("tool_call", async (event: any, ctx: any) =>
-    decideApproval(event as ApprovalDecisionInput, ctx.ui as ConfirmUI),
+    decideApproval(event as ApprovalDecisionInput, ctx.ui as ConfirmUI,
+      process.env, Boolean(process.stdin.isTTY), perms),
   );
 }
 
