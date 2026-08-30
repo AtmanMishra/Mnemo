@@ -8,7 +8,7 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 - [x] 1.2 `mnemo auth` wizard: provider picker (anthropic/openai/openrouter/opencode/opencode-go) -> paste key OR oauth device flow where supported -> default model pick from live catalog
 - [x] 1.3 First-run detection: auto-launch wizard; stored creds resolve to env; branding via pi header (partial)
 - [x] 1.4 `mnemo auth status|logout` commands
-- [ ] 1.5 Verify pi /login lists our providers inside interactive TUI
+- [x] 1.5 Verify pi /login lists our providers inside interactive TUI
 
 ## AREA 2 — COCKPIT TUI (one app, navigation rail)
 - [x] 2.1 RPC backbone: drive agent via pi runRpcMode (JSON-RPC) instead of REPL scraping
