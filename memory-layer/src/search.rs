@@ -76,7 +76,17 @@ pub struct SearchOpts {
     pub kind: Option<NodeKind>,
     /// Restrict to these brain areas. Empty = every area.
     pub areas: Vec<Area>,
+    /// Areas the query was routed to. Not a filter: nodes outside them are
+    /// still searched, just scored down by `cross_area`. Empty = no bias.
+    pub prefer: Vec<Area>,
+    /// Score multiplier for nodes outside `prefer`. None = CROSS_AREA_DISCOUNT.
+    pub cross_area: Option<f32>,
 }
+
+/// How much of its score an out-of-area node keeps. Tuned with `memeval`:
+/// low enough to reorder near-ties, high enough that a mis-routed query still
+/// finds the right node — the router is a keyword heuristic, it WILL be wrong.
+pub const CROSS_AREA_DISCOUNT: f32 = 0.85;
 
 impl SearchOpts {
     pub fn kind(k: NodeKind) -> Self {
@@ -84,6 +94,19 @@ impl SearchOpts {
     }
     pub fn areas(areas: Vec<Area>) -> Self {
         Self { areas, ..Default::default() }
+    }
+    pub fn prefer(mut self, prefer: Vec<Area>) -> Self {
+        self.prefer = prefer;
+        self
+    }
+
+    /// Score multiplier for one node under this query's routing.
+    fn area_weight(&self, store: &StoreData, id: NodeId) -> f32 {
+        if self.prefer.is_empty() { return 1.0; }
+        match store.nodes.get(&id) {
+            Some(n) if self.prefer.contains(&n.area) => 1.0,
+            _ => self.cross_area.unwrap_or(CROSS_AREA_DISCOUNT),
+        }
     }
 }
 
@@ -137,7 +160,7 @@ pub fn search(
     let q = emb.embed(query);
     let mut scored: Vec<(NodeId, f32)> = vectors.iter()
         .filter(|(id, _)| passes_filter(store, **id, opts))
-        .map(|(id, v)| (*id, cosine(&q, v)))
+        .map(|(id, v)| (*id, cosine(&q, v) * opts.area_weight(store, *id)))
         .filter(|(_, s)| *s > 1e-6)
         .collect();
     scored.sort_by(|a, b| b.1.total_cmp(&a.1));
@@ -158,6 +181,7 @@ pub fn search_ann(
     let seeds: Vec<(NodeId, f32)> = index.search(&q, k * 4).into_iter()
         .map(|(id, s)| (id as NodeId, s))
         .filter(|(id, _)| passes_filter(store, *id, opts))
+        .map(|(id, s)| (id, s * opts.area_weight(store, id)))
         .collect();
     expand(store, seeds, k, now)
 }

@@ -201,11 +201,11 @@ fn handle(
         "search" => {
             let query = params.get("query").and_then(|q| q.as_str()).ok_or("missing 'query'")?;
             let k = params.get("k").and_then(|k| k.as_u64()).unwrap_or(5) as usize;
-            // explicit areas restrict the search; otherwise the router only
-            // reports where it would look (biasing lands in 3.3)
+            // explicit areas restrict the search; otherwise the router picks
+            // areas to PREFER — out-of-area nodes are discounted, not dropped
             let asked = parse_areas(params)?;
             let routed = if asked.is_empty() { route_query(query) } else { asked.clone() };
-            let opts = SearchOpts::areas(asked);
+            let opts = SearchOpts::areas(asked).prefer(routed.clone());
             let vectors = build_vectors(s, emb);
             let results = search(s, &vectors, emb, query, k, *clock, &opts);
             // enrich hits with label + derived state so the caller can READ

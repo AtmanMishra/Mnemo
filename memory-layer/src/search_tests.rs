@@ -154,4 +154,44 @@ mod p1 {
         // never guesses more than two areas
         assert!(route_query("plan how to fix the failed build in the repo last time").len() <= 2);
     }
+
+    #[test]
+    fn preferred_area_wins_ties_without_excluding_others() {
+        // two near-identical nodes, one Procedural, one Semantic
+        let s = store_with(&[
+            Op::CreateNode { id: 30, kind: NodeKind::Aspect, label: "helm rollback runbook".into(), at: t() },
+            Op::SetArea { node: 30, area: Area::Procedural, at: t() + 1 },
+        ]);
+        let emb = HashingEmbedder;
+        let vectors = build_vectors(&s, &emb);
+        let now = t() + 2;
+
+        let neutral = search(&s, &vectors, &emb, "helm rollback", 5, now, &SearchOpts::default());
+        let score_of = |r: &Vec<crate::search::SearchResult>, id| {
+            r.iter().find(|x| x.node == id).map(|x| x.score)
+        };
+        let base = score_of(&neutral, 2).expect("semantic node must be found");
+
+        let routed = search(&s, &vectors, &emb, "helm rollback", 5, now,
+            &SearchOpts::default().prefer(vec![Area::Procedural]));
+        // the out-of-area node is still returned, just discounted
+        let discounted = score_of(&routed, 2).expect("cross-area nodes must NOT be excluded");
+        assert!(discounted < base, "preference must discount out-of-area nodes");
+        assert!((discounted - base * crate::search::CROSS_AREA_DISCOUNT).abs() < 1e-4);
+        assert_eq!(score_of(&routed, 30), score_of(&neutral, 30),
+            "in-area nodes keep their full score");
+    }
+
+    #[test]
+    fn misrouted_query_still_finds_the_right_node() {
+        // router guesses Salience; nothing lives there. A hard filter would
+        // return nothing — the discount must leave ranking intact instead.
+        let s = store_with(&[]);
+        let emb = HashingEmbedder;
+        let vectors = build_vectors(&s, &emb);
+        let opts = SearchOpts::default().prefer(vec![Area::Salience]);
+        let r = search(&s, &vectors, &emb, "helm rollback wait", 5, t(), &opts);
+        assert!(!r.is_empty(), "mis-routed query must not come back empty");
+        assert_eq!(r[0].node, 2, "ranking must survive a wrong route");
+    }
 }
