@@ -105,3 +105,29 @@ func TestModeNames(t *testing.T) {
 		}
 	}
 }
+
+func TestAFlatOverlayIsNotAdvertisedTreeKeys(t *testing.T) {
+	// A list has no hierarchy; naming h and l there names keys that do
+	// nothing, which is how a status line stops being believed.
+	var flat []string
+	for _, e := range New().OverlayHints(false) {
+		flat = append(flat, e.Key)
+	}
+	for _, bad := range []string{"h", "l"} {
+		for _, k := range flat {
+			if k == bad {
+				t.Fatalf("a flat overlay advertises %q: %v", bad, flat)
+			}
+		}
+	}
+	if flat[0] != "type" {
+		t.Fatalf("the first thing to say about a palette is that typing filters it, got %q", flat[0])
+	}
+	var tree []string
+	for _, e := range New().OverlayHints(true) {
+		tree = append(tree, e.Key)
+	}
+	if len(tree) != 4 || tree[0] != "l" {
+		t.Fatalf("a tree overlay should advertise movement, got %v", tree)
+	}
+}

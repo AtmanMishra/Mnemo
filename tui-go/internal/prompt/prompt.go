@@ -47,6 +47,9 @@ func New(isDark bool) *Model {
 	// The textarea's own newline binding must go: enter is send here, and a
 	// widget that also inserts a newline on enter would do both.
 	ta.KeyMap.InsertNewline.SetKeys("ctrl+j")
+	// The real terminal cursor, not a drawn block: the view declares where it
+	// sits, and hiding it is how read mode announces itself.
+	ta.SetVirtualCursor(false)
 	ta.Focus()
 	m := &Model{ta: ta, width: 80}
 	m.histAt = 0

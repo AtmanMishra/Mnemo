@@ -1,0 +1,280 @@
+// Package app wires the pieces together: one root model, three modes, and a
+// single screen with overlays over it.
+//
+// There is no pane rail. Six co-equal panes cycled with tab was the old
+// shape, and it failed twice over — a rail of nouns is a menu of guesses, and
+// the panes were never co-equal anyway, since the transcript is what you are
+// reading almost all of the time. Here the transcript is the application and
+// everything else is one chord away.
+package app
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/chat"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/filetree"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/prompt"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/theme"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/tree"
+)
+
+// Config is everything the application needs from the outside. Home and CWD
+// are fields rather than lookups so a test can point the whole program at a
+// temporary directory — a forgotten home parameter has caused real bugs here.
+type Config struct {
+	Home  string
+	CWD   string
+	Agent agent.Agent
+	Dark  bool
+}
+
+// NoticeFor is how long a one-off message stays in the status line.
+//
+// Without this, a command's result is overwritten by the next frame and every
+// chord looks like it did nothing.
+const NoticeFor = 5 * time.Second
+
+// Model is the whole application.
+type Model struct {
+	cfg  Config
+	th   *theme.Theme
+	keys keymap.Map
+	mode keymap.Mode
+
+	w, h int
+
+	chat     *chat.Model
+	prompt   *prompt.Model
+	explorer *tree.Model
+	ov       *overlay.Model
+
+	explorerOpen  bool
+	explorerFocus bool
+
+	agent   agent.Agent
+	working bool
+	tick    int
+
+	mouse   bool
+	notice  string
+	noticed time.Time
+
+	lastInterrupt time.Time
+	quitting      bool
+
+	// openTool maps a running tool call id to its block, so a result lands on
+	// the call it belongs to rather than being appended as a new line.
+	openTool map[string]*chat.Block
+}
+
+// New builds the application.
+func New(cfg Config) *Model {
+	if cfg.Home == "" {
+		cfg.Home, _ = os.UserHomeDir()
+	}
+	if cfg.CWD == "" {
+		cfg.CWD, _ = os.Getwd()
+	}
+	if cfg.Agent == nil {
+		cfg.Agent = agent.Offline{Reason: "no agent backend configured — run with --agent, or see mnemo --help"}
+	}
+	th := theme.New(theme.PICO8, theme.Heavy, cfg.Dark)
+	m := &Model{
+		cfg:      cfg,
+		th:       th,
+		keys:     keymap.New(),
+		mode:     keymap.Insert,
+		w:        80,
+		h:        24,
+		chat:     chat.New(),
+		prompt:   prompt.New(cfg.Dark),
+		explorer: tree.New(filetree.Root(cfg.CWD)),
+		agent:    cfg.Agent,
+		mouse:    true,
+		openTool: map[string]*chat.Block{},
+	}
+	m.welcome()
+	m.layout()
+	return m
+}
+
+// welcome is what an empty transcript says.
+//
+// Not a logo and a blank screen: the first thing on screen names the three
+// keys that remove the most work, because the complaint this rebuild answers
+// was that nothing told you what anything did.
+func (m *Model) welcome() {
+	m.chat.Append(&chat.Block{Kind: chat.Agent, Body: []string{
+		"ready.",
+		"",
+		"^k   anything, by name",
+		"^e   open every thinking block at once",
+		"^t   the folder explorer, on the right",
+		"^s   sessions and the sub-agents under them",
+		"",
+		"esc leaves the prompt and hands the transcript single-letter keys.",
+		"esc again comes back. That is the whole navigation model.",
+	}})
+}
+
+// Init starts the program.
+func (m *Model) Init() tea.Cmd {
+	return tea.Batch(
+		m.prompt.Focus(),
+		tea.RequestBackgroundColor,
+	)
+}
+
+// tickMsg drives the dither band and the spinner. It only fires while the
+// agent is working: an idle Mnemo is a still screen, and a TUI that animates
+// while nothing is happening is burning a battery to look busy.
+type tickMsg time.Time
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(theme.SpinnerIntervalMS*time.Millisecond, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+// noticeMsg clears an expired status-line message.
+type noticeMsg struct{}
+
+func (m *Model) notify(s string) tea.Cmd {
+	m.notice = s
+	m.noticed = time.Now()
+	return tea.Tick(NoticeFor, func(time.Time) tea.Msg { return noticeMsg{} })
+}
+
+// layout recomputes every region's size. Called on resize and whenever the
+// prompt grows.
+func (m *Model) layout() {
+	if m.w < 20 {
+		m.w = 20
+	}
+	if m.h < 8 {
+		m.h = 8
+	}
+	body := m.bodyHeight()
+
+	right := m.explorerWidth()
+	left := m.w - right
+	if right > 0 {
+		left--
+	}
+
+	m.chat.SetSize(left, body)
+	m.prompt.SetWidth(m.w - 2)
+	if right > 0 {
+		m.explorer.SetSize(right, body)
+	}
+	if m.ov != nil {
+		m.ov.SetSize(m.w, body+1)
+	}
+}
+
+// explorerWidth is a third of the screen, clamped. Zero when it is closed —
+// a closed explorer must cost nothing, not a column of blank.
+func (m *Model) explorerWidth() int {
+	if !m.explorerOpen {
+		return 0
+	}
+	w := m.w / 3
+	if w > 40 {
+		w = 40
+	}
+	if w < 20 {
+		w = 20
+	}
+	if m.w-w < 30 {
+		// Too narrow to hold both. The transcript wins: it is the
+		// application, and the explorer is a convenience.
+		return 0
+	}
+	return w
+}
+
+// Home and CWD expose the configured paths, for tests.
+func (m *Model) Home() string { return m.cfg.Home }
+func (m *Model) CWD() string  { return m.cfg.CWD }
+
+// Mode is the live key table, for tests and the status line.
+func (m *Model) Mode() keymap.Mode { return m.mode }
+
+// Chat exposes the transcript, for tests.
+func (m *Model) Chat() *chat.Model { return m.chat }
+
+// Overlay exposes the open overlay, or nil.
+func (m *Model) Overlay() *overlay.Model { return m.ov }
+
+// ExplorerOpen reports whether the folder pane is showing.
+func (m *Model) ExplorerOpen() bool { return m.explorerOpen }
+
+// Notice is the transient status-line message.
+func (m *Model) Notice() string {
+	if m.notice == "" || time.Since(m.noticed) > NoticeFor {
+		return ""
+	}
+	return m.notice
+}
+
+// relCWD is the working directory as a human writes it.
+func (m *Model) relCWD() string {
+	if m.cfg.Home != "" {
+		if r, err := filepath.Rel(m.cfg.Home, m.cfg.CWD); err == nil && len(r) > 0 && r[0] != '.' {
+			return "~/" + r
+		}
+	}
+	return m.cfg.CWD
+}
+
+// Resize sets the screen size directly. Used by --dump and by tests, which
+// have no terminal to ask.
+func (m *Model) Resize(w, h int) {
+	m.w, m.h = w, h
+	m.layout()
+}
+
+// Press feeds one keystroke by name. It exists because a TUI cannot be
+// screenshotted from a script, and "it looked right when I ran it" is not a
+// check anybody else can repeat.
+func (m *Model) Press(keystroke string) {
+	m.Update(tea.KeyPressMsg(parseKey(keystroke)))
+}
+
+func parseKey(s string) tea.Key {
+	switch s {
+	case "esc":
+		return tea.Key{Code: tea.KeyEscape}
+	case "enter":
+		return tea.Key{Code: tea.KeyEnter}
+	case "up":
+		return tea.Key{Code: tea.KeyUp}
+	case "down":
+		return tea.Key{Code: tea.KeyDown}
+	case "left":
+		return tea.Key{Code: tea.KeyLeft}
+	case "right":
+		return tea.Key{Code: tea.KeyRight}
+	case "tab":
+		return tea.Key{Code: tea.KeyTab}
+	case "backspace":
+		return tea.Key{Code: tea.KeyBackspace}
+	case "space":
+		return tea.Key{Code: ' ', Text: " "}
+	}
+	if strings.HasPrefix(s, "ctrl+") && len(s) == len("ctrl+")+1 {
+		return tea.Key{Code: rune(s[len("ctrl+")]), Mod: tea.ModCtrl}
+	}
+	r := []rune(s)
+	if len(r) == 0 {
+		return tea.Key{}
+	}
+	return tea.Key{Code: r[0], Text: string(r[0])}
+}

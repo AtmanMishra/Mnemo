@@ -167,6 +167,20 @@ func (m Map) Help() []Entry {
 	return out
 }
 
+// OverlayHints are the keys live while a modal is up. A flat list filters as
+// you type and has no hierarchy, so advertising h/l there names keys that do
+// nothing — which is how a status line stops being believed.
+func (m Map) OverlayHints(isTree bool) []Entry {
+	e := func(b key.Binding) Entry {
+		h := b.Help()
+		return Entry{Mode: Browse, Key: h.Key, Desc: h.Desc}
+	}
+	if isTree {
+		return []Entry{e(m.Open), e(m.Close), e(m.Choose), e(m.Back)}
+	}
+	return []Entry{{Mode: Browse, Key: "type", Desc: "filter"}, e(m.Choose), e(m.Back)}
+}
+
 // Hints are the few keys worth naming in the status line for a mode. Four is
 // the limit: a status bar listing twelve keys is a status bar nobody reads.
 func (m Map) Hints(mode Mode, busy bool) []Entry {

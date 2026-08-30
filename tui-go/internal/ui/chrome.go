@@ -185,6 +185,20 @@ func Pad(s string, width int) string {
 	return strings.Join(lines, "\n")
 }
 
+// PadTo makes a block exactly `rows` rows tall, adding blank lines or cutting
+// extra ones. Without it a short transcript leaves the prompt floating in the
+// middle of the screen instead of sitting at the bottom where it belongs.
+func PadTo(s string, rows int) string {
+	if rows < 1 {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	for len(lines) < rows {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines[:rows], "\n")
+}
+
 func max(a, b int) int {
 	if a > b {
 		return a

@@ -397,16 +397,24 @@ func (m *Model) line(t *theme.Theme, i int, sel bool) string {
 	label := m.style(t, r.Node).Render(r.Node.Label)
 	head := trunk + t.Muted.Render(marker) + " " + label
 
+	// One column is spent on the selection marker, so everything else has
+	// width-1 to live in. Forgetting that is how the right-hand detail loses
+	// its last character.
+	avail := m.width - 1
+	if avail < 1 {
+		avail = 1
+	}
+
 	// Detail is right-aligned and dropped rather than wrapped: a tree that
 	// wraps stops being scannable, which is the only reason to use a tree.
 	if r.Node.Detail != "" {
-		room := m.width - ansi.StringWidth(head) - 1
-		if d := ansi.StringWidth(r.Node.Detail); room >= d && d > 0 {
-			head += strings.Repeat(" ", room-d+1) + t.Faint.Render(r.Node.Detail)
+		room := avail - ansi.StringWidth(head) - ansi.StringWidth(r.Node.Detail)
+		if room >= 1 {
+			head += strings.Repeat(" ", room) + t.Faint.Render(r.Node.Detail)
 		}
 	}
-	if w := ansi.StringWidth(head); w > m.width && m.width > 1 {
-		head = ansi.Truncate(head, m.width-1, "…")
+	if ansi.StringWidth(head) > avail {
+		head = ansi.Truncate(head, avail, "…")
 	}
 	if sel {
 		return t.Accent.Render(t.G.Seg) + head
