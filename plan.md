@@ -12,7 +12,7 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 
 ## AREA 2 — COCKPIT TUI (one app, navigation rail)
 - [x] 2.1 RPC backbone: drive agent via pi runRpcMode (JSON-RPC) instead of REPL scraping
-- [ ] 2.2 Shell: left nav rail (Chat/Memory/Agents/Skills/Logs) + main pane + input/status bar; Tab+number switching; focus rings
+- [x] 2.2 Shell: left nav rail (Chat/Memory/Agents/Skills/Logs) + main pane + input/status bar; Tab+number switching; focus rings
 - [ ] 2.3 Chat pane: streaming markdown, thinking blocks, tool cards, diff blocks (reuse pi components / seatui md.rs)
 - [ ] 2.4 Memory pane: brain-area grouped node browser, search, steering log, live journal tail
 - [ ] 2.5 Agents pane: subagent tree from journal episodes (status/model/spend), drill-in transcript, kill
