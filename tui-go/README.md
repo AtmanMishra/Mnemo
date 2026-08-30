@@ -58,3 +58,6 @@ go run ./cmd/mnemo --dump --keys "ctrl+t,down,l"    # …after pressing keys
 
 `--dump` exists because a TUI cannot be screenshotted from a script, and "it
 looked right when I ran it" is not a check anybody else can repeat.
+
+181 tests. The other suites stay green alongside it: `tui` 213, `agent` 212,
+`memory-layer` 44, `harness-engine` 19.
