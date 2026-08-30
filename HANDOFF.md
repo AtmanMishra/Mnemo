@@ -29,7 +29,7 @@ memory-layer/   Rust. Graph memory engine: nodes{facts,state,log,context}, typed
                 edges, steering, HNSW+hashing/OpenRouter embeddings.
                 Bins: memcli (REPL), memtui (ratatui dashboard), memsrv (JSON-RPC
                 sidecar over stdio — THE integration surface for agents), memeval
-                (retrieval benchmark). 36 tests (cargo test).
+                (retrieval benchmark). 37 tests (cargo test).
 harness-engine/ TypeScript, zero deps. Dynamic tool-plugin system: createHarness()
                 writes bundles (manifest.json + .mjs tool files) that agents can
                 build for themselves at runtime; scoped registry; fs.watch
@@ -47,10 +47,10 @@ agent/          TypeScript, runs on Node >=22.6 native TS stripping (no build st
                 src/skills/     SKILL.md discovery at pi's standard locations +
                                 harness-bridge (harness bundles -> discoverable skills)
                 104 tests (npm test).
-tui/            Rust, ratatui. `seatui` — INLINE REPL (like Claude Code/Codex, NOT
-                an alt-screen dashboard): scrollback + slim bottom input/status bar.
-                Superseded goal: becomes the shell for a unified COCKPIT (nav rail:
-                Chat/Memory/Agents/Skills/Logs) — NOT built yet (Area 2). 23 tests.
+tui/            Rust, ratatui. `mnemo-cockpit` — nav rail (Chat/Memory/Agents/
+                Skills/Logs) driven by pi's RPC mode: streams text/thinking/tool
+                execution, shows delegation tree, memory search grouped by brain area.
+                seatui (inline REPL) and memtui (dashboard) deprecated. 112 tests.
 plan.md         MASTER TASK TRACKER. 7 areas, checkboxes. READ THIS FIRST for "what's next".
 STATUS.md       Outcomes/verification log + doc index. Read for "what happened and why".
 research/       Design docs, one file per topic (see STATUS.md's doc index table).
@@ -72,12 +72,13 @@ npm test                                         # 104 tests, ~1s, must NOT hang
 npx tsc --noEmit                                 # must be clean
 
 cd ../memory-layer
-cargo test                                       # 36 tests
+cargo test                                       # 37 tests
 cargo run --bin memcli                           # memory REPL
 cargo run --bin memtui                           # memory dashboard (? = help)
 cargo run --bin memsrv <journal-path>             # JSON-RPC sidecar (see §5 protocol)
 
-cd ../tui && cargo run --bin seatui              # inline chat TUI
+cd ../tui && cargo run --bin mnemo-cockpit       # the cockpit (nav rail: Chat/Memory/Agents/Skills/Logs)
+cargo run --bin seatui                           # deprecated: inline chat TUI
 cd ../harness-engine && npm test                 # 19 tests (1 flaky, rerun if red)
 ```
 
@@ -131,11 +132,6 @@ steer{episode,failure,fix?{node,fact,new_key,new_value}} · set_area{node,area} 
 
 ## 7. What's NOT done (see plan.md for the authoritative live list)
 - Area 1.5: verify pi's in-TUI `/login` lists our providers (quick check)
-- Area 2 (0/9): the unified COCKPIT TUI — nav rail (Chat/Memory/Agents/Skills/Logs),
-  driven via pi's RPC mode instead of REPL scraping. This is the biggest lift (~1-2wk).
-- Area 3 (0/6): brain-area memory — add `area` column to nodes, route search by
-  region, salience markers, consolidation job. Rust-only, no LLM needed, high value,
-  self-contained — GOOD STARTING POINT for a fresh session.
 - Area 4 (0/5): MCP bridge, web search tool, permission rule engine, plan mode,
   image input.
 - Area 5 (0/7): structured logging/tracing — spans for tool calls and LLM round

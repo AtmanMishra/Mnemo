@@ -160,5 +160,15 @@ HEAD ac50ba7, working tree clean, all pushed.
 - **3.6 (Cockpit Memory pane groups by area)** remains open: it depends on the Area 2 cockpit and will land with task 2.4.
 - Verification: memory-layer 36 passing / 0 failing (was 19 at the start of Area 3), agent 104 passing / 0 failing, tui 23, harness-engine 19.
 
+### AREA 2 — COCKPIT TUI: COMPLETE
+- **2.1 RPC backbone**: tui/src/rpc.rs spawns `mnemo --mode rpc` and reads pi's JSONL event stream (agent_start/settled, streaming text and thinking deltas, message_end as authoritative reply, tool_execution start/end, turn_end token+cost stats). parse_event is a pure function so the protocol layer is tested from lines recorded off a live run, plus one test driving a scripted child process. No API key or network in tests. Unknown pi event types are ignored rather than erroring, so a pi upgrade can't break the cockpit.
+- **2.2 Shell**: new `mnemo-cockpit` binary — nav rail (Chat/Memory/Agents/Skills/Logs), main pane, prompt, status bar. Tab/shift-tab cycle and alt+digit jumps work mid-sentence without eating the draft; bare digits navigate only when the body has focus. Navigation state is pure (no terminal, no process), so every key path is a unit test. Shared modules moved behind a lib target.
+- **2.3-2.7 Panes** (all behind one `PaneView` trait — adding a pane = a module, a field, a match arm): Chat (streaming, collapsible thinking, tool cards that flip running→ok/failed, coloured diff hunks, turn cost, tail-anchored scrollback); Memory (nodes grouped by brain area — this is 3.6 — area-filtered search via memsrv, node state on demand); Agents (delegation tree from journal episodes, run state from outcome logs, drill-in transcript, orphaned subagents stay visible); Skills (SKILL.md discovery mirroring the agent's own root order, plus harness bundles); Logs (live journal tail with filters, survives a compacted journal).
+- **Extras** beyond the plan text: slash-command palette with subsequence matching and tab completion, and a `?` card merging global with pane-local bindings.
+- **2.8 PIXEL pass** per research/mnemo-ui-identity.md: double-line chrome, colour as state, no italics, braille spinner, prompt cursor pulse while streaming.
+- **2.9**: seatui and memtui now print deprecation notices pointing at mnemo-cockpit; both still run.
+- **Bug found**: end-to-end test caught memory-layer search applying its kind/area filter to seeds only, so graph expansion pulled neighbours back in from excluded kinds and areas. Fixed in expand() so it covers both search() and search_ann() and both filters. memeval unchanged at Hit@1 93% / Hit@3 100% / MRR 0.967.
+- Verification: tui 112 passing / 0 failing (was 23), memory-layer 37, agent 104, harness-engine 19 — 272 total, all green. End-to-end test tui/tests/cockpit_e2e.rs drives a real memsrv over a real journal, real skill files on disk, real key handling and real ratatui rendering. The binary was also launched for real: it enters and leaves the alternate screen and exits cleanly.
+
 ### Next candidates
-Area 2.1 (RPC backbone -> cockpit) | Area 6 packaging quick wins
+Area 4 (agent capabilities) | Area 5 (logging and traces) | Area 6 (packaging)
