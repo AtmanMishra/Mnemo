@@ -114,3 +114,37 @@ use paid credits. Deterministic tests never call LLMs - keep it that way.
 - TUI decision: Option A adopted per research/tui-adoption-report.md - wrap pi main()
   with extensionFactories (tools + approval + memory directive as inline extensions);
   custom REPL deleted; gains streaming markdown/diffs/thinking/compaction/resume/fork/tree.
+
+## MNEMO ERA (current)
+Agent renamed to MNEMO (Mnemosyne). Command: `mnemo`. Env: MNEMO_* (SEA_* fallbacks kept).
+Task tracking moved to plan.md (7 areas). This file records outcomes/verification.
+
+| Doc | Purpose |
+|-----|---------|
+| plan.md | master task tracker, 7 areas, live checkboxes |
+| STATUS.md | outcomes, verification evidence, decisions log (this file) |
+| research/audit-report.md | competitor gap audit + single-CLI blockers |
+| research/brain-areas-design.md | brain-region memory architecture (Area 3) |
+| research/mnemo-ui-identity.md | pixel design system, Silkscreen+VT323, animations |
+| research/tui-adoption-report.md | why pi InteractiveMode; cockpit integration path |
+| research/agent-tui-design.md | cockpit layout + feature parity table |
+| research/memory-design-spec.md / memory-layer-notes.md | memory core design + research |
+| research/pi-agent-report.md / deepseek-harness-and-scrapling-report.md | upstream studies |
+
+### AREA 1 — AUTH & ONBOARDING: COMPLETE (4/5)
+- ~/.mnemo/auth.json credential store (chmod 600); env > store precedence
+- `mnemo auth` wizard (provider picker, key validation, default model)
+- `mnemo auth status|logout`; first-run auto-launch when nothing configured
+- LIVE VERIFIED: `mnemo "<prompt>"` with ZERO env vars -> resolved opencode-go/
+  ox-alpha-free from store -> memory_search -> correct answer
+- Bug caught by tests: wizard wrote credentials to real home instead of injected
+  home; polluted ~/.mnemo cleaned and reseeded
+- Remaining: 1.5 verify pi in-TUI /login provider list
+
+### Test totals (current)
+agent 102 · tui 23 (+31 self-checks) · memory-layer 19 (+2 integration) · harness-engine 19
+HEAD ac50ba7, working tree clean, all pushed.
+
+### Next candidates
+Area 3.1-3.2 (brain-area column + routed search, Rust, no LLM needed) |
+Area 2.1 (RPC backbone -> cockpit) | Area 6 packaging quick wins
