@@ -18,3 +18,7 @@ agent/.agents/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 graft/
+
+# local agent tooling (not project source)
+.claude/
+CLAUDE.md
