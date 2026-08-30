@@ -68,6 +68,12 @@ pub struct Cockpit {
     pub input: String,
     pub status: String,
     pub quit: bool,
+    /// `?` help card is open.
+    pub show_help: bool,
+    /// Agent is mid-run (drives the spinner and the cursor pulse).
+    pub busy: bool,
+    /// Alternating flag for the cursor pulse.
+    pub pulse: bool,
 }
 
 impl Default for Cockpit {
@@ -78,6 +84,9 @@ impl Default for Cockpit {
             input: String::new(),
             status: String::new(),
             quit: false,
+            show_help: false,
+            busy: false,
+            pulse: false,
         }
     }
 }
@@ -95,6 +104,11 @@ impl Cockpit {
             KeyCode::Char('c') | KeyCode::Char('d') if ctrl => {
                 self.quit = true;
                 return Action::Quit;
+            }
+            // tab completes a command before it moves panes
+            KeyCode::Tab if self.input.starts_with('/') => {
+                if let Some(done) = crate::palette::complete(&self.input) { self.input = done; }
+                return Action::None;
             }
             KeyCode::Tab => { self.pane = self.pane.next(); return Action::None; }
             KeyCode::BackTab => { self.pane = self.pane.prev(); return Action::None; }
@@ -114,11 +128,14 @@ impl Cockpit {
                     if line.is_empty() { Action::None } else { Action::Submit(line) }
                 }
                 KeyCode::Backspace => { self.input.pop(); Action::None }
-                KeyCode::Esc => { self.focus = Focus::Main; Action::None }
+                KeyCode::Esc if self.show_help => { self.show_help = false; Action::None }
+            KeyCode::Esc => { self.focus = Focus::Main; Action::None }
                 KeyCode::Char(c) if !ctrl => { self.input.push(c); Action::None }
                 _ => Action::None,
             },
             Focus::Main => match key.code {
+                KeyCode::Char('?') => { self.show_help = !self.show_help; Action::None }
+                KeyCode::Esc if self.show_help => { self.show_help = false; Action::None }
                 KeyCode::Char('q') => { self.quit = true; Action::Quit }
                 KeyCode::Char('i') | KeyCode::Enter => { self.focus = Focus::Input; Action::None }
                 KeyCode::Char(c) if c.is_ascii_digit() => {
@@ -223,5 +240,31 @@ mod tests {
         let mut c = Cockpit::new();
         assert_eq!(c.on_key(with(KeyCode::Char('c'), KeyModifiers::CONTROL)), Action::Quit);
         assert_eq!(c.input, "");
+    }
+
+    #[test]
+    fn tab_completes_a_command_before_it_switches_panes() {
+        let mut c = Cockpit::new();
+        for ch in "/cons".chars() { c.on_key(key(ch)); }
+        c.on_key(code(KeyCode::Tab));
+        assert_eq!(c.input, "/consolidate");
+        assert_eq!(c.pane, Pane::Chat, "tab must not also move the pane");
+        // with no command open, tab is navigation again
+        c.input.clear();
+        c.on_key(code(KeyCode::Tab));
+        assert_eq!(c.pane, Pane::Memory);
+    }
+
+    #[test]
+    fn help_card_toggles_from_the_body_and_escapes() {
+        let mut c = Cockpit::new();
+        c.on_key(code(KeyCode::Esc));
+        c.on_key(key('?'));
+        assert!(c.show_help);
+        c.on_key(key('?'));
+        assert!(!c.show_help);
+        c.on_key(key('?'));
+        c.on_key(code(KeyCode::Esc));
+        assert!(!c.show_help, "esc closes the card");
     }
 }

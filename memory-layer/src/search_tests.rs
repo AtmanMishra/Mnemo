@@ -194,4 +194,30 @@ mod p1 {
         assert!(!r.is_empty(), "mis-routed query must not come back empty");
         assert_eq!(r[0].node, 2, "ranking must survive a wrong route");
     }
+
+    #[test]
+    fn filters_survive_graph_expansion() {
+        // node 1 and 2 are linked, so a hit on one pulls the other in. A kind
+        // or area filter must still hold for the expanded neighbour.
+        let s = store_with(&[
+            Op::CreateNode { id: 40, kind: NodeKind::TaskEpisode, label: "deploy run".into(), at: t() },
+            Op::Link { id: 50, src: 2, dst: 40, kind: EdgeKind::SuppliesContext, at: t() },
+            Op::SetArea { node: 2, area: Area::Salience, at: t() },
+        ]);
+        let emb = HashingEmbedder;
+        let vectors = build_vectors(&s, &emb);
+        let now = t() + 10;
+
+        let r = search(&s, &vectors, &emb, "helm rollback", 5, now,
+            &SearchOpts::areas(vec![Area::Salience]));
+        assert!(!r.is_empty());
+        assert!(r.iter().all(|x| s.nodes[&x.node].area == Area::Salience),
+            "area filter leaked through expansion: {:?}",
+            r.iter().map(|x| (x.node, s.nodes[&x.node].area)).collect::<Vec<_>>());
+
+        let r = search(&s, &vectors, &emb, "helm rollback", 5, now,
+            &SearchOpts::kind(NodeKind::Aspect));
+        assert!(r.iter().all(|x| s.nodes[&x.node].kind == NodeKind::Aspect),
+            "kind filter leaked through expansion: {r:?}");
+    }
 }

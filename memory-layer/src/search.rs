@@ -43,6 +43,7 @@ fn expand(
     seeds: Vec<(NodeId, f32)>,
     k: usize,
     now: Millis,
+    opts: &SearchOpts,
 ) -> Vec<SearchResult> {
     let mut out: HashMap<NodeId, SearchResult> = HashMap::new();
     for (id, s) in seeds {
@@ -54,7 +55,9 @@ fn expand(
             if !e.alive_at(now) { continue; }
             if !matches!(e.kind, EdgeKind::PartOf | EdgeKind::SuppliesContext | EdgeKind::ActivatedWith | EdgeKind::DerivedFrom) { continue; }
             let nb = if e.src == id { Some(e.dst) } else if e.dst == id { Some(e.src) } else { None };
-            if let Some(nb_id) = nb {
+            // a filtered-out node must not sneak back in as a neighbour —
+            // "restrict to this area/kind" has to mean the whole result set
+            if let Some(nb_id) = nb.filter(|n| passes_filter(store, *n, opts)) {
                 let boosted = s * 0.5 * e.weight.max(0.1);
                 let entry = out.entry(nb_id).or_insert(SearchResult { node: nb_id, score: 0.0, via_graph: true });
                 if boosted > entry.score {
@@ -164,7 +167,7 @@ pub fn search(
         .filter(|(_, s)| *s > 1e-6)
         .collect();
     scored.sort_by(|a, b| b.1.total_cmp(&a.1));
-    expand(store, scored, k, now)
+    expand(store, scored, k, now, opts)
 }
 
 /// Search v2: HNSW ANN seeds + same graph expansion. Same contract as `search`.
@@ -183,5 +186,5 @@ pub fn search_ann(
         .filter(|(id, _)| passes_filter(store, *id, opts))
         .map(|(id, s)| (id, s * opts.area_weight(store, id)))
         .collect();
-    expand(store, seeds, k, now)
+    expand(store, seeds, k, now, opts)
 }

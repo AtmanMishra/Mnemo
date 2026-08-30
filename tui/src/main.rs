@@ -766,6 +766,9 @@ fn main() -> ExitCode {
     if flags.contains(&"--self-test") {
         return self_test();
     }
+    // 2.9: superseded by `mnemo-cockpit`, which has the chat pane plus memory,
+    // agents, skills and logs. Kept working until the cockpit is the default.
+    eprintln!("seatui is deprecated — use `cargo run --bin mnemo-cockpit` (Chat pane).");
     let yolo = flags.contains(&"--yolo");
     let verbose = flags.contains(&"--verbose");
     match run_live(yolo, verbose) {

@@ -13,13 +13,13 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 ## AREA 2 — COCKPIT TUI (one app, navigation rail)
 - [x] 2.1 RPC backbone: drive agent via pi runRpcMode (JSON-RPC) instead of REPL scraping
 - [x] 2.2 Shell: left nav rail (Chat/Memory/Agents/Skills/Logs) + main pane + input/status bar; Tab+number switching; focus rings
-- [ ] 2.3 Chat pane: streaming markdown, thinking blocks, tool cards, diff blocks (reuse pi components / seatui md.rs)
-- [ ] 2.4 Memory pane: brain-area grouped node browser, search, steering log, live journal tail
-- [ ] 2.5 Agents pane: subagent tree from journal episodes (status/model/spend), drill-in transcript, kill
-- [ ] 2.6 Skills pane: discovered skills+harnesses, load/create actions
-- [ ] 2.7 Logs pane: journal ops stream w/ filters
-- [ ] 2.8 Pixel identity pass per research/mnemo-ui-identity.md (+ANIMATIONS allowed: spinner, pane transitions, meter fills, typing pulse)
-- [ ] 2.9 Deprecate seatui + memtui standalone binaries after panes reach parity
+- [x] 2.3 Chat pane: streaming markdown, thinking blocks, tool cards, diff blocks (reuse pi components / seatui md.rs)
+- [x] 2.4 Memory pane: brain-area grouped node browser, search, steering log, live journal tail
+- [x] 2.5 Agents pane: subagent tree from journal episodes (status/model/spend), drill-in transcript, kill
+- [x] 2.6 Skills pane: discovered skills+harnesses, load/create actions
+- [x] 2.7 Logs pane: journal ops stream w/ filters
+- [x] 2.8 Pixel identity pass per research/mnemo-ui-identity.md (+ANIMATIONS allowed: spinner, pane transitions, meter fills, typing pulse)
+- [x] 2.9 Deprecate seatui + memtui standalone binaries after panes reach parity
 
 ## AREA 3 — BRAIN-AREA MEMORY (research/brain-areas-design.md)
 - [x] 3.1 model.rs: add `area` column to Node (default derived from kind); memsrv persists
@@ -27,7 +27,7 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 - [x] 3.3 search.rs: cross-area discount weights; tune via memeval (no regression vs 80% hit@1 baseline)
 - [x] 3.4 steer(): write SALIENCE pain markers before Executive correction
 - [x] 3.5 Consolidation job skeleton (`mnemo consolidate`): Episodic replay -> Semantic facts
-- [ ] 3.6 Cockpit Memory pane groups by area (pairs with 2.4)
+- [x] 3.6 Cockpit Memory pane groups by area (pairs with 2.4)
 
 ## AREA 4 — AGENT CAPABILITIES
 - [ ] 4.1 MCP client bridge (servers as registered tools)

@@ -549,6 +549,9 @@ fn tui_loop<B: Backend>(
 }
 
 fn main() {
+    // 2.9: superseded by the cockpit's Memory pane (nodes grouped by brain
+    // area, search, node state) and Logs pane (live journal tail).
+    eprintln!("memtui is deprecated — use `cargo run --bin mnemo-cockpit` (Memory/Logs panes).");
     load_dotenv();
     let args: Vec<String> = std::env::args().collect();
     let render_once = args.iter().any(|a| a == "--render-once");
