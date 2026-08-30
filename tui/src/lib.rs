@@ -2,6 +2,7 @@
 //! over these modules, so panes, auth, sessions and the RPC protocol are all
 //! testable without a terminal.
 pub mod auth;
+pub mod brand;
 pub mod clipboard;
 pub mod cockpit;
 pub mod cockpit_ui;

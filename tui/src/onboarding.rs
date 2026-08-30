@@ -7,6 +7,7 @@
 //! Pure state plus a render function — no terminal, no network — so every step
 //! and every wrong turn is a unit test. Writing the credential is `auth::save`.
 use crate::auth::{self, AuthFile, PROVIDERS};
+use crate::brand;
 use crate::models::{filter_models, Model};
 use crate::theme;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -265,19 +266,30 @@ pub fn masked(key: &str) -> String {
 
 /// PIXEL onboarding: chunky title, one step at a time, colour as state.
 pub fn lines(o: &Onboarding, existing: &AuthFile) -> Vec<Line<'static>> {
-    let mut out: Vec<Line<'static>> = vec![
-        Line::from(Span::styled(
+    lines_in(o, existing, 100)
+}
+
+/// The overlay, sized for a terminal `cols` wide.
+///
+/// First run gets the full brand — wordmark and Nyx — because it is the one
+/// moment the product introduces itself. `/login` and `/model` get the
+/// wordmark alone: you already know what this is, and a cat every time you
+/// switch model is a cat you stop seeing.
+pub fn lines_in(o: &Onboarding, existing: &AuthFile, cols: usize) -> Vec<Line<'static>> {
+    let mut out: Vec<Line<'static>> = Vec::new();
+    if o.reason == Reason::FirstRun {
+        out.extend(brand::splash(cols));
+    } else if let Some(w) = brand::wordmark_for(cols) {
+        out.extend(brand::paint_at(w, brand::SCALE_WORDMARK));
+    } else {
+        out.push(Line::from(Span::styled(
             "▚ MNEMO ▞",
             Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            "memory that works like a brain",
-            Style::default().fg(theme::GREY),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(o.prompt(), Style::default().fg(theme::WHITE))),
-        Line::from(""),
-    ];
+        )));
+    }
+    out.push(Line::from(""));
+    out.push(Line::from(Span::styled(o.prompt(), Style::default().fg(theme::WHITE))));
+    out.push(Line::from(""));
 
     match o.step {
         Step::Provider => {

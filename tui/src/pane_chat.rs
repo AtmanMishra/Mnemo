@@ -1,6 +1,7 @@
 //! 2.3 Chat pane: pi's RPC event stream rendered as a transcript —
 //! streaming assistant text, thinking blocks, tool cards, diff blocks.
 //! Pure state + pure rendering; the event loop only feeds it `AgentEvent`s.
+use crate::brand;
 use crate::cockpit::Pane;
 use crate::md::{self, SegStyle};
 use crate::pane::PaneView;
@@ -38,6 +39,10 @@ pub struct ChatPane {
     /// global flag: reading one tool's output should not bury the transcript
     /// under every other one.
     pub opened: Vec<usize>,
+    /// The project directory, shown on the welcome card.
+    pub project: String,
+    /// Last known terminal width, so the card can size the mascot.
+    pub width: usize,
     /// Which foldable block the keys act on, as an index into `foldable()`.
     /// None until the first `[`/`]`, so the pane starts with no cursor to
     /// explain.
@@ -117,6 +122,7 @@ impl ChatPane {
 
     /// Render the transcript, tail-anchored, into at most `height` lines.
     pub fn lines(&self, height: usize) -> Vec<Line<'static>> {
+        if self.entries.is_empty() { return self.welcome(); }
         let mut all: Vec<Line<'static>> = Vec::new();
         let focused = self.focused_entry();
         for (i, e) in self.entries.iter().enumerate() {
@@ -220,6 +226,24 @@ impl ChatPane {
         let Some(at) = self.foldable().iter().position(|i| *i == entry) else { return false };
         self.focus = Some(at);
         true
+    }
+
+    /// What an empty Chat pane shows: Nyx, and where you are.
+    ///
+    /// An empty transcript is the only place with room for the mascot, and the
+    /// only moment it costs nothing to show it.
+    pub fn welcome(&self) -> Vec<Line<'static>> {
+        let plain = Style::default().fg(theme::WHITE);
+        let dim = Style::default().fg(theme::GREY);
+        let mut facts = vec![
+            ("MNEMO".to_string(), Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+            (brand::TAGLINE.to_string(), dim),
+            (String::new(), dim),
+        ];
+        if !self.project.is_empty() { facts.push((self.project.clone(), plain)); }
+        facts.push((String::new(), dim));
+        facts.push(("ask anything · / for commands · ? for keys".to_string(), dim));
+        brand::welcome(self.width.max(60), &facts)
     }
 
     /// Scroll back (positive) or forward (negative) through history.
@@ -817,5 +841,45 @@ mod mouse_tests {
         let scrolled = p.line_owners(height);
         assert_ne!(scrolled, owners, "scrolling moves what a row points at");
         assert_eq!(scrolled.len(), p.lines(height).len());
+    }
+}
+
+#[cfg(test)]
+mod welcome_tests {
+    use super::*;
+
+    fn text(l: &Line) -> String { l.spans.iter().map(|s| s.content.to_string()).collect() }
+
+    #[test]
+    fn an_empty_chat_introduces_the_product() {
+        let mut p = ChatPane::new();
+        p.project = "/work/mnemo".into();
+        p.width = 120;
+        let out: Vec<String> = p.lines(0).iter().map(text).collect();
+        let joined = out.join("\n");
+        assert!(joined.contains("MNEMO"));
+        assert!(joined.contains(brand::TAGLINE));
+        assert!(joined.contains("/work/mnemo"), "it says where you are: {joined}");
+        assert!(joined.contains("? for keys"), "and how to get started");
+    }
+
+    #[test]
+    fn the_first_message_replaces_the_card_entirely() {
+        // the mascot is welcome on an empty screen and nowhere else
+        let mut p = ChatPane::new();
+        p.width = 120;
+        assert!(!p.lines(0).is_empty());
+        p.push_user("hello");
+        let out: Vec<String> = p.lines(0).iter().map(text).collect();
+        assert_eq!(out.len(), 1, "just the message: {out:?}");
+        assert!(out[0].contains("hello"));
+    }
+
+    #[test]
+    fn a_narrow_pane_still_gets_a_card() {
+        let mut p = ChatPane::new();
+        p.width = 40;
+        let joined = p.lines(0).iter().map(text).collect::<Vec<_>>().join("\n");
+        assert!(joined.contains("MNEMO"), "{joined}");
     }
 }

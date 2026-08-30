@@ -12,6 +12,7 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScree
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use seatui::auth::{self, AuthFile};
+use seatui::brand;
 use seatui::clipboard;
 use seatui::cockpit::{Action, Cockpit, Focus, Pane};
 use seatui::cockpit_ui;
@@ -102,6 +103,13 @@ fn main() -> io::Result<()> {
     // a TUI is the one thing a script cannot inspect, so the readers it
     // depends on are runnable on their own against real files
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--brand") {
+        let cols = crossterm::terminal::size().map(|(w, _)| w as usize).unwrap_or(100);
+        for line in brand::sheet(cols) {
+            println!("{}", line.spans.iter().map(|s| s.content.to_string()).collect::<String>());
+        }
+        return Ok(());
+    }
     if let Some(i) = args.iter().position(|a| a == "--transcript") {
         let Some(file) = args.get(i + 1) else {
             eprintln!("mnemo-agent --transcript <session.jsonl>");
@@ -127,7 +135,11 @@ fn main() -> io::Result<()> {
     apply_model(&mut cockpit, &stored);
 
     let mut panes = Panes {
-        chat: ChatPane::new(),
+        chat: {
+            let mut c = ChatPane::new();
+            c.project = cwd.display().to_string();
+            c
+        },
         sessions: {
             let mut p = SessionsPane::new(cwd.clone());
             p.projects = list_projects(&home);
@@ -191,10 +203,13 @@ fn switch_to(
 ) {
     if let Some(a) = agent.as_mut() { a.stop(); }
     *agent = spawn_agent(root, cwd, session, cockpit);
+    let (project, width) = (cwd.display().to_string(), panes.chat.width);
     panes.chat = match session {
         Some(f) => ChatPane::from_transcript(&transcript(f)),
         None => ChatPane::new(),
     };
+    panes.chat.project = project;
+    panes.chat.width = width;
     cockpit.pane = Pane::Chat;
     cockpit.busy = false;
 }
@@ -250,11 +265,13 @@ fn run<B: ratatui::backend::Backend>(
 ) -> io::Result<()> {
     let mut spin = 0usize;
     let mut body_height = 10usize;
+    let mut body_width = 100usize;
 
     while !cockpit.quit {
         // --- onboarding takes the whole screen while it is open -------------
         if let Some(ob) = overlay.as_mut() {
-            let body = onboarding::lines(ob, stored);
+            let cols = term.size().map(|s| s.width as usize).unwrap_or(100);
+            let body = onboarding::lines_in(ob, stored, cols);
             term.draw(|f| cockpit_ui::draw_onboarding(f, body))?;
             if !event::poll(Duration::from_millis(120))? { continue; }
             let Event::Key(key) = event::read()? else { continue };
@@ -293,6 +310,7 @@ fn run<B: ratatui::backend::Backend>(
             let next = cockpit.queued.remove(0);
             send_prompt(&next, cockpit, panes, agent.as_mut());
         }
+        panes.chat.width = body_width;
         panes.view_mut(cockpit.pane).tick();
         refresh_sessions(panes, home);
 
@@ -303,6 +321,7 @@ fn run<B: ratatui::backend::Backend>(
         term.draw(|f| {
             let (_, main, _, _) = cockpit_ui::layout_with(f.area(), cockpit.queued.len());
             body_height = main.height.saturating_sub(2) as usize;
+            body_width = main.width.saturating_sub(2) as usize;
             cockpit_ui::draw_with_help(f, cockpit, body, &help);
         })?;
 

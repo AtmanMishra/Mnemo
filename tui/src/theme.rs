@@ -17,6 +17,9 @@ pub const INDIGO: Color = Color::Rgb(0x83, 0x76, 0x9C);
 pub const PINK: Color = Color::Rgb(0xFF, 0x77, 0xA8);
 pub const PEACH: Color = Color::Rgb(0xFF, 0xCC, 0xAA);
 pub const DARKGREY: Color = Color::Rgb(0x2B, 0x28, 0x25);
+/// PICO-8 brown. The mascot's rosette ink — dark enough for the "extreme
+/// contrast" the Bengal standard asks for without going to flat black.
+pub const BROWN: Color = Color::Rgb(0xAB, 0x52, 0x36);
 
 /// The one colour that means "this is the thing you are pointing at": pane
 /// titles, the selected row, the prompt border, the user's own words.

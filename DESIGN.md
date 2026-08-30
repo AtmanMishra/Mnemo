@@ -24,7 +24,160 @@ font with no patched icons.
 
 ---
 
-## 2. Palette
+## 2. The brand
+
+### The name
+
+**Mnemo** — from *Mnemosyne*, the Greek personification of memory and mother of
+the Muses. Lowercase in prose (`mnemo-agent` is the command), uppercase in the
+wordmark. Never "Mnemo AI", never a tagline bolted onto the name.
+
+The tagline is one line, lowercase, no exclamation mark:
+
+> memory that works like a brain
+
+### The wordmark
+
+Five letters, block-built, strokes three cells thick, with a half-cell lip
+down and to the right that gives depth without spending a second colour:
+
+```
+███         ███   ███         ███   ████████████   ███         ███      █████████
+██████   ██████▒  ██████      ███▒  ███▒▒▒▒▒▒▒▒▒▒  ██████   ██████▒  ███ ▒▒▒▒▒▒▒▒███
+███▒▒▒███ ▒▒███▒  ███▒▒▒███   ███▒  █████████      ███▒▒▒███ ▒▒███▒  ███▒        ███▒
+███▒   ▒▒▒  ███▒  ███▒   ▒▒██████▒  ███▒▒▒▒▒▒▒     ███▒   ▒▒▒  ███▒  ███▒        ███▒
+███▒        ███▒  ███▒      ▒▒███▒  ████████████   ███▒        ███▒   ▒▒█████████ ▒▒▒
+ ▒▒▒         ▒▒▒   ▒▒▒         ▒▒▒   ▒▒▒▒▒▒▒▒▒▒▒▒   ▒▒▒         ▒▒▒      ▒▒▒▒▒▒▒▒▒
+```
+
+83 cells wide, so it needs an 87-column terminal. Below that a two-cell-stroke
+version (57 cells) takes over; below **that** the wordmark is dropped entirely
+and the tagline stands alone. **A wordmark that wraps is not a wordmark.**
+
+The lip is drawn in ROSETTE brown, not grey — it is the same ink as the
+mascot's markings, which is what makes the logo and the cat look related
+rather than merely adjacent.
+
+### Nyx, the Bengal cat
+
+The mascot is a **Bengal cat**, and the breed is the point.
+
+A Bengal's defining feature is the **rosette**: a two-toned spot with a dark
+ring and a lighter centre, *clustered* rather than evenly scattered. TICA's
+breed standard prefers rosettes over single spots and asks for "extreme"
+contrast against the ground colour.
+
+That is a fair description of Mnemo's memory graph — marks that mean something
+as a cluster and nothing individually, with sharp boundaries between them. The
+mascot is this breed because of what the pattern is, not because cats are
+appealing.
+
+The other breed signatures are all in the art: bold **mascara** lines running
+back from the eyes, small ears on a wide base, a heavy muzzle, a spotted belly,
+and a thick **ringed tail**.
+
+```
+    ████                    ████
+  ████████                ████████
+  ████████████████████████████████
+████████████████████████████████████
+████▓▓████    ████████    ████▓▓████      ← mascara beside the eyes
+████████████████████████████████████
+  ████████████▄▄▄▄▄▄▄▄████████████        ← the nose: the one accent pixel
+    ████████            ████████
+      ████████████████████████
+        ████████████████████              ████
+      ████████████████████████          ████▓▓██
+    ████▒▒████████▓▓████████▒▒████      ████▒▒██
+    ████▓▓████████▒▒████████▓▓████      ████▓▓██  ← ringed tail
+    ████▒▒████████▓▓████████▒▒████      ████▒▒██
+    ████▓▓████████▒▒████████▓▓████    ████▓▓████
+    ████████████████████████████████  ████▒▒████
+    ████████████████████████████████  ████▓▓████
+      ████████████████████████████  ████▒▒██████
+        ████████████████████████  ████████████
+        ████            ████      ████████
+```
+
+**The rosettes are drawn from `theme::DITHER`** — the same density ramp as the
+thinking animation. One vocabulary, used twice. That is not a coincidence to
+preserve casually: if the ramp changes, the cat changes with it, and that is
+correct.
+
+**The nose is the only ACCENT-coloured pixel in the entire mascot.** The brand
+colour is the cat's nose. A test enforces exactly one accent run — more than
+one and it stops being a detail and becomes decoration.
+
+#### Three sizes
+
+| Art | Cells | Where |
+|---|---|---|
+| `CAT_SIT` | 48 × 20 | First run, and the empty Chat pane. The full mascot. |
+| `CAT_HEAD` | 28 × 7 | A narrower welcome card. |
+| `CAT_TINY` | 20 × 3 | A cramped header. Mascara is gone; ears and eyes still read. |
+
+Seven rows is the floor for the head: below it the mascara and the muzzle
+merge into a blob and it stops being a Bengal. `cat_for(cols, beside)` picks;
+the mascot shrinks before it ever overflows.
+
+#### Where the mascot appears
+
+- **First run** — the splash: wordmark, tagline, Nyx sitting.
+- **An empty Chat pane** — the welcome card: Nyx on the left, name, tagline,
+  project directory and a one-line hint on the right.
+
+That is all. The first message you send replaces the card entirely. A mascot
+you see on every screen is a mascot you stop seeing.
+
+`/login` and `/model` get the wordmark **without** the cat: by then you know
+what this is, and a cat every time you switch model is noise.
+
+Run `mnemo-agent --brand` to print the whole identity — a TUI is the one thing
+you cannot screenshot from a script.
+
+### Colours of the mascot
+
+| Role | Token | Hex |
+|---|---|---|
+| Coat (golden Bengal ground) | `COAT` = `ORANGE` | `FFA300` |
+| Rosettes and the wordmark lip | `ROSETTE` = `BROWN` | `AB5236` |
+| Nose | `ACCENT` | `FF77A8` |
+| Eyes | *negative space* | — |
+
+The eyes are holes in the coat, not drawn pixels. At this resolution a drawn
+eye becomes a smudge; a gap stays sharp at every size and needs no colour.
+
+The coat is golden rather than silver or charcoal — the golden brown Bengal is
+the archetype, and its rosettes carry the most contrast. Pink chrome over a
+golden mascot is also simply not a combination another terminal tool is using.
+
+### Storing the art
+
+Art lives in [tui/src/brand.rs](tui/src/brand.rs) as **marker strings**, never
+as pre-coloured spans, so shape and palette stay one thing each:
+
+| marker | is | drawn as |
+|---|---|---|
+| `#` | coat / letterform | `█` in COAT |
+| `R` | rosette core | `▓` in ROSETTE |
+| `r` | rosette edge | `▒` in ROSETTE |
+| `n` | nose | `▄` in ACCENT |
+| `e` | wordmark lip | `▒` in ROSETTE |
+| `.` | nothing | a space |
+
+`paint_at(art, scale)` is the only place a glyph becomes a colour. Two scales
+exist: the **mascot** is stored as pixels and drawn 2 cells wide (a terminal
+cell is about twice as tall as it is wide, and a one-cell pixel makes a
+squashed cat); the **wordmark** is stored at cell resolution already and drawn
+1:1.
+
+Tests enforce the things that only break on someone else's terminal: every art
+row the same width, no marker the painter does not know, rosettes present and
+clustered, exactly one accent pixel, and the art shrinking rather than
+overflowing.
+
+
+## 3. Palette
 
 Defined once in [tui/src/theme.rs](tui/src/theme.rs). Never write a
 `Color::Rgb` anywhere else.
@@ -41,6 +194,8 @@ Defined once in [tui/src/theme.rs](tui/src/theme.rs). Never write a
 | `WHITE` | `FFF1E8` | Ordinary content. |
 | `GREY` | `5F574F` | Metadata you can ignore: token counts, argument summaries, unfocused borders. |
 | `DARKGREY` | `2B2825` | The agent's gutter rail. Present, never read. |
+| `BROWN` | `AB5236` | Mascot only: rosette ink and the wordmark's lip. |
+| `ORANGE` (as `COAT`) | `FFA300` | Running — and, in the mascot, the Bengal's ground colour. |
 
 ### Why the accent is pink, not yellow
 
@@ -54,7 +209,7 @@ Yellow is still in the palette. It is no longer the accent.
 
 ---
 
-## 3. Layout
+## 4. Layout
 
 ```
 ┌ RAIL ─┐┌─ BODY ───────────────────────────────────┐
@@ -83,7 +238,7 @@ frame is two boxes saying one thing.
 
 ---
 
-## 4. Who is speaking: the gutter
+## 5. Who is speaking: the gutter
 
 Every transcript line starts with a two-cell gutter. Speaker identity is a
 column you scan, not a punctuation mark you read.
@@ -106,7 +261,7 @@ bars.
 
 ---
 
-## 5. Folding
+## 6. Folding
 
 Thinking blocks and tool cards are **closed by default** and each says what is
 behind it (`thinking (43 words)`, `▸ 12 lines`). Opening a block should be an
@@ -134,7 +289,7 @@ the transcript under every other one.
 
 ---
 
-## 6. Motion
+## 7. Motion
 
 There is exactly one animation vocabulary: the **dither ramp**
 `[' ', '░', '▒', '▓', '█']`.
@@ -160,7 +315,7 @@ interval for everything is `SPINNER_INTERVAL_MS = 80`.
 
 ---
 
-## 7. The prompt: send, queue, steer
+## 8. The prompt: send, queue, steer
 
 Typing while the agent works is normal. Both outcomes are one keystroke.
 
@@ -181,7 +336,7 @@ The status bar names both keys, but only while they differ —
 
 ---
 
-## 8. Mouse, selection, copy
+## 9. Mouse, selection, copy
 
 **Mouse capture is off by default. That is a decision, not an omission.**
 
@@ -210,7 +365,7 @@ click ends up landing one block off after a folding change.
 
 ---
 
-## 9. Panes
+## 10. Panes
 
 Every pane implements [`PaneView`](tui/src/pane.rs): `lines(height)`,
 `on_key`, `status()`, `help()`. Adding a pane is a module, a field on `Panes`,
@@ -232,7 +387,7 @@ is what makes every key path a unit test, and it is why `lines()` returns
 
 ---
 
-## 10. Keys
+## 11. Keys
 
 Global, from any focus:
 
@@ -252,7 +407,7 @@ into the prompt must not teleport you to the Memory pane.
 
 ---
 
-## 11. Adding to this
+## 12. Adding to this
 
 - **A new colour?** Only if no existing token means that state. Add it to
   `theme.rs` and to the table above.
@@ -264,6 +419,7 @@ into the prompt must not teleport you to the Memory pane.
 - **Never** italics (many terminals render them as inverse), nested borders,
   or a colour that means two things.
 
-Test totals and how to run the suites live in
-[README.md](README.md); what happened and why lives in
-[STATUS.md](STATUS.md).
+Test totals and how to run the suites live in [README.md](README.md); what
+happened and why lives in [STATUS.md](STATUS.md). How the system actually
+works — process topology, data flow, the kernel, pi, the memory layer, with
+diagrams — lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

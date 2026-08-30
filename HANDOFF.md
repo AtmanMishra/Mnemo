@@ -52,7 +52,10 @@ tui/            Rust, ratatui. `mnemo-agent` — nav rail (Chat/Sessions/Memory/
                 tool execution, shows delegation tree, memory search grouped by brain
                 area, session/project drill-down. 179 tests.
 plan.md         MASTER TASK TRACKER. 8 areas, checkboxes. READ THIS FIRST for "what's next".
-DESIGN.md       The TUI design system: palette, gutters, folding, motion, keys.
+DESIGN.md       Brand + TUI design system: wordmark, the Bengal mascot, palette,
+                gutters, folding, motion, keys.
+docs/           ARCHITECTURE / DATAFLOW / KERNEL / PI-INTEGRATION / MEMORY —
+                deep docs with mermaid diagrams.
 STATUS.md       Outcomes/verification log + doc index. Read for "what happened and why".
 research/       Design docs, one file per topic (see STATUS.md's doc index table).
 AGENTS.md       Repo-root instructions pi auto-loads into every Mnemo session.

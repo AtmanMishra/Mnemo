@@ -68,7 +68,7 @@ cd ../tui && cargo test                         # 179 passing, 0 failing
 cd ../harness-engine && npm test                # 19 passing, 0 failing
 ```
 
-Design system and keybindings: **DESIGN.md**. Live task tracker: **plan.md** (8 areas with checkboxes). See **STATUS.md** for outcomes and verification. **HANDOFF.md** for picking up cold. **research/** for design docs and architecture.
+Brand, design system and keybindings: **DESIGN.md**. Architecture with diagrams: **docs/**. Live task tracker: **plan.md** (8 areas with checkboxes). See **STATUS.md** for outcomes and verification. **HANDOFF.md** for picking up cold. **research/** for design docs and architecture.
 
 ## License
 
