@@ -2,12 +2,10 @@
 
 How `mnemo-agent` looks, why it looks that way, and where to change it.
 
-**Status: this document specifies the Go / Bubble Tea rebuild.** The shipping
-TUI today is Rust + ratatui (`tui/`, ~9,000 lines, 213 tests). This document is
-the target, not a description of `tui/`. Section 15 is the migration plan and
-section 16 the honest risk list. The brand — sections 1 through 3 — is
-unchanged by the rebuild and is already implemented; everything from section 4
-onward is new.
+**Status: built.** The Go / Bubble Tea interface lives in `tui-go/` and runs:
+`go run ./cmd/mnemo`. The Rust build in `tui/` still ships and is not deleted
+until the Go one passes the same acceptance run. Section 15 tracks what is
+done and section 16 what is not.
 
 The rules here are not preferences. Each one exists because the alternative was
 tried, or because a terminal makes the alternative actively worse. If you break
@@ -290,11 +288,11 @@ The ecosystem, pinned:
 | `charm.land/bubbletea/v2` | the loop. v2's Cursed Renderer (ncurses-derived) plus synchronized output (DECSET 2026) removes tearing |
 | `charm.land/lipgloss/v2` | styling, layout, and the Canvas / Layer / Compositor for overlays |
 | `charm.land/bubbles/v2` | textarea, viewport, list, table, spinner, help, key |
-| `charm.land/glamour/v2` | markdown, styled from JSON |
-| `charm.land/log/v2` | structured logs into the Logs overlay |
-| `github.com/charmbracelet/harmonica` | spring motion for the overlays |
+| `charm.land/glamour/v2` | markdown, styled from JSON — **planned, not in yet** |
+| `charm.land/log/v2` | structured logs — **planned; the Logs overlay reads the span log directly** |
+| `github.com/charmbracelet/harmonica` | spring motion — **planned, not in yet** |
 | `github.com/charmbracelet/x/ansi` | width, wrap, truncate — all ANSI- and wide-char-aware |
-| `github.com/charmbracelet/x/exp/teatest/v2` | golden-file tests over the real program |
+| `github.com/charmbracelet/x/exp/teatest/v2` | golden-file tests — **planned; the suite composes frames directly instead** |
 
 **Not** `bubblezone`. It solved mouse hit-testing before Bubble Tea had it;
 v2's `View.OnMouse` does it natively, and bubblezone's own README warns it may
@@ -308,23 +306,23 @@ The Elm loop, one root model, messages down and up. No shared mutable state, no
 callbacks into the view.
 
 ```
-main.go
+cmd/mnemo/       the binary, and --dump
+app/             the root model: model.go · update.go · view.go
 internal/
-  brand/      markers, Ink, wordmark, walk cycle, splash
-  theme/      the palette, styles, glamour stylesheet
-  chat/       transcript: blocks, folding, focus, search
-  prompt/     textarea, history, queue and steer
-  cmdpal/     the command palette
-  overlay/    sessions · memory · logs · help
-  rpc/        pi RPC client over line-delimited JSON (ported)
-  memsrv/     memory-layer client (ported)
-  session/    discovery, resume (ported)
-  auth/       login, provider and model listing (ported)
-app/
-  model.go    the root Model
-  update.go   the message switch
-  view.go     compose header · transcript · prompt · status
-  keys.go     the single key-map, source of truth for `?`
+  theme/         the palette, glyphs, styles
+  brand/         Nyx and the wordmark, as marker strings
+  ui/            chrome: rules, bands, chips
+  tree/          one hierarchical list, used four times
+  chat/          the transcript: blocks, folding, focus, wrapping
+  prompt/        input, history, queue
+  overlay/       one modal contract
+  keymap/        every binding
+  session/       pi's stored sessions, and replaying one
+  trace/         the span log as a call graph
+  memory/        memsrv over line-JSON-RPC
+  filetree/      a directory as tree nodes, lazily
+  agent/         the backend boundary
+  pi/            pi's RPC behind it
 ```
 
 The root model is small on purpose — everything else is a sub-model that owns
@@ -332,33 +330,54 @@ its own state:
 
 ```go
 type Model struct {
-    mode      Mode          // Insert | Read | Overlay
-    chat      chat.Model
-    prompt    prompt.Model
-    overlay   overlay.Model  // nil when none is up
-    keys      KeyMap
-    isDark    bool
-    w, h      int
-    agent     agentState    // idle | thinking | tool | error
+    cfg  Config          // Home, CWD, Agent, memsrv paths — never lookups
+    th   *theme.Theme
+    keys keymap.Map
+    mode keymap.Mode     // Insert | Read | Browse
+
+    chat     *chat.Model
+    prompt   *prompt.Model
+    explorer *tree.Model
+    ov       *overlay.Model   // nil when the transcript has the screen
+
+    agent   agent.Agent
+    working bool
+    tick    int
 }
 ```
 
-Long-running work — pi RPC, memsrv, tool output — arrives as messages from
-`tea.Cmd` goroutines. **Nothing blocks `Update`.** Streaming tokens arrive as
-`StreamDeltaMsg` and are appended to the open block.
+`Config` carries `Home` and `CWD` as fields rather than calling
+`os.UserHomeDir`, so a test can point the entire program at a temporary
+directory. A forgotten home parameter has caused real bugs here: the test then
+reads the developer's actual `~/.pi` and passes for the wrong reason.
+
+
+Everything the interface knows about the backend is `agent.Agent`: five methods
+and a handful of messages. That is what lets the backend be replaced — a live
+pi RPC process, a replayed session file, nothing at all — without the
+transcript, the keys or the layout knowing.
+
+`Next()` is the one method worth explaining. The backend drives the loop by
+being **asked for its next message** rather than by holding a reference to the
+program, and every branch that handles an agent message re-arms it. Forgetting
+to re-arm once stops the stream dead with no error anywhere, so there is
+exactly one place that does it.
 
 `View()` returns a `tea.View`, not a string. That is where alt-screen, mouse
 mode, window title, cursor position and shape are *declared* rather than
 commanded:
 
 ```go
-func (m Model) View() tea.View {
+func (m *Model) View() tea.View {
     v := tea.NewView(m.compose())
     v.AltScreen = true
-    v.MouseMode = tea.MouseModeAllMotion
-    v.WindowTitle = m.titleForSession()
-    v.Cursor = m.prompt.Cursor()   // nil in Read mode — no cursor, no ambiguity
-    v.OnMouse = m.onMouse
+    v.WindowTitle = "mnemo · " + m.relCWD()
+    if m.mouse {
+        v.MouseMode = tea.MouseModeCellMotion
+    }
+    if m.mode == keymap.Insert && m.ov == nil && !m.explorerFocus {
+        v.Cursor = m.promptCursor()   // nil everywhere else
+    }
     return v
 }
 ```
@@ -370,10 +389,10 @@ reading the status line, that typing will not go into the prompt.
 
 ## 6. The surface: one screen, not six panes
 
-**This is the part of the rebuild the current TUI most needs.**
+**This is the change the rebuild exists for.**
 
-Today there is a rail of six panes — Chat, Sessions, Agents, Memory, Skills,
-Logs — cycled with Tab. Two problems, both fatal:
+The Rust build has a rail of six panes — Chat, Sessions, Agents, Memory,
+Skills, Logs — cycled with Tab. Two problems, both fatal:
 
 1. **A rail of six nouns is a menu of six guesses.** "Agents" and "Sessions" tell
    you nothing about what is inside or why you would open them.
@@ -382,38 +401,45 @@ Logs — cycled with Tab. Two problems, both fatal:
    conversation. You are reading the transcript ~95% of the time, and paying
    three Tab presses to reach memory is three too many.
 
-So: **one surface, four overlays, no rail.**
+So: **one surface, one optional side pane, five overlays, no rail.**
 
 ```
-┌────────────────────────────────────────────────────────────────────┐
-│ ▞▚ mnemo   ~/self-evolving-agent   deepseek-v4-flash   session 4   │  header, 1 line
-├────────────────────────────────────────────────────────────────────┤
-│                                                                    │
-│  ▊ can you make the resume flow real                               │  transcript
-│                                                                    │  (viewport,
-│  · thinking  ░▒▓█▓▒░                                               │   soft-wrapped)
-│                                                                    │
-│  │ I'll look at how pi stores sessions first.                      │
-│                                                                    │
-│  ● read  tui/src/sessions.rs                             ▸ 40 ln   │
-│  ● 2 sub-agents  ─ probe-rpc · read-jsonl                ▸         │
-│                                                                    │
-├────────────────────────────────────────────────────────────────────┤
-│ ▊ ▏                                                                │  prompt, grows
-├────────────────────────────────────────────────────────────────────┤
-│ enter send · esc read · ^k palette      12 mem · 2 agents · 4.1k ↑ │  status
-└────────────────────────────────────────────────────────────────────┘
+▚ MNEMO ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ ~/self-evolving-agent/tui-go ▌ offline
+━━╾ TRANSCRIPT · 1 THINKING HIDDEN · ^E ╼━━━━━━━━━━━━━━━━━━━━┃━━╾ EXPLORER ╼━━━━━━━━━━━━━━━━
+● resumed · hi · deepseek-v4-flash                           ┃▌▾ tui-go                     
+                                                             ┃   ├─▸ app                    
+▊ hi                                                         ┃   ├─▸ cmd                    
+                                                             ┃   ├─▸ internal               
+· ▸ thinking                                                 ┃   ├─  README.md            3k
+                                                             ┃   ├─  go.mod               1k
+│ Hi! I'm ready to help with whatever you're working on in   ┃   └─  go.sum               4k
+  the `tui` project. What can I do for you?                  ┃                              
+                                                             ┃                              
+                                                             ┃                              
+                                                             ┃                              
+                                                             ┃                              
+                                                             ┃                              
+                                                             ┃                              
+▊ ask, or press ^k                                                                          
+ EXPLORER  ▌ explorer · enter puts a path in the prompt · esc back                          
 ```
+
+That is a real frame, printed by `--dump`, not a sketch. The header band
+travels while the agent works and is still when it is not; the region rule
+names what is under it and, here, that one thinking block is collapsed and
+`^e` opens it; the explorer is on the right because `^t` was pressed, and it
+took focus in the same press.
 
 **What happened to the six panes:**
 
 | was | is now |
 |---|---|
 | Chat | the surface itself |
+| — | **new:** the folder explorer, `^t`, on the right |
 | Sessions | overlay, `^s` — a resume picker, which is the only thing anyone ever wanted from it |
 | **Agents** | **deleted.** Sub-agent runs are *events in the conversation*, so they are foldable blocks in the transcript, where they happened |
 | Memory | overlay, `^m` |
-| Skills | a section of the command palette. It was a list you read once |
+| Skills | gone for now. It was a list you read once; when it returns it is a palette section, not a pane |
 | Logs | overlay, `^l` |
 
 Deleting the Agents pane also deletes a bug class it kept producing: because
@@ -430,16 +456,17 @@ not hidden — "no memories yet" is information.
 
 ### Overlays
 
-An overlay is a Lip Gloss `Layer` composited over a dimmed transcript, centred,
-at most 80% of each dimension, entering with a Harmonica spring (a 90ms
-overshoot on scale, not a fade — fades in a terminal are just colour steps and
-look like a redraw bug). Every overlay:
+An overlay **replaces the body region** and draws its own labelled rule. Not a
+floating layer: the compositing version is a later change to one function, and
+a half-hidden transcript behind a panel is harder to read than no transcript.
+Every overlay:
 
 - is dismissed by `esc`, always, with no confirmation;
 - has a one-line **purpose** at the top, in the reader's words;
 - when empty, says what will appear here and the concrete thing that causes it —
   never "(no episodes)";
-- is filterable by typing, with no mode change.
+- filters: a flat list as you type, a tree from `/` — so `j`/`k`/`h`/`l` keep
+  working in a hierarchy, and a palette needs no keystroke to arm it.
 
 The four:
 
@@ -449,18 +476,27 @@ for the entire app — if you can do it, typing part of its name here finds it.
 It is the answer to "I don't know what this thing can do", which no rail of
 nouns can be.
 
-**`^s` Sessions.** Resume. Rows are `when · first user message · turns · model`.
-The first message is the only reliable name a session has; a timestamp is not a
-name. `enter` resumes, `d` deletes, `n` starts fresh.
+**`^s` Sessions.** Project → session → the sub-agents under it. A session is
+named by its **first user message**, because a timestamp is not a name, and the
+project you are standing in opens itself. `enter` on a session replays the
+whole conversation through the same blocks a live turn uses — a summary card
+would make resuming feel like opening a receipt rather than picking a
+conversation back up.
 
-**`^m` Memory.** Rows sorted by **fact count, newest as tie-break** — sorting by
-id buried every real fact under thirty empty `pi session … 0 facts` rows.
-`enter` expands one to its facts; `/` searches; `d` forgets, with a confirm,
-because that one *is* destructive.
+**`^m` Memory.** Brain area → memory → its facts, sorted by **fact count**,
+newest as tie-break. Against the real journal that is five memories that know
+something above forty-seven empty `pi session …` episodes; by id it was the
+other way round, which is precisely what made the old pane useless. An area
+that knows nothing starts closed, and a memory's facts are fetched only when it
+is opened. Read-only for now.
 
-**`^l` Logs.** `charm.land/log` output, level-filtered with `1`–`4`, `/` to
-search, `f` to follow the tail. This is where a failing tool call explains
-itself.
+**`^l` Logs.** The span log as the tree it already is: every span carries a
+parent, so this is the **call graph of a run**, not a flat scroll — the only
+view where a slow turn shows you which call was slow. Branches containing a
+failure open themselves; everything else stays closed. A span whose parent was
+rotated out of the log is collected under "unlinked" rather than dropped
+(which loses failures) or hung at the top (which makes it look like a session
+it is not).
 
 ---
 
@@ -468,53 +504,78 @@ itself.
 
 Three modes and one rule for leaving them: **`esc` always goes up one level.**
 
+Global chords are dispatched **before any surface sees the key**, so nothing
+can swallow `^k` and strand you — a test presses every chord from every mode.
 Discoverability is not left to a manual: the status line always names the
-current mode's four most useful keys, and `^k` finds any of them by name.
+current mode's most useful keys, and `^k` finds any of them by name.
 
-### Insert (the default — you land here)
+### Global — live in every mode
+
+| key | does |
+|---|---|
+| `^e` | **open every thinking block in the transcript.** One press |
+| `^r` | the same for tool blocks · `^a` for everything |
+| `^t` | folder explorer on the right — **and focuses it** |
+| `^s` | sessions: project → session → the sub-agents under it |
+| `^m` | memory: brain area → memory → its facts |
+| `^l` | logs: every run as a call graph |
+| `^k` | the palette — run anything by name |
+| `^h` | every key, generated from the table the program dispatches on |
+| `^g` | mouse reporting off; drag-select is the terminal's again |
+| `^c` | interrupt the agent; again within 2s quits |
+| `^d` | quit, on an empty prompt |
+| `esc` | up one level |
+
+`^e` is the key the whole rebuild is organised around. Reading a long turn
+meant opening eight thinking blocks one at a time — eight keystrokes to answer
+one question. Partial state completes to all-open rather than inverting each
+block, so the key always finishes the job, and the region rule advertises how
+many are hidden: **a reader who cannot see that blocks are collapsed does not
+know there is anything to open.**
+
+### Insert — where you land
 
 | key | does |
 |---|---|
 | *any character* | types into the prompt |
 | `enter` | send — or **queue**, if the agent is busy |
-| `alt+enter` | **steer**: interrupt what the agent is doing with this |
-| `shift+enter` | newline |
-| `tab` | complete slash command or file path |
-| `↑` / `↓` | prompt history, when the prompt is empty or one line |
-| `esc` | → Read mode |
+| `alt+enter` | **steer**: interrupt what it is doing with this |
+| `^j` | newline |
+| `↑` / `↓` | prompt history, on a single-line prompt |
+| `esc` | → Read |
 
-### Read (`esc` from Insert)
+### Read — `esc` from Insert
 
 The cursor disappears, so the mode is visible without reading anything.
 
 | key | does |
 |---|---|
-| `j` / `k` | line down / up |
-| `^d` / `^u` | half page |
-| `g` / `G` | top / bottom |
-| `J` / `K` | **next / previous block** — the useful movement, since a transcript is a list of blocks, not of lines |
-| `enter` / `space` | fold or unfold the focused block |
-| `t` | show / hide all tool blocks at once |
-| `y` | yank the focused block · `Y` yanks the whole transcript |
-| `/` then `n` / `N` | search, next, previous |
-| `?` | help |
-| `esc` | → Insert |
+| `j` / `k` | line down / up · `^d` / `^u` half page · `g` / `G` ends |
+| `J` / `K` | **next / previous block** — a transcript is a list of blocks |
+| `enter` | fold or unfold the focused block |
+| `y` / `Y` | copy this block · the whole transcript |
+| `i` | back to the prompt |
 
-### Global (Insert and Read both)
+### Browse — a tree under the hand
+
+The explorer and the tree overlays share one key table, because they are one
+model.
 
 | key | does |
 |---|---|
-| `^k` | command palette |
-| `^s` `^m` `^l` | sessions · memory · logs |
-| `^o` | fold/unfold the newest block without leaving Insert |
-| `^c` | interrupt the agent; again within 2s quits |
-| `^d` | quit (only on an empty prompt) |
+| `l` | open, then go deeper |
+| `h` | **close, or jump to the parent** |
+| `E` / `C` | expand / collapse the whole tree |
+| `enter` | on a container: open it **and step inside**, one press. On a leaf: use it |
+| `/` | filter — matches keep their ancestors, so the hierarchy still reads |
 
-Bindings live in one `KeyMap` struct built with `bubbles/key`. `?` and the
-palette both render *from that struct*, so a binding cannot exist without being
-documented — the help can never drift from the code.
+`h` is the move that saves the most keystrokes in a deep tree: leaving a
+subtree is one press, not "up, up, up, left". And `enter` descends in one press
+rather than two, because expanding and then pressing again to get inside does
+nothing the reader asked for.
 
----
+Bindings live in one `KeyMap`. `^h` and the palette both render **from that
+struct**, so a binding cannot exist without being documented.
 
 ## 8. Who is speaking: the gutter
 
@@ -559,26 +620,28 @@ at once for when you want the shape of a long session at a glance.
 
 ## 10. Motion
 
-Three animations, and nothing else moves.
+Three things move, and only while there is work to report.
 
-**Thinking — the dither wave.** A five-step density ramp,
-`[' ', '░', '▒', '▓', '█']`, running as a wave along the thinking line. Same
-ramp as the cat's rosettes: one vocabulary, used twice. It reads as *work in
-progress* rather than *loading*, and it degrades to a monochrome terminal
-without losing meaning, because density is the signal, not colour.
+**The header band.** The dither ramp travels along the top of the screen while
+the agent is working, and is a single still step of the same ramp when it is
+not. It is the largest motion cue on screen and it costs no row of its own.
 
-**Tool running — the spinner.** `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` at 80ms, from `bubbles/spinner`.
+**A running tool call.** Its gutter is a braille spinner at 80ms, not a dot. A
+static dot on a call that is still out looks exactly like a call that
+finished, which is the difference between waiting and being stuck.
 
-**Overlays — a spring.** `harmonica.NewSpring(harmonica.FPS(60), 6.0, 0.5)`
-driving the overlay's height as it opens. A spring, not a linear tween, because
-a slight overshoot is what makes a panel feel like it *arrived* rather than
-having been drawn.
+**A thinking block still filling.** It draws the ramp beside its title —
+density travelling left to right reads as *work in progress*, where a spinner
+reads as *loading*.
 
-Motion stops when work stops. An idle Mnemo is a still screen — a TUI that
-animates while nothing is happening is a TUI that burns a laptop battery to
-look busy. `NO_COLOR`, a non-TTY, or `CI` disables all three.
+The other half of motion is stopping it. A turn that ends, or is interrupted,
+**clears every running marker**: a spinner nobody stops is a UI that looks
+hung. A tool still open when the turn ended is marked failed with "no result",
+never ok — it never reported back, and saying ok would be inventing an outcome.
 
----
+Idle is a still screen. The animation timer only runs while the agent is
+working; a TUI that animates while nothing is happening is burning a battery to
+look busy.
 
 ## 11. The prompt: send, queue, steer
 
@@ -603,15 +666,10 @@ paste never fires `enter` — a real bug class in hand-rolled prompts.
 
 ## 12. Mouse, selection, copy
 
-Mouse mode is declared in the view (`v.MouseMode = tea.MouseModeAllMotion`) and
-hit-tested in `v.OnMouse`, natively. No zone-marker library.
-
-| gesture | does |
-|---|---|
-| click a fold header | fold / unfold |
-| wheel | scroll the transcript |
-| click a path in a tool result | opens `$EDITOR` at that line |
-| drag | select — see below |
+Mouse mode is declared in the view (`v.MouseMode`) rather than commanded, and
+would be hit-tested in `v.OnMouse` natively — no zone-marker library. The
+row-to-block mapping exists and is tested (`chat.BlockAtRow`); nothing calls it
+yet. Click-to-fold and wheel scrolling are in section 16.
 
 **The terminal's own selection must keep working.** A TUI in alt-screen with
 mouse tracking on steals drag-select, which is the gesture every terminal user
@@ -624,22 +682,24 @@ which crosses SSH, unlike a `pbcopy` subprocess.
 
 ---
 
-## 13. Markdown
-
-Rendered by `glamour` with a Mnemo JSON stylesheet in `internal/theme`, so
-markdown styling and the palette are the same source. Code blocks are
-syntax-highlighted, wrapped to the viewport width less the gutter, and never
-horizontally scrolled — a horizontally scrolling code block in a chat log is
-unreadable.
+## 13. Wrapping
 
 **Wrap before you slice.** The transcript is tail-anchored: it takes the last
 *N* rows. If a logical line silently becomes three rows at render time, the two
 newest rows fall off the bottom of the screen. So every block is wrapped to the
-final width *before* the viewport takes its slice. This exact bug shipped in the
-Rust TUI; it is the reason `md.rs` exists, and the reason the Go version wraps
-through `ansi.Wordwrap` at model level rather than trusting the renderer.
+final width *before* the viewport takes its slice.
 
----
+This exact bug shipped in the Rust build. Wrapping goes through `ansi.Wordwrap`
+at model level rather than trusting the renderer, and the width sweep — render
+at 20, 40, 60, 80, 120 and 200 columns, assert no row exceeds the width — is
+the regression as a test.
+
+Wrapped lines keep the gutter column. A continuation that starts at column 0
+reads as a new speaker.
+
+Markdown is **not** rendered yet: text is wrapped and coloured, not styled.
+`glamour` with a Mnemo JSON stylesheet is the plan and is listed in section 16
+as outstanding, not described here as if it existed.
 
 ## 14. Testing
 
@@ -660,51 +720,60 @@ and "equivalent" means the same *properties*, not the same count.
 
 ---
 
-## 15. Migration
+## 15. What is built
 
-Port in this order. Each step ends green and is pushed.
+`tui-go/`, twelve packages, 235 tests.
 
-1. **Scaffold + brand.** Go module, `internal/brand` + `internal/theme`, splash
-   and walk cycle, drift guard. Verifies the palette and the art before anything
-   depends on them.
-2. **The shell.** Root model, three modes, header/transcript/prompt/status,
-   key-map, `?` rendered from it. Golden files at five widths.
-3. **Transcript.** Blocks, gutters, folding, focus, search, glamour, wrap-before-
-   slice. The width sweep lands here.
-4. **Ports.** `rpc`, `memsrv`, `session`, `auth` — straight translations of
-   working Rust, each with the Rust test cases carried over.
-5. **Live agent.** Streaming, queue and steer, interrupt, sub-agent blocks.
-6. **Overlays.** Palette, sessions, memory, logs.
-7. **Mouse, clipboard, `^g`.**
-8. **Onboarding + installer** cut over; the Rust binary is retired only when
-   `mnemo-agent` in Go passes the same acceptance run.
+| package | owns |
+|---|---|
+| `internal/theme` | the palette, the glyphs, the styles. Nothing else names a colour |
+| `internal/brand` | Nyx and the wordmark, generated from `tui/src/brand.rs` so the two cannot drift |
+| `internal/tree` | one hierarchical list, used four times: folders, sessions, memory, logs |
+| `internal/chat` | the transcript: blocks, folding, focus, wrapping |
+| `internal/ui` | chrome: rules, bands, chips. Holds no state |
+| `internal/keymap` | every binding; help and the palette render from it |
+| `internal/overlay` | one modal contract: purpose line, filter, empty state |
+| `internal/session` | pi's stored sessions, and replaying one |
+| `internal/trace` | the span log, as the call graph it already is |
+| `internal/memory` | memsrv over line-JSON-RPC |
+| `internal/filetree` | a directory as tree nodes, lazily |
+| `internal/prompt` | input, history, and the queue |
+| `internal/agent` + `internal/pi` | the backend boundary, and pi's RPC behind it |
+| `app` | the root model: three modes, one screen |
 
-Both binaries coexist until step 8. `tui/` is not deleted in step 1.
+**One tree, four uses** is the modularity that matters. Folders, sessions,
+sub-agents, memories and spans are all the same shape, so they share one model,
+one key table and one renderer. A fifth hierarchy costs a `[]*tree.Node`.
 
----
+`home` and `cwd` are configuration on `app.Config`, never lookups, so no test
+can read — or write — the developer's real `~/.pi` or `~/.mnemo`. The memsrv
+binary and its journal are parameters for the same reason.
 
-## 16. Risks, stated plainly
+`--dump` renders one frame to stdout, optionally after pressing keys
+(`--keys "ctrl+t,down,l"`). A TUI cannot be screenshotted from a script, and
+"it looked right when I ran it" is not a check anybody else can repeat.
 
-- **Go is not installed on this machine.** `go version` → `command not found`.
-  Step 0 is installing a toolchain; nothing above has been compiled.
-- **Charm v2 is young.** Bubble Tea, Lip Gloss and Bubbles v2 shipped
-  2026-02-23 — the first breaking release in six years. Expect thin
-  third-party examples and some v1-era blog posts that no longer compile. Pin
-  exact versions; do not track `latest`.
-- **`teatest` lives in `x/exp`.** Explicitly experimental. If its API moves, the
-  golden harness moves with it.
-- **213 tests must be re-earned, not counted.** A port that lands with 40 tests
-  and a green CI is a regression wearing a checkmark.
-- **The Rust TUI is what `install.ts` ships today.** Release, packaging and the
-  installer's art guard all change in step 8, not before.
-- **This buys maintainability, not features.** The port on its own adds nothing
-  a user can see. The parts a user *can* see — one surface instead of six panes,
-  the command palette, queue/steer, real folding — are design decisions in this
-  document, and could in principle be made in Rust. The case for Go is that
-  sections 4's deletion table is roughly 1,500 lines of our code replaced by
-  library code that is already tested.
+## 16. What is not built
 
----
+Stated plainly, because a design document that describes intentions as
+features is worse than no document.
+
+- **Markdown is not rendered.** No `glamour` yet: code blocks are wrapped text.
+- **Overlays replace the body rather than floating over it.** No Lip Gloss
+  compositor, no Harmonica spring. It is correct and dull; the layered version
+  is a later change to one function.
+- **Mouse is declared but not hit-tested.** `^g` works, wheel and click do not
+  yet fold blocks. `chat.BlockAtRow` exists and is tested; nothing calls it.
+- **No search in the transcript.** `/` filters trees only.
+- **Memory is read-only.** No forget, no confirm.
+- **Onboarding, auth and model switching are not ported.** `tui/` still owns
+  first run; the Go binary assumes you are already set up.
+- **Golden-file tests are not in yet.** The suite asserts on rendered text and
+  on widths, which catches overflow and layout, but not colour.
+- **Charm v2 is four months old** (shipped 2026-02-23). Versions are pinned;
+  do not track `latest`.
+- **The Rust build is what the installer ships.** Packaging changes last, not
+  first.
 
 ## 17. Adding to this
 
