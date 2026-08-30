@@ -35,6 +35,12 @@ interface Pending {
  */
 export type ToolDispatcher = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 
+/**
+ * How many in-kernel tool calls may execute at once. Approval prompting is
+ * serialized separately (see makeKernelDispatcher); this bounds the work.
+ */
+export const MAX_PARALLEL_TOOL_CALLS = 8;
+
 function drainPending(pending: Map<number, Pending>, value: IpyResult): void {
   const entries = [...pending.entries()];
   pending.clear();
@@ -83,15 +89,45 @@ export class IPyKernel {
     let reply: Record<string, unknown>;
     try {
       if (!this.dispatcher) throw new Error("no tools are available inside this kernel");
-      const name = String(msg?.name ?? "");
-      const args = (msg?.args ?? {}) as Record<string, unknown>;
-      reply = { op: "tool_result", ok: true, result: await this.dispatcher(name, args) };
+      if (msg?.op === "tool_calls") {
+        reply = { op: "tool_result", ok: true, results: await this.runBatch(msg?.calls) };
+      } else {
+        const name = String(msg?.name ?? "");
+        const args = (msg?.args ?? {}) as Record<string, unknown>;
+        reply = { op: "tool_result", ok: true, result: await this.dispatcher(name, args) };
+      }
     } catch (err: any) {
       reply = { op: "tool_result", ok: false, error: String(err?.message ?? err) };
     }
     // ponytail: no timeout - a tool that never returns hangs the kernel, the
     // same way it would hang a normal tool call. Add one if that ever bites.
     this.proc?.stdin?.write(JSON.stringify(reply) + "\n");
+  }
+
+  /**
+   * Run a batch of in-kernel tool calls concurrently, in bounded waves.
+   *
+   * The point of a batch is that N calls cost one round trip instead of N, so
+   * they run at the same time - but not ALL at the same time: a hundred
+   * parallel bash_exec calls would be a fork bomb wearing a tool name.
+   * Failures come back in place rather than rejecting the batch.
+   */
+  private async runBatch(calls: unknown): Promise<Array<Record<string, unknown>>> {
+    if (!Array.isArray(calls)) throw new Error("tool_calls: calls must be an array");
+    const out: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < calls.length; i += MAX_PARALLEL_TOOL_CALLS) {
+      const wave = calls.slice(i, i + MAX_PARALLEL_TOOL_CALLS);
+      out.push(...await Promise.all(wave.map(async (c: any) => {
+        try {
+          const name = String(c?.name ?? "");
+          const args = (c?.args ?? {}) as Record<string, unknown>;
+          return { ok: true, result: await this.dispatcher!(name, args) };
+        } catch (err: any) {
+          return { ok: false, error: String(err?.message ?? err) };
+        }
+      })));
+    }
+    return out;
   }
 
   private handleStdoutChunk(chunk: Buffer): void {
@@ -107,7 +143,7 @@ export class IPyKernel {
       } catch {
         continue; // not a protocol line; ignore
       }
-      if (msg.op === "tool_call") {
+      if (msg.op === "tool_call" || msg.op === "tool_calls") {
         void this.serveToolCall(msg);
         continue;
       }
@@ -298,7 +334,13 @@ export const ipyRunTool: SeaTool = {
   label: "IPython run",
   description:
     "Execute Python in ONE persistent kernel process. Variables, imports and functions persist across " +
-    "calls, exactly like notebook cells. Use restart=true to reset state.",
+    "calls, exactly like notebook cells. Use restart=true to reset state.\n" +
+    "Host tools are callable from the code as `tools.<name>(arg=...)`, returning the tool's text. " +
+    "A refused or failed tool raises ToolError, which you can catch. Prefer this whenever you would " +
+    "otherwise issue many similar tool calls: a loop over forty files is one ipy_run call, not forty.\n" +
+    "`tools.parallel([(name, {args}), ...])` runs a whole batch at once and returns the results in " +
+    "order; a failed element is a ToolError in the list instead of the result, so the rest survive. " +
+    "Use it whenever the calls do not depend on each other.",
   parameters,
   async execute(_id, params) {
     if (params.restart) {

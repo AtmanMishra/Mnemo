@@ -37,12 +37,21 @@ export function makeKernelDispatcher(
 ): ToolDispatcher {
   let seq = 0;
   const byName = new Map(tools.map((t) => [t.name, t]));
+  // Approval is a user interaction, so it happens ONE AT A TIME even when the
+  // calls behind it run in parallel: two readline prompts racing for the same
+  // terminal is how you approve the wrong command.
+  let gateQueue: Promise<unknown> = Promise.resolve();
+  const serializedGate = (name: string, args: Record<string, unknown>) => {
+    const run = gateQueue.then(() => gate(name, args), () => gate(name, args));
+    gateQueue = run.then(() => undefined, () => undefined);
+    return run;
+  };
   return async (name, args) => {
     const tool = byName.get(name);
     if (!tool) {
       throw new Error(`unknown tool "${name}". Available: ${[...byName.keys()].sort().join(", ")}`);
     }
-    const decision = await gate(name, args ?? {});
+    const decision = await serializedGate(name, args ?? {});
     if (decision.block) {
       throw new Error(decision.reason ?? `${name} was blocked`);
     }

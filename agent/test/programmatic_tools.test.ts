@@ -4,7 +4,7 @@
  */
 import { test, after } from "node:test";
 import assert from "node:assert";
-import { IPyKernel } from "../src/tools/ipy_run.ts";
+import { IPyKernel, ipyRunTool } from "../src/tools/ipy_run.ts";
 import { makeKernelDispatcher, resultText } from "../src/tools/kernel_tools.ts";
 import { textResult, type SeaTool } from "../src/tools/types.ts";
 import { decideApproval } from "../extensions/approval-gate.ts";
@@ -184,4 +184,154 @@ test("resultText flattens a tool result to what the program sees", () => {
   assert.equal(resultText(textResult("hello") as any), "hello");
   assert.equal(resultText({ content: [] } as any), "");
   assert.equal(resultText({} as any), "");
+});
+
+// --- parallel tool calling ---------------------------------------------
+
+function slowTool(name: string, ms: number, fn: (args: any) => string): SeaTool {
+  return {
+    name, label: name, description: name,
+    parameters: Type.Object({}),
+    execute: async (_id, params) => {
+      await new Promise((r) => setTimeout(r, ms));
+      return textResult(fn(params));
+    },
+  };
+}
+
+test("tools.parallel really runs them at the same time", async () => {
+  // the point of the batch is wall-clock: eight 100ms calls in one round trip
+  // must not take eight times 100ms
+  const tools = [slowTool("read_file", 100, (a) => `contents of ${a.path}`)];
+  const k = kernel(makeKernelDispatcher(tools, allow));
+
+  const started = Date.now();
+  const res = await k.run(`
+paths = [f"f{i}.ts" for i in range(8)]
+out = tools.parallel([("read_file", {"path": p}) for p in paths])
+out
+`);
+  const elapsed = Date.now() - started;
+  assert.equal(res.ok, true, res.error ?? "run failed");
+  assert.match(res.result ?? "", /contents of f0\.ts/);
+  assert.match(res.result ?? "", /contents of f7\.ts/);
+  assert.ok(elapsed < 500, `8x100ms concurrently should be well under 500ms, took ${elapsed}ms`);
+});
+
+test("results come back in the order they were sent", async () => {
+  // the fastest call finishing first must not reorder the list
+  const tools = [
+    slowTool("slow", 120, () => "slow"),
+    slowTool("quick", 5, () => "quick"),
+  ];
+  const k = kernel(makeKernelDispatcher(tools, allow));
+  const res = await k.run(`
+tools.parallel([("slow", {}), ("quick", {}), ("slow", {})])
+`);
+  assert.equal(res.ok, true, res.error ?? "run failed");
+  assert.equal(res.result, `['slow', 'quick', 'slow']`);
+});
+
+test("one failed call does not lose the rest of the batch", async () => {
+  const tools = [
+    fakeTool("read_file", (a) => {
+      if (a.path === "missing.ts") throw new Error("ENOENT: missing.ts");
+      return `contents of ${a.path}`;
+    }),
+  ];
+  const k = kernel(makeKernelDispatcher(tools, allow));
+  const res = await k.run(`
+out = tools.parallel([
+    ("read_file", {"path": "a.ts"}),
+    ("read_file", {"path": "missing.ts"}),
+    ("read_file", {"path": "b.ts"}),
+])
+[str(x) if isinstance(x, ToolError) else x for x in out]
+`);
+  assert.equal(res.ok, true, res.error ?? "run failed");
+  assert.match(res.result ?? "", /contents of a\.ts/);
+  assert.match(res.result ?? "", /ENOENT: missing\.ts/, "the failure is reported in place");
+  assert.match(res.result ?? "", /contents of b\.ts/, "and the call after it still ran");
+});
+
+test("an unknown tool in a batch is a ToolError, not a dead kernel", async () => {
+  const k = kernel(makeKernelDispatcher([fakeTool("read_file", () => "x")], allow));
+  const res = await k.run(`
+out = tools.parallel([("read_file", {}), ("nope", {})])
+isinstance(out[1], ToolError) and "nope" in str(out[1])
+`);
+  assert.equal(res.ok, true, res.error ?? "run failed");
+  assert.equal(res.result, "True");
+  // and the kernel is still usable afterwards
+  const after = await k.run(`tools.read_file()`);
+  assert.equal(after.ok, true, after.error ?? "run failed");
+});
+
+test("a denied tool is refused inside a batch too", async () => {
+  // programmatic tool calling must not be a way around the permission rules,
+  // and a batch must not be a way around programmatic tool calling's gate
+  const perms: Permissions = {
+    ...DEFAULT_PERMISSIONS,
+    rules: [{ tool: "bash_exec", pattern: "*", action: "deny" },
+            ...DEFAULT_PERMISSIONS.rules],
+  };
+  const tools = [fakeTool("bash_exec", () => "ran"), fakeTool("read_file", () => "read")];
+  const k = kernel(makeKernelDispatcher(tools, gateWith(perms)));
+  const res = await k.run(`
+out = tools.parallel([("read_file", {}), ("bash_exec", {"command": "rm -rf /"})])
+(out[0], isinstance(out[1], ToolError))
+`);
+  assert.equal(res.ok, true, res.error ?? "run failed");
+  assert.equal(res.result, `('read', True)`);
+});
+
+test("approval prompts are serialized even when the calls are not", async () => {
+  // two readline prompts racing for one terminal is how you approve the wrong
+  // command; the calls behind them may still overlap
+  let inFlight = 0;
+  let maxConcurrentGates = 0;
+  const gate = async () => {
+    inFlight += 1;
+    maxConcurrentGates = Math.max(maxConcurrentGates, inFlight);
+    await new Promise((r) => setTimeout(r, 10));
+    inFlight -= 1;
+    return {};
+  };
+  const k = kernel(makeKernelDispatcher([slowTool("read_file", 60, () => "x")], gate));
+  const started = Date.now();
+  const res = await k.run(`tools.parallel([("read_file", {}) for _ in range(4)])`);
+  const elapsed = Date.now() - started;
+  assert.equal(res.ok, true, res.error ?? "run failed");
+  assert.equal(maxConcurrentGates, 1, "one prompt at a time");
+  assert.ok(elapsed < 4 * 60, `execution still overlaps, took ${elapsed}ms`);
+});
+
+test("an empty batch costs nothing and a malformed one is caught in python", async () => {
+  const k = kernel(makeKernelDispatcher([fakeTool("read_file", () => "x")], allow));
+  const empty = await k.run(`tools.parallel([])`);
+  assert.equal(empty.ok, true, empty.error ?? "run failed");
+  assert.equal(empty.result, "[]");
+
+  // a try/except statement is not an expression, so give the kernel one
+  const bad = await k.run(`
+def probe():
+    try:
+        tools.parallel([("", {})])
+        return "no error"
+    except ToolError as e:
+        return str(e)
+
+probe()
+`);
+  assert.equal(bad.ok, true, bad.error ?? "run failed");
+  assert.match(bad.result ?? "", /needs a tool name/);
+});
+
+test("the tool description tells the model these capabilities exist", () => {
+  // building programmatic and parallel tool calling and not advertising them
+  // is the same as not having them: the model only knows what the schema says
+  const d = ipyRunTool.description;
+  assert.match(d, /tools\.<name>/, "programmatic tool calling must be discoverable");
+  assert.match(d, /tools\.parallel/, "so must the batch form");
+  assert.match(d, /ToolError/, "and how a failure arrives");
 });

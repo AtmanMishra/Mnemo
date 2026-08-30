@@ -27,9 +27,9 @@ Design pillars (do not relitigate without reading the research docs):
 ```
 memory-layer/   Rust. Graph memory engine: nodes{facts,state,log,context}, typed
                 edges, steering, HNSW+hashing/OpenRouter embeddings.
-                Bins: memcli (REPL), memtui (ratatui dashboard), memsrv (JSON-RPC
-                sidecar over stdio — THE integration surface for agents), memeval
-                (retrieval benchmark). 44 tests (cargo test).
+                Bins: memcli (REPL), memsrv (JSON-RPC sidecar over stdio — THE
+                integration surface for agents), memeval (retrieval benchmark),
+                mempolicy (learned steering evaluation). 44 tests (cargo test).
 harness-engine/ TypeScript, zero deps. Dynamic tool-plugin system: createHarness()
                 writes bundles (manifest.json + .mjs tool files) that agents can
                 build for themselves at runtime; scoped registry; fs.watch
@@ -46,12 +46,12 @@ agent/          TypeScript, runs on Node >=22.6 native TS stripping (no build st
                                 directive), approval-gate (y/n on mutating tools)
                 src/skills/     SKILL.md discovery at pi's standard locations +
                                 harness-bridge (harness bundles -> discoverable skills)
-                179 tests (npm test).
-tui/            Rust, ratatui. `mnemo-cockpit` — nav rail (Chat/Memory/Agents/
-                Skills/Logs) driven by pi's RPC mode: streams text/thinking/tool
-                execution, shows delegation tree, memory search grouped by brain area.
-                seatui (inline REPL) and memtui (dashboard) deprecated. 115 tests.
-plan.md         MASTER TASK TRACKER. 7 areas, checkboxes. READ THIS FIRST for "what's next".
+                195 tests (npm test).
+tui/            Rust, ratatui. `mnemo-agent` — nav rail (Chat/Sessions/Memory/
+                Agents/Skills/Logs) driven by pi's RPC mode: streams text/thinking/
+                tool execution, shows delegation tree, memory search grouped by brain
+                area, session/project drill-down. 133 tests.
+plan.md         MASTER TASK TRACKER. 8 areas, checkboxes. READ THIS FIRST for "what's next".
 STATUS.md       Outcomes/verification log + doc index. Read for "what happened and why".
 research/       Design docs, one file per topic (see STATUS.md's doc index table).
 AGENTS.md       Repo-root instructions pi auto-loads into every Mnemo session.
@@ -59,36 +59,36 @@ AGENTS.md       Repo-root instructions pi auto-loads into every Mnemo session.
 
 ## 3. How to run things
 ```bash
-# one-time setup (or: mnemo auth  — interactive wizard)
-mkdir -p ~/.mnemo && cat > ~/.mnemo/auth.json <<'EOF'
-{"version":1,"providers":{"opencode-go":{"kind":"api_key","key":"<KEY>",
- "defaultModel":"ox-alpha-free","updated_at":0}},"defaultProvider":"opencode-go"}
-EOF
+# The full app (TUI with onboarding wizard, auth inside the runtime)
+cd tui && cargo run --bin mnemo-agent
 
-cd agent && node ./bin/mnemo.ts                 # interactive (pi InteractiveMode)
-node ./bin/mnemo.ts "<prompt>"                  # one-shot
+# Memory-layer tools (all live CLI tools, no dependencies on the agent)
+cd memory-layer
+cargo run --bin memcli                          # memory REPL
+cargo run --bin memsrv <journal-path>           # JSON-RPC sidecar (see §5 protocol)
+cargo run --bin memeval                         # retrieval benchmark
+cargo run --bin mempolicy                       # learned steering evaluation
+
+# Agent CLI (mnemo-agent spawns this in --mode rpc; these are the other modes)
+cd ../agent && node ./bin/mnemo.ts "<prompt>"   # one-shot; how sub-agents run
 node ./bin/mnemo.ts auth status                 # provider/key table
 node ./bin/mnemo.ts traces [session]            # span trees, --json for raw
 node ./bin/mnemo.ts consolidate                 # replay episodes into semantic lessons
-npm test                                         # 179 tests, ~1s, must NOT hang
-npx tsc --noEmit                                 # must be clean
+npm test                                         # 195 tests, must NOT hang
+npx tsc --noEmit                                # must be clean
 
-cd ../memory-layer
-cargo test                                       # 37 tests
-cargo run --bin memcli                           # memory REPL
-cargo run --bin memtui                           # memory dashboard (? = help)
-cargo run --bin memsrv <journal-path>             # JSON-RPC sidecar (see §5 protocol)
-
-cd ../tui && cargo run --bin mnemo-cockpit       # the cockpit (nav rail: Chat/Memory/Agents/Skills/Logs)
-cargo run --bin seatui                           # deprecated: inline chat TUI
-cd ../harness-engine && npm test                 # 19 tests (1 flaky, rerun if red)
+# Test suites
+cd ../memory-layer && cargo test                # 44 tests
+cd ../tui && cargo test                         # 133 tests
+cd ../harness-engine && npm test                # 19 tests (1 flaky, rerun if red)
 ```
 
-## 4. Current state (verified at HEAD 0969477)
-- ALL 4 codebases green: agent 179, memory-layer 44, tui 115, harness-engine 19
-  (357 total). Working tree clean, everything pushed.
-- All 7 plan areas complete (every plan.md checkbox ticked): auth, cockpit,
-  brain-area memory, agent capabilities, tracing, packaging, quality.
+## 4. Current state (verified at HEAD 7483d25)
+- ALL 4 codebases green: agent 195, memory-layer 44, tui 133, harness-engine 19
+  (391 total). Working tree clean, everything pushed.
+- All 8 plan areas complete (every plan.md checkbox ticked): auth, cockpit,
+  brain-area memory, agent capabilities, tracing, packaging, quality, and the
+  one-app rework that made mnemo-agent the only thing you run.
 - Live-verified end-to-end on a real LLM (ox-alpha-free / OpenCode): memory
   write+search+recall, hierarchical spawn_subagent delegation (child writes to
   the SAME shared journal), agent building its OWN harness plugin at runtime

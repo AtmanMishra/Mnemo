@@ -27,7 +27,6 @@ hierarchical subagents sharing knowledge.
 | Steering engine | memory-layer/src/steering.rs | (in suite) | rules v0 |
 | OpenRouter embeddings | memory-layer/src/remote.rs | live-verified | liquid/lfm-2.5-embedding-350m:free, 1024-dim, disk cache |
 | memcli REPL | memory-layer/src/bin/memcli.rs | manual | persistent journal |
-| memtui dashboard | memory-layer/src/bin/memtui.rs | render-once | keybinds complete (? overlay) |
 | Sidecar memsrv | memory-layer/src/bin/memsrv.rs | 2 integration | line-JSON-RPC over stdio |
 | Harness engine | harness-engine/ | 19 | dynamic bundles, scopes, watcher, safety gate |
 | Agent runtime on pi | agent/ | 20/20 pass, tsc clean | RECOVERED by runtime-finisher; kernel bridge solid (persistence+timeout recovery) |
@@ -133,6 +132,8 @@ Task tracking moved to plan.md (7 areas). This file records outcomes/verificatio
 | research/pi-agent-report.md / deepseek-harness-and-scrapling-report.md | upstream studies |
 | research/programmatic-tool-calling.md | in-kernel tool dispatch to reduce round-trips (tasks 4.6-4.7) |
 
+**Note:** AREA 8 consolidated the application into a single binary (`mnemo-agent`). The AREA sections below include historical records of previous binaries (seatui, memtui, mnemo-cockpit) that have been superseded. Refer to the final AREA 8 section for current state.
+
 ### AREA 1 — AUTH & ONBOARDING: COMPLETE (4/5)
 - ~/.mnemo/auth.json credential store (chmod 600); env > store precedence
 - `mnemo auth` wizard (provider picker, key validation, default model)
@@ -197,7 +198,30 @@ HEAD ac50ba7, working tree clean, all pushed.
 - 7.1: CI runs all four suites as separate jobs plus a secret-scan job; the Rust jobs build memsrv first because the agent and cockpit tests drive the real sidecar.
 - 7.2: retrieval eval 15 -> 22 cases with a fourth domain and brain-area nodes; LLM task pairs 3 -> 5 (a superseded fact where the stale value is a fail, and knowledge that only exists as a salience marker). Hit@1 moved 93% -> 82%: two misses are the pain marker legitimately outranking the old aspect on failure-shaped queries (those now accept either answer), the rest are real retrieval misses left failing rather than tuned away — "who gets paged when latency spikes" does not retrieve "alert routing" at all.
 - 7.3: learned steering policy experiment — features from journal replay, logistic regression, both policies scored on the same held-out split, reported by `cargo run --bin mempolicy`. On the real journal the honest answer today is "nothing to learn from": it records no failures with feeders yet. steer() still uses the lexical-overlap rule.
-- Verification: agent 179, memory-layer 44, tui 115, harness-engine 19 — 357 total, all green, tsc clean.
+- Verification: agent 195, memory-layer 44, tui 133, harness-engine 19 — 391 total, all green, tsc clean.
 
 ### Next candidates
 All 7 plan areas complete. Open threads: (1) real retrieval misses in Area 7.2, left failing rather than tuned away — clearest is "who gets paged when latency spikes" not retrieving "alert routing"; (2) steering policy experiment in 7.3 awaiting a journal with real failure history.
+
+### AREA 8 — MNEMO-AGENT: ONE APP, AUTH INSIDE THE RUNTIME: COMPLETE
+- **Consolidation**: Three legacy binaries (seatui, memtui, mnemo-cockpit) replaced by single binary `mnemo-agent`.
+  - `seatui` — inline chat TUI, deleted. Replaced by mnemo-agent's Chat pane.
+  - `memtui` — memory dashboard, deleted. Replaced by mnemo-agent's Memory pane (groups by brain area).
+  - `mnemo-cockpit` — cockpit TUI, renamed to `mnemo-agent`. Enhanced with Sessions pane (Projects -> Sessions -> subagent runs).
+- **Auth moved inside runtime**: On first launch, `mnemo-agent` runs a colourful pixel-themed onboarding wizard inside the TUI itself (pick provider, paste API key, pick default model). No interactive shell commands, no auto-launch of external tools.
+  - `mnemo auth login` removed as a runnable interactive command; running it now prints a message directing users to `mnemo-agent`.
+  - `mnemo auth status` and `mnemo auth logout` still work (useful in scripts).
+  - First run with no credentials auto-launches the wizard; stored credentials go to `~/.mnemo/auth.json`.
+- **Runtime model switching**: `/login` and `/model` commands work inside a running session, allowing mid-session provider and model changes.
+- **Nav rail structure**: Six panes accessible via Tab/Shift-Tab or Alt+digit (when body loses focus, bare digits 1-6 also switch). Bare `?` shows keybindings; `/` opens command palette.
+  - Chat: streamed text and thinking, tool cards that flip running->ok/failed, coloured diff hunks, turn cost.
+  - Sessions: Projects -> drill-down to sessions -> subagent runs tree. Launch directory pinned as "here" even with no history.
+  - Memory: nodes grouped by brain area, area-filtered search, state inspection on demand.
+  - Agents: delegation tree from journal episodes, run state from outcome logs, orphaned subagents visible.
+  - Skills: SKILL.md discovery + harness bundles as discoverable skills.
+  - Logs: live journal tail with filters (survives a compacted journal); `s` flips to the trace store.
+- **Memory-layer CLI tools unchanged**: memcli (REPL), memsrv (JSON-RPC sidecar), memeval (retrieval benchmark), mempolicy (learned steering evaluation) remain as standalone binaries for scripting and lower-level access.
+- **Multi-model sub-agents**: `spawn_subagent` takes an optional `model`. Omitted, the child inherits the parent's. An unavailable model is REFUSED with the list of what is available rather than quietly downgraded — a silent fallback would look like it worked, the worst outcome for a multi-model run.
+- **Sessions are live, not a listing**: enter on a session restarts the agent in that project's directory against that session file (pi's `--session`) and replays the stored transcript into the Chat pane; enter on a subagent opens its trace spans. The working directory matters twice over — pi derives its session directory from it, so resuming from elsewhere forks the session into the wrong project. Startup runs the agent in the launch directory for the same reason.
+- **Build**: `cd tui && cargo run --bin mnemo-agent`
+- **Verification**: agent 195 passing / 0 failing, tui 133 passing / 0 failing, memory-layer 44 passing / 0 failing, harness-engine 19 passing / 0 failing — 391 total, all green, tsc clean.

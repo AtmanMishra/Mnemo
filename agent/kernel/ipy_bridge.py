@@ -11,6 +11,13 @@ Programmatic tool calling (plan 4.6): submitted code can call host tools as
 and blocks on the host's reply
   {"op": "tool_result", "ok": true, "result": <json>}   (or ok:false + error)
 
+`tools.parallel([...])` sends the whole batch at once instead
+  {"op": "tool_calls", "calls": [{"name": .., "args": {..}}, ...]}
+  {"op": "tool_result", "ok": true, "results": [{"ok": .., "result"|"error"}, ..]}
+turning N sequential round trips into one. Results keep the order they were
+sent in, and a failed call is a ToolError IN the list rather than an exception,
+so one bad element does not lose the rest of the batch.
+
 Two things make that safe: the request is written to the stdout buffer captured
 BEFORE contextlib.redirect_stdout, so it is not swallowed by the cell's output
 capture; and the reply is read from the same stdin object the main loop uses,
@@ -52,24 +59,72 @@ class ToolProxy:
             raise AttributeError(name)
 
         def call(**kwargs):
-            request = {"op": "tool_call", "name": name, "args": kwargs}
-            stdout = object.__getattribute__(self, "_stdout")
-            stdin = object.__getattribute__(self, "_stdin")
-            stdout.write((json.dumps(request) + "\n").encode("utf-8"))
-            stdout.flush()
-            line = stdin.readline()
-            if not line:
-                raise ToolError(f"bridge closed while calling {name}")
-            try:
-                reply = json.loads(line.decode("utf-8"))
-            except Exception as exc:
-                raise ToolError(f"unreadable reply for {name}: {exc}") from None
+            reply = self._rpc({"op": "tool_call", "name": name, "args": kwargs})
             if not reply.get("ok"):
                 raise ToolError(reply.get("error") or f"tool {name} failed")
             return reply.get("result")
 
         call.__name__ = name
         return call
+
+    def parallel(self, calls):
+        """Run many host tool calls at once; returns results in order.
+
+        A loop of forty `tools.read_file(...)` calls costs forty sequential
+        round trips to the host. This costs one, and the host runs them
+        concurrently - which is the whole reason programmatic tool calling is
+        cheaper than forty separate tool_use blocks.
+
+            results = tools.parallel([("read_file", {"path": p}) for p in paths])
+
+        Each element is the tool's result, or a ToolError IN PLACE of it: one
+        unreadable file must not lose the other thirty-nine. Check with
+        `isinstance(r, ToolError)`.
+
+        `parallel` is a real method, so it wins over __getattr__ - a host tool
+        actually named "parallel" would be unreachable through the proxy.
+        """
+        items = []
+        for c in calls:
+            if isinstance(c, dict):
+                name, args = c.get("name"), c.get("args")
+            else:
+                name, args = c
+            if not name:
+                raise ToolError("parallel: every call needs a tool name")
+            items.append({"name": str(name), "args": dict(args or {})})
+        if not items:
+            return []
+
+        reply = self._rpc({"op": "tool_calls", "calls": items})
+        if not reply.get("ok"):
+            raise ToolError(reply.get("error") or "parallel tool call failed")
+        results = reply.get("results") or []
+        out = []
+        for i, item in enumerate(items):
+            r = results[i] if i < len(results) else None
+            if not isinstance(r, dict):
+                out.append(ToolError(f"no reply for {item['name']}"))
+            elif r.get("ok"):
+                out.append(r.get("result"))
+            else:
+                out.append(ToolError(r.get("error") or f"tool {item['name']} failed"))
+        return out
+
+    def _rpc(self, request):
+        """One request up the pipe, one reply back. The module docstring
+        explains why this stdout and this stdin are the right ones."""
+        stdout = object.__getattribute__(self, "_stdout")
+        stdin = object.__getattribute__(self, "_stdin")
+        stdout.write((json.dumps(request) + "\n").encode("utf-8"))
+        stdout.flush()
+        line = stdin.readline()
+        if not line:
+            raise ToolError("bridge closed during a tool call")
+        try:
+            return json.loads(line.decode("utf-8"))
+        except Exception as exc:
+            raise ToolError(f"unreadable reply: {exc}") from None
 
 
 class SeaKernel:
