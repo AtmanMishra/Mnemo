@@ -1,5 +1,5 @@
 /**
- * sea-tools-inline adapter tests: all 14 sea tools must register through a
+ * sea-tools-inline adapter tests: every sea tool must register through a
  * fake ExtensionAPI, with names preserved and executable execute() functions.
  */
 import { test } from "node:test";
@@ -21,6 +21,8 @@ const EXPECTED = [
   "memory_search",
   "memory_write_fact",
   "memory_steer",
+  "web_fetch",
+  "web_search",
 ];
 
 function fakePi() {
@@ -38,7 +40,7 @@ function fakePi() {
   };
 }
 
-test("registers exactly the 14 sea tools with stable names", () => {
+test("registers exactly the sea tools, with stable names", () => {
   const pi = fakePi();
   seaToolsFactory(pi);
   assert.deepEqual(

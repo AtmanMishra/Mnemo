@@ -31,7 +31,7 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 
 ## AREA 4 — AGENT CAPABILITIES
 - [ ] 4.1 MCP client bridge (servers as registered tools)
-- [ ] 4.2 Web search/fetch tool (Brave/Tavily key optional)
+- [x] 4.2 Web search/fetch tool (Brave/Tavily key optional)
 - [x] 4.3 Permission rule engine: ~/.mnemo/permissions.json allow/ask/deny patterns (extends approval gate)
 - [x] 4.4 Plan mode: read-only phase + tool allowlist switch
 - [ ] 4.5 Image/screenshot input surfacing through tools

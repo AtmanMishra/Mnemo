@@ -39,7 +39,7 @@ test("submitted code can call a host tool and use the value", async () => {
 text = tools.read_file(path="a.ts")
 text.upper()
 `);
-  assert.equal(res.ok, true, res.error);
+  assert.equal(res.ok, true, res.error ?? "run failed");
   assert.match(res.result ?? "", /CONTENTS OF A\.TS/);
   assert.deepEqual(seen, [{ path: "a.ts" }], "args arrive as keyword arguments");
 });
@@ -54,7 +54,7 @@ test("a loop makes many tool calls but returns once", async () => {
 hits = [p for p in ["f1","f2","f3","f4"] if "TODO" in tools.read_file(path=p)]
 hits
 `);
-  assert.equal(res.ok, true, res.error);
+  assert.equal(res.ok, true, res.error ?? "run failed");
   assert.equal(calls, 4, "every iteration reached the host");
   assert.match(res.result ?? "", /f3/);
   assert.doesNotMatch(res.result ?? "", /f1|f2|f4/, "only the filtered result comes back");
@@ -79,7 +79,7 @@ v = tools.read_file(path="a")
 print("after", v)
 v
 `);
-  assert.equal(res.ok, true, res.error);
+  assert.equal(res.ok, true, res.error ?? "run failed");
   assert.equal(res.result, "'value'");
   assert.match(res.output ?? "", /before/);
   assert.match(res.output ?? "", /after value/);
@@ -111,7 +111,7 @@ except ToolError as e:
     out = f"caught: {e}"
 out
 `);
-  assert.equal(res.ok, true, res.error);
+  assert.equal(res.ok, true, res.error ?? "run failed");
   assert.match(res.result ?? "", /caught: command not found/);
 });
 
@@ -149,13 +149,13 @@ except ToolError as e:
     out = str(e)
 out
 `);
-  assert.equal(res.ok, true, res.error);
+  assert.equal(res.ok, true, res.error ?? "run failed");
   assert.match(res.result ?? "", /denied by/);
   assert.equal(ran, 0, "the denied tool must not have executed");
 
   // the same tool with an allowed command still works
   const ok = await k.run(`tools.bash_exec(command="ls")`);
-  assert.equal(ok.ok, true, ok.error);
+  assert.equal(ok.ok, true, ok.error ?? "run failed");
   assert.equal(ran, 1);
 });
 
