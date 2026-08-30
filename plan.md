@@ -25,7 +25,7 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 - [x] 3.1 model.rs: add `area` column to Node (default derived from kind); memsrv persists
 - [x] 3.2 memsrv search: `areas` filter + query router heuristic v0 (keyword->area mapping)
 - [x] 3.3 search.rs: cross-area discount weights; tune via memeval (no regression vs 80% hit@1 baseline)
-- [ ] 3.4 steer(): write SALIENCE pain markers before Executive correction
+- [x] 3.4 steer(): write SALIENCE pain markers before Executive correction
 - [ ] 3.5 Consolidation job skeleton (`mnemo consolidate`): Episodic replay -> Semantic facts
 - [ ] 3.6 Cockpit Memory pane groups by area (pairs with 2.4)
 

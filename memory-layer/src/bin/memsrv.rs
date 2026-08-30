@@ -247,6 +247,7 @@ fn handle(
             let (ops, notes) = steer(s, episode, failure, correction.as_ref(), *clock)?;
             for op in ops { apply(s, j, op)?; }
             Ok(json!({
+                "pain_node": notes.pain_node,
                 "blamed_feeders": notes.blamed_feeders,
                 "superseded_on": notes.superseded_on,
                 "gap_node": notes.gap_node,

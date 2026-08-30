@@ -154,4 +154,51 @@ mod p2 {
             serde_json::to_value(&s).unwrap(),
             serde_json::to_value(&replayed).unwrap());
     }
+
+    #[test]
+    fn steer_writes_salience_pain_marker_first() {
+        let mut s = episode_with_two_feeders();
+        let (ops, notes) = steer(&s, 10, "404 on rewritten cart path", None, t() + 10).unwrap();
+        let pain = notes.pain_node.expect("every failure must leave a pain marker");
+
+        // the marker is created before any blame/correction/rewire op
+        let pain_at = ops.iter().position(|o| matches!(o, Op::CreateNode { id, .. } if *id == pain)).unwrap();
+        let first_decision = ops.iter().position(|o| matches!(o,
+            Op::RecordOutcome { .. } | Op::SupersedeFact { .. } | Op::Unlink { .. }));
+        if let Some(d) = first_decision {
+            assert!(pain_at < d, "pain marker must precede the executive decision");
+        }
+
+        for op in &ops { s.apply(op).unwrap(); }
+        assert_eq!(s.nodes[&pain].area, Area::Salience);
+        assert!(s.nodes[&pain].label.starts_with("pain: "));
+        assert_eq!(s.nodes[&pain].active_facts().next().unwrap().value,
+            "404 on rewritten cart path");
+
+        // cited by the episode, but NOT a context feeder: it must never become
+        // a blame target for the next failure
+        assert!(s.edges.values().any(|e| e.src == 10 && e.dst == pain
+            && e.kind == EdgeKind::DerivedFrom));
+        assert!(!s.feeders_of(10, t() + 20).iter().any(|e| e.src == pain));
+
+        let (ops2, notes2) = steer(&s, 10, "404 on rewritten cart path again", None, t() + 20).unwrap();
+        assert!(!notes2.blamed_feeders.iter().any(|(_, src)| *src == pain),
+            "pain markers must not be blamed");
+        assert_ne!(notes2.pain_node, Some(pain), "each failure gets its own marker");
+        for op in &ops2 { s.apply(op).unwrap(); }
+    }
+
+    #[test]
+    fn pain_marker_label_is_truncated_not_split() {
+        let s = episode_with_two_feeders();
+        let long = "é".repeat(200); // multibyte: naive slicing would panic here
+        let (ops, notes) = steer(&s, 10, &long, None, t() + 10).unwrap();
+        let pain = notes.pain_node.unwrap();
+        let label = ops.iter().find_map(|o| match o {
+            Op::CreateNode { id, label, .. } if *id == pain => Some(label.clone()),
+            _ => None,
+        }).unwrap();
+        assert!(label.ends_with("..."));
+        assert_eq!(label.chars().count(), "pain: ".len() + 60 + 3);
+    }
 }

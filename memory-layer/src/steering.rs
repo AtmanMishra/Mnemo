@@ -37,6 +37,7 @@ const SWITCH_THRESHOLD: f32 = 0.2;
 
 #[derive(Debug, Default)]
 pub struct SteerNotes {
+    pub pain_node: Option<NodeId>,
     pub blamed_feeders: Vec<(EdgeId, NodeId)>,
     pub superseded_on: Option<NodeId>,
     pub gap_node: Option<NodeId>,
@@ -45,6 +46,7 @@ pub struct SteerNotes {
 }
 
 /// Failure steering. Emits ops that:
+///   0. capture a SALIENCE pain marker (fast capture, before any decision),
 ///   1. log the failure on the episode ("model-visible means logged"),
 ///   2. down-weight implicated feeder edges (lexical overlap of failure text
 ///      with each feeder's active facts),
@@ -72,6 +74,23 @@ pub fn steer(
     // 1. log it
     ops.push(Op::CommitLog { node: episode, kind: "outcome".into(),
         detail: failure_detail.into(), at: now });
+
+    // 0/1b. pain marker FIRST, before any executive decision below. Amygdala
+    // logic: capture that it hurt, cheaply and unconditionally; deciding what
+    // to do about it is the rest of this function.
+    let pain = ids.node();
+    ops.push(Op::CreateNode { id: pain, kind: NodeKind::Aspect,
+        label: format!("pain: {}", truncate(failure_detail, 60)), at: now });
+    ops.push(Op::SetArea { node: pain, area: Area::Salience, at: now });
+    let pfid = ids.fact();
+    ops.push(Op::AddFact { node: pain, fact_id: pfid, key: "failure".into(),
+        value: failure_detail.into(), at: now });
+    let peid = ids.edge();
+    // episode CITES the marker: DerivedFrom keeps it out of feeders_of(), so a
+    // pain marker can never become a blame target for the next failure.
+    ops.push(Op::Link { id: peid, src: episode, dst: pain,
+        kind: EdgeKind::DerivedFrom, at: now });
+    notes.pain_node = Some(pain);
 
     let q_tokens: HashSet<String> = tokenize(failure_detail).collect();
     let feeders = store.feeders_of(episode, now);
@@ -160,6 +179,13 @@ pub fn reinforce(
         ops.push(Op::RecordOutcome { edge: e.id, success: true, at: now });
     }
     Ok(ops)
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    match s.char_indices().nth(max) {
+        Some((i, _)) => format!("{}...", &s[..i]),
+        None => s.to_string(),
+    }
 }
 
 fn lexical_overlap(store: &StoreData, node: NodeId, query: &HashSet<String>) -> usize {
