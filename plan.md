@@ -33,7 +33,7 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 - [ ] 4.1 MCP client bridge (servers as registered tools)
 - [ ] 4.2 Web search/fetch tool (Brave/Tavily key optional)
 - [x] 4.3 Permission rule engine: ~/.mnemo/permissions.json allow/ask/deny patterns (extends approval gate)
-- [ ] 4.4 Plan mode: read-only phase + tool allowlist switch
+- [x] 4.4 Plan mode: read-only phase + tool allowlist switch
 - [ ] 4.5 Image/screenshot input surfacing through tools
 - [ ] 4.6 Programmatic tool calling (research/programmatic-tool-calling.md): `tools` proxy inside the ipy kernel + `tool_call` op on the existing stdio bridge, so the model writes ONE program instead of N tool_use round trips
 - [ ] 4.7 Route in-kernel tool calls through the approval gate + permission rules — without this, generated code bypasses the y/n gate on bash_exec/write_file/apply_edit (pairs with 4.3)
