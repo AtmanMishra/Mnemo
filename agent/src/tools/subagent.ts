@@ -11,6 +11,7 @@
  * child's final answer to stdout.
  */
 import { spawn } from "node:child_process";
+import { activeTracing, childTraceEnv as traceEnvFor } from "../../extensions/tracing.ts";
 import * as path from "node:path";
 import { Type } from "typebox";
 import { textResult, type SeaTool } from "./types.ts";
@@ -57,7 +58,10 @@ export function runSubagent(
   const started = Date.now();
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, composeChildPrompt(opts.task, opts.context)], {
-      env: { ...process.env }, // MNEMO_MEMORY_JOURNAL inherits -> SHARED memory graph
+      // MNEMO_MEMORY_JOURNAL inherits -> SHARED memory graph.
+      // The trace env makes the child's spans hang off this call's span, so
+      // `mnemo traces` shows the whole delegation tree (5.4).
+      env: { ...process.env, ...childTraceEnv() },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -101,6 +105,12 @@ export function extractAnswer(stdout: string): string {
   const lines = stdout.split("\n").filter((l) => l.startsWith("ANSWER:"));
   if (lines.length > 0) return lines[lines.length - 1]!.slice("ANSWER:".length).trim();
   return stdout.trim();
+}
+
+/** Trace ids to hand the child, or nothing when tracing is off. */
+function childTraceEnv(): Record<string, string> {
+  const t = activeTracing();
+  return t ? traceEnvFor(t.tracer) : {};
 }
 
 export const subagentSpawnTool: SeaTool = {

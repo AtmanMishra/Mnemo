@@ -39,13 +39,13 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 - [x] 4.7 Route in-kernel tool calls through the approval gate + permission rules — without this, generated code bypasses the y/n gate on bash_exec/write_file/apply_edit (pairs with 4.3)
 
 ## AREA 5 — LOGGING & TRACES
-- [ ] 5.1 Structured logger: level-filtered JSONL traces in ~/.mnemo/logs/<date>.jsonl (request_id spans)
-- [ ] 5.2 LLM call tracing: provider/model/tokens-in/out/latency/stop-reason per model round-trip
-- [ ] 5.3 Tool-call spans: tool name, inputs summary, output size, duration, ok/error (extension hook writes span)
-- [ ] 5.4 Subagent correlation: child spans carry parent session/request ids -> full delegation tree reconstructable
-- [ ] 5.5 `mnemo traces [session-id]` CLI: pretty-print span tree; --json flag
-- [ ] 5.6 Cockpit Logs pane renders the same trace store (pairs with 2.7)
-- [ ] 5.7 Log rotation + redaction (never write api keys / .env values into traces)
+- [x] 5.1 Structured logger: level-filtered JSONL traces in ~/.mnemo/logs/<date>.jsonl (request_id spans)
+- [x] 5.2 LLM call tracing: provider/model/tokens-in/out/latency/stop-reason per model round-trip
+- [x] 5.3 Tool-call spans: tool name, inputs summary, output size, duration, ok/error (extension hook writes span)
+- [x] 5.4 Subagent correlation: child spans carry parent session/request ids -> full delegation tree reconstructable
+- [x] 5.5 `mnemo traces [session-id]` CLI: pretty-print span tree; --json flag
+- [x] 5.6 Cockpit Logs pane renders the same trace store (pairs with 2.7)
+- [x] 5.7 Log rotation + redaction (never write api keys / .env values into traces)
 
 ## AREA 6 — PACKAGING & DISTRIBUTION
 - [ ] 6.1 package.json files/engines fields; npm publish (scoped) or npm link quickstart

@@ -48,7 +48,15 @@ fn main() -> io::Result<()> {
         memory: MemoryPane::new(),
         agents: AgentsPane::new(),
         skills: SkillsPane::load(&root, &home, &root.join("harness-engine").join("bundles")),
-        logs: LogsPane::new(&journal),
+        logs: {
+            // 5.6: the same pane can show today's agent traces (`s` toggles)
+            let today = std::process::Command::new("date")
+                .arg("+%Y-%m-%d").output().ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
+            LogsPane::new(&journal).with_traces(&home.join(".mnemo").join("logs").join(format!("{today}.jsonl")))
+        },
     };
     refresh_memory(&mut panes, mem.as_mut());
 

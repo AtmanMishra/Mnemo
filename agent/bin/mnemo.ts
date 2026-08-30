@@ -5,6 +5,7 @@
 //   mnemo "<prompt>"          one-shot prompt (pi print mode when non-TTY)
 //   mnemo                     interactive TUI (pi interactive mode)
 //   mnemo consolidate         distil recurring episodes into semantic lessons
+//   mnemo traces [session]    print span trees from ~/.mnemo/logs (--json)
 //
 // MCP servers listed in ~/.mnemo/mcp.json are connected before pi starts and
 // their tools registered as mcp__<server>__<tool>.
@@ -33,7 +34,9 @@ import { runWizard } from "../src/auth/wizard.ts";
 import { seaToolsInline } from "../extensions/sea-tools-inline.ts";
 import { memoryLayerHooks, runConsolidate, sharedMem } from "../extensions/memory-layer.ts";
 import { discoverMcpTools, loadMcpConfig, setMcpTools } from "../src/mcp.ts";
+import { formatTree, readSpans, sessionsOf } from "../src/trace.ts";
 import approvalExt from "../extensions/approval-gate.ts";
+import tracingExt from "../extensions/tracing.ts";
 
 const invokedDirectly = (() => {
   try {
@@ -161,6 +164,40 @@ async function ensureAuthenticated(): Promise<void> {
   }
 }
 
+/** mnemo traces [session-id] [--json] [--date YYYY-MM-DD] */
+export function renderTraces(
+  argv: string[],
+  home = process.env.HOME ?? "",
+  log: (s: string) => void = console.log,
+): void {
+  const flags = new Set(argv.filter((a) => a.startsWith("--")));
+  const dateIdx = argv.indexOf("--date");
+  const date = dateIdx >= 0 ? argv[dateIdx + 1] : undefined;
+  const session = argv.slice(1).find((a) => !a.startsWith("--") && a !== date);
+
+  const spans = readSpans(home, date);
+  if (spans.length === 0) {
+    log("(no traces yet — run mnemo once, or check MNEMO_LOG_LEVEL)");
+    return;
+  }
+  if (flags.has("--json")) {
+    log(JSON.stringify(session ? spans.filter((s) => s.session === session) : spans, null, 2));
+    return;
+  }
+  if (session) {
+    log(formatTree(spans, session));
+    return;
+  }
+  // no session named: list them, newest last, so the id can be copied
+  for (const id of sessionsOf(spans)) {
+    const own = spans.filter((s) => s.session === id);
+    const started = new Date(Math.min(...own.map((s) => s.start))).toISOString();
+    const failed = own.filter((s) => s.ok === false).length;
+    log(`${id}  ${started}  ${own.length} spans${failed ? `  ${failed} failed` : ""}`);
+  }
+  log("\nmnemo traces <session-id>   to see one session's span tree");
+}
+
 /** Connect to configured MCP servers before pi registers tools. */
 async function loadMcpTools(): Promise<void> {
   const config = loadMcpConfig(process.env.HOME ?? undefined);
@@ -188,6 +225,7 @@ function factories() {
     // (pi rejects duplicate tool names across inline extensions)
     { name: "sea-memory", factory: memoryLayerHooks as any },
     approvalExt,
+    tracingExt,
   ];
 }
 
@@ -202,6 +240,11 @@ async function run(): Promise<void> {
   // Help/version/pi subcommands must reach pi without a provider check.
   if (argv[0] === "auth") {
     await handleAuth(argv);
+    return;
+  }
+  // traces read a local file: no provider, no model, no network
+  if (argv[0] === "traces") {
+    renderTraces(argv);
     return;
   }
   // consolidation is pure memory-layer work: no provider, no model, no LLM
