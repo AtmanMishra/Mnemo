@@ -19,3 +19,5 @@ mod search_tests;
 mod consolidate_tests;
 #[cfg(test)]
 mod policy_tests;
+#[cfg(test)]
+mod rootcause_tests;
