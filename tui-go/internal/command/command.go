@@ -66,7 +66,6 @@ func Builtins() []Command {
 		{Name: "expand", Desc: "open everything", Kind: Builtin, Chord: "^a"},
 		{Name: "collapse", Desc: "close everything", Kind: Builtin, Chord: "^a"},
 		{Name: "copy", Desc: "copy the whole transcript", Kind: Builtin, Chord: "Y"},
-		{Name: "mouse", Desc: "hand drag-select back to the terminal", Kind: Builtin, Chord: "^g"},
 		{Name: "clear", Desc: "start a new session", Kind: Builtin},
 		{Name: "quit", Desc: "leave", Kind: Builtin, Chord: "^d"},
 	}

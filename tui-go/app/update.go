@@ -308,12 +308,6 @@ func (m *Model) global(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case key.Matches(msg, k.CycleBack):
 		return m.cycleFocus(-1), true
 
-	case key.Matches(msg, k.MouseOff):
-		m.mouse = !m.mouse
-		if m.mouse {
-			return m.notify("mouse on — clicks fold blocks"), true
-		}
-		return m.notify("mouse off — drag-select is the terminal's again"), true
 	}
 	return nil, false
 }
@@ -525,9 +519,6 @@ func (m *Model) runSlash(c command.Command, args string) tea.Cmd {
 	case "copy":
 		m.chat.ClearFocus()
 		return m.copy(m.chat.YankFocused(), "transcript")
-	case "mouse":
-		m.mouse = !m.mouse
-		return m.notify("mouse " + onOff(m.mouse))
 	case "clear":
 		m.chat.Clear()
 		m.welcome()
@@ -840,11 +831,6 @@ func (m *Model) actions() []action {
 		{"memory", k.Memory.Help().Desc, k.Memory.Help().Key, (*Model).openMemory},
 		{"logs", k.Logs.Help().Desc, k.Logs.Help().Key, (*Model).openLogs},
 		{"keys", k.KeysHelp.Help().Desc, k.KeysHelp.Help().Key, (*Model).openHelp},
-		{"mouse", k.MouseOff.Help().Desc, k.MouseOff.Help().Key,
-			func(m *Model) tea.Cmd {
-				m.mouse = !m.mouse
-				return m.notify("mouse " + onOff(m.mouse))
-			}},
 		{"copy", "copy the whole transcript", k.YankAll.Help().Key,
 			func(m *Model) tea.Cmd {
 				m.chat.ClearFocus()

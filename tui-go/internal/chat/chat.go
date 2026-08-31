@@ -334,8 +334,8 @@ func (m *Model) scrollToFocus() {
 	m.clamp()
 }
 
-// row is one rendered line plus which block produced it, so mouse clicks and
-// focus scrolling can map a screen row back to a block.
+// row is one rendered line plus which block produced it, so focus scrolling
+// can map a screen row back to a block.
 type row struct {
 	text  string
 	block int
@@ -378,24 +378,6 @@ func (m *Model) View(t *theme.Theme) string {
 		out = append(out, r.text)
 	}
 	return strings.Join(out, "\n")
-}
-
-// BlockAtRow maps a visible row index back to a block index, for mouse clicks.
-// Returns -1 when the row is blank or out of range.
-func (m *Model) BlockAtRow(y int) int {
-	rows := m.render(nil)
-	start := m.scroll
-	if m.follow || start > len(rows)-m.height {
-		start = len(rows) - m.height
-	}
-	if start < 0 {
-		start = 0
-	}
-	i := start + y
-	if i < 0 || i >= len(rows) {
-		return -1
-	}
-	return rows[i].block
 }
 
 // render is the single place a block becomes lines. A nil theme renders

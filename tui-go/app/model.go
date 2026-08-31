@@ -75,7 +75,6 @@ type Model struct {
 	working bool
 	tick    int
 
-	mouse   bool
 	notice  string
 	noticed time.Time
 
@@ -116,7 +115,6 @@ func New(cfg Config) *Model {
 		prompt:   prompt.New(cfg.Dark),
 		explorer: tree.New(filetree.Root(cfg.CWD)),
 		agent:    cfg.Agent,
-		mouse:    true,
 		openTool: map[string]*chat.Block{},
 	}
 	m.chat.SetMarkdown(markdown.New(th))
@@ -144,6 +142,7 @@ func (m *Model) welcome() {
 		"- `^t` — the folder explorer, on the right",
 		"- `^s` — sessions, and the sub-agents under them",
 		"",
+		"`tab` moves between the prompt, the transcript and the explorer.",
 		"`esc` goes up one level, from anywhere. That is the whole model.",
 		"In the transcript and in any tree: ↑ ↓ move, → opens, ← closes.",
 	}})

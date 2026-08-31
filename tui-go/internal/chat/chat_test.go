@@ -240,25 +240,6 @@ func TestAppendKeepsTheViewPinnedUntilYouScroll(t *testing.T) {
 	}
 }
 
-func TestBlockAtRowMapsClicksBack(t *testing.T) {
-	m := New()
-	m.SetSize(50, 20)
-	m.Append(&Block{Kind: User, Body: []string{"first"}})
-	m.Append(&Block{Kind: Tool, Title: "read", Detail: "40 ln", Body: []string{"x"}})
-	if got := m.BlockAtRow(0); got != 0 {
-		t.Fatalf("row 0 belongs to block %d, want 0", got)
-	}
-	if got := m.BlockAtRow(1); got != -1 {
-		t.Fatalf("the blank separator belongs to no block, got %d", got)
-	}
-	if got := m.BlockAtRow(2); got != 1 {
-		t.Fatalf("row 2 belongs to block %d, want 1", got)
-	}
-	if got := m.BlockAtRow(999); got != -1 {
-		t.Fatal("a click past the end belongs to no block")
-	}
-}
-
 func TestClearResetsEverything(t *testing.T) {
 	m := withThinking(3)
 	m.FocusNext()

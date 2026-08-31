@@ -45,7 +45,6 @@ type Map struct {
 	AllTools  key.Binding
 	AllBlocks key.Binding
 	Find      key.Binding
-	MouseOff  key.Binding
 	Cycle     key.Binding
 	CycleBack key.Binding
 	KeysHelp  key.Binding
@@ -106,7 +105,6 @@ func New() Map {
 		AllTools:  b("^r", "open every tool block", "ctrl+r"),
 		AllBlocks: b("^a", "open everything", "ctrl+a"),
 		Find:      b("^f", "find in transcript", "ctrl+f"),
-		MouseOff:  b("^g", "hand drag-select back to the terminal", "ctrl+g"),
 		Cycle:     b("tab", "prompt · transcript · explorer", "tab"),
 		CycleBack: b("shift+tab", "the other way", "shift+tab"),
 		KeysHelp:  b("^h", "keys", "ctrl+h", "f1"),
@@ -170,7 +168,7 @@ func (m Map) Help() []Entry {
 	var out []Entry
 	// Global first: these are the ones that remove the most keystrokes.
 	out = append(out, group(Insert, m.Palette, m.Explorer, m.Sessions, m.Memory, m.Logs,
-		m.AllThink, m.AllTools, m.AllBlocks, m.Find, m.MouseOff, m.Cycle, m.CycleBack,
+		m.AllThink, m.AllTools, m.AllBlocks, m.Find, m.Cycle, m.CycleBack,
 		m.KeysHelp, m.Interrupt, m.Quit, m.Back)...)
 	out = append(out, group(Insert, m.Send, m.Steer, m.Newline, m.Complete, m.HistPrev, m.HistNext)...)
 	out = append(out, group(Read, m.Down, m.Up, m.HalfDown, m.HalfUp, m.Top, m.Bottom,

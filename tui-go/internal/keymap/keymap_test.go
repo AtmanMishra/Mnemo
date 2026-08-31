@@ -29,7 +29,7 @@ func TestGlobalChordsAreUnique(t *testing.T) {
 		{"Sessions", m.Sessions.Keys()}, {"Memory", m.Memory.Keys()},
 		{"Logs", m.Logs.Keys()}, {"AllThink", m.AllThink.Keys()},
 		{"AllTools", m.AllTools.Keys()}, {"AllBlocks", m.AllBlocks.Keys()},
-		{"Find", m.Find.Keys()}, {"MouseOff", m.MouseOff.Keys()},
+		{"Find", m.Find.Keys()},
 		{"Interrupt", m.Interrupt.Keys()}, {"Quit", m.Quit.Keys()},
 	} {
 		for _, k := range b.keys {

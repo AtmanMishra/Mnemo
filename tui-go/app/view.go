@@ -22,15 +22,55 @@ func (m *Model) View() tea.View {
 	v := tea.NewView(m.compose())
 	v.AltScreen = true
 	v.WindowTitle = "mnemo · " + m.relCWD()
-	if m.mouse {
-		v.MouseMode = tea.MouseModeCellMotion
-	} else {
-		v.MouseMode = tea.MouseModeNone
-	}
+	// Mouse reporting stays OFF, deliberately. Requesting it captures every
+	// click and drag inside the program, which takes drag-select away from
+	// the terminal — and drag-select is the copy gesture every terminal user
+	// already has. Nothing here is worth that trade, so selection stays the
+	// terminal's and `y` copies a block from the keyboard.
+	v.MouseMode = tea.MouseModeNone
 	if m.mode == keymap.Insert && m.ov == nil && !m.explorerFocus {
 		v.Cursor = m.promptCursor()
 	}
 	return v
+}
+
+// rows says which screen row each region starts on.
+//
+// ONE owner. When the prompt's row was computed in two places the two
+// disagreed by one, and the terminal cursor sat a line off the text it was
+// supposed to be in.
+type rows struct {
+	header    int
+	rule      int // -1 when an overlay is up and draws its own
+	bodyTop   int
+	bodyRows  int
+	promptTop int
+	status    int
+}
+
+func (m *Model) rows() rows {
+	r := rows{header: 0, rule: -1}
+	y := 1
+	if m.spacious() {
+		y++
+	}
+	if m.ov == nil {
+		r.rule = y
+		y++
+	}
+	r.bodyTop = y
+	r.bodyRows = m.bodyHeight()
+	y += r.bodyRows
+	if m.spacious() {
+		y++
+	}
+	r.promptTop = y
+	y += m.prompt.Rows() + len(m.prompt.Queued())
+	if m.spacious() {
+		y++
+	}
+	r.status = y
+	return r
 }
 
 // promptCursor places the terminal cursor inside the prompt. The prompt's own
@@ -46,11 +86,7 @@ func (m *Model) promptCursor() *tea.Cursor {
 }
 
 func (m *Model) promptTop() int {
-	top := m.h - 1 - m.prompt.Rows() - len(m.prompt.Queued())
-	if m.spacious() {
-		top-- // the blank row above the status band
-	}
-	return top + m.prompt.MenuTopOffset()
+	return m.rows().promptTop + m.prompt.MenuTopOffset()
 }
 
 // margin is the air down each side of the screen.
@@ -128,9 +164,6 @@ func (m *Model) header() string {
 	facts := []ui.Seg{
 		{Text: m.relCWD(), Style: m.th.Ink},
 		{Text: m.agent.Model(), Style: m.th.Muted},
-	}
-	if !m.mouse {
-		facts = append(facts, ui.Seg{Text: "mouse off", Style: m.th.Warn})
 	}
 	return ui.Header(m.th, m.inner(), m.tick, m.working, facts)
 }
