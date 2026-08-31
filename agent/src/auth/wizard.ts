@@ -17,7 +17,7 @@ export const PROVIDER_LABELS_INTERNAL: Record<ProviderId, string> = {
   openai: "OpenAI (GPT)",
   openrouter: "OpenRouter (300+ models, free tier)",
   opencode: "OpenCode Zen (Claude/GPT via OpenCode)",
-  "opencode-go": "OpenCode GO (Ox models, e.g. ox-alpha-free)",
+  "opencode-go": "OpenCode GO (Ox models, e.g. deepseek-v4-flash)",
 };
 
 export function providerMenu(): string {

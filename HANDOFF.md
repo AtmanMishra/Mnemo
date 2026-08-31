@@ -101,9 +101,10 @@ cd ../harness-engine && npm test                # 19 tests (1 flaky, rerun if re
   (hashing fallback), n=22 with brain areas in the corpus. The older 93% was a
   15-case, single-area corpus — not the same measurement.
 - The 3/3-with-memory vs 0/3-without task result predates the eval expansion to
-  5 pairs and has NOT been re-run: the stored default model (ox-alpha-free) now
-  returns "not supported" from OpenCode. Re-run `mnemo auth` to pick a live
-  model, then `node agent/eval/memory-eval.mjs`.
+  5 pairs and has NOT been re-run. The stored default is now deepseek-v4-flash
+  via opencode-go (~/.mnemo/auth.json). Re-run
+  `node agent/eval/memory-eval.mjs` to re-measure (uses the stored default
+  unless MNEMO_MODEL is set).
 
 ## 5. memsrv protocol (the memory integration surface)
 Line-delimited JSON over stdio. `{"id":N,"method":"M","params":{...}}` ->
