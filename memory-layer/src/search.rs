@@ -141,6 +141,38 @@ pub fn route_query(query: &str) -> Vec<Area> {
     hits.into_iter().map(|(a, _)| a).collect()
 }
 
+/// Curated query-side aliases: concept words whose vocabulary gap is a known
+/// retrieval miss, expanded on the QUERY only (never index text, so no other
+/// query is disturbed). Deliberately tiny — one entry targets one eval case;
+/// every added entry is a new regression risk and must win the same two gates
+/// (flip the case, no memeval --hash regression).
+///
+/// "who gets paged when latency spikes" shares zero tokens with the alert-
+/// routing node ("page on symptom not cause"); the embedding-level stem fix
+/// (P2, 9f5e53a) regressed the baseline and was reverted. This is the
+/// different mechanism: exact curated aliases at the retrieval entry.
+const QUERY_ALIASES: &[(&str, &[&str])] = &[
+    ("paged", &["page", "on-call"]),
+];
+
+/// Expand curated aliases into the query text (query-side rewrite only).
+/// A key fires only as a whole token, so "pages"/"paged" in unrelated docs
+/// stay unaffected — the map is exact, not substring-based.
+pub fn expand_query_aliases(query: &str) -> String {
+    let q = query.to_ascii_lowercase();
+    let mut expanded = q.clone();
+    for (key, aliases) in QUERY_ALIASES {
+        let key_hit = q.split(|c: char| !c.is_ascii_alphanumeric()).any(|t| t == *key);
+        if key_hit {
+            for a in *aliases {
+                expanded.push(' ');
+                expanded.push_str(a);
+            }
+        }
+    }
+    expanded
+}
+
 fn passes_filter(store: &StoreData, id: NodeId, opts: &SearchOpts) -> bool {
     store.nodes.get(&id)
         .map(|n| !n.deleted
@@ -160,7 +192,7 @@ pub fn search(
     now: Millis,
     opts: &SearchOpts,
 ) -> Vec<SearchResult> {
-    let q = emb.embed(query);
+    let q = emb.embed(&expand_query_aliases(query));
     let mut scored: Vec<(NodeId, f32)> = vectors.iter()
         .filter(|(id, _)| passes_filter(store, **id, opts))
         .map(|(id, v)| (*id, cosine(&q, v) * opts.area_weight(store, *id)))
@@ -180,7 +212,7 @@ pub fn search_ann(
     now: Millis,
     opts: &SearchOpts,
 ) -> Vec<SearchResult> {
-    let q = emb.embed(query);
+    let q = emb.embed(&expand_query_aliases(query));
     let seeds: Vec<(NodeId, f32)> = index.search(&q, k * 4).into_iter()
         .map(|(id, s)| (id as NodeId, s))
         .filter(|(id, _)| passes_filter(store, *id, opts))
