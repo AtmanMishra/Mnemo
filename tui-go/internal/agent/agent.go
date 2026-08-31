@@ -31,6 +31,12 @@ type ToolEnd struct {
 	ID     string
 	Detail string
 	OK     bool
+
+	// Out is the tool's full result, verbatim. Detail is the one-line
+	// summary a collapsed block shows; Out is what opening it reveals — the
+	// diff, the log, the stack trace, unshortened until the interface
+	// decides how much of it is worth rendering.
+	Out string
 }
 
 // Delegated reports a sub-agent run finishing under the current turn.

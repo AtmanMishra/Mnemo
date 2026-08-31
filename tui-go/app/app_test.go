@@ -369,6 +369,72 @@ func TestAToolResultLandsOnItsOwnCall(t *testing.T) {
 	}
 }
 
+func TestToolOutputRendersNativelyInsideTheBlock(t *testing.T) {
+	// The summary is what the collapsed block says; the output is what
+	// opening it reveals — verbatim, folding and the ^r/^a toggles intact.
+	m := fixture(t, 100, 30)
+	m.Update(agent.ToolStart{ID: "1", Name: "read", Args: "go.sum"})
+	m.Update(agent.ToolEnd{ID: "1", Detail: "4 ln", OK: true, Out: "line one\nline two\nline three\nline four\n\n"})
+	blocks := m.Chat().Blocks()
+	b := blocks[len(blocks)-1]
+	if !b.Foldable() {
+		t.Fatal("a tool result big enough to open must be foldable")
+	}
+	if len(b.Body) != 4 || b.Body[0] != "line one" || b.Body[3] != "line four" {
+		t.Fatalf("the block must hold the output verbatim, got %#v", b.Body)
+	}
+	// ^a opens everything, ^r re-folds every tool block; the output is still
+	// there either way.
+	press(t, m, "ctrl+a")
+	if !strings.Contains(screen(m), "line three") {
+		t.Fatalf("^a must reveal the native output:\n%s", screen(m))
+	}
+	press(t, m, "ctrl+r")
+	if strings.Contains(screen(m), "line three") {
+		t.Fatalf("^r must fold tool blocks back:\n%s", screen(m))
+	}
+}
+
+func TestAToolOutputWithNoCallIsStillShown(t *testing.T) {
+	m := fixture(t, 100, 30)
+	m.Update(agent.ToolEnd{ID: "nope", Detail: "2 ln", OK: true, Out: "orphan\nresult"})
+	blocks := m.Chat().Blocks()
+	b := blocks[len(blocks)-1]
+	if b.Kind != chat.Tool || len(b.Body) != 2 {
+		t.Fatalf("an orphan result must become a block of its own, got %+v", b)
+	}
+}
+
+func TestAMegabyteToolOutputIsCappedAndSaysSo(t *testing.T) {
+	huge := "head\n" + strings.Repeat("middle\n", 5000) + "tail\n"
+	lines := toolLines(huge)
+	if len(lines) > 1002 {
+		t.Fatalf("a build log must not be rendered whole: %d lines", len(lines))
+	}
+	if lines[0] != "head" || lines[len(lines)-1] != "tail" {
+		t.Fatalf("the anchor and the tail must survive, got %q … %q", lines[0], lines[len(lines)-1])
+	}
+	var marker string
+	for _, l := range lines {
+		if strings.Contains(l, "skipped") {
+			marker = l
+		}
+	}
+	if marker == "" {
+		t.Fatalf("the cap must say it skipped some:\n%q", lines[1])
+	}
+}
+
+func TestTrailingBlankLinesAreDroppedFromToolOutput(t *testing.T) {
+	if got := toolLines("a\n\n\n"); len(got) != 1 || got[0] != "a" {
+		t.Fatalf("got %#v", got)
+	}
+	if got := toolLines(""); len(got) != 0 {
+		t.Fatalf("empty output is an empty body, got %#v", got)
+	}
+}
+
+
 func TestAResultWithNoCallIsStillShown(t *testing.T) {
 	m := fixture(t, 100, 30)
 	before := m.Chat().Len()

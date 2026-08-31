@@ -133,6 +133,7 @@ func (m *Model) fold(msg tea.Msg) tea.Cmd {
 			m.chat.Append(b)
 		}
 		delete(m.openTool, msg.ID)
+		b.Body = toolLines(msg.Out)
 		b.Detail = msg.Detail
 		b.State = chat.OK
 		if !msg.OK {
@@ -140,8 +141,7 @@ func (m *Model) fold(msg tea.Msg) tea.Cmd {
 		}
 		return nil
 
-	case agent.Delegated:
-		st := chat.OK
+	case agent.Delegated:		st := chat.OK
 		if !msg.OK {
 			st = chat.Failed
 		}
@@ -1303,6 +1303,30 @@ func (m *Model) memEditorKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	}
+}
+
+// toolLines is a tool result as block text: verbatim, trailing blank lines
+// gone, and bounded — a build log a megabyte long is the worst thing to
+// render in the app's own terminal. The one-line summary ("84 ln") stays
+// honest because the cap says, in its own line, that it skipped some.
+//
+// The quoted-as-text habit this replaces was the two-step: read the summary,
+// wonder what is behind it, open it, read a paraphrase. Native output is the
+// block's whole point.
+func toolLines(out string) []string {
+	lines := strings.Split(out, "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	const max = 1000
+	if len(lines) > max {
+		// Keep the first line (usually the invocation's echo) and the last
+		// max-1 lines. A summary that says "84 ln" while showing 84 lines
+		// would be lying, so the skipped count is said out loud.
+		skipped := len(lines) - max + 1
+		lines = append([]string{lines[0], "… " + itoa(skipped) + " lines skipped in the middle"}, lines[skipped:]...)
+	}
+	return lines
 }
 
 func (e *memEditor) fieldValue() string {

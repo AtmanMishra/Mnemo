@@ -71,6 +71,7 @@ func ParseEvent(v map[string]any) tea.Msg {
 			ID:     str(v, "toolCallId"),
 			Detail: summary(out, isErr),
 			OK:     !isErr,
+			Out:    out,
 		}
 
 	case "turn_end":

@@ -97,8 +97,11 @@ func TestAToolCallCarriesItsResultNotItsInvocation(t *testing.T) {
 	if end.ID != "7" || !end.OK || end.Detail != "3 ln" {
 		t.Fatalf("got %#v", end)
 	}
-	fail := ev(t, `{"type":"tool_execution_end","toolCallId":"8","isError":true,"result":""}`).(agent.ToolEnd)
-	if fail.OK || fail.Detail != "failed" {
+	if end.Out != "a\nb\nc" {
+		t.Fatalf("the full result must ride along, got %q", end.Out)
+	}
+	fail := ev(t, `{"type":"tool_execution_end","toolCallId":"8","isError":true,"result":"denied\n"}`).(agent.ToolEnd)
+	if fail.OK || fail.Detail != "denied" || fail.Out != "denied\n" {
 		t.Fatalf("got %#v", fail)
 	}
 }
