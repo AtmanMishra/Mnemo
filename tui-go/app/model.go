@@ -144,7 +144,6 @@ func (m *Model) welcome() {
 		"- `^t` — the folder explorer, on the right",
 		"- `^s` — sessions, and the sub-agents under them",
 		"",
-		"`tab` moves between the prompt, the transcript and the explorer.",
 		"`esc` goes up one level, from anywhere. That is the whole model.",
 		"In the transcript and in any tree: ↑ ↓ move, → opens, ← closes.",
 	}})
