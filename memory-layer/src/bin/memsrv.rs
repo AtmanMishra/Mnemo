@@ -145,6 +145,15 @@ fn handle(
     match method {
         "ping" => Ok(json!({"pong": true})),
 
+        "stats" => {
+            // cheap counters for lifecycle decisions (e.g. "enough new
+            // episodes to consolidate"). No deref, no heavy scan beyond count.
+            let episodes = s.nodes.values()
+                .filter(|n| !n.deleted && matches!(n.kind, NodeKind::TaskEpisode))
+                .count();
+            Ok(json!({"episodes": episodes}))
+        }
+
         "dump" => {
             // A forgotten memory is gone from the listing even though its
             // ops stay in the journal. The journal is the history; dump is
@@ -302,6 +311,6 @@ fn handle(
             Ok(json!({ "forgot": node, "label": label }))
         }
 
-        other => Err(format!("unknown method '{other}' (supported: ping dump state create_node episode fact link search set_area forget steer good consolidate)")),
+        other => Err(format!("unknown method '{other}' (supported: ping stats dump state create_node episode fact link search set_area forget steer good consolidate)")),
     }
 }

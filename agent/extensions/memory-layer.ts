@@ -342,7 +342,85 @@ export const MEMORY_DIRECTIVE = [
 ].join("\n");
 
 /** Shared across every registration site so all memory tools hit one episode. */
-const sessionState = { episodeId: null as number | null };
+const sessionState = newLifecycleState();
+
+/** How many NEW episodes a session must add before shutdown consolidates. */
+export const CONSOLIDATE_THRESHOLD = 3;
+
+/** Per-process memory lifecycle bookkeeping (episode, dedupe, baseline). */
+export interface LifecycleState {
+  episodeId: number | null;
+  /** Episode count when this process's session started; null = baseline unknown. */
+  startEpisodes: number | null;
+  /** Per-episode set of already-steered failure signatures (dedupe). */
+  steered: Map<number, Set<string>>;
+}
+
+export function newLifecycleState(): LifecycleState {
+  return { episodeId: null, startEpisodes: null, steered: new Map() };
+}
+
+/** Live TaskEpisode count from the sidecar; null when unreachable. */
+export async function countEpisodes(
+  client: Pick<MemClient, "request">,
+): Promise<number | null> {
+  try {
+    const res = await client.request("stats");
+    if (!res.ok) return null;
+    const n = Number(res.result?.episodes);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One steer per (episode, failure-signature): a rattling tool must paint a
+ * pain marker once, not per call — but the same failure in a LATER episode is
+ * new evidence and steers again.
+ */
+export async function autoSteer(
+  client: Pick<MemClient, "request">,
+  state: LifecycleState,
+  kind: "tool" | "turn",
+  detail: string,
+): Promise<void> {
+  if (state.episodeId === null) return;
+  const sig = `${kind}:${detail.slice(0, 240)}`;
+  const per = state.steered.get(state.episodeId) ?? new Set<string>();
+  if (per.has(sig)) return;
+  per.add(sig);
+  state.steered.set(state.episodeId, per);
+  try {
+    await client.request("steer", { episode: state.episodeId, failure: detail });
+  } catch {
+    /* memory must never break the agent loop */
+  }
+}
+
+/**
+ * Shutdown pass: consolidate once the session has added a threshold of new
+ * episodes (its own plus any sub-agent sessions sharing the journal). Returns
+ * whether a consolidation ran. No baseline -> skip rather than guess.
+ */
+export async function consolidateIfDue(
+  client: Pick<MemClient, "request">,
+  state: LifecycleState,
+  log: (line: string) => void = console.log,
+  threshold: number = CONSOLIDATE_THRESHOLD,
+): Promise<boolean> {
+  if (state.startEpisodes === null) return false;
+  const now = await countEpisodes(client);
+  if (now === null) return false;
+  const gained = now - state.startEpisodes;
+  if (gained < threshold) {
+    log(`${gained} new episode(s) this session, below consolidate threshold ${threshold}`);
+    return false;
+  }
+  await runConsolidate(client, log);
+  return true;
+}
+
 
 /** The three memory tools as pi-compatible ToolDefinitions (shared instances). */
 export function makeMemoryTools(): any[] {
@@ -423,11 +501,10 @@ export default function memoryLayerExtension(pi: any): void {
   registerLifecycle(pi);
 }
 
-function registerLifecycle(pi: any): void {
-  const client = sharedMem;
-
+export function registerLifecycle(pi: any, client: MemClient = sharedMem, state: LifecycleState = sessionState): void {
   pi.on("session_start", async () => {
-    await ensureEpisode(client, sessionState);
+    await ensureEpisode(client, state);
+    state.startEpisodes = await countEpisodes(client);
   });
 
   // Appenditive system-prompt chaining: officially recomputed each turn, which
@@ -439,18 +516,43 @@ function registerLifecycle(pi: any): void {
 
   pi.on("tool_execution_end", async (event: any) => {
     try {
-      const episode = await ensureEpisode(client, sessionState);
+      const episode = await ensureEpisode(client, state);
       const detail = `${event.toolName}: ${event.isError ? "error" : "ok"}`;
       await client.request("commit_log", { node: episode, kind: "tool_call", detail });
+      if (event.isError) {
+        const errText =
+          typeof event.result === "string" && event.result.length > 0
+            ? `: ${event.result}`
+            : "";
+        await autoSteer(client, state, "tool", `${event.toolName} failed${errText}`);
+      }
     } catch {
       /* memory logging must never break the agent loop */
     }
   });
 
+  // A turn can fail without any tool being in flight (provider error, model
+  // timeout). The assistant message records it as stopReason "error" with an
+  // errorMessage; steer on exactly that, nothing else.
+  pi.on("turn_end", async (event: any) => {
+    try {
+      const msg = event?.message ?? {};
+      if (msg.stopReason !== "error") return;
+      await autoSteer(client, state, "turn", msg.errorMessage ?? "turn failed");
+    } catch {
+      /* ignore */
+    }
+  });
+
   pi.on("session_shutdown", async () => {
     try {
-      const episode = await ensureEpisode(client, sessionState);
+      const episode = await ensureEpisode(client, state);
       await client.request("commit_log", { node: episode, kind: "outcome", detail: "session ended" });
+    } catch { /* ignore */ }
+    try {
+      // new episodes this session (own + sub-agents on the same journal) have
+      // crossed the threshold: distil them into lessons before we go
+      await consolidateIfDue(client, state);
     } catch { /* ignore */ }
     client.stop();
   });
