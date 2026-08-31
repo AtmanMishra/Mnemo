@@ -34,7 +34,18 @@ export interface MemResult {
 
 interface Pending {
   resolve: (value: MemResult) => void;
+  /** Per-request watchdog timer (cleared when the request settles). */
+  timer: ReturnType<typeof setTimeout>;
 }
+
+/**
+ * Hard guardrail: a request must never hang the client forever. Any request
+ * the sidecar does not answer within this window is failed with an error,
+ * whether its child died without an exit event or the response was lost.
+ * 30s is generous: memsrv is local and requests are ms-scale; a real long
+ * op (e.g. consolidate over a huge journal) stays under it.
+ */
+const WATCHDOG_MS = 30_000;
 
 /** Client for one long-lived memsrv process. Requests are serialized FIFO. */
 export class MemClient {
@@ -75,7 +86,11 @@ export class MemClient {
   stop(): void {
     const old = this.proc;
     this.proc = null;
-    this.pending.clear();
+    // NEVER drop pending: every in-flight request settles here, or a later
+    // request's queued task can be orphaned and the whole FIFO chain hangs
+    // (the memory-layer suite's restart-loop hang). Resolving with an error
+    // is the "pending request must not outlive a dead child" guarantee.
+    this.drainPending("memsrv stopped by client");
     if (!old) return;
     try {
       old.stdin?.write(JSON.stringify({ method: "exit" }) + "\n");
@@ -86,6 +101,15 @@ export class MemClient {
         old.kill("SIGKILL");
       }
     }, 250).unref?.();
+  }
+
+  /** Settle every in-flight request with an error and clear the watchdogs. */
+  private drainPending(reason: string): void {
+    for (const [, p] of [...this.pending.entries()]) {
+      clearTimeout(p.timer);
+      p.resolve({ ok: false, error: reason });
+    }
+    this.pending.clear();
   }
 
   private start(): void {
@@ -115,24 +139,21 @@ export class MemClient {
       this.stderrTail.push(chunk.toString("utf8"));
       if (this.stderrTail.length > 20) this.stderrTail.shift();
     });
-    // A dead child must only fail the requests that were riding on IT. After
+    // Generation guard: only the CURRENT child may settle requests. After
     // stop() + a fresh request, the OLD process's exit event arrives while a
-    // NEW one is already serving: draining unconditionally resolved that new
-    // request with "memsrv exited before responding". That was the ~1-in-8
-    // flake in the memory suite.
+    // NEW one is already serving: draining unconditionally would resolve the
+    // NEW child's in-flight request with "memsrv exited before responding".
+    // Each spawn is its own generation; a stale proc's exit must not touch
+    // newer requests (which stop()'s drain already settled anyway).
     proc.once("exit", () => {
       if (this.proc !== proc) return;
       this.proc = null;
-      for (const [, p] of [...this.pending.entries()]) {
-        p.resolve({ ok: false, error: "memsrv exited before responding" });
-      }
-      this.pending.clear();
+      this.drainPending("memsrv exited before responding");
     });
     proc.once("error", (err) => {
       if (this.proc !== proc) return;
       this.proc = null;
-      for (const [, p] of [...this.pending.entries()]) p.resolve({ ok: false, error: String(err) });
-      this.pending.clear();
+      this.drainPending(String(err));
     });
     process.once("exit", () => this.stop());
   }
@@ -153,6 +174,7 @@ export class MemClient {
       const p = this.pending.get(msg.id);
       if (p) {
         this.pending.delete(msg.id);
+        clearTimeout(p.timer);
         p.resolve(
           msg.ok
             ? { ok: true, result: msg.result }
@@ -169,11 +191,22 @@ export class MemClient {
       return Promise.resolve({ ok: false, error: "memsrv is not running" });
     }
     return new Promise<MemResult>((resolve) => {
-      this.pending.set(id, { resolve });
+      // Watchdog backstop: the request settles no matter what — answered,
+      // drained by stop(), failed by its child's exit/error, or timed out
+      // on a dead-silent child. Unref'd so a stuck request can never keep
+      // the process alive by itself.
+      const timer = setTimeout(() => {
+        if (this.pending.delete(id)) {
+          resolve({ ok: false, error: `memsrv did not respond within ${WATCHDOG_MS}ms` });
+        }
+      }, WATCHDOG_MS);
+      timer.unref?.();
+      this.pending.set(id, { resolve, timer });
       try {
         stdin.write(JSON.stringify({ id, method, params }) + "\n");
       } catch (err) {
         this.pending.delete(id);
+        clearTimeout(timer);
         resolve({ ok: false, error: `memsrv stdin write failed: ${String(err)}` });
       }
     });

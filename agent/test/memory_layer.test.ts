@@ -146,10 +146,33 @@ test("recall pulls the right node out of a real journal, and skips the rest", as
 test("a stopped client restarts, and the dead process does not fail the new one", async () => {
   // the ~1-in-8 flake: stop() kills the child, the next request spawns a
   // fresh one, and then the OLD child's exit event arrives and resolves the
-  // NEW child's in-flight request with "memsrv exited before responding"
+  // NEW child's in-flight request with "memsrv exited before responding".
+  // The generation guard (only the current child settles requests) fixes
+  // it; this 25-cycle loop is the regression test.
   for (let i = 0; i < 25; i++) {
     client.stop();
     const res = await client.request("episode", { label: `restart ${i}` });
     assert.equal(res.ok, true, res.error ?? "restart failed");
   }
+});
+
+test("stop() settles in-flight requests instead of orphaning them", async () => {
+  // The suite hang: a fire-and-forget request (e.g. recallFor's mark_useful
+  // vote) is in flight when stop() lands — the sidecar reply is a macrotask,
+  // stop() runs while the request still sits in pending. An orphaned task
+  // blocks the FIFO queue, so every request queued behind it (the restart
+  // loop's own) hangs forever and the file fails with "Promise resolution is
+  // still pending". stop() must settle it with an error: a pending request
+  // may never outlive its child.
+  const vote = client.request("mark_useful", { node: 1 }).then(
+    (r) => r,
+    (e) => ({ ok: false, error: String(e) }),
+  );
+  await Promise.resolve(); // let the queued task reach the sidecar
+  client.stop(); // drains the in-flight vote
+  const settled = await vote; // MUST settle — hard guarantee
+  assert.equal(settled.ok, false, "an in-flight request must be settled, not orphaned");
+  // and the queue is not blocked: the client restarts and answers
+  const ping = await client.request("ping");
+  assert.equal(ping.ok, true);
 });
