@@ -53,12 +53,12 @@ test("animation is off wherever nobody is watching", () => {
 test("every step names a real directory of this repo", () => {
   const all = steps("/repo");
   assert.deepEqual(all.map((s) => s.cwd), [
-    "/repo/agent", "/repo/harness-engine", "/repo/memory-layer", "/repo/tui",
+    "/repo/agent", "/repo/harness-engine", "/repo/memory-layer", "/repo/tui-go",
   ]);
   // node before rust: the agent is what the TUI drives, and a cargo build is
   // the slowest thing here — failing fast on a missing npm is kinder
   assert.equal(all[0].cmd, "npm");
-  assert.equal(all[3].cmd, "cargo");
+  assert.equal(all[3].cmd, "go");
   assert.ok(all.every((s) => s.label && !s.label.endsWith(".")), "labels read as progress, not sentences");
 });
 

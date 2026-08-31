@@ -1,5 +1,10 @@
 # Mnemo — Architecture
 
+> **Note (archive).** The Rust TUI (`tui/`, ratatui) was archived on branch
+> `archive/tui-rust` and is no longer in the main system. The presentation
+> layer is now `tui-go/` (Go, Bubble Tea v2) — one surface, transcript-first.
+> `mnemo-agent` in this document refers to the old Rust binary; the Go
+> equivalent is `tui-go/cmd/mnemo`.
 
 > **On citations.** This document names files, not line numbers. The repo is
 > under active development and spans go stale within hours — an earlier draft

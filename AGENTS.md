@@ -159,14 +159,16 @@ self-evolving-agent/
     app/                    root model & layout
     *.go                    per-package main, tests
     go.mod / go.sum         dependencies
-    DESIGN.md               user-facing feature spec (shared with tui/)
+    DESIGN.md               user-facing feature spec
     README.md               running & architecture overview
-  tui/                      Rust version (still maintained for comparison)
   agent/                    pi agent (spawned as subprocess)
   memory-layer/             memsrv memory backend (optional)
-  DESIGN.md                 shared spec between tui/ and tui-go/
+  DESIGN.md                 the TUI spec (root)
   AGENTS.md                 this file
 ```
+
+> The Rust `tui/` was archived on branch `archive/tui-rust` (see git history
+> before commit 2240ac4); it is not part of the main system anymore.
 
 ## Dependencies
 
@@ -189,4 +191,4 @@ Rust (memory-layer only, if memsrv used):
 - **Code graph**: graft/ (auto-indexed)
 - **Test suite**: `go test ./...` runs all, `go test ./app/` for a package
 - **Live view**: `go run ./cmd/mnemo -- --repo $(pwd)`
-- **Original Rust TUI**: tui/ (Rust, ratatui, single-file handoff spec)
+- **Original Rust TUI**: archived on branch `archive/tui-rust`; not in the main system.

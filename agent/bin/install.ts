@@ -2,14 +2,15 @@
 /**
  * `mnemo install` — set Mnemo up, with Nyx pacing while it happens.
  *
- * Installing Mnemo means four slow things: two `npm install`s and two cargo
- * builds. Slow is fine; SILENT and slow is what makes people kill the process
- * and file a bug. So the mascot walks for the whole of it, and each step says
- * what it is doing and how long it took.
+ * Installing Mnemo means four slow things: two `npm install`s, a cargo build
+ * and a go build. Slow is fine; SILENT and slow is what makes people kill the
+ * process and file a bug. So the mascot walks for the whole of it, and each
+ * step says what it is doing and how long it took.
  *
- * The art here is duplicated from tui/src/brand.rs on purpose — the Rust
- * binary does not exist yet at install time, so there is nothing to ask. A
- * test in the tui crate reads THIS file and fails if the two ever drift.
+ * The art is Nyx, the Bengal — the same mascot tui-go/internal/brand paints.
+ * The copy here is standalone (the old Rust TUI lives on the archive/tui-rust
+ * branch), so this file is the single source for the installer's own pacing
+ * display.
  *
  * Plain Node, no dependencies: an installer that needs installing is not an
  * installer.
@@ -22,7 +23,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 // --- brand ---------------------------------------------------------------
-// Keep in sync with tui/src/brand.rs (enforced by a test there).
+// Nyx, same mascot as tui-go/internal/brand. Standalone copy for the
+// installer's own display; there is no Rust crate to sync with anymore.
 export const WALK_BODY = [
   "..##.......##..##...",
   ".#rr#.....########..",
@@ -209,8 +211,8 @@ export function steps(root: string = ROOT) {
       cmd: "npm", args: ["install", "--no-audit", "--no-fund"], cwd: path.join(root, "harness-engine") },
     { label: "building memsrv, the memory sidecar",
       cmd: "cargo", args: ["build", "--release", "--bin", "memsrv"], cwd: path.join(root, "memory-layer") },
-    { label: "building mnemo-agent",
-      cmd: "cargo", args: ["build", "--release", "--bin", "mnemo-agent"], cwd: path.join(root, "tui") },
+    { label: "building mnemo, the terminal interface",
+      cmd: "go", args: ["build", "-o", "mnemo", "./cmd/mnemo"], cwd: path.join(root, "tui-go") },
   ];
 }
 

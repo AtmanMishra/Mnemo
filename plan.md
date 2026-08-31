@@ -61,7 +61,7 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 
 ## AREA 7 — QUALITY
 
-- [x] 7.1 CI: test matrix on push (agent/tui/memory-layer)
+- [x] 7.1 CI: test matrix on push (agent/tui-go/memory-layer/harness-engine)
 - [x] 7.2 Eval suite expansion: >15 retrieval cases + 5 LLM task pairs
 - [x] 7.3 Learned steering policy experiment (log-replay training data)
 
