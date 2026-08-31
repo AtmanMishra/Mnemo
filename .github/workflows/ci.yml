@@ -1,6 +1,6 @@
 name: ci
 
-# 7.1: every push and PR runs all four suites. They are independent, so they
+# 7.1: every push and PR runs all five suites. They are independent, so they
 # run as separate jobs and a red Rust suite still tells you about TypeScript.
 on:
   push:
@@ -78,6 +78,20 @@ jobs:
       - name: npm test
         working-directory: harness-engine
         run: npm test || npm test
+
+  tui-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - name: go vet
+        working-directory: tui-go
+        run: go vet ./...
+      - name: go test
+        working-directory: tui-go
+        run: go test ./...
 
   secrets:
     runs-on: ubuntu-latest
