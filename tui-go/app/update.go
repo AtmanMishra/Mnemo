@@ -225,16 +225,24 @@ func (m *Model) appendChunk(k chat.Kind, title, text string) {
 }
 
 func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// 1. Global chords, always, in every mode.
+	// 1. A pending confirmation, before ANY other key — global chords
+	// included. A question a chord can walk past is a question that gets
+	// answered by accident, and this one is the only irreversible thing here.
+	// Anything that is not an explicit yes counts as no, so no key is
+	// dangerous while it is up.
+	if m.confirm != nil {
+		return m, m.confirmKey(msg)
+	}
+	// 2. Global chords, always, in every other mode.
 	if cmd, handled := m.global(msg); handled {
 		return m, cmd
 	}
-	// 2. The search line, when it is up: it owns every printable key, so it
+	// 3. The search line, when it is up: it owns every printable key, so it
 	// has to be asked before a mode gets a chance to read "n" as a movement.
 	if m.searching {
 		return m, m.searchKey(msg)
 	}
-	// 3. Whatever has the screen.
+	// 4. Whatever has the screen.
 	if m.ov != nil {
 		return m, m.overlayKey(msg)
 	}
@@ -679,6 +687,11 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 	if key.Matches(msg, k.Choose) {
 		return m.chooseOverlay()
 	}
+	// Forget is offered only where it means something. Binding it globally
+	// would put a destructive key one slip away in every list.
+	if ov.Kind == overlay.Memory && key.Matches(msg, k.Forget) && !ov.Typing() {
+		return m.forgetSelected()
+	}
 
 	// A tree overlay keeps its movement keys until `/` is pressed; a flat one
 	// filters as you type, because a palette you have to arm is a palette
@@ -1082,4 +1095,63 @@ func (m *Model) searchKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.chat.FirstHit()
 	}
 	return nil
+}
+
+// confirmation is a pending destructive action.
+//
+// Exactly one thing in this interface cannot be undone — forgetting a memory
+// appends a tombstone, and there is no key that puts it back. So it is the
+// one thing that asks first. Everything else is reversible and asking would
+// be noise.
+type confirmation struct {
+	prompt string
+	run    func(*Model) tea.Cmd
+}
+
+// ask puts a yes/no question in the status line.
+func (m *Model) ask(prompt string, run func(*Model) tea.Cmd) tea.Cmd {
+	m.confirm = &confirmation{prompt: prompt, run: run}
+	return nil
+}
+
+// confirmKey answers a pending question. Anything that is not an explicit
+// yes is a no: a destructive action must never be reachable by a keystroke
+// you did not mean.
+func (m *Model) confirmKey(msg tea.KeyPressMsg) tea.Cmd {
+	c := m.confirm
+	m.confirm = nil
+	if msg.String() == "y" || msg.String() == "Y" {
+		return c.run(m)
+	}
+	return m.notify("left alone")
+}
+
+// forgetSelected removes the memory under the cursor.
+func (m *Model) forgetSelected() tea.Cmd {
+	if m.ov == nil || m.ov.Kind != overlay.Memory || m.ov.Tree() == nil {
+		return nil
+	}
+	n := m.ov.Tree().Current()
+	if n == nil {
+		return nil
+	}
+	// Areas are headings, not memories. Offering to forget one would be
+	// offering to delete a category that never existed as a thing.
+	id, ok := memory.NodeID(n.ID)
+	if !ok {
+		return m.notify("that is a brain area, not a memory — open it and pick one")
+	}
+	label := n.Label
+	return m.ask("forget "+label+"? this cannot be undone — y / n", func(m *Model) tea.Cmd {
+		if m.mem == nil {
+			// The overlay is open, so a client was made to fill it; if it has
+			// gone away since, say so rather than silently doing nothing.
+			return m.notify("the memory service is not connected")
+		}
+		if _, err := m.mem.Forget(id); err != nil {
+			return m.notify("could not forget: " + err.Error())
+		}
+		m.openMemory() // reload, so the row is actually gone
+		return m.notify("forgot " + label)
+	})
 }

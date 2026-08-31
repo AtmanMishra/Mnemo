@@ -7,6 +7,7 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/brand"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/chat"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/theme"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/ui"
 	"github.com/charmbracelet/x/ansi"
@@ -266,6 +267,13 @@ func (m *Model) chatOrWelcome(h int) string {
 func (m *Model) status() string {
 	left := []ui.Seg{{Text: ui.Chip(m.th, m.modeName())}}
 
+	// A pending question owns the row outright. It is the only thing on this
+	// screen that is waiting on you.
+	if m.confirm != nil {
+		left = append(left, ui.Seg{Text: m.confirm.prompt, Style: m.th.Warn})
+		return ui.Band(m.th, m.inner(), left, nil)
+	}
+
 	// A live search owns the row. The query has to be visible to be
 	// correctable, and the count next to it is what tells you the word you
 	// half-remembered is in here at all.
@@ -305,6 +313,12 @@ func (m *Model) status() string {
 		hints := m.keys.Hints(m.hintMode(), m.working)
 		if m.ov != nil {
 			hints = m.keys.OverlayHints(m.ov.IsTree())
+			if m.ov.Kind == overlay.Memory {
+				// A destructive key nobody is told about is a destructive key
+				// nobody uses — and one somebody eventually hits by accident.
+				h := m.keys.Forget.Help()
+				hints = append(hints, keymap.Entry{Key: h.Key, Desc: h.Desc})
+			}
 		}
 		for _, e := range hints {
 			left = append(left, ui.Seg{Text: e.Key + " " + e.Desc, Style: m.th.Muted})
@@ -345,6 +359,9 @@ func (m *Model) hintMode() keymap.Mode {
 }
 
 func (m *Model) modeName() string {
+	if m.confirm != nil {
+		return "confirm"
+	}
 	if m.searching {
 		return "find"
 	}

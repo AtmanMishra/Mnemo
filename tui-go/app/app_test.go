@@ -10,6 +10,8 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/chat"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/tree"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -887,5 +889,94 @@ func TestSearchOwnsPrintableKeysWhileItIsUp(t *testing.T) {
 	typeIn(t, m, "nav")
 	if m.Chat().Query() != "nav" {
 		t.Fatalf("query = %q; a movement key ate a letter", m.Chat().Query())
+	}
+}
+
+func TestForgettingAMemoryAsksFirst(t *testing.T) {
+	// Forgetting appends a tombstone and there is no key that puts it back.
+	// It is the only irreversible thing here, so it is the only thing that
+	// asks.
+	m := fixture(t, 100, 30)
+	m.ov = overlay.NewTree(overlay.Memory, "purpose", []*tree.Node{
+		{ID: "area:semantic", Label: "semantic", Expanded: true, Children: []*tree.Node{
+			{ID: "7", Label: "the parser lives in internal/pi"},
+		}},
+	})
+	press(t, m, "down") // onto the memory itself
+	press(t, m, "d")
+	s := lastLine(screen(m))
+	if !strings.Contains(s, "cannot be undone") {
+		t.Fatalf("the question must say what is at stake: %q", s)
+	}
+	if !strings.Contains(s, "the parser lives") {
+		t.Fatalf("it must name what it is about to remove: %q", s)
+	}
+}
+
+func TestAnythingButYesIsNo(t *testing.T) {
+	// A destructive action must never be reachable by a keystroke you did not
+	// mean.
+	for _, answer := range []string{"n", "q", "esc", "enter", "j"} {
+		m := fixture(t, 100, 30)
+		m.ov = overlay.NewTree(overlay.Memory, "purpose", []*tree.Node{{ID: "7", Label: "a memory"}})
+		press(t, m, "d")
+		if m.confirm == nil {
+			t.Fatal("expected a pending question")
+		}
+		press(t, m, answer)
+		if m.confirm != nil {
+			t.Fatalf("%q left the question hanging", answer)
+		}
+		if !strings.Contains(lastLine(screen(m)), "left alone") {
+			t.Fatalf("%q should have declined: %q", answer, lastLine(screen(m)))
+		}
+	}
+}
+
+func TestAPendingQuestionOwnsTheKeyboard(t *testing.T) {
+	// A question that a global chord can walk past is a question that gets
+	// answered by accident.
+	m := fixture(t, 100, 30)
+	m.ov = overlay.NewTree(overlay.Memory, "purpose", []*tree.Node{{ID: "7", Label: "a memory"}})
+	press(t, m, "d")
+	press(t, m, "ctrl+t") // would normally open the explorer
+	if m.ExplorerOpen() {
+		t.Fatal("a global chord stepped over a pending confirmation")
+	}
+}
+
+func TestForgetIsRefusedOnABrainArea(t *testing.T) {
+	// Areas are headings. Offering to forget one is offering to delete a
+	// category that never existed as a thing.
+	m := fixture(t, 100, 30)
+	m.ov = overlay.NewTree(overlay.Memory, "purpose", []*tree.Node{
+		{ID: "area:semantic", Label: "semantic", Children: []*tree.Node{{ID: "7", Label: "x"}}},
+	})
+	press(t, m, "d")
+	if m.confirm != nil {
+		t.Fatal("an area must not be offered for deletion")
+	}
+	if !strings.Contains(lastLine(screen(m)), "brain area") {
+		t.Fatalf("it must say why: %q", lastLine(screen(m)))
+	}
+}
+
+func TestForgetIsOnlyOfferedInMemory(t *testing.T) {
+	// Binding it globally would put a destructive key one slip away in every
+	// list.
+	m := fixture(t, 100, 30)
+	press(t, m, "ctrl+s") // sessions
+	press(t, m, "d")
+	if m.confirm != nil {
+		t.Fatal("d is a destructive key and must not be live outside memory")
+	}
+}
+
+func TestTheForgetKeyIsAdvertisedWhereItWorks(t *testing.T) {
+	m := fixture(t, 120, 30)
+	m.ov = overlay.NewTree(overlay.Memory, "purpose", []*tree.Node{{ID: "7", Label: "a memory"}})
+	if !strings.Contains(lastLine(screen(m)), "forget") {
+		t.Fatalf("a destructive key nobody is told about is one somebody eventually hits by accident: %q",
+			lastLine(screen(m)))
 	}
 }

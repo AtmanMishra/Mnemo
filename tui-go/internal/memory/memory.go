@@ -15,6 +15,7 @@ import (
 	"io"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -324,4 +325,35 @@ func str(m map[string]any, k string) string {
 func num(m map[string]any, k string) int {
 	f, _ := m[k].(float64)
 	return int(f)
+}
+
+// NodeID reads a memory's id back out of a tree node id.
+//
+// Areas are headings ("area:semantic") and fact rows carry a suffix
+// ("12:some fact"); only a bare number is a memory you can act on. Returning
+// false for the others is what stops "forget" being offered on a category
+// that never existed as a thing.
+func NodeID(id string) (int, bool) {
+	if id == "" || strings.Contains(id, ":") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(id)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// Forget removes a memory from the store and returns what it was called.
+//
+// The journal is append-only and replay must be exact, so this appends a
+// tombstone rather than rewriting history: the listing is the present, the
+// journal is the record of how it got there. Nothing is recoverable through
+// this interface afterwards, which is why the caller confirms first.
+func (c *Client) Forget(id int) (string, error) {
+	res, err := c.Call("forget", map[string]any{"node": id})
+	if err != nil {
+		return "", err
+	}
+	return str(res, "label"), nil
 }

@@ -146,7 +146,10 @@ fn handle(
         "ping" => Ok(json!({"pong": true})),
 
         "dump" => {
-            let nodes: Vec<serde_json::Value> = s.nodes.values().map(|n| json!({
+            // A forgotten memory is gone from the listing even though its
+            // ops stay in the journal. The journal is the history; dump is
+            // the present.
+            let nodes: Vec<serde_json::Value> = s.nodes.values().filter(|n| !n.deleted).map(|n| json!({
                 "id": n.id, "kind": n.kind, "area": n.area, "label": n.label,
                 "facts": n.active_facts().count(),
                 "feeders": s.feeders_of(n.id, *clock).len(),
@@ -287,6 +290,18 @@ fn handle(
             Ok(json!({ "area": format!("{area:?}") }))
         }
 
-        other => Err(format!("unknown method '{other}' (supported: ping dump state create_node episode fact link search set_area steer good consolidate)")),
+        "forget" => {
+            let node = p_node(params, "node")?;
+            // Soft by default. The journal is append-only and replay must be
+            // exact, so forgetting appends a tombstone rather than removing
+            // history — `hard` drops the node from the live store too, but
+            // the op that created it is still on disk either way.
+            let hard = params.get("hard").and_then(|h| h.as_bool()).unwrap_or(false);
+            let label = s.nodes.get(&node).map(|n| n.label.clone()).unwrap_or_default();
+            apply(s, j, Op::DeleteNode { node, hard, at: *clock })?;
+            Ok(json!({ "forgot": node, "label": label }))
+        }
+
+        other => Err(format!("unknown method '{other}' (supported: ping dump state create_node episode fact link search set_area forget steer good consolidate)")),
     }
 }

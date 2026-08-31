@@ -78,6 +78,11 @@ type Model struct {
 	notice  string
 	noticed time.Time
 
+	// confirm is a pending destructive action: what it will do, in the
+	// reader's words, and the function that does it. Nothing irreversible
+	// happens without one.
+	confirm *confirmation
+
 	// searching is true while ^f has the keys: every printable character goes
 	// into the query rather than to a mode.
 	searching bool

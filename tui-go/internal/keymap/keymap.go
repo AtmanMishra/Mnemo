@@ -84,6 +84,7 @@ type Map struct {
 	ExpandAll   key.Binding
 	CollapseAll key.Binding
 	Choose      key.Binding
+	Forget      key.Binding
 	Filter      key.Binding
 }
 
@@ -146,6 +147,7 @@ func New() Map {
 		ExpandAll:   b("E", "expand everything", "E"),
 		CollapseAll: b("C", "collapse everything", "C"),
 		Choose:      b("enter", "use this", "enter"),
+		Forget:      b("d", "forget this memory", "d"),
 		Filter:      b("/", "filter", "/"),
 	}
 }
@@ -177,7 +179,7 @@ func (m Map) Help() []Entry {
 	out = append(out, group(Insert, m.Send, m.Steer, m.Newline, m.Complete, m.HistPrev, m.HistNext)...)
 	out = append(out, group(Read, m.Down, m.Up, m.HalfDown, m.HalfUp, m.Top, m.Bottom,
 		m.NextBlk, m.PrevBlk, m.Toggle, m.Yank, m.YankAll, m.NextHit, m.PrevHit, m.Insert)...)
-	out = append(out, group(Browse, m.Next, m.Prev, m.Open, m.Close, m.ExpandAll, m.CollapseAll, m.Choose, m.Filter)...)
+	out = append(out, group(Browse, m.Next, m.Prev, m.Open, m.Close, m.ExpandAll, m.CollapseAll, m.Choose, m.Forget, m.Filter)...)
 	return out
 }
 

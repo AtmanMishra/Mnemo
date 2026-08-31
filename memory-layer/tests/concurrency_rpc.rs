@@ -256,3 +256,82 @@ fn memsrv_search_filters_and_routes_by_area() {
     drop(stdin);
     child.wait().unwrap();
 }
+
+/// Forgetting a memory removes it from `dump` but leaves the journal intact.
+///
+/// The journal is append-only and replay must be exact, so "forget" appends a
+/// tombstone rather than rewriting history. The distinction matters: the
+/// listing is the present, the journal is the record of how it got here, and
+/// a forget that edited the past would make every replay after it a different
+/// store.
+#[test]
+fn memsrv_forget_hides_a_node_without_rewriting_the_journal() {
+    let dir = std::env::temp_dir().join(format!("memlayer-rpc-forget-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let jpath = dir.join("journal.jsonl");
+
+    let spawn = || {
+        std::process::Command::new(env!("CARGO_BIN_EXE_memsrv"))
+            .arg(&jpath)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn memsrv")
+    };
+
+    fn read_json(reader: &mut std::io::BufReader<std::process::ChildStdout>) -> serde_json::Value {
+        use std::io::BufRead;
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("read rpc line");
+        serde_json::from_str(line.trim()).expect("valid json response")
+    }
+
+    let mut child = spawn();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut reader = std::io::BufReader::new(child.stdout.take().unwrap());
+    let mut send = |stdin: &mut std::process::ChildStdin, id: u32, method: &str, params: serde_json::Value| {
+        use std::io::Write;
+        writeln!(stdin, "{}", serde_json::json!({"id": id, "method": method, "params": params})).unwrap();
+        stdin.flush().unwrap();
+    };
+
+    send(&mut stdin, 1, "create_node", serde_json::json!({"kind": "aspect", "label": "keep-me"}));
+    let keep = read_json(&mut reader)["result"]["node"].as_u64().unwrap();
+    send(&mut stdin, 2, "create_node", serde_json::json!({"kind": "aspect", "label": "forget-me"}));
+    let drop = read_json(&mut reader)["result"]["node"].as_u64().unwrap();
+
+    send(&mut stdin, 3, "dump", serde_json::json!({}));
+    assert_eq!(read_json(&mut reader)["result"]["nodes"].as_array().unwrap().len(), 2);
+
+    send(&mut stdin, 4, "forget", serde_json::json!({"node": drop}));
+    let r = read_json(&mut reader);
+    assert!(r["ok"].as_bool().unwrap(), "forget failed: {r}");
+    assert_eq!(r["result"]["label"], "forget-me", "forget should name what it removed");
+
+    send(&mut stdin, 5, "dump", serde_json::json!({}));
+    let nodes = read_json(&mut reader)["result"]["nodes"].as_array().unwrap().clone();
+    assert_eq!(nodes.len(), 1, "a forgotten memory must leave the listing");
+    assert_eq!(nodes[0]["id"].as_u64().unwrap(), keep);
+
+    drop_stdin(stdin);
+    let _ = child.wait();
+
+    // The tombstone is on disk, and replaying it gives the same answer.
+    let journal = std::fs::read_to_string(&jpath).unwrap();
+    assert!(journal.contains("DeleteNode"), "the forget must be journaled:\n{journal}");
+
+    let mut child = spawn();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut reader = std::io::BufReader::new(child.stdout.take().unwrap());
+    send(&mut stdin, 6, "dump", serde_json::json!({}));
+    let nodes = read_json(&mut reader)["result"]["nodes"].as_array().unwrap().clone();
+    assert_eq!(nodes.len(), 1, "replay must reproduce the forget, not undo it");
+    drop_stdin(stdin);
+    let _ = child.wait();
+}
+
+fn drop_stdin(stdin: std::process::ChildStdin) {
+    std::mem::drop(stdin);
+}
