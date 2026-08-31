@@ -101,6 +101,19 @@ tool_result (modify) interception — NOT a replacement of pi's events.
 - [ ] 10.4 /trigger: on_failure, on_uncommitted, on_push (webhook), on_cost_over; /now fires any job
 - [ ] 10.5 Notifications (TUI status chip + opt-in OS notify) + Schedules overlay in tui-go
 
+## AREA 11 — MEMORY-LAYER IMPROVEMENTS (research/memory-layer-improvements.md; curated — do NOT bloat the graph model)
+
+Guardrail: the memory layer's job = store facts with history, retrieve the right
+context, reshape via steering/consolidation. Every change serves one of those or is
+NOT built. Retrieval changes MUST keep memeval --hash at Hit@1 ≥ 73% / Hit@3 ≥ 77%
+/ MRR ≥ 0.743 (n=22) or improve — revert otherwise.
+
+- [ ] 11.1 Caching (the missing piece): (a) in-memory LRU for memsrv search, keyed (query, areas[], k), bounded ~256; (b) memoize state_of per node, invalidate on journal op touching that node. Embeddings already disk-cached — leave them. Pure performance, zero semantic change; measure memeval --hash byte-identical.
+- [ ] 11.2 Retrieval usefulness feedback via EXISTING machinery: capture useful/unhelpful signal (agent recall + TUI thumbs) as counters on node/edge, route into existing prefer()/success-failure reweight so useful edges gain weight, noisy ones lose it. When counters accumulate, feed mempolicy (learned weight replaces fixed one) — not a learning-to-rank system now.
+- [ ] 11.3 memsrv thin wrappers (no new engine): `recall_brief(query)` = ready-to-inject block (area-routed, top-k with State inlined not bare scores, provenance line); `remember(summary)` = auto-route area + create node/facts/log in one call.
+- [ ] 11.4 Tests + eval gate for all of the above: deterministic (real memsrv + temp journal, fake pi, setProjectRoot/setSkillsHome overrides), memeval --hash pinned 73/77/0.743 no-regression per retrieval change, cargo test + agent npm test green.
+NON-GOALS (explicitly not in this area — see doc table): learned embedding/router ML pipeline (no journal signal yet), per-kind recency decay (Supersede covers staleness), cluster summaries, proactive ActivatedWith recall, journal GC, parallel memsrv reads, diff/timeline ops.
+
 ## DONE (reference)
 
 [x] Memory layer core+steering+sidecar (19+2 tests)
