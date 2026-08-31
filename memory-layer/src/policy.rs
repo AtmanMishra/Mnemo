@@ -65,6 +65,74 @@ fn node_tokens(store: &StoreData, node: NodeId) -> HashSet<String> {
     out
 }
 
+/// A synthetic failure journal with structure the shipped rule cannot see.
+///
+/// Scenario, honestly labelled by an ORACLE (a post-hoc true accounting, not
+/// what `steer()` would have written): ONE troubled episode is fed by three
+/// aspects. Every round the same silent feeder C is the real, recorded culprit
+/// — yet its text shares zero tokens with the failure — while feeder A
+/// lexically overlaps every failure without being the culprit (the rule's
+/// standing false positive), and innocent B never appears at all. Because the
+/// episode and its edges persist across rounds, C's failure history and edge
+/// weight accumulate (and after enough blame its weight hits zero and the
+/// edge dies, exactly like `alive_at` says). The only features that ever
+/// point at C are that history and that collapse — the overlap rule cannot
+/// see either.
+///
+/// Purpose: answer "can the pipeline learn at all?" If yes, the real
+/// journal's 'nothing to learn from' is a DATA verdict, not a model one. The
+/// comparison is still honest: both policies are scored on the same held-out
+/// examples and the synthetic journal is flagged as synthetic in the output.
+#[allow(clippy::needless_range_loop)]
+pub fn synthetic_journal_ops() -> Vec<Op> {
+    let mut s = StoreData::new();
+    let mut ops = Vec::new();
+    let t = 1_700_000_000_000u64;
+    let push = |s: &mut StoreData, op: Op, ops: &mut Vec<Op>| {
+        s.apply(&op).unwrap();
+        ops.push(op);
+    };
+
+    // A: lexically overlapping, NEVER the culprit (rule cries wolf)
+    push(&mut s, Op::CreateNode { id: 1, kind: NodeKind::Aspect,
+        label: "ingress annotations".into(), at: t }, &mut ops);
+    push(&mut s, Op::AddFact { node: 1, fact_id: 1, key: "rewrite".into(),
+        value: "rewrite target annotation routes paths".into(), at: t }, &mut ops);
+    // B: silent and blameless, never recorded
+    push(&mut s, Op::CreateNode { id: 2, kind: NodeKind::Aspect,
+        label: "helm release".into(), at: t }, &mut ops);
+    push(&mut s, Op::AddFact { node: 2, fact_id: 2, key: "version".into(),
+        value: "chart pinned to v3.2".into(), at: t }, &mut ops);
+    // C: silent, repeatedly the recorded culprit, so its history accumulates
+    push(&mut s, Op::CreateNode { id: 3, kind: NodeKind::Aspect,
+        label: "mesh proxy".into(), at: t }, &mut ops);
+    push(&mut s, Op::AddFact { node: 3, fact_id: 3, key: "retry".into(),
+        value: "connection pooled, keepalive 30s".into(), at: t }, &mut ops);
+
+    // ONE long-lived episode: its feeder edges carry the history across rounds
+    let ep = s.next_node;
+    push(&mut s, Op::CreateNode { id: ep, kind: NodeKind::TaskEpisode,
+        label: "watch cluster".into(), at: t }, &mut ops);
+    for src in [1u64, 2, 3] {
+        let eid = s.next_edge;
+        push(&mut s, Op::Link { id: eid, src, dst: ep,
+            kind: EdgeKind::SuppliesContext, at: t }, &mut ops);
+    }
+
+    for r in 0..15u64 {
+        let now = t + 100 + r * 1000;
+        // the failure text always overlaps A (ingress jargon), never C
+        push(&mut s, Op::CommitLog { node: ep, kind: "outcome".into(),
+            detail: "rewrite annotation routes failed: ingress paths broke".into(),
+            at: now }, &mut ops);
+        // oracle: the silent feeder is the one recorded as failed
+        let c_edge = s.edges.values()
+            .find(|e| e.src == 3 && e.dst == ep).map(|e| e.id).unwrap();
+        push(&mut s, Op::RecordOutcome { edge: c_edge, success: false, at: now + 1 }, &mut ops);
+    }
+    ops
+}
+
 /// Features for one candidate feeder against one failure description.
 pub fn features_for(
     store: &StoreData,
@@ -142,12 +210,18 @@ fn blamed_edges(rest: &[Op]) -> HashSet<EdgeId> {
 pub struct Policy {
     pub weights: [f32; 6],
     pub bias: f32,
+    /// Per-feature mean/std over the TRAINING set, applied at score time.
+    means: [f32; 6],
+    stds: [f32; 6],
 }
 
 impl Policy {
     pub fn score(&self, f: &Features) -> f32 {
         let x = f.as_vec();
-        let z: f32 = self.weights.iter().zip(x.iter()).map(|(w, v)| w * v).sum::<f32>() + self.bias;
+        let z: f32 = (0..6)
+            .map(|k| self.weights[k] * ((x[k] - self.means[k]) / self.stds[k]))
+            .sum::<f32>()
+            + self.bias;
         1.0 / (1.0 + (-z).exp())
     }
     pub fn predict(&self, f: &Features) -> bool {
@@ -156,19 +230,44 @@ impl Policy {
 }
 
 /// Logistic regression by plain gradient descent. Features are standardised
-/// first, because raw counts and 0..1 weights on one scale make the step size
-/// meaningless.
+/// first (per-feature mean/std over the training set), because raw counts and
+/// 0..1 weights on one scale make the step size meaningless: a signal hiding
+/// in a long-history counter would be washed out by a lexically loud feature.
 pub fn train(examples: &[Example], epochs: usize, lr: f32) -> Policy {
-    let mut policy = Policy { weights: [0.0; 6], bias: 0.0 };
+    let mut policy = Policy { weights: [0.0; 6], bias: 0.0, means: [0.0; 6], stds: [1.0; 6] };
     if examples.is_empty() { return policy; }
     let n = examples.len() as f32;
+
+    // standardise: statistics come from the training set ONLY
+    let mut sums = [0f32; 6];
+    for ex in examples {
+        let x = ex.features.as_vec();
+        for k in 0..6 { sums[k] += x[k]; }
+    }
+    let mut means = [0f32; 6];
+    for k in 0..6 { means[k] = sums[k] / n; }
+    let mut sq = [0f32; 6];
+    for ex in examples {
+        let x = ex.features.as_vec();
+        for k in 0..6 { let d = x[k] - means[k]; sq[k] += d * d; }
+    }
+    let mut stds = [0f32; 6];
+    for k in 0..6 { stds[k] = (sq[k] / n).sqrt().max(1e-6); }
+    policy.means = means;
+    policy.stds = stds;
+
+    let norm = |x: &[f32; 6]| -> [f32; 6] {
+        let mut out = [0f32; 6];
+        for k in 0..6 { out[k] = (x[k] - means[k]) / stds[k]; }
+        out
+    };
 
     for _ in 0..epochs {
         let mut grad = [0.0f32; 6];
         let mut bias_grad = 0.0f32;
         for ex in examples {
             let err = policy.score(&ex.features) - if ex.label { 1.0 } else { 0.0 };
-            let x = ex.features.as_vec();
+            let x = norm(&ex.features.as_vec());
             for k in 0..6 { grad[k] += err * x[k]; }
             bias_grad += err;
         }

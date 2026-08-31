@@ -146,4 +146,54 @@ mod p4 {
         assert_eq!(s.precision, 0.5);
         assert_eq!(s.recall, 0.5);
     }
+
+    #[test]
+    fn synthetic_journal_has_both_labels_and_nonzero_examples() {
+        let ops = synthetic_journal_ops();
+        let examples = examples_from_journal(&ops);
+        // rounds 0..5: 3 feeders each (C survives six blames); rounds 6..14:
+        // C's weight hit zero and the edge died, so only A and B remain
+        assert_eq!(examples.len(), 36);
+        let positives = examples.iter().filter(|e| e.label).count();
+        assert_eq!(positives, 6, "one recorded culprit per surviving round, always C");
+        // the overlap rule can see past examples only: positives must include
+        // zero-overlap culprits (that is the whole point of the fixture)
+        let silent_positives = examples.iter()
+            .filter(|e| e.label && e.features.overlap == 0.0).count();
+        assert_eq!(silent_positives, 6, "every positive is a silent culprit");
+        // and C's history DID accumulate before the edge died: mid-round
+        // culprits carry failures and a collapsed weight, the features the
+        // shipped rule never looks at
+        let with_history = examples.iter()
+            .filter(|e| e.label && (e.features.prior_failures > 0.0 || e.features.weight < 0.5))
+            .count();
+        assert!(with_history >= 4, "repeated oracle blames must build history");
+    }
+
+    #[test]
+    fn learned_beats_the_lexical_rule_on_the_synthetic_journal() {
+        // the synthetic journal records blame the overlap rule cannot see:
+        // the honest bar is that the pipeline CAN learn it (and demonstrably
+        // better than the rule it would replace)
+        let exp = run_experiment(&synthetic_journal_ops());
+        assert!(exp.learned.accuracy > exp.heuristic.accuracy + 0.2,
+            "learned {:?} should clearly beat heuristic {:?}",
+            exp.learned, exp.heuristic);
+        // and it must actually CATCH culprits, not just stay quiet: a policy
+        // with zero recall is not a win, it is the majority class
+        assert!(exp.learned.recall > exp.heuristic.recall,
+            "learned recall {:?} must beat heuristic recall {:?}",
+            exp.learned.recall, exp.heuristic.recall);
+    }
+
+    #[test]
+    fn the_lexical_rule_is_blind_to_silent_culprits() {
+        // sanity pin: on this fixture the shipped rule never finds the
+        // culprit (it can only see overlap), so its recall is zero
+        let ops = synthetic_journal_ops();
+        let examples = examples_from_journal(&ops);
+        let scored = evaluate(&examples, heuristic_predict);
+        assert_eq!(scored.recall, 0.0, "overlap-only rule cannot recall silent culprits");
+        assert!(scored.accuracy < 0.5, "and its accuracy is below chance");
+    }
 }
