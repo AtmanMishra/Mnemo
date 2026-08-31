@@ -13,6 +13,7 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/auth"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/chat"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/command"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/filetree"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/markdown"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/memory"
@@ -284,6 +285,15 @@ func (m *Model) global(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			m.lastInterrupt = time.Now()
 			return tea.Batch(m.agent.Interrupt(), m.notify("interrupted")), true
 		}
+		// First, the draft — pi's ctrl+c clears the editor before it quits
+		// anything. A wrong draft is the everyday case; quitting is the
+		// deliberate one, and getting to it must not mean losing the draft
+		// to a keystroke you did not mean.
+		if !m.prompt.Empty() {
+			m.prompt.SetValue("")
+			m.lastInterrupt = time.Now() // the quit window starts here, like pi
+			return m.notify("cleared the draft · ^c again to quit"), true
+		}
 		// Twice within two seconds quits. Once does not, because ^c is also
 		// how you stop the agent, and quitting on the first press means one
 		// mistyped chord throws away the session.
@@ -404,13 +414,14 @@ func (m *Model) cycleFocus(d int) tea.Cmd {
 func (m *Model) insertKey(msg tea.KeyPressMsg) tea.Cmd {
 	k := m.keys
 
-	// The slash menu owns the arrows and tab while it is open. It closes on
-	// esc or as soon as the text stops looking like a command, so it can
-	// never hold a key hostage.
+	// The slash menu (or the @-file menu) owns the arrows and tab while it is
+	// open. It closes on esc or as soon as the text stops looking like one,
+	// so it can never hold a key hostage.
 	if m.prompt.MenuOpen() {
 		switch {
 		case key.Matches(msg, k.Back):
 			m.prompt.Suggest(nil)
+			m.mention = false
 			m.layout()
 			return nil
 		case key.Matches(msg, k.HistPrev):
@@ -420,11 +431,21 @@ func (m *Model) insertKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.prompt.SugMove(1)
 			return nil
 		case key.Matches(msg, k.Complete):
-			m.prompt.Complete()
-			m.suggest()
-			m.layout()
+			if m.mention {
+				m.completeMention()
+			} else {
+				m.prompt.Complete()
+				m.suggest()
+				m.layout()
+			}
 			return nil
 		case key.Matches(msg, k.Send):
+			if m.mention {
+				// A picked file is a reference, not a message: it goes into
+				// the prompt, and the prompt stays yours.
+				m.completeMention()
+				return nil
+			}
 			if c, ok := m.prompt.SugSelected(); ok {
 				m.prompt.Suggest(nil)
 				rest := argsAfter(m.prompt.Take())
@@ -476,6 +497,12 @@ func (m *Model) insertKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.layout()
 			return nil
 		}
+
+	case key.Matches(msg, k.QueueUp):
+		return m.queuePull()
+
+	case key.Matches(msg, k.QueueDn):
+		return m.queueDraft()
 	}
 	cmd := m.prompt.Update(msg)
 	m.suggest()
@@ -483,18 +510,164 @@ func (m *Model) insertKey(msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
-// suggest recomputes the slash menu from what is in the prompt.
-//
-// It opens on a leading "/" and closes the moment a space is typed: after the
-// name, what follows is arguments, and a menu still filtering on them would
-// be filtering on the wrong thing.
+// suggest recomputes whichever menu belongs to the prompt: slash commands
+// when the line starts with a slash, @-file references when an @ is in the
+// text, and nothing at all otherwise. A slash followed by arguments closes
+// the command menu — after the name, what follows is arguments, and a menu
+// still filtering on them would be filtering on the wrong thing.
 func (m *Model) suggest() {
 	v := m.prompt.Value()
-	if !strings.HasPrefix(v, "/") || strings.ContainsAny(v, " \n") {
-		m.prompt.Suggest(nil)
+	m.mention = false
+	if strings.HasPrefix(v, "/") {
+		if strings.ContainsAny(v, " \n") {
+			m.prompt.Suggest(nil)
+			return
+		}
+		m.prompt.Suggest(command.Match(m.cmds, v))
 		return
 	}
-	m.prompt.Suggest(command.Match(m.cmds, v))
+	if at := strings.LastIndex(v, "@"); at >= 0 {
+		q := strings.ToLower(v[at+1:])
+		if i := strings.IndexAny(q, " \t\n"); i >= 0 {
+			q = q[:i]
+		}
+		rows := m.mentionFiles(q)
+		if len(rows) == 0 {
+			// No match is a closed menu, not a stuck one: a menu with no rows
+			// cannot be dismissed, and a mention flag with no menu behind it
+			// starts swallowing tab and enter.
+			m.prompt.Suggest(nil)
+			return
+		}
+		m.mention = true
+		m.prompt.Suggest(rows)
+		return
+	}
+	m.prompt.Suggest(nil)
+}
+
+// completeMention puts the highlighted file reference into the prompt, in
+// place of the @word that asked for it, and keeps editing.
+func (m *Model) completeMention() {
+	c, ok := m.prompt.SugSelected()
+	if !ok {
+		return
+	}
+	v := m.prompt.Value()
+	at := strings.LastIndex(v, "@")
+	if at < 0 {
+		m.prompt.Insert(c.Name + " ")
+	} else {
+		// Replace "@word" with "path", keeping whatever came after the word.
+		rest := v[at+1:]
+		cut := 0
+		for cut < len(rest) && !strings.ContainsRune(" \t\n", rune(rest[cut])) {
+			cut++
+		}
+		tail := rest[cut:]
+		insert := c.Name
+		if tail == "" {
+			insert += " "
+		}
+		m.prompt.SetValue(v[:at] + insert + tail)
+	}
+	m.prompt.Suggest(nil)
+	m.mention = false
+	m.layout()
+}
+
+// mentionRows is the @ menu: the project's files, matched by subsequence on
+// their relative path the way command names are — "pi" finds internal/pi,
+// and "pkg/main" finds cmd/mnemo/main.go without you typing every letter.
+// Capped, because a menu that lists four thousand rows is not a menu.
+func (m *Model) mentionFiles(q string) []command.Command {
+	if q == "" {
+		q = " " // an empty query matches everything below; don't
+	}
+	var out []command.Command
+	for _, f := range m.projectFiles() {
+		if !subseq(q, f) {
+			continue
+		}
+		out = append(out, command.Command{Name: f, Kind: command.File})
+		if len(out) >= 30 {
+			break
+		}
+	}
+	return out
+}
+
+// projectFiles lists the working tree's files, relative, once.
+func (m *Model) projectFiles() []string {
+	if m.files != nil {
+		return m.files
+	}
+	var out []string
+	_ = filepath.WalkDir(m.cfg.CWD, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if p != m.cfg.CWD && (filetree.Skip[d.Name()] || strings.HasPrefix(d.Name(), ".") && d.Name() != ".claude") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		out = append(out, strings.TrimPrefix(p, m.cfg.CWD+string(filepath.Separator)))
+		return nil
+	})
+	if out == nil {
+		out = []string{}
+	}
+	m.files = out
+	return out
+}
+
+// subseq reports whether every rune of needle appears in hay, in order — the
+// same matching rule the command names use, so "@pi" behaves like "/pi".
+func subseq(needle, hay string) bool {
+	needle = strings.ToLower(strings.TrimSpace(needle))
+	hay = strings.ToLower(hay)
+	i := 0
+	for _, r := range needle {
+		found := false
+		for ; i < len(hay); i++ {
+			if hay[i] == byte(r) {
+				found = true
+				i++
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return len(needle) > 0
+}
+
+// queuePull brings the most recently queued message back into the editor, so
+// it can be corrected before it ever goes out — pi's alt+up.
+func (m *Model) queuePull() tea.Cmd {
+	q := m.prompt.Queued()
+	if len(q) == 0 {
+		return m.notify("nothing queued — enter while a turn is running queues a message")
+	}
+	last := q[len(q)-1]
+	m.prompt.DropLastQueued()
+	m.prompt.SetValue(last)
+	m.layout()
+	return m.notify("back in the editor — edit it, then enter to send")
+}
+
+// queueDraft queues the draft ahead of the rest, so it goes next — alt+down.
+func (m *Model) queueDraft() tea.Cmd {
+	if m.prompt.Empty() {
+		return m.notify("the editor is empty — write what to queue first")
+	}
+	text := m.prompt.Take()
+	m.prompt.QueueFront(text)
+	m.layout()
+	return m.notify("queued first — it goes when this turn ends")
 }
 
 // argsAfter is everything after the command name on the line.
@@ -629,6 +802,9 @@ func (m *Model) readKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, k.YankAll):
 		m.chat.ClearFocus()
 		return m.copy(m.chat.YankFocused(), "transcript")
+
+	case key.Matches(msg, k.Undo):
+		return m.undoLastExchange()
 	}
 	return nil
 }
@@ -640,6 +816,36 @@ func (m *Model) copy(text, what string) tea.Cmd {
 		return m.notify("nothing to copy")
 	}
 	return tea.Batch(tea.SetClipboard(text), m.notify("copied the "+what))
+}
+
+// undoLastExchange removes the last finished exchange from the transcript:
+// the most recent user message and everything the agent did in answer.
+//
+// It is honest about what it is not: the agent already ran that turn, so the
+// undo is a view-level correction, never a rewrite of the backend or the
+// session file — said out loud, or a reader expects the model to have
+// forgotten the question, and it has not.
+func (m *Model) undoLastExchange() tea.Cmd {
+	if m.working {
+		return m.notify("wait for the turn to end before undoing it")
+	}
+	blocks := m.chat.Blocks()
+	last := -1
+	for i, b := range blocks {
+		if b.Kind == chat.User {
+			last = i
+		}
+	}
+	if last < 0 {
+		return m.notify("nothing to undo yet — no exchange has finished")
+	}
+	label := ""
+	if len(blocks[last].Body) > 0 {
+		label = blocks[last].Body[0]
+	}
+	m.chat.TruncateAt(last)
+	m.chat.ClearFocus()
+	return m.notify("undid: “" + label + "” — the agent still remembers the turn")
 }
 
 func (m *Model) explorerKey(msg tea.KeyPressMsg) tea.Cmd {

@@ -110,6 +110,14 @@ type Model struct {
 	// editor is the memory overlay's open fact editor, or nil when the list
 	// is just a list. While it is non-nil its keys own the overlay.
 	editor *memEditor
+
+	// mention is true while the @-file menu is up: tab and enter insert a
+	// path instead of completing a command or sending the line.
+	mention bool
+
+	// files is the working tree's relative file list, for @-mentions,
+	// scanned once and never guessed at.
+	files []string
 	mem *memory.Client
 
 	// cmds is every slash command: built-ins, skills, plugins, bundles.
@@ -350,6 +358,16 @@ func parseKey(s string) tea.Key {
 	}
 	if strings.HasPrefix(s, "ctrl+") && len(s) == len("ctrl+")+1 {
 		return tea.Key{Code: rune(s[len("ctrl+")]), Mod: tea.ModCtrl}
+	}
+	if strings.HasPrefix(s, "alt+") {
+		switch strings.TrimPrefix(s, "alt+") {
+		case "enter":
+			return tea.Key{Code: tea.KeyEnter, Mod: tea.ModAlt}
+		case "up":
+			return tea.Key{Code: tea.KeyUp, Mod: tea.ModAlt}
+		case "down":
+			return tea.Key{Code: tea.KeyDown, Mod: tea.ModAlt}
+		}
 	}
 	r := []rune(s)
 	if len(r) == 0 {

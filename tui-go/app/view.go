@@ -396,7 +396,7 @@ func (m *Model) status() string {
 	right := []ui.Seg{}
 	if m.working {
 		right = append(right, ui.Seg{
-			Text:  theme.Spinner[m.tick%len(theme.Spinner)] + " working",
+			Text:  theme.Spinner[m.tick%len(theme.Spinner)] + " working · ^c stops",
 			Style: m.th.Accent,
 		})
 	}

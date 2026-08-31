@@ -59,6 +59,8 @@ type Map struct {
 	Complete key.Binding
 	HistPrev key.Binding
 	HistNext key.Binding
+	QueueUp  key.Binding
+	QueueDn  key.Binding
 
 	// Read.
 	Down     key.Binding
@@ -74,6 +76,7 @@ type Map struct {
 	YankAll  key.Binding
 	NextHit  key.Binding
 	PrevHit  key.Binding
+	Undo     key.Binding
 	Insert   key.Binding
 
 	// Browse — a tree with focus.
@@ -123,6 +126,8 @@ func New() Map {
 		Complete: b("tab", "complete", "tab"),
 		HistPrev: b("up", "previous prompt", "up"),
 		HistNext: b("down", "next prompt", "down"),
+		QueueUp:  b("alt+up", "pull the last queued message back to edit it", "alt+up"),
+		QueueDn:  b("alt+down", "queue the draft first, so it goes next", "alt+down"),
 
 		Down:     b("j", "scroll down a line", "j"),
 		Up:       b("k", "scroll up a line", "k"),
@@ -140,6 +145,7 @@ func New() Map {
 		YankAll: b("Y", "copy the transcript", "Y"),
 		NextHit: b("n", "next match", "n"),
 		PrevHit: b("N", "previous match", "N"),
+		Undo:    b("u", "undo the last exchange", "u"),
 		Insert:  b("i", "back to the prompt", "i", "a"),
 
 		Next:        b("↓", "down", "down", "j"),

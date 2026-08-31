@@ -216,6 +216,10 @@ func (m *Model) Insert(s string) { m.ta.InsertString(s) }
 // Queue adds a message to be sent when the current turn ends.
 func (m *Model) Queue(s string) { m.queue = append(m.queue, s) }
 
+// QueueFront adds a message ahead of everything already queued — what
+// re-queueing a retrieved draft does. The queue is FIFO, so front is "next".
+func (m *Model) QueueFront(s string) { m.queue = append([]string{s}, m.queue...) }
+
 // Queued is the pending list.
 func (m *Model) Queued() []string { return m.queue }
 

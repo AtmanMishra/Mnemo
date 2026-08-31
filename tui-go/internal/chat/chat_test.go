@@ -412,3 +412,24 @@ func TestWithoutARendererTheTextIsShownAsTyped(t *testing.T) {
 		t.Fatal("with no renderer the text is drawn as it is")
 	}
 }
+
+func TestTruncateAtDropsFromTheIndexOn(t *testing.T) {
+	m := New()
+	m.Append(&Block{Kind: Agent, Body: []string{"ready"}})
+	m.Append(&Block{Kind: User, Body: []string{"why?"}})
+	m.Append(&Block{Kind: Agent, Body: []string{"because"}})
+	m.TruncateAt(1)
+	if m.Len() != 1 {
+		t.Fatalf("truncate must keep everything before the cut, got %d blocks", m.Len())
+	}
+	if b := m.Blocks()[0]; b.Kind != Agent || b.Body[0] != "ready" {
+		t.Fatalf("the welcome must survive, got %+v", b)
+	}
+	// Truncating to the same place again is a no-op, not a panic.
+	m.TruncateAt(0)
+	if m.Len() != 0 {
+		t.Fatalf("got %d", m.Len())
+	}
+	m.TruncateAt(-1)
+	m.TruncateAt(5)
+}

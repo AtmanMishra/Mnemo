@@ -64,6 +64,15 @@ func press(t *testing.T, m *Model, keystroke string) {
 	default:
 		if strings.HasPrefix(keystroke, "ctrl+") {
 			k = tea.Key{Code: rune(keystroke[len("ctrl+")]), Mod: tea.ModCtrl}
+		} else if strings.HasPrefix(keystroke, "alt+") {
+			switch strings.TrimPrefix(keystroke, "alt+") {
+			case "enter":
+				k = tea.Key{Code: tea.KeyEnter, Mod: tea.ModAlt}
+			case "up":
+				k = tea.Key{Code: tea.KeyUp, Mod: tea.ModAlt}
+			case "down":
+				k = tea.Key{Code: tea.KeyDown, Mod: tea.ModAlt}
+			}
 		} else {
 			r := []rune(keystroke)[0]
 			k = tea.Key{Code: r, Text: string(r)}
@@ -1666,5 +1675,158 @@ func TestTheWriterKeysAreSilentWithoutAClient(t *testing.T) {
 	press(t, m, "n")
 	if m.editor != nil {
 		t.Fatal("with no service there is nothing to add a fact to")
+	}
+}
+
+// --- pi-parity ergonomics --------------------------------------------------
+
+func TestAMentionListsTheProjectFiles(t *testing.T) {
+	// @ is pi's file reference: fuzzy over the working tree, inserted in
+	// place, dismissed with esc.
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "see @ma")
+	if !m.mention {
+		t.Fatal("an @ must raise the file menu")
+	}
+	if !strings.Contains(screen(m), "main.go") {
+		t.Fatalf("the menu must list the matching files:\n%s", screen(m))
+	}
+	press(t, m, "tab")
+	if got := m.prompt.Value(); got != "see main.go " {
+		t.Fatalf("tab must insert the reference in place, got %q", got)
+	}
+	if m.mention || m.prompt.MenuOpen() {
+		t.Fatal("completing a mention must close its menu")
+	}
+}
+
+func TestAMentionClosesOnEscape(t *testing.T) {
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "fix @ma")
+	if !m.prompt.MenuOpen() {
+		t.Fatal("the mention menu must be up before esc can be tested")
+	}
+	press(t, m, "esc")
+	if m.prompt.MenuOpen() || m.mention {
+		t.Fatal("esc must dismiss the file menu")
+	}
+	if got := m.prompt.Value(); got != "fix @ma" {
+		t.Fatalf("dismissing must not edit the draft, got %q", got)
+	}
+}
+
+func TestAMentionWithoutMatchesIsAClosedNotAStuckMenu(t *testing.T) {
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "@nope")
+	if m.prompt.MenuOpen() || m.mention {
+		t.Fatal("a menu nobody can pick from must not sit there swallowing keys")
+	}
+	// And the draft is still editable, obviously.
+	typeIn(t, m, "xyz")
+	if got := m.prompt.Value(); got != "@nopexyz" {
+		t.Fatalf("typing must keep working, got %q", got)
+	}
+}
+
+func TestQueuePullBringsTheLastQueuedBackForEditing(t *testing.T) {
+	m := fixture(t, 100, 30)
+	m.working = true
+	typeIn(t, m, "first apart")
+	press(t, m, "enter") // queued
+	typeIn(t, m, "second aside")
+	press(t, m, "enter") // queued
+	if got := m.prompt.Queued(); len(got) != 2 {
+		t.Fatalf("queue = %v", got)
+	}
+	press(t, m, "alt+up")
+	if got := m.prompt.Value(); got != "second aside" {
+		t.Fatalf("alt+up must bring the last queued back, got %q", got)
+	}
+	if got := m.prompt.Queued(); len(got) != 1 || got[0] != "first apart" {
+		t.Fatalf("the retrieved one must leave the queue, got %v", got)
+	}
+}
+
+func TestQueueDraftPutsTheDraftAheadOfTheRest(t *testing.T) {
+	m := fixture(t, 100, 30)
+	m.working = true
+	typeIn(t, m, "urgent correction")
+	press(t, m, "enter")
+	typeIn(t, m, "a smarter follow-up")
+	press(t, m, "alt+down")
+	if got := m.prompt.Queued(); len(got) != 2 || got[0] != "a smarter follow-up" || got[1] != "urgent correction" {
+		t.Fatalf("alt+down must queue the draft first, got %v", got)
+	}
+	if !m.prompt.Empty() {
+		t.Fatalf("queuing must take the draft out of the editor, got %q", m.prompt.Value())
+	}
+}
+
+func TestQueuePullWithNothingQueuedSaysSo(t *testing.T) {
+	m := fixture(t, 100, 30)
+	press(t, m, "alt+up")
+	if !strings.Contains(screen(m), "nothing queued") {
+		t.Fatalf("it must say what is missing:\n%s", screen(m))
+	}
+}
+
+func TestUndoRemovesTheLastExchange(t *testing.T) {
+	m := fixture(t, 100, 30)
+	m.chat.Append(&chat.Block{Kind: chat.User, Body: []string{"why is it slow?"}})
+	m.Update(agent.Text{Text: "Because it re-parses on every frame."})
+	m.Update(agent.Done{})
+	before := m.chat.Len()
+	press(t, m, "esc") // read mode
+	press(t, m, "u")
+	if m.chat.Len() != before-2 {
+		t.Fatalf("undo must drop the question and its answer, went %d → %d", before, m.chat.Len())
+	}
+	if !strings.Contains(screen(m), "undid: “why is it slow?") {
+		t.Fatalf("undo must say what it removed:\n%s", screen(m))
+	}
+}
+
+func TestUndoIsRefusedWhileATurnIsRunning(t *testing.T) {
+	m := fixture(t, 100, 30)
+	m.working = true
+	press(t, m, "esc")
+	press(t, m, "u")
+	if !strings.Contains(screen(m), "wait for the turn") {
+		t.Fatalf("undoing a live turn would be lying about the backend:\n%s", screen(m))
+	}
+}
+
+func TestUndoWithNothingDoneSaysSo(t *testing.T) {
+	m := fixture(t, 100, 30)
+	press(t, m, "esc")
+	press(t, m, "u")
+	if !strings.Contains(screen(m), "nothing to undo") {
+		t.Fatalf("it must say what is missing:\n%s", screen(m))
+	}
+}
+
+func TestCtrlCClearsTheDraftBeforeItQuitsAnything(t *testing.T) {
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "half a thought")
+	press(t, m, "ctrl+c")
+	if !m.prompt.Empty() {
+		t.Fatalf("^c must clear the draft first, got %q", m.prompt.Value())
+	}
+	if !strings.Contains(screen(m), "cleared the draft") {
+		t.Fatalf("it must say what it did:\n%s", screen(m))
+	}
+	// A second ^c, now that the draft is gone and the first was recent,
+	// quits — the pi shape.
+	press(t, m, "ctrl+c")
+	if !m.quitting {
+		t.Fatal("^c twice quits, with the draft safe in between")
+	}
+}
+
+func TestTheBusyStatusLineSaysHowToStop(t *testing.T) {
+	m := fixture(t, 160, 30)
+	m.working = true
+	if !strings.Contains(lastLine(screen(m)), "^c stops") {
+		t.Fatalf("a running agent must announce its own brake: %q", lastLine(screen(m)))
 	}
 }

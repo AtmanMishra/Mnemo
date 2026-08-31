@@ -59,6 +59,45 @@ go run ./cmd/mnemo --dump --keys "ctrl+t,down,l"    # …after pressing keys
 `--dump` exists because a TUI cannot be screenshotted from a script, and "it
 looked right when I ran it" is not a check anybody else can repeat.
 
+## Pi-parity: the gap list
+
+Where this interface stands against pi's own (README "Interactive Mode",
+"Sessions", "Skills"). Everything below is the honest remainder, not the
+whole — the surfaces pi and Mnemo share (`/model` ↔ `^l`-adjacent `Ctrl+L`,
+`/resume` ↔ `^s`, thinking-fold ↔ `Ctrl+T`, tool-fold ↔ `Ctrl+O`, copy-last
+↔ `y`/`Y`, skills in the palette ↔ `/skill:name`) are not listed.
+
+**Closed by this build**
+
+| pi | Mnemo |
+|---|---|
+| `@` fuzzy file reference | `@` in the prompt lists the working tree's files, subsequence-matched, tab/enter inserts the path in place |
+| queue: `Alt+Up` retrieves queued messages to edit | `alt+up` pulls the last queued message back into the editor, `alt+down` re-queues a draft first |
+| `Ctrl+C` clears the editor, twice quits | first `^c` clears a draft, `^c` while working interrupts, twice quits; the busy line says "^c stops" |
+| — | `u` in read mode undoes the last exchange from the transcript (view-level; the agent keeps the turn) |
+
+**Still gaps**
+
+- **Session branching** — pi's `/tree` (jump to any point, continue, switch
+  branches in place) and `/fork`/`/clone` (new session from a previous user
+  message / copy the active branch). Mnemo's session overlay resumes whole
+  sessions only. Needs a writer for the JSONL session tree; the format
+  (parentId branching) mirrors server-side work this build must not touch.
+- **`/compact`** — compaction lives in the agent's context engine. A
+  client-side fake would only remove messages the model still stands on.
+- **Pending-approval indicator** — the approval gate is an interactive-mode
+  extension; RPC mode does not emit approval events for Mnemo to draw.
+- **Theme picker** — the palette is centralised in `internal/theme` (one
+  struct, one colour source) but switching palettes at runtime is not wired.
+  This build ships one theme, deliberately.
+- **`!command` / `!!command`** boxes, **external editor** (`Ctrl+G`),
+  **`/export` `/import` `/share`**, **`/name`**, **`/session` info row**,
+  **path completion on tab**, **`/thinking` level control** — none wired; all
+  need either agent protocol surface or terminal features this build does not
+  reach for yet.
+- **Startup header** — Mnemo's header shows cwd + model as pi's does, but not
+  the loaded-skills/extensions census.
+
 ## Acceptance harness (golden frames)
 
 `app/golden_test.go` does to a curated set of scenarios exactly what `--dump`

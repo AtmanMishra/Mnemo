@@ -135,12 +135,26 @@ func (m *Model) Last() *Block {
 // Blocks exposes the list for callers that stream into the open block.
 func (m *Model) Blocks() []*Block { return m.blocks }
 
+// TruncateAt drops every block from i onwards — what undo needs. The
+// transcript is the present the reader sees; cutting a finished exchange from
+// it neither touches the backend nor rewrites the session file, so it is
+// asked first and said out loud.
+func (m *Model) TruncateAt(i int) {
+	if i < 0 || i >= len(m.blocks) {
+		return
+	}
+	m.blocks = m.blocks[:i]
+	m.ClearFocus()
+	if m.follow {
+		m.Bottom()
+	}
+}
+
 // Len is the number of blocks.
 func (m *Model) Len() int { return len(m.blocks) }
 
 // Clear empties the transcript, for a session switch.
-func (m *Model) Clear() {
-	m.blocks = nil
+func (m *Model) Clear() {	m.blocks = nil
 	m.focus, m.scroll = -1, 0
 	m.follow = true
 }

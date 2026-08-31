@@ -26,6 +26,8 @@ const (
 	Plugin
 	// Harness is a bundle of tools.
 	Harness
+	// File is a @-mention completion — a reference to a file, not a runnable.
+	File
 )
 
 func (k Kind) String() string {
@@ -36,6 +38,8 @@ func (k Kind) String() string {
 		return "plugin"
 	case Harness:
 		return "harness"
+	case File:
+		return "file"
 	}
 	return "built-in"
 }
