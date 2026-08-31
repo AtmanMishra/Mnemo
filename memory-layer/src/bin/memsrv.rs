@@ -258,6 +258,50 @@ fn handle(
             }))
         }
 
+        "recall_brief" => {
+            // ML-3: ready-to-inject memory block. Thin wrapper over the same
+            // search + state path — state text inlined, never bare scores.
+            let query = params.get("query").and_then(|q| q.as_str()).ok_or("missing 'query'")?;
+            let k = params.get("k").and_then(|k| k.as_u64()).unwrap_or(5) as usize;
+            let asked = parse_areas(params)?;
+            let routed = if asked.is_empty() { route_query(query) } else { asked.clone() };
+            let block = recall_brief(s, emb, query, k, &asked, &routed, *clock)?;
+            Ok(json!({
+                "block": block,
+                "routed": routed.iter().map(|a| format!("{a:?}")).collect::<Vec<_>>(),
+            }))
+        }
+
+        "remember" => {
+            // ML-3: one-call remember. Auto-routes the summary to a brain
+            // area with the same keyword heuristic search uses, then creates
+            // node + summary fact + log entry atomically.
+            let summary = params.get("summary").and_then(|sm| sm.as_str())
+                .ok_or("missing 'summary'")?;
+            let routed = route_query(summary);
+            let area = routed.first().copied().unwrap_or(Area::Semantic);
+            let label = params.get("label").and_then(|l| l.as_str()).map(str::to_string)
+                .unwrap_or_else(|| truncate(summary, 60));
+            let node = s.next_node;
+            // Aspect holds prose; a routed Procedural/Episodic/Salience area
+            // is an override, NOT a kind change (a Harness is a generated
+            // bundle, not prose)
+            apply(s, j, Op::CreateNode { id: node, kind: NodeKind::Aspect, label: label.clone(), at: *clock })?;
+            if area != Area::Semantic {
+                apply(s, j, Op::SetArea { node, area, at: *clock })?;
+            }
+            let fact_id = s.next_fact;
+            apply(s, j, Op::AddFact { node, fact_id, key: "summary".into(),
+                value: summary.into(), at: *clock })?;
+            apply(s, j, Op::CommitLog { node, kind: "remembered".into(),
+                detail: format!("remembered: {label}"), at: *clock })?;
+            Ok(json!({
+                "node": node,
+                "area": format!("{area:?}"),
+                "routed": routed.iter().map(|a| format!("{a:?}")).collect::<Vec<_>>(),
+            }))
+        }
+
         "steer" => {
             let episode = p_node(params, "episode")?;
             let failure = params.get("failure").and_then(|f| f.as_str())
@@ -329,6 +373,62 @@ fn handle(
             Ok(json!({ "forgot": node, "label": label }))
         }
 
-        other => Err(format!("unknown method '{other}' (supported: ping stats dump state create_node episode fact link search set_area forget steer good consolidate)")),
+        other => Err(format!("unknown method '{other}' (supported: ping stats dump state create_node episode fact link search recall_brief remember set_area forget steer good consolidate mark_useful)")),
+    }
+}
+
+/// ML-3: ready-to-inject memory block. Composes the existing search + state
+/// path — no new engine, no new storage. State text is ALWAYS inlined: an
+/// LLM cannot act on a bare similarity score (this was a real contract bug
+/// once).
+fn recall_brief(
+    s: &mut StoreData,
+    emb: &dyn Embedder,
+    query: &str,
+    k: usize,
+    asked: &[Area],
+    routed: &[Area],
+    now: Millis,
+) -> Result<String, String> {
+    let opts = SearchOpts::areas(asked.to_vec()).prefer(routed.to_vec());
+    let vectors = build_vectors(s, emb);
+    let results = search(s, &vectors, emb, query, k, now, &opts);
+
+    let mut block = format!("[memory recall \"{query}\"]\n\n");
+    block.push_str(&format!("routed areas: {}\n\n", area_names(routed)));
+    for (i, r) in results.iter().enumerate() {
+        let state = s.state_of(r.node).unwrap_or_default();
+        let indented: String = state.lines().map(|l| format!("  {l}\n")).collect();
+        block.push_str(&format!("hit {}/{} (score {:.3}{})\n",
+            i + 1, results.len(), r.score,
+            if r.via_graph { ", via graph" } else { "" }));
+        block.push_str(&indented);
+        if i + 1 < results.len() { block.push('\n'); }
+    }
+    // one-line provenance: which areas were searched + the newest change
+    // among the returned nodes (the caller can judge freshness at a glance)
+    let newest = results.iter().filter_map(|r| {
+        s.nodes.get(&r.node).and_then(|n| n.log.iter().map(|l| l.at).max())
+    }).max().unwrap_or(0);
+    let newest_id = results.iter().find(|r| {
+        s.nodes.get(&r.node).map(|n| n.log.iter().map(|l| l.at).max().unwrap_or(0)).unwrap_or(0)
+            == newest
+    }).map(|r| r.node);
+    block.push_str(&format!("\nprovenance: recalled {} node(s) from areas {}; newest changed {}\n",
+        results.len(), area_names(routed),
+        newest_id.map(|i| format!("node {i} at {newest}")).unwrap_or_else(|| "-".into())));
+    Ok(block)
+}
+
+fn area_names(areas: &[Area]) -> String {
+    if areas.is_empty() { "all".into() }
+    else { areas.iter().map(|a| format!("{a:?}")).collect::<Vec<_>>().join(", ") }
+}
+
+/// Truncate to a sensible label/headline length without splitting UTF-8.
+fn truncate(s: &str, max: usize) -> String {
+    match s.char_indices().nth(max) {
+        Some((i, _)) => format!("{}...", &s[..i]),
+        None => s.to_string(),
     }
 }
