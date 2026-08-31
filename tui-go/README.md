@@ -59,5 +59,25 @@ go run ./cmd/mnemo --dump --keys "ctrl+t,down,l"    # …after pressing keys
 `--dump` exists because a TUI cannot be screenshotted from a script, and "it
 looked right when I ran it" is not a check anybody else can repeat.
 
+## Acceptance harness (golden frames)
+
+`app/golden_test.go` does to a curated set of scenarios exactly what `--dump`
+does — resize, press keys, render — and pins the resulting text in
+`app/testdata/golden/`. The states covered: a fresh session, a conversation
+with thinking / tool output / a sub-agent all open, the palette overlay, and
+an active search. Colour is deliberately not part of the contract: the frames
+are ANSI-free, so a palette change cannot masquerade as a layout change and
+a layout change cannot hide behind a colour change.
+
+**Regolding** (only when the change is intentional — a new keyboard model, a
+moved status segment):
+
+```
+go test ./app/ -run TestAcceptanceGoldenFrames -update
+```
+
+Then review the diff before committing. A golden that "just changed a bit" is
+a regression wearing a fresh coat of paint.
+
 181 tests. The other suites stay green alongside it: `tui` 213, `agent` 212,
 `memory-layer` 44, `harness-engine` 19.

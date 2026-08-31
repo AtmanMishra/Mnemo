@@ -1,0 +1,30 @@
+  ▚ MNEMO ───────────────────────────────────────────────────────────────────── ~/tui-go ▌ offline
+  
+  ━━╾ TRANSCRIPT ╼━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  │ ready.                                                                                        
+                                                                                                  
+    · nothing is set up yet — /login logs in a provider, /model picks the default                 
+    · / — commands, skills and plugins. Start typing; pick with ↑ ↓                               
+    · ^k — the same list, as a palette                                                            
+    · ^e — open every thinking block at once                                                      
+    · ^t — the folder explorer, on the right                                                      
+    · ^s — sessions, and the sub-agents under them                                                
+                                                                                                  
+    tab moves between the prompt, the transcript and the explorer.                                
+    esc goes up one level, from anywhere. That is the whole model.                                
+    In the transcript and in any tree: ↑ ↓ move, → opens, ← closes.                               
+                                                                                                  
+                                                                                                  
+                                                                                                  
+                                                                                                  
+                                                                                                  
+                                                                                                  
+                                                                                                  
+                                                                                                  
+                                                                                                  
+                                                                                                  
+                                                                                                  
+  
+  ▊ ask, or press ^k                                                                              
+  
+   INSERT  ▌ enter send, or queue while busy ▌ tab prompt · transcript · e… 0/0 thinking ▌ 1 block

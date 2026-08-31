@@ -1,0 +1,30 @@
+  ▚ MNEMO ───────────────────────────────────────────────────────────────────── ~/tui-go ▌ offline
+  
+  ━━╾ TRANSCRIPT · 1 THINKING HIDDEN · ^E ╼━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                                                                                                  
+    · nothing is s╭──────────────────────────────────────────────────────────────╮                
+    · / — commands│ ━━╾ PALETTE ╼━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │                
+    · ^k — the sam│ every command, skill and plugin — type to filter, enter to … │                
+    · ^e — open ev│ BUILT-IN                                                     │                
+    · ^t — the fol│ ▌ /help                           ^h  every key and command  │                
+    · ^s — session│   /explorer           ^t  the folder explorer, on the right  │                
+                  │   /sessions                       ^s  resume a conversation  │                
+    tab moves betw│   /memory                          ^m  what Mnemo remembers  │                
+    esc goes up on│   /logs                       ^l  every run as a call graph  │                
+    In the transcr│   /thinking                   ^e  open every thinking block  │                
+                  │   /tools                          ^r  open every tool block  │                
+  ▊ how does the f│   /expand                               ^a  open everything  │                
+                  │   /collapse                            ^a  close everything  │                
+  · ▸ thinking    │   /copy                        Y  copy the whole transcript  │                
+                  │   /clear                                start a new session  │                
+  │ It reads flags│   /login                                                     │                
+                  │   /model                                                     │                
+  ● ▸ read  limit=│   /logout      forget a provider's key — /logout <provider>  │           40 ln
+                  │   /quit                                           ^d  leave  │                
+  ● ▸ bash  go tes╰──────────────────────────────────────────────────────────────╯          exit 1
+                                                                                                  
+  ● ▸ 1 sub-agent                                                                                 
+  
+  ▊ ask, or press ^k                                                                              
+  
+   PALETTE  ▌ type filter ▌ enter use this ▌ esc up one level              0/1 thinking ▌ 7 blocks
