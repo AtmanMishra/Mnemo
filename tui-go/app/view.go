@@ -7,6 +7,7 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/brand"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/chat"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/memory"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/theme"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/ui"
@@ -196,6 +197,7 @@ func (m *Model) body() string {
 		// opened it to act on is still visible behind it.
 		pw := m.overlayWidth()
 		m.ov.SetSize(pw, m.overlayHeight())
+		m.ov.SetFooter(m.memoryEditorLine()) // "" when there is no editor
 		backdrop := left
 		if r := m.explorerWidth(); r > 0 {
 			backdrop = ui.Columns(m.th, h,
@@ -215,7 +217,6 @@ func (m *Model) body() string {
 }
 
 // overlayWidth and overlayHeight size the floating panel.
-//
 // Two thirds of the screen, bounded: wide enough that a session title is not
 // truncated, narrow enough that the transcript is still readable around it.
 // A modal that fills the screen is a page wearing a border.
@@ -271,6 +272,28 @@ func (m *Model) bodyHeight() int {
 		h = 3
 	}
 	return h
+}
+
+// editing reports whether the memory editor is open. The status row drops
+// the list's writer hints while it is, because their keys are the edit's.
+func (m *Model) editing() bool { return m.editor != nil }
+
+// memoryEditorLine is the editor's one row inside the overlay: both fields,
+// the cursor on the live one, and the keys that get you out. Empty string
+// when there is no editor to show.
+func (m *Model) memoryEditorLine() string {
+	if !m.editing() || m.ov == nil || m.ov.Kind != overlay.Memory {
+		return ""
+	}
+	e := m.editor
+	key, value := e.key, e.value
+	if e.field == 0 {
+		key += "▏"
+	} else {
+		value += "▏"
+	}
+	return "edit “" + e.label + "” · key: " + key + " · value: " + value +
+		"   tab flips · enter saves · esc leaves"
 }
 
 // chatOrWelcome shows Nyx when there is nothing to read yet. She is the only
@@ -347,11 +370,22 @@ func (m *Model) status() string {
 		hints := m.keys.Hints(m.hintMode(), m.working)
 		if m.ov != nil {
 			hints = m.keys.OverlayHints(m.ov.IsTree())
-			if m.ov.Kind == overlay.Memory {
-				// A destructive key nobody is told about is a destructive key
-				// nobody uses — and one somebody eventually hits by accident.
-				h := m.keys.Forget.Help()
-				hints = append(hints, keymap.Entry{Key: h.Key, Desc: h.Desc})
+			if m.ov.Kind == overlay.Memory && !m.editing() {
+				// The memory list's writers belong on the row with the reader,
+				// like the forget key — but only where they can actually fire.
+				// Advertisement that outruns capability is how a key becomes
+				// "nothing happened".
+				if m.mem != nil && m.ov.Tree() != nil {
+					if n := m.ov.Tree().Current(); n != nil {
+						if _, ok := memory.NodeID(n.ID); ok {
+							hints = append(hints, keymap.Entry{Key: m.keys.Add.Help().Key, Desc: m.keys.Add.Help().Desc})
+						}
+						if _, _, _, ok := memory.FactRow(n.ID); ok {
+							hints = append(hints, keymap.Entry{Key: m.keys.Edit.Help().Key, Desc: m.keys.Edit.Help().Desc})
+						}
+					}
+				}
+				hints = append(hints, keymap.Entry{Key: m.keys.Forget.Help().Key, Desc: m.keys.Forget.Help().Desc})
 			}
 		}
 		for _, e := range hints {

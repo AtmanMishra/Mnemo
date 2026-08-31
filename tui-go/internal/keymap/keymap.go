@@ -85,6 +85,8 @@ type Map struct {
 	CollapseAll key.Binding
 	Choose      key.Binding
 	Forget      key.Binding
+	Add         key.Binding
+	Edit        key.Binding
 	Filter      key.Binding
 }
 
@@ -148,6 +150,8 @@ func New() Map {
 		CollapseAll: b("C", "collapse everything", "C"),
 		Choose:      b("enter", "use this", "enter"),
 		Forget:      b("d", "forget this memory", "d"),
+		Add:         b("n", "new fact", "n"),
+		Edit:        b("e", "edit this fact", "e"),
 		Filter:      b("/", "filter", "/"),
 	}
 }

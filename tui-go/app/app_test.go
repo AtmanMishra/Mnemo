@@ -1433,3 +1433,172 @@ func TestATypedModelNameWorksWhenTheCatalogueCannotBeAsked(t *testing.T) {
 		t.Fatalf("the typed name must be written, got %+v", f)
 	}
 }
+
+// --- the memory editor: add a fact, edit a fact --------------------------
+
+// scriptedMemSrv stands in for memsrv: one memory under Semantic holding one
+// fact, every request captured to a file so a test can assert the wire. The
+// scripted replies are what a real store returns for dump, state and fact.
+func scriptedMemSrv(t *testing.T, capture string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "memsrv")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in *'"exit"'*) exit 0;; esac
+  printf '%s\n' "$line" >> '` + capture + `'
+  id=$(printf '%s' "$line" | sed 's/.*"id":\([0-9]*\).*/\1/')
+  case "$line" in
+    *'"method":"dump"'*) printf '{"id":%s,"ok":true,"result":{"nodes":[{"id":22,"kind":"Aspect","area":"Semantic","label":"project","facts":1,"feeders":0}]}}\n' "$id";;
+    *'"method":"state"'*) printf '{"id":%s,"ok":true,"result":{"state":"- port: 8080"}}\n' "$id";;
+    *'"method":"fact"'*) printf '{"id":%s,"ok":true,"result":{"fact":7}}\n' "$id";;
+    *) printf '{"id":%s,"ok":true,"result":{}}\n' "$id";;
+  esac
+done
+`
+	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// memFixture is an app whose memory overlay talks to a scripted sidecar: the
+// real one replays a journal and may want an API key; the protocol is what is
+// under test.
+func memFixture(t *testing.T, capture string) *Model {
+	t.Helper()
+	m := fixture(t, 100, 30)
+	m.cfg.MemsrvBin = scriptedMemSrv(t, capture)
+	m.cfg.MemJournal = filepath.Join(t.TempDir(), "journal.jsonl")
+	return m
+}
+
+func TestAddingAFactWritesItThroughTheClient(t *testing.T) {
+	capt := filepath.Join(t.TempDir(), "req")
+	m := memFixture(t, capt)
+	press(t, m, "ctrl+m")
+	m.Overlay().Tree().ExpandAll()
+	press(t, m, "down") // onto the memory itself
+	press(t, m, "n")
+	if m.editor == nil || m.editor.node != 22 || m.editor.field != 0 {
+		t.Fatalf("n must open a key-first editor on the memory, got %+v", m.editor)
+	}
+	typeIn(t, m, "port")
+	press(t, m, "tab") // to the value
+	typeIn(t, m, "8080")
+	if !strings.Contains(screen(m), "value: 8080▏") {
+		t.Fatalf("the editor must show both fields and the live one:\n%s", screen(m))
+	}
+	press(t, m, "enter")
+	if m.editor != nil {
+		t.Fatal("saving must close the editor")
+	}
+	raw, _ := os.ReadFile(capt)
+	for _, want := range []string{`"method":"fact"`, `"node":22`, `"key":"port"`, `"value":"8080"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("the fact request is missing %s:\n%s", want, raw)
+		}
+	}
+	if !strings.Contains(screen(m), "wrote fact #7") {
+		t.Fatalf("saving must say what happened:\n%s", screen(m))
+	}
+}
+
+func TestEditingAFactCorrectsItsValue(t *testing.T) {
+	capt := filepath.Join(t.TempDir(), "req")
+	m := memFixture(t, capt)
+	press(t, m, "ctrl+m")
+	m.Overlay().Tree().ExpandAll()
+	press(t, m, "down") // the memory
+	press(t, m, "right") // load its facts
+	press(t, m, "down")  // onto "port: 8080"
+	press(t, m, "e")
+	if m.editor == nil {
+		t.Fatal("e on a fact row must open the editor")
+	}
+	if m.editor.key != "port" || m.editor.value != "8080" || m.editor.field != 1 {
+		t.Fatalf("the editor must be prefilled with the row and land on the value: %+v", m.editor)
+	}
+	typeIn(t, m, "9") // 8080 → 80809
+	press(t, m, "enter")
+	raw, _ := os.ReadFile(capt)
+	for _, want := range []string{`"method":"fact"`, `"key":"port"`, `"value":"80809"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("the correction is missing %s:\n%s", want, raw)
+		}
+	}
+}
+
+func TestTheEditorAbandonedIsAbandoned(t *testing.T) {
+	capt := filepath.Join(t.TempDir(), "req")
+	m := memFixture(t, capt)
+	press(t, m, "ctrl+m")
+	m.Overlay().Tree().ExpandAll()
+	press(t, m, "down")
+	press(t, m, "n")
+	typeIn(t, m, "port")
+	press(t, m, "esc")
+	if m.editor != nil {
+		t.Fatal("esc must leave the edit alone")
+	}
+	if raw, _ := os.ReadFile(capt); strings.Contains(string(raw), `"method":"fact"`) {
+		t.Fatalf("abandoning the editor must not write anything:\n%s", raw)
+	}
+}
+
+func TestAWritersKeyOnTheWrongRowSaysWhatIsMissing(t *testing.T) {
+	m := memFixture(t, filepath.Join(t.TempDir(), "req"))
+	press(t, m, "ctrl+m")
+	m.Overlay().Tree().ExpandAll()
+	press(t, m, "n") // still on the area heading
+	if !strings.Contains(screen(m), "that is an area") {
+		t.Fatalf("n on an area must say so:\n%s", screen(m))
+	}
+	press(t, m, "down") // onto the memory
+	press(t, m, "e")
+	if !strings.Contains(screen(m), "that is a memory") {
+		t.Fatalf("e on a memory must ask for a fact row:\n%s", screen(m))
+	}
+}
+
+func TestTheEditorDemandsAKey(t *testing.T) {
+	m := memFixture(t, filepath.Join(t.TempDir(), "req"))
+	press(t, m, "ctrl+m")
+	m.Overlay().Tree().ExpandAll()
+	press(t, m, "down")
+	press(t, m, "n")
+	press(t, m, "enter") // nothing typed
+	if m.editor == nil {
+		t.Fatal("a fact with no key is not a fact — the editor must stay open")
+	}
+	if !strings.Contains(screen(m), "a fact needs a key") {
+		t.Fatalf("it must say what is wrong:\n%s", screen(m))
+	}
+}
+
+func TestTheNewFactKeysAreAdvertisedWhereTheyWork(t *testing.T) {
+	m := memFixture(t, filepath.Join(t.TempDir(), "req"))
+	m.Resize(160, 30) // room for every advertised key
+	press(t, m, "ctrl+m")
+	m.Overlay().Tree().ExpandAll()
+	press(t, m, "down") // onto the memory itself
+	if !strings.Contains(lastLine(screen(m)), "n new fact") {
+		t.Fatalf("a writer key nobody is told about is one nobody uses: %q", lastLine(screen(m)))
+	}
+	press(t, m, "right") // load the facts
+	press(t, m, "down")  // onto the fact row
+	if !strings.Contains(lastLine(screen(m)), "e edit this fact") {
+		t.Fatalf("edit is only advertised where a fact is under the cursor: %q", lastLine(screen(m)))
+	}
+}
+
+func TestTheWriterKeysAreSilentWithoutAClient(t *testing.T) {
+	// No memsrv: the memory overlay is the error list, not a tree, and n/e
+	// must not pretend to work.
+	m := fixture(t, 100, 30)
+	m.cfg.MemsrvBin = ""
+	press(t, m, "ctrl+m")
+	press(t, m, "n")
+	if m.editor != nil {
+		t.Fatal("with no service there is nothing to add a fact to")
+	}
+}

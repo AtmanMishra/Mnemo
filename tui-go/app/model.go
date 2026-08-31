@@ -107,6 +107,9 @@ type Model struct {
 	// provider.
 	wizard string
 
+	// editor is the memory overlay's open fact editor, or nil when the list
+	// is just a list. While it is non-nil its keys own the overlay.
+	editor *memEditor
 	mem *memory.Client
 
 	// cmds is every slash command: built-ins, skills, plugins, bundles.

@@ -263,6 +263,12 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) global(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	k := m.keys
+	// An open memory editor owns every key the way a confirmation does: tab
+	// is its field-flip, not a surface cycle, and a global chord walking past
+	// the editor would leave it half-edited and unnoticed.
+	if m.editor != nil {
+		return nil, false
+	}
 	switch {
 	case key.Matches(msg, k.Quit):
 		if m.ov == nil && m.prompt.Empty() {
@@ -689,6 +695,13 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 	k := m.keys
 	ov := m.ov
 
+	// An open editor owns the overlay outright: its keystrokes are field
+	// text, not navigation, and it answers before the tree gets a chance to
+	// read n or e as movement.
+	if m.editor != nil {
+		return m.memEditorKey(msg)
+	}
+
 	if key.Matches(msg, k.Back) {
 		if m.ov.Kind == overlay.Models {
 			m.wizard = "" // skipping the wizard's model step is a choice, not a stuck flag
@@ -712,6 +725,18 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 	if ov.Kind == overlay.Login && key.Matches(msg, k.Forget) {
 		if id, ok := ov.Selected(); ok {
 			return m.logout(strings.TrimPrefix(id, "login:"))
+		}
+	}
+
+	// The memory tree's writers: n opens a fresh fact, e edits the row under
+	// the cursor. Offered only where they mean something, like d — a binding
+	// that fires in every list is a key nobody can trust.
+	if ov.Kind == overlay.Memory && ov.Tree() != nil && !ov.Typing() {
+		switch {
+		case key.Matches(msg, k.Add):
+			return m.memNewFact()
+		case key.Matches(msg, k.Edit):
+			return m.memEditFact()
 		}
 	}
 
@@ -1194,6 +1219,136 @@ func (m *Model) forgetSelected() tea.Cmd {
 		m.openMemory() // reload, so the row is actually gone
 		return m.notify("forgot " + label)
 	})
+}
+
+// --- memory editor: add a fact, edit a fact -------------------------------
+
+// memEditor is the smallest thing that can write a fact: a node to write to
+// and two fields. One struct, one line on screen, keys of its own — the
+// overlay stays the one surface, and the editor is a mode of the list it
+// already is.
+type memEditor struct {
+	node  int
+	label string
+	key   string
+	value string
+	field int // 0 = key, 1 = value
+}
+
+// memNewFact opens a fresh two-field editor on the memory under the cursor.
+func (m *Model) memNewFact() tea.Cmd {
+	if m.ov == nil || m.ov.Tree() == nil {
+		return nil
+	}
+	n := m.ov.Tree().Current()
+	if n == nil {
+		return nil
+	}
+	id, ok := memory.NodeID(n.ID)
+	if !ok {
+		return m.notify("that is an area — step into it and pick a memory")
+	}
+	if m.mem == nil {
+		return m.notify("the memory service is not connected")
+	}
+	m.editor = &memEditor{node: id, label: n.Label}
+	return m.notify("type the key, tab to the value, enter saves")
+}
+
+// memEditFact opens the editor prefilled from the fact row under the cursor.
+// The value is what you came to fix, so the cursor lands there.
+func (m *Model) memEditFact() tea.Cmd {
+	if m.ov == nil || m.ov.Tree() == nil {
+		return nil
+	}
+	n := m.ov.Tree().Current()
+	if n == nil {
+		return nil
+	}
+	node, key, value, ok := memory.FactRow(n.ID)
+	if !ok {
+		return m.notify("that is a memory — open it and pick one fact to edit")
+	}
+	if m.mem == nil {
+		return m.notify("the memory service is not connected")
+	}
+	m.editor = &memEditor{node: node, label: n.Label, key: key, value: value, field: 1}
+	return m.notify("edit the value, enter saves · esc leaves it alone")
+}
+
+// memEditorKey feeds one keystroke to the open editor.
+func (m *Model) memEditorKey(msg tea.KeyPressMsg) tea.Cmd {
+	k := m.keys
+	e := m.editor
+	switch {
+	case key.Matches(msg, k.Back):
+		m.editor = nil
+		return m.notify("left the edit alone")
+	case key.Matches(msg, k.Send) || msg.String() == "ctrl+j":
+		return m.memEditorSave()
+	case key.Matches(msg, k.Cycle):
+		e.field = 1 - e.field
+		return nil
+	case msg.String() == "backspace":
+		s := []rune(e.fieldValue())
+		if len(s) > 0 {
+			e.setField(string(s[:len(s)-1]))
+		}
+		return nil
+	default:
+		if r := msg.Key().Text; r != "" {
+			for _, c := range r {
+				e.setField(e.fieldValue() + string(c))
+			}
+		}
+		return nil
+	}
+}
+
+func (e *memEditor) fieldValue() string {
+	if e.field == 0 {
+		return e.key
+	}
+	return e.value
+}
+
+func (e *memEditor) setField(s string) {
+	if e.field == 0 {
+		e.key = s
+	} else {
+		e.value = s
+	}
+}
+
+// memEditorSave writes the fact and hands the list back.
+func (m *Model) memEditorSave() tea.Cmd {
+	e := m.editor
+	e.key = strings.TrimSpace(e.key)
+	if e.key == "" {
+		return m.notify("a fact needs a key")
+	}
+	// Value is allowed to be empty: a bare "flag: " is a real fact.
+	var id int
+	var err error
+	if m.mem != nil {
+		id, err = m.mem.AddFact(e.node, e.key, e.value)
+	}
+	if err != nil {
+		return m.notify("could not write: " + err.Error())
+	}
+	m.editor = nil
+	label := e.value
+	if label == "" {
+		label = "(no value)"
+	}
+	// The journal is append-only: this lands as a new fact, and a corrected
+	// re-statement keeps the old line beneath it, the way a tombstone keeps
+	// the record. Said out loud, or a reader counts two facts and wonders
+	// why typing an edit made the memory bigger.
+	return tea.Batch(
+		m.notify("wrote fact #"+itoa(id)+" to “"+e.label+"” · "+e.key+": "+label),
+		m.openMemory(),
+	)
 }
 
 // --- accounts and models -------------------------------------------------

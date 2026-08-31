@@ -344,6 +344,30 @@ func NodeID(id string) (int, bool) {
 	return n, true
 }
 
+// FactRow reads a fact row's pieces back out of its tree node id.
+//
+// Rows are built as "<node>: <state line>" and a state line is "  - key:
+// value". Values may contain colons, so the key/value split is on the FIRST
+// one after the dash. false means the row is not a fact at all — an area,
+// or a memory — which is what keeps "edit" off things that have no value.
+func FactRow(id string) (node int, key, value string, ok bool) {
+	prefix, line, found := strings.Cut(id, ":")
+	if !found {
+		return 0, "", "", false
+	}
+	n, err := strconv.Atoi(prefix)
+	if err != nil {
+		return 0, "", "", false
+	}
+	line = strings.TrimPrefix(strings.TrimSpace(line), "-")
+	line = strings.TrimSpace(line)
+	k, v, found := strings.Cut(line, ":")
+	if !found {
+		return 0, "", "", false
+	}
+	return n, strings.TrimSpace(k), strings.TrimSpace(v), true
+}
+
 // Forget removes a memory from the store and returns what it was called.
 //
 // The journal is append-only and replay must be exact, so this appends a
@@ -356,4 +380,78 @@ func (c *Client) Forget(id int) (string, error) {
 		return "", err
 	}
 	return str(res, "label"), nil
+}
+
+// --- writes -------------------------------------------------------------
+
+// AddFact appends one fact to a memory and returns its id (HANDOFF §5).
+//
+// The journal is append-only: nothing here rewrites history, so a "corrected"
+// re-statement lands as a new fact. The old line stays active — this matches
+// how the agent writes facts (memory_write_fact) — while the true replacement
+// mechanism, supersede, is Steer's fix: it needs the id AddFact returns.
+func (c *Client) AddFact(node int, key, value string) (int, error) {
+	res, err := c.Call("fact", map[string]any{"node": node, "key": key, "value": value})
+	if err != nil {
+		return 0, err
+	}
+	return num(res, "fact"), nil
+}
+
+// SetArea moves a memory between brain areas and returns the area it landed
+// in. Reversible, so the interface does not need to confirm it.
+func (c *Client) SetArea(node int, area string) (string, error) {
+	res, err := c.Call("set_area", map[string]any{"node": node, "area": area})
+	if err != nil {
+		return "", err
+	}
+	return str(res, "area"), nil
+}
+
+// CreateNode adds a memory. kind is one of aspect, entity, harness, outcome;
+// anything else is stored as an aspect. Returns the new node's id and area.
+func (c *Client) CreateNode(kind, label, area string) (int, string, error) {
+	params := map[string]any{"kind": kind, "label": label}
+	if area != "" {
+		params["area"] = area
+	}
+	res, err := c.Call("create_node", params)
+	if err != nil {
+		return 0, "", err
+	}
+	return num(res, "node"), str(res, "area"), nil
+}
+
+// Good marks an episode as having gone well, reinforcing its context.
+func (c *Client) Good(episode int, detail string) error {
+	_, err := c.Call("good", map[string]any{"episode": episode, "detail": detail})
+	return err
+}
+
+// Correction names a wrong fact and the truth that supersedes it.
+type Correction struct {
+	Node     int
+	OldFact  int64
+	NewKey   string
+	NewValue string
+}
+
+// Steer records a failure against an episode and — when fix is given —
+// supersedes the stale fact that caused it.
+//
+// Supersede is the store's only way to REPLACE a fact: the old one is marked
+// superseded and the new one becomes active. It rides on the steer frame
+// (HANDOFF §5 fix{node,fact,new_key,new_value}), which is why the interface's
+// "edit a fact" goes through here rather than through fact; the fact id to
+// pass calls home to what AddFact returned when the line was written.
+func (c *Client) Steer(episode int, failure string, fix *Correction) error {
+	params := map[string]any{"episode": episode, "failure": failure}
+	if fix != nil {
+		params["fix"] = map[string]any{
+			"node": fix.Node, "fact": fix.OldFact,
+			"new_key": fix.NewKey, "new_value": fix.NewValue,
+		}
+	}
+	_, err := c.Call("steer", params)
+	return err
 }

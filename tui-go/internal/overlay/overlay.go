@@ -78,6 +78,7 @@ type Model struct {
 	width  int
 	height int
 	typing bool // a flat overlay filters as you type; a tree waits for /
+	footer string
 }
 
 // NewList builds a flat overlay that filters as you type.
@@ -111,8 +112,14 @@ func (m *Model) SetSize(w, h int) {
 		h = 4
 	}
 	m.width, m.height = w, h
+	// A footer (the memory editor's line) costs the tree its last row, or
+	// the panel is one row taller than the box that floats it.
+	treeH := h - 3
+	if m.footer != "" {
+		treeH = h - 4
+	}
 	if m.tree != nil {
-		m.tree.SetSize(w-2, h-3)
+		m.tree.SetSize(w-2, treeH)
 	}
 	m.scrollIntoView()
 }
@@ -135,6 +142,15 @@ func (m *Model) SetQuery(s string) {
 	}
 	m.refilter()
 }
+
+// SetFooter gives the overlay a last line of its own — the memory editor's
+// field line. Clear it by setting "".
+func (m *Model) SetFooter(s string) {
+	m.footer = s
+}
+
+// Footer is the current footer, for tests.
+func (m *Model) Footer() string { return m.footer }
 
 // Backspace removes one character, and leaves tree filter mode when the query
 // empties — so esc is not the only way back to movement keys.
@@ -308,31 +324,32 @@ func (m *Model) View(t *theme.Theme) string {
 
 	if m.Count() == 0 {
 		b.WriteString(m.emptyView(t))
-		return b.String()
-	}
-	if m.tree != nil {
+	} else if m.tree != nil {
 		b.WriteString(m.tree.View(t, true))
-		return b.String()
-	}
-	h := m.body()
-	end := m.offset + h
-	if end > len(m.filtered) {
-		end = len(m.filtered)
-	}
-	var lastGroup string
-	rows := make([]string, 0, h)
-	for i := m.offset; i < end; i++ {
-		it := m.items[m.filtered[i]]
-		if it.Group != "" && it.Group != lastGroup {
-			lastGroup = it.Group
-			rows = append(rows, t.Faint.Render(strings.ToUpper(it.Group)))
-			if len(rows) >= h {
-				break
-			}
+	} else {
+		h := m.body()
+		end := m.offset + h
+		if end > len(m.filtered) {
+			end = len(m.filtered)
 		}
-		rows = append(rows, m.row(t, it, i == m.sel))
+		var lastGroup string
+		rows := make([]string, 0, h)
+		for i := m.offset; i < end; i++ {
+			it := m.items[m.filtered[i]]
+			if it.Group != "" && it.Group != lastGroup {
+				lastGroup = it.Group
+				rows = append(rows, t.Faint.Render(strings.ToUpper(it.Group)))
+				if len(rows) >= h {
+					break
+				}
+			}
+			rows = append(rows, m.row(t, it, i == m.sel))
+		}
+		b.WriteString(strings.Join(rows, "\n"))
 	}
-	b.WriteString(strings.Join(rows, "\n"))
+	if m.footer != "" {
+		b.WriteString("\n" + t.Accent.Render(ansi.Truncate(m.footer, m.width, "…")))
+	}
 	return b.String()
 }
 
