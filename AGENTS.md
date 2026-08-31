@@ -33,7 +33,7 @@ The terminal UI is **one unified surface** — no tab switching. The transcript 
 - Authentication: `/login` and `/logout` manage API keys per provider
 
 **Testing & Quality**
-- 270+ green tests across all packages
+- 330+ green tests across all packages
 - Mock agent for offline testing
 - Test fixtures for common scenarios (session resume, search, overlays, key dispatch)
 - go vet clean, zero warnings
@@ -122,7 +122,7 @@ go build -o mnemo ./cmd/mnemo
 
 ### Not in this build (by design)
 
-1. **Onboarding/auth/model switching**: First-run wizard still in Rust tui/src/auth.rs. Go side assumes pre-configured ~/.mnemo/auth.json. Can be migrated if needed.
+1. **Onboarding/auth/model switching**: First-run wizard still in Rust tui/src/auth.rs. Go side assumes pre-configured ~/.mnemo/auth.json. Can be migrated if needed. **(DONE 2026-08-31:** the /login + /model + logout flow, the provider→key→model wizard and first-run detection now ship in tui-go; see STATUS.md TUI-GO COMFORT run 2.**)**
 2. **Mouse click/wheel hit-testing**: Mouse reporting requested but never acted on. Choice: terminal drag-select (current) vs. in-app clicks (complicated, loses terminal's copy gesture).
 3. **Golden-file tests**: Tests check logic and text, not colour. Colour regressions not caught. Low value; would need visual-diff harness.
 4. **Overlay compositor**: Overlays float over a dimmed backdrop via Compositor (done). Harmonica springs not used; current spring physics is simple Y-offset (good enough).

@@ -236,3 +236,54 @@ Five backend packages, each green before the next, committed per increment. Tota
 - **P5 env propagation to sub-agents** (f2b36ed). Child env spread `process.env` held the shared-memory contract only by accident. New explicit `childMemoryEnv()`: materialises MNEMO_MEMORY_JOURNAL + MNEMO_MEMSRV_BIN, canonicalising the modern names even when the parent was configured via legacy SEA_* aliases, merged before trace/model env. Unit test (unset/modern/legacy) + end-to-end runSubagent through a fake CLI proving the child actually sees both vars (no LLM).
 
 - **Not done, honestly**: no live-LLM verification runs in this pass (deterministic-only per ground rules; model guidance updated separately to opencode-go / deepseek-v4-flash, commit 01cd05d). Discovery-time harness indexing, per-P2 multi-hop expansion, and shipping a learned steer policy are deliberately deferred (documented reasons above). Nothing was blocked.
+
+### TUI-GO COMFORT — RUN 2 (2026-08-31)
+Goal: make the Go TUI as comfortable and efficient as pi's interactive UI,
+one surface (transcript + esc-dismissible overlays), each package green
+before the next, committed per increment on top of the backend P1–P5 work.
+
+**Gap list vs pi** (recorded in tui-go/README.md "Pi-parity: the gap list"):
+closed this pass — @-mention file references, queue retrieve/reorder
+(alt+up/alt+down), undo-last-exchange, ^c affordance (clear draft / interrupt /
+twice-quit / busy-line "· ^c stops"); and the auth story (login/model/logout
+overlays, first-run wizard, model picker defaulting to deepseek-v4-flash under
+opencode-go). Still open (with reasons): session branching (/tree /fork
+/clone — needs a JSONL session-tree writer), /compact (agent-side context
+engine; a client fake would lie), pending-approval indicator (RPC emits no
+approval events), theme picker (single palette by design), !box / external
+editor / export-import-share / /name / path-tab / /thinking.
+
+**Per-W work** (each committed, tests green before the next):
+- Increment 1 (82005b7): preserved and finished the in-flight /login + /model
+  + logout overlay migration — new internal/auth (auth store + --list-models
+  catalogue parser), Config.Repo wiring, first-run detection (welcome hint +
+  live-agent accounts list), runSlash + builtin entries, flat-overlay d-key
+  fix. 275 → 291 tests.
+- W1 (4d23c6e): login wizard lands on a default model — post-login model step
+  scoped to the provider just pasted, enter-on-empty keeps the canonical
+  opencode-go/deepseek-v4-flash default, typed-name fallback, /model repoints
+  the account while the wizard never does. 291 → 296.
+- W2 (e8af75e): memory overlay writes — AddFact/SetArea/CreateNode/Good/Steer
+  client methods pinned by captured-request wire tests; two-field fact editor
+  (n new, e edit) as a mode of the overlay (footer row, tab flips, enter
+  saves, esc leaves; destructive/unsupported paths confirm or say why). 296 →
+  310.
+- W3 (6a8976d): tool output captured (ToolEnd.Out) and rendered natively in
+  foldable tool blocks — verbatim, never markdown, capped at 1000 lines with
+  a said-out-loud skip count; ^a/^r toggles intact. 310 → 314.
+- W4 (1ee7890): acceptance harness — golden frames for fresh / conversation-
+  open / palette / search states, ANSI-free by contract, -update to regold,
+  regolding documented in README. 314 → 316.
+- W5 (c76861e): pi-parity ergonomics (@-mention file menu, queue alt+up/down,
+  u=undo exchange, ^c clear-draft) + the recorded gap list. 316 → 330.
+
+**Verification evidence**: `go vet ./...` clean at every commit; `go test
+./...` 330 tests green (was 275 at pass start / 270+ at handover); offline
+--dump still renders; auth package schema test pins the agent's auth.json
+contract; memory wire tests use the fakeSrv pattern (no network); goldens
+byte-stable across machines (fixed pseudo-paths). Commits are on main, one
+ahead of origin at time of writing (c76861e), pushed.
+
+**Not done, honestly**: session fork/branch, /compact, approval indicator,
+theme picker, !box, external editor, export/import/share, /name, /session
+info, path-tab, /thinking — reasons in the README gap list; nothing blocked.
