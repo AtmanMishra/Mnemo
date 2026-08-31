@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { composeChildPrompt, extractAnswer, runSubagent } from "../src/tools/subagent.ts";
+import { composeChildPrompt, extractAnswer, runSubagent, childMemoryEnv } from "../src/tools/subagent.ts";
 
 describe("spawn_subagent", () => {
   const tmp = mkdtempSync(path.join(tmpdir(), "sea-subagent-"));
@@ -55,6 +55,76 @@ describe("spawn_subagent", () => {
     } finally {
       if (prev === undefined) delete process.env.SEA_AGENT_BIN;
       else process.env.SEA_AGENT_BIN = prev;
+    }
+  });
+
+  test("childMemoryEnv canonicalises journal+sidecar, legacy names included", () => {
+    const saved = {
+      journal: process.env.MNEMO_MEMORY_JOURNAL,
+      bin: process.env.MNEMO_MEMSRV_BIN,
+      legacy: process.env.SEA_MEMORY_JOURNAL,
+      legacyBin: process.env.SEA_MEMSRV_BIN,
+    };
+    try {
+      delete process.env.MNEMO_MEMORY_JOURNAL;
+      delete process.env.MNEMO_MEMSRV_BIN;
+      // nothing configured -> nothing to carry (both sides resolve defaults)
+      assert.deepEqual(childMemoryEnv(), {});
+      // modern names pass through as-is
+      process.env.MNEMO_MEMORY_JOURNAL = "/tmp/graph.jsonl";
+      process.env.MNEMO_MEMSRV_BIN = "/tmp/memsrv";
+      assert.deepEqual(childMemoryEnv(), {
+        MNEMO_MEMORY_JOURNAL: "/tmp/graph.jsonl",
+        MNEMO_MEMSRV_BIN: "/tmp/memsrv",
+      });
+      // legacy-only config is canonicalised to the modern name, so the child's
+      // MemClient (which prefers MNEMO_*) resolves the SAME graph as the parent
+      delete process.env.MNEMO_MEMORY_JOURNAL;
+      delete process.env.MNEMO_MEMSRV_BIN;
+      process.env.SEA_MEMORY_JOURNAL = "/legacy/graph.jsonl";
+      process.env.SEA_MEMSRV_BIN = "/legacy/memsrv";
+      assert.deepEqual(childMemoryEnv(), {
+        MNEMO_MEMORY_JOURNAL: "/legacy/graph.jsonl",
+        MNEMO_MEMSRV_BIN: "/legacy/memsrv",
+      });
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  test("runSubagent hands MNEMO_MEMORY_JOURNAL + MNEMO_MEMSRV_BIN to the child", async () => {
+    const prev = {
+      MNEMO_AGENT_BIN: process.env.MNEMO_AGENT_BIN,
+      MNEMO_MEMORY_JOURNAL: process.env.MNEMO_MEMORY_JOURNAL,
+      MNEMO_MEMSRV_BIN: process.env.MNEMO_MEMSRV_BIN,
+    };
+    const childSeen = path.join(tmp, "child-seen.json");
+    const envCli = path.join(tmp, "env-agent.mjs");
+    writeFileSync(envCli, `
+      import { writeFileSync } from "node:fs";
+      writeFileSync(${JSON.stringify(childSeen)}, JSON.stringify({
+        journal: process.env.MNEMO_MEMORY_JOURNAL ?? null,
+        sidecar: process.env.MNEMO_MEMSRV_BIN ?? null,
+      }));
+      console.log("ANSWER: env-checked");
+    `);
+    process.env.MNEMO_AGENT_BIN = envCli;
+    process.env.MNEMO_MEMORY_JOURNAL = "/shared/graph.jsonl";
+    process.env.MNEMO_MEMSRV_BIN = "/shared/memsrv";
+    try {
+      const r = await runSubagent({ task: "check env", timeoutMs: 15000 });
+      assert.equal(r.exitCode, 0);
+      const seen = JSON.parse(await import("node:fs").then((f) => f.readFileSync(childSeen, "utf8")));
+      assert.equal(seen.journal, "/shared/graph.jsonl", "child must share the parent's journal");
+      assert.equal(seen.sidecar, "/shared/memsrv", "child must share the parent's sidecar");
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
     }
   });
 

@@ -101,10 +101,12 @@ export function runSubagent(
   const started = Date.now();
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, composeChildPrompt(opts.task, opts.context)], {
-      // MNEMO_MEMORY_JOURNAL inherits -> SHARED memory graph.
-      // The trace env makes the child's spans hang off this call's span, so
-      // `mnemo traces` shows the whole delegation tree (5.4).
-      env: { ...process.env, ...childTraceEnv(), ...(opts.env ?? {}) },
+      // MNEMO_MEMORY_JOURNAL + MNEMO_MEMSRV_BIN propagate EXPLICITLY (P5):
+      // the child must share the parent's memory graph and sidecar, even when
+      // the parent was configured through the legacy SEA_* names. The trace
+      // env makes the child's spans hang off this call's span, so `mnemo
+      // traces` shows the whole delegation tree (5.4).
+      env: { ...process.env, ...childMemoryEnv(), ...childTraceEnv(), ...(opts.env ?? {}) },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -148,6 +150,25 @@ export function extractAnswer(stdout: string): string {
   const lines = stdout.split("\n").filter((l) => l.startsWith("ANSWER:"));
   if (lines.length > 0) return lines[lines.length - 1]!.slice("ANSWER:".length).trim();
   return stdout.trim();
+}
+
+/**
+ * The memory env a child MUST inherit to share the parent's graph.
+ *
+ * Explicit rather than implicit: canonicalises the MODERN variable names even
+ * when the parent was configured through the legacy SEA_* aliases, so the
+ * child's MemClient resolves the SAME journal and sidecar the parent uses —
+ * not merely "whatever happened to be in process.env". Empty when the parent
+ * runs on defaults (both processes resolve identical defaults from the same
+ * repo, so nothing needs carrying).
+ */
+export function childMemoryEnv(): Record<string, string> {
+  const out: Record<string, string> = {};
+  const journal = process.env.MNEMO_MEMORY_JOURNAL ?? process.env.SEA_MEMORY_JOURNAL;
+  if (journal) out.MNEMO_MEMORY_JOURNAL = journal;
+  const bin = process.env.MNEMO_MEMSRV_BIN ?? process.env.SEA_MEMSRV_BIN;
+  if (bin) out.MNEMO_MEMSRV_BIN = bin;
+  return out;
 }
 
 /** Trace ids to hand the child, or nothing when tracing is off. */
