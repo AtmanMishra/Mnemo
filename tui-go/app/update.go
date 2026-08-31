@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/auth"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/chat"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/command"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
@@ -65,6 +66,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prompt.Insert(msg.Content)
 		m.layout()
 		return m, nil
+
+	case modelsMsg:
+		return m, m.onModels(msg)
 
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
@@ -549,6 +553,12 @@ func (m *Model) runSlash(c command.Command, args string) tea.Cmd {
 	case "quit":
 		m.quitting = true
 		return tea.Quit
+	case "login":
+		return m.login(args)
+	case "model":
+		return m.openModels()
+	case "logout":
+		return m.logout(args)
 	}
 	return nil
 }
@@ -692,6 +702,15 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 	if ov.Kind == overlay.Memory && key.Matches(msg, k.Forget) && !ov.Typing() {
 		return m.forgetSelected()
 	}
+	// The same key, the same shape: d removes the thing under the cursor,
+	// wherever removing is a thing this list can do. The login list is a FLAT
+	// list, so it is always "typing" — unlike the memory tree, and the guard
+	// from there would make this branch unreachable, which is not a d-key.
+	if ov.Kind == overlay.Login && key.Matches(msg, k.Forget) {
+		if id, ok := ov.Selected(); ok {
+			return m.logout(strings.TrimPrefix(id, "login:"))
+		}
+	}
 
 	// A tree overlay keeps its movement keys until `/` is pressed; a flat one
 	// filters as you type, because a palette you have to arm is a palette
@@ -757,6 +776,14 @@ func (m *Model) chooseOverlay() tea.Cmd {
 		m.ov = nil
 		m.mode = keymap.Insert
 		return tea.Batch(m.prompt.Focus(), m.resume(id))
+	case overlay.Models:
+		m.ov = nil
+		m.mode = keymap.Insert
+		return tea.Batch(m.prompt.Focus(), m.chooseModel(id))
+	case overlay.Login:
+		m.ov = nil
+		m.mode = keymap.Insert
+		return tea.Batch(m.prompt.Focus(), m.login(strings.TrimPrefix(id, "login:")))
 	default:
 		m.ov = nil
 		m.mode = keymap.Insert
@@ -1153,5 +1180,144 @@ func (m *Model) forgetSelected() tea.Cmd {
 		}
 		m.openMemory() // reload, so the row is actually gone
 		return m.notify("forgot " + label)
+	})
+}
+
+// --- accounts and models -------------------------------------------------
+
+// openLogin lists the providers and says which are already set up.
+//
+// It does not ask for a key here. A key is a long opaque string that has to
+// be pasted, and pasting it into a list is not a thing a list can do — so
+// choosing a provider hands the prompt back with `/login <provider> ` already
+// typed, and the paste goes where every other paste goes.
+func (m *Model) openLogin() tea.Cmd {
+	f := auth.Load(m.cfg.Home)
+	items := make([]overlay.Item, 0, len(auth.Providers))
+	for _, p := range auth.Providers {
+		detail := "not set up"
+		if a, ok := f.Providers[p]; ok && len(a.Key) >= auth.MinKeyLen {
+			detail = "logged in"
+			if a.DefaultModel != "" {
+				detail += " · " + a.DefaultModel
+			}
+			if p == f.DefaultProvider {
+				detail += " · default"
+			}
+		}
+		items = append(items, overlay.Item{
+			Label: p, Detail: detail, Group: "provider", ID: "login:" + p,
+		})
+	}
+	m.ov = overlay.NewList(overlay.Login,
+		"which account the agent runs on — enter starts a login, "+string(m.keys.Forget.Keys()[0])+" logs one out",
+		items)
+	m.armOverlay()
+	return nil
+}
+
+// openModels lists what the logged-in providers actually offer.
+//
+// Asking the agent takes about half a second, which is too long to do inside
+// a keystroke, so the list arrives as a message and the overlay opens
+// immediately saying it is loading. An interface that freezes while it thinks
+// is one people stop pressing.
+func (m *Model) openModels() tea.Cmd {
+	m.ov = overlay.NewList(overlay.Models,
+		"every model your logged-in providers offer — enter makes it the default",
+		nil,
+		"Asking the agent for the catalogue…",
+		"This takes about half a second.",
+	)
+	m.armOverlay()
+	repo := m.cfg.Repo
+	return func() tea.Msg {
+		models, err := auth.Fetch(repo)
+		return modelsMsg{models: models, err: err}
+	}
+}
+
+// modelsMsg carries the catalogue back from the goroutine that asked for it.
+type modelsMsg struct {
+	models []auth.Model
+	err    error
+}
+
+func (m *Model) onModels(msg modelsMsg) tea.Cmd {
+	if m.ov == nil || m.ov.Kind != overlay.Models {
+		return nil // the reader moved on; do not yank them back
+	}
+	if msg.err != nil {
+		m.ov = overlay.NewList(overlay.Models,
+			"every model your logged-in providers offer", nil,
+			"Could not ask the agent for the catalogue.",
+			msg.err.Error(),
+			"An empty list and a failed question are different things —",
+			"this is the second.",
+		)
+		m.armOverlay()
+		return nil
+	}
+	f := auth.Load(m.cfg.Home)
+	items := make([]overlay.Item, 0, len(msg.models))
+	for _, mo := range msg.models {
+		detail := ""
+		if f.DefaultModelFor(mo.Provider) == mo.Name {
+			detail = "current"
+		}
+		items = append(items, overlay.Item{
+			Label: mo.Name, Detail: detail, Group: mo.Provider, ID: "model:" + mo.String(),
+		})
+	}
+	m.ov = overlay.NewList(overlay.Models,
+		"every model your logged-in providers offer — enter makes it the default",
+		items,
+		"No models available.",
+		"Log in to a provider first: /login",
+	)
+	m.armOverlay()
+	return nil
+}
+
+// chooseModel records a model as its provider's default.
+func (m *Model) chooseModel(id string) tea.Cmd {
+	provider, name, ok := strings.Cut(strings.TrimPrefix(id, "model:"), "/")
+	if !ok {
+		return nil
+	}
+	if _, err := auth.SetDefaultModel(m.cfg.Home, provider, name); err != nil {
+		return m.notify(err.Error())
+	}
+	// The running agent keeps the model it started with. Saying so is the
+	// difference between "nothing happened" and "it applies next time".
+	return m.notify("default model is now " + name + " · new sessions use it")
+}
+
+// login and logout, from the prompt.
+func (m *Model) login(args string) tea.Cmd {
+	provider, key, _ := strings.Cut(strings.TrimSpace(args), " ")
+	if provider == "" {
+		return m.openLogin()
+	}
+	if strings.TrimSpace(key) == "" {
+		m.prompt.SetValue("/login " + provider + " ")
+		return m.notify("paste the key after the provider, then enter")
+	}
+	if _, err := auth.SetKey(m.cfg.Home, provider, key, "", time.Now()); err != nil {
+		return m.notify(err.Error())
+	}
+	return m.notify("logged in to " + provider + " · /model picks one")
+}
+
+func (m *Model) logout(args string) tea.Cmd {
+	provider := strings.TrimSpace(args)
+	if provider == "" {
+		return m.notify("which provider? /logout <provider> · /login lists them")
+	}
+	return m.ask("log out of "+provider+"? — y / n", func(m *Model) tea.Cmd {
+		if _, err := auth.Logout(m.cfg.Home, provider); err != nil {
+			return m.notify(err.Error())
+		}
+		return m.notify("logged out of " + provider)
 	})
 }

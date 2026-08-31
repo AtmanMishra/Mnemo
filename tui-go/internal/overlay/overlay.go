@@ -27,6 +27,8 @@ const (
 	Memory
 	Logs
 	Help
+	Models
+	Login
 )
 
 func (k Kind) String() string {
@@ -41,6 +43,10 @@ func (k Kind) String() string {
 		return "logs"
 	case Help:
 		return "keys"
+	case Models:
+		return "model"
+	case Login:
+		return "login"
 	}
 	return ""
 }

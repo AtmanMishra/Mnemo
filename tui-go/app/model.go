@@ -16,6 +16,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/auth"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/chat"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/command"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/filetree"
@@ -45,6 +46,11 @@ type Config struct {
 
 	// HarnessDir holds tool bundles. A parameter for the same reason.
 	HarnessDir string
+
+	// Repo is the repository root holding agent/bin/mnemo.ts. It is what
+	// makes the model catalogue askable; without it /model can say why
+	// instead of showing an empty list.
+	Repo string
 }
 
 // NoticeFor is how long a one-off message stays in the status line.
@@ -128,6 +134,14 @@ func New(cfg Config) *Model {
 	}
 	m.chat.SetMarkdown(markdown.New(th))
 	m.cmds = command.Load(cfg.CWD, cfg.Home, cfg.HarnessDir)
+	// First run, with a real backend: the accounts list takes the screen,
+	// the way the Rust wizard's provider step did. Nothing works until one
+	// provider is logged in, and a list that says which are set up is the
+	// shortest route there. Dismissible, like every overlay — the welcome
+	// keeps the /login hint either way.
+	if !auth.Load(cfg.Home).Configured() && m.liveAgent() {
+		m.openLogin()
+	}
 	m.welcome()
 	m.layout()
 	return m
@@ -142,9 +156,19 @@ func (m *Model) Commands() []command.Command { return m.cmds }
 // keys that remove the most work, because the complaint this rebuild answers
 // was that nothing told you what anything did.
 func (m *Model) welcome() {
-	m.chat.Append(&chat.Block{Kind: chat.Agent, Body: []string{
+	body := []string{
 		"**ready.**",
 		"",
+	}
+	// First run is detected here, not once at startup: logging out and
+	// clearing can turn a configured home back into a first run, and the
+	// hint at the top is what makes a yes/no of it.
+	if !auth.Load(m.cfg.Home).Configured() {
+		body = append(body,
+			"- nothing is set up yet — `/login` logs in a provider, `/model` picks the default",
+			"")
+	}
+	body = append(body,
 		"- `/` — commands, skills and plugins. Start typing; pick with ↑ ↓",
 		"- `^k` — the same list, as a palette",
 		"- `^e` — open every thinking block at once",
@@ -154,7 +178,16 @@ func (m *Model) welcome() {
 		"`tab` moves between the prompt, the transcript and the explorer.",
 		"`esc` goes up one level, from anywhere. That is the whole model.",
 		"In the transcript and in any tree: ↑ ↓ move, → opens, ← closes.",
-	}})
+	)
+	m.chat.Append(&chat.Block{Kind: chat.Agent, Body: body})
+}
+
+// liveAgent reports whether a real backend is attached. An Offline agent is
+// a mock — dumps, tests, or a deliberate no-backend run — and no mock should
+// ever hijack the first frame with an accounts list nobody asked it for.
+func (m *Model) liveAgent() bool {
+	_, off := m.cfg.Agent.(agent.Offline)
+	return !off
 }
 
 // Init starts the program.

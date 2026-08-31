@@ -47,7 +47,7 @@ export function missingKeyMessage(sel: ProviderSelection | null): string {
       "  OPENAI_API_KEY       - use OpenAI models",
       "  ANTHROPIC_API_KEY    - use Anthropic models",
       "  OPENROUTER_API_KEY   - use OpenRouter models",
-      "  OPENCODE_API_KEY     - use OpenCode models (e.g. ox-alpha)",
+      "  OPENCODE_API_KEY     - use OpenCode models (e.g. deepseek-v4-flash)",
       "",
       "Optional overrides:",
       "  MNEMO_PROVIDER=openai|anthropic|openrouter force a provider when several keys are set",

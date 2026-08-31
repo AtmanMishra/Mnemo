@@ -258,7 +258,7 @@ func TestASkillPromptCarriesItsPathSoTheAgentCanReadIt(t *testing.T) {
 
 func TestLoadAlwaysIncludesTheBuiltins(t *testing.T) {
 	got := Load(t.TempDir(), t.TempDir(), t.TempDir())
-	for _, want := range []string{"help", "sessions", "memory", "logs", "clear", "quit"} {
+	for _, want := range []string{"help", "sessions", "memory", "logs", "login", "model", "logout", "clear", "quit"} {
 		if !has(got, want) {
 			t.Fatalf("/%s is missing: %v", want, names(got))
 		}

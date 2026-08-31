@@ -67,6 +67,9 @@ func Builtins() []Command {
 		{Name: "collapse", Desc: "close everything", Kind: Builtin, Chord: "^a"},
 		{Name: "copy", Desc: "copy the whole transcript", Kind: Builtin, Chord: "Y"},
 		{Name: "clear", Desc: "start a new session", Kind: Builtin},
+		{Name: "login", Desc: "log in a provider — /login <provider> <key>, or /login alone to list them", Kind: Builtin},
+		{Name: "model", Desc: "pick the default model from what your providers offer", Kind: Builtin},
+		{Name: "logout", Desc: "forget a provider's key — /logout <provider>", Kind: Builtin},
 		{Name: "quit", Desc: "leave", Kind: Builtin, Chord: "^d"},
 	}
 }

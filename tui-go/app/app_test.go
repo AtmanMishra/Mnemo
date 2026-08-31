@@ -1,13 +1,16 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/auth"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/chat"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
@@ -1050,5 +1053,257 @@ func TestNamesStillMatchByTheirInitials(t *testing.T) {
 	typeIn(t, m, "sess")
 	if _, ok := m.Overlay().Selected(); !ok {
 		t.Fatal("sess should find /sessions")
+	}
+}
+
+// --- accounts and models --------------------------------------------------
+
+// stubAgent is a real backends' shape without the process: not agent.Offline,
+// so first-run detection sees a live agent, and every method is the offline
+// stub because nothing here talks to it.
+type stubAgent struct{ agent.Offline }
+
+var _ agent.Agent = stubAgent{}
+
+func TestAFreshHomeSaysSetupIsMissing(t *testing.T) {
+	m := fixture(t, 100, 30)
+	if !strings.Contains(screen(m), "nothing is set up yet") {
+		t.Fatalf("a first run must say so:\n%s", screen(m))
+	}
+}
+
+func TestAConfiguredHomeDoesNotMentionSetup(t *testing.T) {
+	home := t.TempDir()
+	if _, err := auth.SetKey(home, "anthropic", "sk-ant-test-key-1234", "claude-x", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	m := New(Config{Home: home, CWD: t.TempDir(), Dark: true, Agent: agent.Offline{Reason: "test"}})
+	m.Resize(100, 30)
+	if strings.Contains(screen(m), "nothing is set up yet") {
+		t.Fatalf("a configured home is not a first run:\n%s", screen(m))
+	}
+}
+
+func TestFirstRunWithALiveAgentOpensTheAccountsList(t *testing.T) {
+	m := New(Config{Home: t.TempDir(), CWD: t.TempDir(), Dark: true, Agent: stubAgent{}})
+	m.Resize(100, 30)
+	if m.Overlay() == nil || m.Overlay().Kind != overlay.Login {
+		t.Fatalf("first run with a real backend should open the accounts list, got %v", m.Overlay())
+	}
+	press(t, m, "esc")
+	if m.Overlay() != nil {
+		t.Fatal("the accounts list is an overlay like every other: esc dismisses it")
+	}
+	if !strings.Contains(screen(m), "/login logs in a provider") {
+		t.Fatal("the hint must survive dismissal, so the way back is findable")
+	}
+}
+
+func TestAnOfflineAgentNeverStealsTheFirstFrame(t *testing.T) {
+	m := fixture(t, 100, 30)
+	if m.Overlay() != nil {
+		t.Fatalf("an offline/--dump run must not open a wizard nobody asked for: %v", m.Overlay())
+	}
+}
+
+func TestLoginOverlayListsEveryProviderAndTheirState(t *testing.T) {
+	m := fixture(t, 100, 30)
+	press(t, m, "/")
+	typeIn(t, m, "login")
+	press(t, m, "enter")
+	if m.Overlay() == nil || m.Overlay().Kind != overlay.Login {
+		t.Fatalf("expected the login overlay, got %v", m.Overlay())
+	}
+	s := screen(m)
+	for _, p := range []string{"anthropic", "openai", "openrouter", "opencode", "opencode-go"} {
+		if !strings.Contains(s, p) {
+			t.Fatalf("every provider must be listed, missing %q:\n%s", p, s)
+		}
+	}
+	if !strings.Contains(s, "not set up") {
+		t.Fatalf("a fresh home must say nothing is set up:\n%s", s)
+	}
+	press(t, m, "esc")
+	if m.Overlay() != nil {
+		t.Fatal("esc must close the login overlay")
+	}
+}
+
+func TestChoosingAProviderHandsThePromptBackForTheKey(t *testing.T) {
+	m := fixture(t, 100, 30)
+	press(t, m, "/")
+	typeIn(t, m, "login")
+	press(t, m, "enter")
+	press(t, m, "enter") // anthropic is first
+	if m.Overlay() != nil {
+		t.Fatal("choosing a provider must close the list")
+	}
+	if got := m.prompt.Value(); got != "/login anthropic " {
+		t.Fatalf("the prompt should be armed with the login, got %q", got)
+	}
+	if !strings.Contains(screen(m), "paste the key after the provider") {
+		t.Fatalf("it must say what to do next:\n%s", screen(m))
+	}
+}
+
+func TestTypingACredentialLogsInAndWritesTheStore(t *testing.T) {
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "/login openrouter sk-or-test-key-1234")
+	press(t, m, "enter")
+	if !strings.Contains(screen(m), "logged in to openrouter") {
+		t.Fatalf("login must say so:\n%s", screen(m))
+	}
+	f := auth.Load(m.Home())
+	if !f.Configured() || f.EffectiveProvider() != "openrouter" {
+		t.Fatalf("the store under the temp home must hold the login, got %+v", f)
+	}
+	if _, err := os.Stat(filepath.Join(m.Home(), ".mnemo", "auth.json")); err != nil {
+		t.Fatalf("auth.json should exist on disk: %v", err)
+	}
+}
+
+func TestAShortKeyIsRefusedAndNothingIsWritten(t *testing.T) {
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "/login openrouter short")
+	press(t, m, "enter")
+	if !strings.Contains(screen(m), "too short") {
+		t.Fatalf("the refusal must be shown, not swallowed:\n%s", screen(m))
+	}
+	if auth.Load(m.Home()).Configured() {
+		t.Fatal("a refused paste must not half-write the store")
+	}
+}
+
+func TestLogoutWithoutAProviderNamesOne(t *testing.T) {
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "/logout")
+	press(t, m, "enter")
+	if !strings.Contains(screen(m), "which provider?") {
+		t.Fatalf("it must say what is missing:\n%s", screen(m))
+	}
+}
+
+func TestLogoutAsksBeforeForgettingAndYRemovesTheKey(t *testing.T) {
+	m := fixture(t, 100, 30)
+	if _, err := auth.SetKey(m.Home(), "anthropic", "sk-ant-test-key-1234", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	typeIn(t, m, "/logout anthropic")
+	press(t, m, "enter")
+	if !strings.Contains(screen(m), "log out of anthropic?") {
+		t.Fatalf("forgetting a credential must ask first:\n%s", screen(m))
+	}
+	if !auth.Load(m.Home()).Configured() {
+		t.Fatal("nothing may be removed before the explicit yes")
+	}
+	press(t, m, "y")
+	if auth.Load(m.Home()).Configured() {
+		t.Fatal("y must remove the key")
+	}
+}
+
+func TestTheLoginListDKeyLogsOutWithConfirmation(t *testing.T) {
+	m := fixture(t, 100, 30)
+	if _, err := auth.SetKey(m.Home(), "openai", "sk-oa-test-key-1234", "gpt-x", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	press(t, m, "/")
+	typeIn(t, m, "login")
+	press(t, m, "enter")
+	press(t, m, "down") // anthropic → openai
+	press(t, m, "d")
+	if m.confirm == nil || !strings.Contains(screen(m), "log out of openai") {
+		t.Fatalf("d on the login list must ask first:\n%s", screen(m))
+	}
+	if !auth.Load(m.Home()).Configured() {
+		t.Fatal("the key must survive until the yes")
+	}
+	press(t, m, "y")
+	if auth.Load(m.Home()).Configured() {
+		t.Fatal("y must log it out")
+	}
+}
+
+func TestModelOverlayExplainsWhenItCannotAsk(t *testing.T) {
+	m := fixture(t, 100, 30)
+	press(t, m, "/")
+	typeIn(t, m, "model")
+	press(t, m, "enter")
+	if m.Overlay() == nil || m.Overlay().Kind != overlay.Models {
+		t.Fatalf("expected the models overlay, got %v", m.Overlay())
+	}
+	m.Update(modelsMsg{err: errors.New("no repository configured — start with --repo to list models")})
+	s := screen(m)
+	if !strings.Contains(s, "Could not ask the agent for the catalogue.") {
+		t.Fatalf("a failed question must not look like an empty account:\n%s", s)
+	}
+	if !strings.Contains(s, "start with --repo") {
+		t.Fatalf("the concrete fix must be on screen:\n%s", s)
+	}
+}
+
+func TestTheModelListArrivesAndMarksTheCurrentDefault(t *testing.T) {
+	m := fixture(t, 100, 30)
+	if _, err := auth.SetKey(m.Home(), "opencode-go", "sk-oc-test-key-1234", "deepseek-v4-flash", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	press(t, m, "/")
+	typeIn(t, m, "model")
+	press(t, m, "enter")
+	m.Update(modelsMsg{models: []auth.Model{
+		{Provider: "opencode-go", Name: "deepseek-v4-flash"},
+		{Provider: "opencode-go", Name: "kimi"},
+	}, err: nil})
+	s := screen(m)
+	if !strings.Contains(s, "deepseek-v4-flash") || !strings.Contains(s, "current") {
+		t.Fatalf("the row already in use must be marked:\n%s", s)
+	}
+}
+
+func TestChoosingAModelWritesItAsTheProviderDefault(t *testing.T) {
+	m := fixture(t, 100, 30)
+	if _, err := auth.SetKey(m.Home(), "opencode-go", "sk-oc-test-key-1234", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	press(t, m, "/")
+	typeIn(t, m, "model")
+	press(t, m, "enter")
+	m.Update(modelsMsg{models: []auth.Model{
+		{Provider: "opencode-go", Name: "deepseek-v4-flash"},
+		{Provider: "opencode-go", Name: "kimi"},
+	}, err: nil})
+	press(t, m, "down") // deepseek-v4-flash → kimi
+	press(t, m, "enter")
+	if got := auth.Load(m.Home()).DefaultModelFor("opencode-go"); got != "kimi" {
+		t.Fatalf("default model = %q, want kimi", got)
+	}
+	if !strings.Contains(screen(m), "default model is now kimi") {
+		t.Fatalf("choosing a model must say what happened:\n%s", screen(m))
+	}
+}
+
+func TestAModelCatalogueThatArrivesAfterTheOverlayClosedIsIgnored(t *testing.T) {
+	m := fixture(t, 100, 30)
+	press(t, m, "/")
+	typeIn(t, m, "model")
+	press(t, m, "enter")
+	press(t, m, "esc") // moved on before the list landed
+	m.Update(modelsMsg{models: []auth.Model{{Provider: "opencode-go", Name: "deepseek-v4-flash"}}})
+	if m.Overlay() != nil {
+		t.Fatal("a late catalogue must not yank the reader back into a list they closed")
+	}
+}
+
+func TestModelOnlyMakesSenseForALoggedInProvider(t *testing.T) {
+	// Greenfield: /model with nothing logged in still explains itself instead
+	// of pretending there is nothing to see. The overlay's empty state names
+	// the missing step.
+	m := fixture(t, 100, 30)
+	press(t, m, "/")
+	typeIn(t, m, "model")
+	press(t, m, "enter")
+	m.Update(modelsMsg{models: nil, err: nil})
+	if !strings.Contains(screen(m), "Log in to a provider first: /login") {
+		t.Fatalf("an empty catalogue must say what fills it:\n%s", screen(m))
 	}
 }

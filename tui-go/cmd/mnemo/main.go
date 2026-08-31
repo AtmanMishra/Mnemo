@@ -29,7 +29,7 @@ func main() {
 	)
 	flag.Parse()
 
-	cfg := app.Config{Home: *home, CWD: *cwd, Dark: true, MemsrvBin: *msrv, MemJournal: *jrnl, HarnessDir: *hdir}
+	cfg := app.Config{Home: *home, CWD: *cwd, Dark: true, MemsrvBin: *msrv, MemJournal: *jrnl, HarnessDir: *hdir, Repo: *repo}
 
 	// The live backend is opt-in by path rather than discovered, so running
 	// the interface never silently spawns a node process somebody did not ask
