@@ -72,6 +72,8 @@ type Map struct {
 	Toggle   key.Binding
 	Yank     key.Binding
 	YankAll  key.Binding
+	NextHit  key.Binding
+	PrevHit  key.Binding
 	Insert   key.Binding
 
 	// Browse — a tree with focus.
@@ -133,6 +135,8 @@ func New() Map {
 		Toggle:  b("enter", "fold or unfold", "enter", " "),
 		Yank:    b("y", "copy this block", "y"),
 		YankAll: b("Y", "copy the transcript", "Y"),
+		NextHit: b("n", "next match", "n"),
+		PrevHit: b("N", "previous match", "N"),
 		Insert:  b("i", "back to the prompt", "i", "a"),
 
 		Next:        b("↓", "down", "down", "j"),
@@ -172,7 +176,7 @@ func (m Map) Help() []Entry {
 		m.KeysHelp, m.Interrupt, m.Quit, m.Back)...)
 	out = append(out, group(Insert, m.Send, m.Steer, m.Newline, m.Complete, m.HistPrev, m.HistNext)...)
 	out = append(out, group(Read, m.Down, m.Up, m.HalfDown, m.HalfUp, m.Top, m.Bottom,
-		m.NextBlk, m.PrevBlk, m.Toggle, m.Yank, m.YankAll, m.Insert)...)
+		m.NextBlk, m.PrevBlk, m.Toggle, m.Yank, m.YankAll, m.NextHit, m.PrevHit, m.Insert)...)
 	out = append(out, group(Browse, m.Next, m.Prev, m.Open, m.Close, m.ExpandAll, m.CollapseAll, m.Choose, m.Filter)...)
 	return out
 }

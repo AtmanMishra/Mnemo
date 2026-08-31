@@ -265,6 +265,35 @@ func (m *Model) chatOrWelcome(h int) string {
 // you must visit to read.
 func (m *Model) status() string {
 	left := []ui.Seg{{Text: ui.Chip(m.th, m.modeName())}}
+
+	// A live search owns the row. The query has to be visible to be
+	// correctable, and the count next to it is what tells you the word you
+	// half-remembered is in here at all.
+	if m.searching || m.chat.Query() != "" {
+		q := m.chat.Query()
+		cur, total := m.chat.SearchAt()
+		caret := ""
+		if m.searching {
+			caret = "▏"
+		}
+		left = append(left, ui.Seg{Text: "/" + q + caret, Style: m.th.Ink})
+		switch {
+		case q == "":
+			left = append(left, ui.Seg{Text: "type to search · esc cancels", Style: m.th.Muted})
+		case total == 0:
+			left = append(left, ui.Seg{Text: "no matches", Style: m.th.Warn})
+		default:
+			left = append(left, ui.Seg{
+				Text:  itoa(cur) + " of " + itoa(total),
+				Style: m.th.Accent,
+			})
+			if !m.searching {
+				left = append(left, ui.Seg{Text: "n · N", Style: m.th.Muted})
+			}
+		}
+		return ui.Band(m.th, m.inner(), left, nil)
+	}
+
 	if n := m.Notice(); n != "" {
 		// A notice answers "why did nothing happen", so for its five seconds
 		// it outranks the counts. Sharing the row means a narrow terminal
@@ -316,6 +345,9 @@ func (m *Model) hintMode() keymap.Mode {
 }
 
 func (m *Model) modeName() string {
+	if m.searching {
+		return "find"
+	}
 	if m.ov != nil {
 		return m.ov.Kind.String()
 	}

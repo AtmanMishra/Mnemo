@@ -79,6 +79,11 @@ type Model struct {
 	follow bool // pinned to the bottom, which is the normal state
 	tick   int  // animation frame, for blocks that are still running
 	md     *markdown.Renderer
+
+	query    string
+	hits     []int
+	hit      int
+	counting bool
 }
 
 // SetMarkdown gives the transcript a renderer. Without one it draws the text
@@ -392,6 +397,18 @@ func (m *Model) render(t *theme.Theme) []row {
 			out = append(out, row{text: "", block: -1})
 		}
 		out = append(out, m.renderBlock(t, b, i, 0)...)
+	}
+	if m.query != "" && !m.counting {
+		// The hit list is indexed by row, so highlighting has to happen after
+		// every row exists — and recount() renders too, so it says so and
+		// this does not recurse.
+		cur := -1
+		if m.hit < len(m.hits) {
+			cur = m.hits[m.hit]
+		}
+		for i := range out {
+			out[i].text = highlight(t, out[i].text, m.query, i == cur)
+		}
 	}
 	return out
 }

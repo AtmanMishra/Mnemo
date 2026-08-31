@@ -807,3 +807,85 @@ func TestAnIdleHeaderIsAHairlineNotABand(t *testing.T) {
 		t.Fatal("a working header must show the ramp")
 	}
 }
+
+func TestFindIsRealAndNotJustABinding(t *testing.T) {
+	// ^f was documented in the key map and did nothing, which is the same
+	// failure as a pane called "Agents" that listed sessions: the interface
+	// promising something it does not do.
+	m := fixture(t, 100, 30)
+	m.Chat().Append(&chat.Block{Kind: chat.Agent, Body: []string{"the parser lives in internal/pi"}})
+	press(t, m, "ctrl+f")
+	typeIn(t, m, "parser")
+	s := lastLine(screen(m))
+	if !strings.Contains(s, "/parser") {
+		t.Fatalf("the query must be visible to be correctable: %q", s)
+	}
+	if !strings.Contains(s, "1 of 1") {
+		t.Fatalf("the count is what tells you the word is in here: %q", s)
+	}
+}
+
+func TestSearchSaysWhenThereIsNothing(t *testing.T) {
+	m := fixture(t, 100, 30)
+	press(t, m, "ctrl+f")
+	typeIn(t, m, "zzzqqq")
+	if !strings.Contains(lastLine(screen(m)), "no matches") {
+		t.Fatalf("silence is not an answer: %q", lastLine(screen(m)))
+	}
+}
+
+func TestEscapeAbandonsTheSearchAndItsMarks(t *testing.T) {
+	m := fixture(t, 100, 30)
+	press(t, m, "ctrl+f")
+	typeIn(t, m, "ready")
+	press(t, m, "esc")
+	if m.Chat().Query() != "" {
+		t.Fatal("esc must clear the query, or the transcript stays annotated")
+	}
+	if strings.Contains(lastLine(screen(m)), "/ready") {
+		t.Fatalf("the search line is still up: %q", lastLine(screen(m)))
+	}
+}
+
+func TestEnterKeepsTheResultsAndHandsBackNAndBigN(t *testing.T) {
+	m := fixture(t, 100, 30)
+	for i := 0; i < 3; i++ {
+		m.Chat().Append(&chat.Block{Kind: chat.Agent, Body: []string{"needle here"}})
+	}
+	press(t, m, "ctrl+f")
+	typeIn(t, m, "needle")
+	press(t, m, "enter")
+	if m.Chat().Query() != "needle" {
+		t.Fatal("enter keeps the query so n and N have something to step through")
+	}
+	before, _ := m.Chat().SearchAt()
+	press(t, m, "n")
+	after, _ := m.Chat().SearchAt()
+	if after == before {
+		t.Fatal("n must step to the next match once the search line is dismissed")
+	}
+	if !strings.Contains(lastLine(screen(m)), "n · N") {
+		t.Fatalf("the row must advertise the keys that are now live: %q", lastLine(screen(m)))
+	}
+}
+
+func TestBackspaceOnAnEmptyQueryLeavesSearch(t *testing.T) {
+	m := fixture(t, 100, 30)
+	press(t, m, "ctrl+f")
+	press(t, m, "backspace")
+	if strings.Contains(lastLine(screen(m)), "type to search") {
+		t.Fatal("backspacing past the start is how you back out without reaching for esc")
+	}
+}
+
+func TestSearchOwnsPrintableKeysWhileItIsUp(t *testing.T) {
+	// "n" is next-match in read mode. While the query line has the keys it
+	// has to be a letter, or you cannot search for anything with an n in it.
+	m := fixture(t, 100, 30)
+	m.Chat().Append(&chat.Block{Kind: chat.Agent, Body: []string{"navigation"}})
+	press(t, m, "ctrl+f")
+	typeIn(t, m, "nav")
+	if m.Chat().Query() != "nav" {
+		t.Fatalf("query = %q; a movement key ate a letter", m.Chat().Query())
+	}
+}

@@ -193,6 +193,12 @@ type Theme struct {
 	Selected lipgloss.Style
 	Key      lipgloss.Style
 
+	// Search hits. Every other match is dim, the one you are on is the
+	// accent reversed — so "where am I in the results" is answerable without
+	// reading the count.
+	Match    lipgloss.Style
+	MatchNow lipgloss.Style
+
 	// Texture is the header band at rest. It is drawn in the mascot's own
 	// rosette brown rather than in near-black: a band nobody can see is not
 	// restraint, it is a missing element, and the screen reads as unfinished.
@@ -240,6 +246,8 @@ func New(p Palette, g Glyphs, isDark bool) *Theme {
 	t.Label = s().Foreground(t.P.Accent).Bold(true)
 	t.Selected = s().Foreground(t.P.Ground).Background(t.P.Accent)
 	t.Key = s().Foreground(t.P.Accent)
+	t.Match = s().Foreground(t.P.Ground).Background(t.P.Warn)
+	t.MatchNow = s().Foreground(t.P.Ground).Background(t.P.Accent).Bold(true)
 	return t
 }
 

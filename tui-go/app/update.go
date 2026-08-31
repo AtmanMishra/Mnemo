@@ -229,7 +229,12 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if cmd, handled := m.global(msg); handled {
 		return m, cmd
 	}
-	// 2. Whatever has the screen.
+	// 2. The search line, when it is up: it owns every printable key, so it
+	// has to be asked before a mode gets a chance to read "n" as a movement.
+	if m.searching {
+		return m, m.searchKey(msg)
+	}
+	// 3. Whatever has the screen.
 	if m.ov != nil {
 		return m, m.overlayKey(msg)
 	}
@@ -298,6 +303,16 @@ func (m *Model) global(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case key.Matches(msg, k.AllBlocks):
 		opened := m.chat.ToggleEverything()
 		return m.notify(openedWord(opened) + " every block"), true
+
+	case key.Matches(msg, k.Find):
+		if m.ov != nil {
+			return nil, false // an overlay has its own filter; ^f there would be two
+		}
+		m.searching = true
+		m.mode = keymap.Read
+		m.prompt.Blur()
+		m.chat.Search("")
+		return nil, true
 
 	case key.Matches(msg, k.Cycle):
 		if m.prompt.MenuOpen() {
@@ -576,6 +591,14 @@ func (m *Model) readKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, k.Toggle):
 		if !m.chat.ToggleFocused() {
 			return m.notify("nothing folded here — J and K step between blocks")
+		}
+	case key.Matches(msg, k.NextHit):
+		if !m.chat.NextHit() {
+			return m.notify("no matches — ^f searches the transcript")
+		}
+	case key.Matches(msg, k.PrevHit):
+		if !m.chat.PrevHit() {
+			return m.notify("no matches — ^f searches the transcript")
 		}
 	case key.Matches(msg, k.Yank):
 		return m.copy(m.chat.YankFocused(), "block")
@@ -1014,3 +1037,49 @@ func itoa(n int) string {
 }
 
 var _ = os.Getenv
+
+// searchKey drives the ^f query line.
+//
+// It searches on every keystroke rather than waiting for enter. A search box
+// that does nothing until you commit makes you type the whole word before it
+// tells you the word is not there.
+func (m *Model) searchKey(msg tea.KeyPressMsg) tea.Cmd {
+	q := m.chat.Query()
+	switch {
+	case key.Matches(msg, m.keys.Back):
+		// esc abandons the search AND its highlights. Leaving the marks up
+		// after you have left would make the transcript look permanently
+		// annotated.
+		m.searching = false
+		m.chat.Search("")
+		return nil
+
+	case key.Matches(msg, m.keys.Choose):
+		// enter keeps the query and the highlights, and hands the keys back
+		// so n and N step through what was found.
+		m.searching = false
+		if !m.chat.FirstHit() {
+			return m.notify("no match for " + q)
+		}
+		return nil
+
+	case msg.String() == "backspace":
+		if q == "" {
+			m.searching = false
+			return nil
+		}
+		r := []rune(q)
+		m.chat.Search(string(r[:len(r)-1]))
+		return nil
+
+	case key.Matches(msg, m.keys.NextHit) && msg.Mod != 0:
+		m.chat.NextHit()
+		return nil
+	}
+
+	if txt := msg.Key().Text; txt != "" {
+		m.chat.Search(q + txt)
+		m.chat.FirstHit()
+	}
+	return nil
+}

@@ -78,6 +78,10 @@ type Model struct {
 	notice  string
 	noticed time.Time
 
+	// searching is true while ^f has the keys: every printable character goes
+	// into the query rather than to a mode.
+	searching bool
+
 	lastInterrupt time.Time
 	quitting      bool
 
