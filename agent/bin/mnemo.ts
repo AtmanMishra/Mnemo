@@ -36,10 +36,12 @@ import { seaToolsInline } from "../extensions/sea-tools-inline.ts";
 import { memoryLayerHooks, runConsolidate, sharedMem } from "../extensions/memory-layer.ts";
 import { discoverMcpTools, loadMcpConfig, setMcpTools } from "../src/mcp.ts";
 import { formatTree, readSpans, sessionsOf } from "../src/trace.ts";
+import { runSchedule } from "../src/schedule/cli.ts";
 import { checkNodeVersion } from "../src/runtime_check.ts";
 import approvalExt from "../extensions/approval-gate.ts";
 import tracingExt from "../extensions/tracing.ts";
 import hooksExt from "../extensions/hooks-inline.ts";
+import schedulesExt from "../extensions/schedules-inline.ts";
 
 const invokedDirectly = (() => {
   try {
@@ -230,6 +232,7 @@ function factories() {
     approvalExt,
     tracingExt,
     hooksExt,
+    schedulesExt,
   ];
 }
 
@@ -273,6 +276,19 @@ async function run(): Promise<void> {
     } finally {
       sharedMem.stop();
     }
+    return;
+  }
+  // schedules/triggers read and fire from local files; the spawned children
+  // carry their own auth, so this subcommand needs no provider of its own
+  if (argv[0] === "schedule") {
+    process.exitCode = await runSchedule(argv.slice(1), {
+      home: process.env.HOME ?? "",
+      cwd: process.cwd(),
+      env: process.env,
+      argv: argv.slice(1),
+      log: (s) => console.log(s),
+      err: (s) => console.error(s),
+    });
     return;
   }
   const PI_SUBCOMMANDS = ["install", "remove", "uninstall", "update", "list", "config"];

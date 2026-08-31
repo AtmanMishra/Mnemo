@@ -95,10 +95,10 @@ tool_result (modify) interception — NOT a replacement of pi's events.
 
 ## AREA 10 — SCHEDULES & TRIGGERS (research/all-in-one-agent-design.md Part B; design done, implementation pending)
 
-- [ ] 10.1 Cron/interval parser + ~/.mnemo/schedules.json job store (prompt, model override, scope, enabled, last/next run)
-- [ ] 10.2 `mnemo schedule` daemon + in-session ticker; double-fire prevented via memsrv journal fd-lock lease
-- [ ] 10.3 Every tick = TaskEpisode in the journal → steering + consolidation + mempolicy apply to scheduled work
-- [ ] 10.4 /trigger: on_failure, on_uncommitted, on_push (webhook), on_cost_over; /now fires any job
+- [x] 10.1 Cron/interval parser + ~/.mnemo/schedules.json job store (prompt, model override, scope, enabled, last/next run)
+- [x] 10.2 `mnemo schedule` daemon + in-session ticker; double-fire prevented via an agent-side lockfile lease (O_EXCL + pid + stale detection) — memsrv left untouched per the parallel-agent guard
+- [x] 10.3 Every tick = TaskEpisode in the journal → steering + consolidation + mempolicy apply to scheduled work (verified: pi emits session_start/shutdown in one-shot print mode; probe-spawn test proves the shared MNEMO_MEMORY_JOURNAL reaches the child)
+- [x] 10.4 /trigger: on_failure (turn_end), on_uncommitted (git dirty poll), on_cost_over (trace-cost budget); /now fires any job (on_push deferred — webhook listener needs a real HTTP surface, noted)
 - [ ] 10.5 Notifications (TUI status chip + opt-in OS notify) + Schedules overlay in tui-go
 
 ## AREA 11 — MEMORY-LAYER IMPROVEMENTS (research/memory-layer-improvements.md; curated — do NOT bloat the graph model)
