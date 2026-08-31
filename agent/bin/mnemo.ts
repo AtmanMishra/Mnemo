@@ -18,7 +18,8 @@
 // Our extensions run identically in every mode via extensionFactories:
 //   sea-tools-inline (all 14 tools), memory-layer (memory tools + lifecycle
 //   hooks + persistent-memory directive), approval-gate (y/n gate on
-//   bash_exec/write_file/apply_edit in interactive+TTY).
+//   bash_exec/write_file/apply_edit in interactive+TTY), hooks (user scoped
+//   pre/post-tool + lifecycle hooks: /hook list|test|add|disable).
 import { pathToFileURL } from "node:url";
 import * as path from "node:path";
 import { main } from "@earendil-works/pi-coding-agent";
@@ -38,6 +39,7 @@ import { formatTree, readSpans, sessionsOf } from "../src/trace.ts";
 import { checkNodeVersion } from "../src/runtime_check.ts";
 import approvalExt from "../extensions/approval-gate.ts";
 import tracingExt from "../extensions/tracing.ts";
+import hooksExt from "../extensions/hooks-inline.ts";
 
 const invokedDirectly = (() => {
   try {
@@ -227,6 +229,7 @@ function factories() {
     { name: "sea-memory", factory: memoryLayerHooks as any },
     approvalExt,
     tracingExt,
+    hooksExt,
   ];
 }
 

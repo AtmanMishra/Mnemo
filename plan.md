@@ -87,9 +87,9 @@ tool_result (modify) interception — NOT a replacement of pi's events.
 
 - [x] 9.1 Hook manifest + matchers: {id, trigger: PreToolUse|PostToolUse|UserPromptSubmit|TurnEnd|SessionStart|SessionShutdown|Notification, matcher{tool,path}, command, timeout, on{block,audit,modify}}; tool regex + path glob; scope resolution project (.mnemo/hooks) → user (~/.mnemo/hooks) → global (~/.config/mnemo/hooks), scoped-then-id order, any block veto wins
 - [x] 9.2 Executor: spawn command with JSON on stdin; exit 0 = allow, 2 = block with reason shown to model, other = allow + log error; timeout; PreToolUse arg-rewrite; PostToolUse result-modify
-- [ ] 9.3 Event wiring: PreToolUse on pi tool_call, PostToolUse on tool_result, lifecycle hooks on turn_end/session_start/session_shutdown, UserPromptSubmit
+- [x] 9.3 Event wiring: PreToolUse on pi tool_call, PostToolUse on tool_result, lifecycle hooks on turn_end/session_start/session_shutdown, UserPromptSubmit
 - [x] 9.4 Audit trail: every invocation (match, command, duration, exit, block reason, delta) through the existing ~/.mnemo/logs tracer with redaction
-- [ ] 9.5 `/hook list|test|add|disable`; add scaffolds the hook file into the chosen scope (script or harness bundle)
+- [x] 9.5 `/hook list|test|add|disable`; add scaffolds the hook file into the chosen scope (script or harness bundle)
 - [ ] 9.6 Memory indexing: hooks recorded as Procedural nodes (reuse harness indexing path) so sessions recall which hooks exist and why
 - [ ] 9.7 Tests: matcher unit, scope precedence, exit-code semantics, arg-rewrite/modify, audit lines, /hook flows; all deterministic, temp dirs, fake pi events (memory_lifecycle.test.ts pattern)
 
