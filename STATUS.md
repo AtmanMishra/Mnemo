@@ -353,3 +353,71 @@ in the manifest but not enforced (hooks inherit the parent's network); no
 live-LLM verification (deterministic-only ground rules). Duplicate memsrv
 sidecar: hooks-inline owns a second compact client alongside the memory-layer
 extension's — same journal, same protocol, acceptable for v1.
+
+### MEMORY-LAYER IMPROVEMENTS — AREA 11 (2026-08-31)
+All four 11.x checkboxes landed, committed per increment (cc8bcb6, 64c5e51-style
+wrappers commit, ML-2 commit, 57fd1e1; pushes below), each green before the
+next, every retrieval change measured before and after with
+`memeval --hash`. Guardrail respected: nothing but the three proposals; all
+seven NON-GOAL rows of research/memory-layer-improvements.md left unbuilt.
+
+- **11.1 caching** (cc8bcb6). (a) `SearchCache`: in-memory LRU (cap 256)
+  in memsrv, keyed on RESOLVED inputs (normalized query — case/whitespace
+  collapsed —, areas filter, k); sits after scoring so a hit is byte-equal
+  to the uncached path; response gains `"cache": hit|miss` for
+  observability. (b) `StoreData.state_of` memoized per node
+  (`#[serde(skip)]` field — snapshots stay byte-compatible), invalidated by
+  `apply()` on every journal op touching the node (edge-only ops provably
+  cannot change the derived text). No TTL, no shared cache, no external
+  store. Verified: `memeval --hash` byte-identical to baseline (Hit@1 73% /
+  Hit@3 77% / MRR 0.743, n=22 — every row equal); cargo test 54 → 64.
+- **11.3 thin wrappers** (recall_brief/remember commit). `recall_brief`
+  returns a ready-to-inject block: routed areas, top-k hits with State text
+  ALWAYS inlined (never bare scores — HANDOFF 6.6), one-line provenance
+  (areas + newest-changed node/at). `remember` auto-routes via the same
+  route_query heuristic (no cue words → Semantic), creates Aspect node +
+  summary fact + remembered log entry atomically; a routed area is an
+  override, never a kind change. Tests: real memsrv + temp journal +
+  forced hashing embedder (temp cwd + env-removed key): block shape, route
+  round-trip, cold replay. cargo test 64 → 66.
+- **11.2 usefulness feedback** (ML-2 commit + 57fd1e1). Exactly the doc's
+  Ceil: two counters, one multiplier, no learning-to-rank. New journaled
+  `Op::RecordUsefulness` + `useful`/`unhelpful` counters on Node (replay-
+  exact via serde defaults); memsrv `mark_useful {node, useful?}` RPC;
+  search()/search_ann() add `(useful - unhelpful) * 0.02` bias (zero votes
+  = zero bias = eval untouched). Crafted-corpus milestone PASSED:
+  identical-text ties break exactly toward the voted node (diff = n×0.02
+  ±1e-4), a couple of votes on junk cannot outrank a clear winner, so the
+  bias improves recall on the crafted corpus and is strictly neutral on
+  memeval. **Real bug caught during development**: a vote LOGGED like other
+  ops pollutes node_text (embeds last-3 log entries) and drifts a
+  heavily-voted node away from its topic — votes now update counters only
+  and stay model-visible via the state text line (display-only, never
+  embedded). Capture side: the agent recall hook votes every node it pulls
+  into the prompt useful (fire-and-forget, errors swallowed — memory never
+  breaks the turn); the TUI thumbs-down is the corrective channel (same
+  RPC; tui/ wiring out of scope this pass). The search LRU gained the
+  per-key invalidation ML-1 named as its "add when stale reads show up"
+  trigger (cache.retain + touched_nodes): a vote is observable on the very
+  next identical query, proven over the wire. cargo test 66 → 74.
+- **11.4 eval gate + totals**. memeval --hash before/after EVERY increment:
+  73% / 77% / 0.743 (n=22), all 22 rows byte-identical across the whole
+  pass. cargo test: 54 → 74 (9 LRU + memo units, 6 bias/counter units,
+  6 memsrv integration: cache transparency + keying, wrappers, feedback
+  loop incl. replay). agent npm test: 346 tests, 345 pass, 0 fail (two
+  consecutive runs; one schedule_cli subtest flaked once under parallel
+  load, passes standalone — pre-existing, unrelated to memory); tsc
+  --noEmit clean.
+- **Not done, honestly**: mempolicy routing deferred per the doc's own
+  "Add when" — counters must accumulate journal signal before a learned
+  weight replaces the fixed 0.02 multiplier (edge-weight nudging was NOT
+  implemented; the doc's Ceil is the score bias, and polluting edge
+  weights would disturb alive_at/SWITCH_THRESHOLD semantics). TUI
+  thumbs-up/down wiring not built (tui/ tree is being retired by the
+  tui-go agent — the mark_useful RPC is the contract it will call). The
+  recall-hook auto-vote nudges counters upward on every retrieval; the
+  thumbs-down channel is the balance, and both feed the same counters.
+  No live-LLM runs (deterministic-only ground rules). Non-goals respected:
+  no learned router, no recency decay, no cluster summaries, no proactive
+  ActivatedWith recall, no journal GC, no parallel reads, no diff/timeline
+  ops.
