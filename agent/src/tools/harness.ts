@@ -9,6 +9,7 @@
 import { Type } from "typebox";
 import * as path from "node:path";
 import { textResult, type SeaTool } from "./types.ts";
+import { indexHarness, sharedMem, type HarnessIndexInput } from "../../extensions/memory-layer.ts";
 
 const toolSpec = Type.Object({
   name: Type.String({ description: "Tool identifier, [a-z0-9_-]." }),
@@ -32,6 +33,12 @@ const parameters = Type.Object({
 export interface CreateHarnessDeps {
   /** Injectable for tests. Defaults to harness-engine's real implementation. */
   createHarness?: (opts: any) => Promise<any>;
+  /**
+   * Index the created bundle into memory (Harness node, Procedural area,
+   * manifest facts). Injectable for tests; defaults to the shared memsrv
+   * client so a harness the agent builds is recallable later.
+   */
+  indexHarness?: (bundle: HarnessIndexInput) => Promise<string>;
   root?: string;
 }
 
@@ -76,10 +83,29 @@ export function makeCreateHarnessTool(deps: CreateHarnessDeps = {}): SeaTool {
         });
         const pretty = (res.tools as string[]).map((t) =>
           t.replace(/^tools\//, "").replace(/\.mjs$/, ""));
+        // index the bundle into memory: best-effort, never breaks the call
+        let memNote = "";
+        try {
+          const index = deps.indexHarness ?? (async (bundle: HarnessIndexInput) => {
+            const r = await indexHarness(sharedMem, bundle);
+            return r.ok
+              ? `\nmemory: harness indexed as node #${r.node}`
+              : `\nmemory: index failed (${r.error})`;
+          });
+          memNote = await index({
+            name: params.name,
+            description: params.description,
+            tools: pretty,
+            dir: res.dir,
+            bundleId: res.bundleId,
+          });
+        } catch {
+          /* memory indexing must not fail create_harness */
+        }
         return textResult(
           `harness created: ${res.bundleId}\ntools: ${pretty.join(", ")}\nlocation: ${res.dir}\n` +
           `tools are registered for this session; the bundle persists on disk and is ` +
-          `discoverable via list_skills.`,
+          `discoverable via list_skills.` + memNote,
           { bundleId: res.bundleId, tools: pretty },
         );
       } catch (err: any) {

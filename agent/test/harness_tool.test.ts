@@ -18,6 +18,7 @@ describe("create_harness tool", () => {
     const realCreate = mod.createHarness;
     const tool = makeCreateHarnessTool({
       root,
+      indexHarness: async () => "", // hermetic: no memsrv in this suite
       createHarness: async (opts: any) => {
         opts.registry = new (ToolRegistry as any)();
         return realCreate(opts);
@@ -49,6 +50,7 @@ describe("create_harness tool", () => {
     const { ToolRegistry } = await import("../../harness-engine/src/registry.ts");
     const tool = makeCreateHarnessTool({
       root,
+      indexHarness: async () => "", // hermetic: no memsrv in this suite
       createHarness: async (opts: any) => {
         opts.registry = new (ToolRegistry as any)();
         return mod.createHarness(opts);

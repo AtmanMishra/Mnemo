@@ -360,6 +360,55 @@ export function newLifecycleState(): LifecycleState {
   return { episodeId: null, startEpisodes: null, steered: new Map() };
 }
 
+/**
+ * One harness bundle as the memory index sees it (name, purpose, tools…).
+ * Everything optional except the name: a created bundle always has all of them.
+ */
+export interface HarnessIndexInput {
+  name: string;
+  description?: string;
+  tools?: string[];
+  dir?: string;
+  bundleId?: string;
+}
+
+/**
+ * Index a harness bundle into memory: a Harness kind node in the Procedural
+ * area with the manifest carried as facts, so a later procedural search can
+ * recall "we built a tool for this" instead of only a disk path.
+ *
+ * Failures are reported, never thrown — indexing must not break the tool call
+ * that created the harness.
+ */
+export async function indexHarness(
+  client: Pick<MemClient, "request">,
+  bundle: HarnessIndexInput,
+): Promise<{ ok: true; node: number } | { ok: false; error: string }> {
+  const facts: Array<[string, string]> = [
+    ["description", bundle.description ?? ""],
+    ...(bundle.tools ?? []).map((t): [string, string] => ["tool", t]),
+  ];
+  if (bundle.dir) facts.push(["location", bundle.dir]);
+  if (bundle.bundleId) facts.push(["bundle", bundle.bundleId]);
+  try {
+    const created = await client.request("create_node", {
+      kind: "harness",
+      area: "procedural",
+      label: bundle.name,
+    });
+    if (!created.ok) return { ok: false, error: created.error ?? "create_node failed" };
+    const node = Number(created.result?.node);
+    for (const [key, value] of facts) {
+      if (!value) continue;
+      const f = await client.request("fact", { node, key, value });
+      if (!f.ok) return { ok: false, error: `fact ${key}: ${f.error}` };
+    }
+    return { ok: true, node };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 /** Live TaskEpisode count from the sidecar; null when unreachable. */
 export async function countEpisodes(
   client: Pick<MemClient, "request">,
