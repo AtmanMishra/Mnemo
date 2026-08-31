@@ -100,6 +100,13 @@ pub struct Node {
     pub context: Vec<ContextChunk>,
     pub created_at: Millis,
     pub deleted: bool,
+    /// ML-2: retrieval-usefulness votes (agent recall hook / TUI thumbs).
+    /// Counters only — the single bias they feed is in search scoring.
+    /// Old snapshots predate these fields, hence serde defaults.
+    #[serde(default)]
+    pub useful: u32,
+    #[serde(default)]
+    pub unhelpful: u32,
 }
 
 impl Node {
@@ -200,6 +207,14 @@ pub enum Op {
         node: NodeId,
         kind: String,
         detail: String,
+        at: Millis,
+    },
+    /// ML-2: one usefulness vote on a node (wall-clock-readable, replay-exact).
+    RecordUsefulness {
+        node: NodeId,
+        /// true = useful (thumbs-up / pulled into context and used),
+        /// false = unhelpful (thumbs-down / noise)
+        useful: bool,
         at: Millis,
     },
 }

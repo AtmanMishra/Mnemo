@@ -91,6 +91,15 @@ pub struct SearchOpts {
 /// finds the right node — the router is a keyword heuristic, it WILL be wrong.
 pub const CROSS_AREA_DISCOUNT: f32 = 0.85;
 
+/// ML-2: retrieval-score bias per net usefulness vote (`useful - unhelpful`).
+/// Small on purpose: it breaks near-ties toward nodes the agent/user actually
+/// found useful, but never outranks a genuinely better match. With zero votes
+/// (the eval corpus) the bias is exactly zero, so memeval is unaffected. The
+/// fixed multiplier can later be replaced by a mempolicy-learned weight once
+/// a journal accumulates enough signal — two counters, one multiplier, and
+/// NOT a learning-to-rank system.
+pub const USEFULNESS_BIAS: f32 = 0.02;
+
 impl SearchOpts {
     pub fn kind(k: NodeKind) -> Self {
         Self { kind: Some(k), ..Default::default() }
@@ -195,7 +204,13 @@ pub fn search(
     let q = emb.embed(&expand_query_aliases(query));
     let mut scored: Vec<(NodeId, f32)> = vectors.iter()
         .filter(|(id, _)| passes_filter(store, **id, opts))
-        .map(|(id, v)| (*id, cosine(&q, v) * opts.area_weight(store, *id)))
+        .map(|(id, v)| {
+            let base = cosine(&q, v) * opts.area_weight(store, *id);
+            let bias = store.nodes.get(id)
+                .map(|n| (n.useful as i32 - n.unhelpful as i32) as f32 * USEFULNESS_BIAS)
+                .unwrap_or(0.0);
+            (*id, base + bias)
+        })
         .filter(|(_, s)| *s > 1e-6)
         .collect();
     scored.sort_by(|a, b| b.1.total_cmp(&a.1));
@@ -216,7 +231,13 @@ pub fn search_ann(
     let seeds: Vec<(NodeId, f32)> = index.search(&q, k * 4).into_iter()
         .map(|(id, s)| (id as NodeId, s))
         .filter(|(id, _)| passes_filter(store, *id, opts))
-        .map(|(id, s)| (id, s * opts.area_weight(store, id)))
+        .map(|(id, s)| {
+            let base = s * opts.area_weight(store, id);
+            let bias = store.nodes.get(&id)
+                .map(|n| (n.useful as i32 - n.unhelpful as i32) as f32 * USEFULNESS_BIAS)
+                .unwrap_or(0.0);
+            (id, base + bias)
+        })
         .collect();
     expand(store, seeds, k, now, opts)
 }

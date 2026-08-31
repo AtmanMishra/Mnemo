@@ -8,7 +8,7 @@ use memory_layer::model::*;
 use memory_layer::persist::{self, Journal};
 use memory_layer::remote::OpenRouterEmbedder;
 use memory_layer::search::{build_vectors, route_query, search, SearchOpts};
-use memory_layer::cache::{normalize_query, SearchCache, SearchKey, SEARCH_CACHE_CAP};
+use memory_layer::cache::{normalize_query, touched_nodes, SearchCache, SearchKey, SEARCH_CACHE_CAP};
 use memory_layer::consolidate::consolidate;
 use memory_layer::steering::{reinforce, steer, Correction};
 use memory_layer::store::StoreData;
@@ -44,8 +44,12 @@ fn main() {
     let mut out = std::io::stdout();
     // ML-1: in-memory LRU for search results. Keyed on the resolved inputs
     // (normalized query, area filter, k); bounded; no TTL. A hit returns
-    // exactly what the uncached path would — it sits after scoring.
-    let mut search_cache: SearchCache<Vec<serde_json::Value>> = SearchCache::new(SEARCH_CACHE_CAP);
+    // exactly what the uncached path would — it sits after scoring. The
+    // value carries the hit node ids so journal ops touching a node can
+    // invalidate the keys that reference it (stale reads ARE the trigger
+    // ML-1 names; mark_useful must be observable on the next identical query).
+    let mut search_cache: SearchCache<(Vec<serde_json::Value>, Vec<NodeId>)> =
+        SearchCache::new(SEARCH_CACHE_CAP);
     for line in stdin.lock().lines() {
         let line = match line { Ok(l) => l, Err(_) => break };
         if line.trim().is_empty() { continue; }
@@ -86,7 +90,8 @@ fn op_at(op: &Op) -> Millis {
         | Op::SetArea { at, .. } | Op::DeleteNode { at, .. }
         | Op::Link { at, .. } | Op::Unlink { at, .. }
         | Op::Reweight { at, .. } | Op::RecordOutcome { at, .. }
-        | Op::PushContext { at, .. } | Op::CommitLog { at, .. } => *at,
+        | Op::PushContext { at, .. } | Op::CommitLog { at, .. }
+        | Op::RecordUsefulness { at, .. } => *at,
     }
 }
 
@@ -142,11 +147,18 @@ fn handle(
     j: &mut Journal,
     emb: &dyn Embedder,
     clock: &mut Millis,
-    cache: &mut SearchCache<Vec<serde_json::Value>>,
+    cache: &mut SearchCache<(Vec<serde_json::Value>, Vec<NodeId>)>,
 ) -> Result<serde_json::Value, String> {
     let mut apply = |s: &mut StoreData, j: &mut Journal, op: Op| -> Result<(), String> {
         s.apply(&op)?;
-        j.append(&op).map_err(|e| format!("journal write failed: {e}"))
+        j.append(&op).map_err(|e| format!("journal write failed: {e}"))?;
+        // ML-1 invalidation: an op touching a node drops every cached search
+        // result that references it, so re-running the same query observes
+        // the mutation (votes included — feedback is immediate).
+        for node in touched_nodes(&op) {
+            cache.retain(|(_, nodes)| !nodes.contains(&node));
+        }
+        Ok(())
     };
     match method {
         "ping" => Ok(json!({"pong": true})),
@@ -229,7 +241,7 @@ fn handle(
             // result. A hit skips routing+embed+scoring entirely.
             let key = SearchKey { query: normalize_query(query), areas: asked.clone(), k };
             let (results, from_cache) = match cache.get(&key) {
-                Some(hits) => (hits.clone(), "hit"),
+                Some((hits, _)) => (hits.clone(), "hit"),
                 None => {
                     let opts = SearchOpts::areas(asked).prefer(routed.clone());
                     let vectors = build_vectors(s, emb);
@@ -247,7 +259,9 @@ fn handle(
                             "state": s.state_of(r.node).unwrap_or_default(),
                         })
                     }).collect();
-                    cache.put(key, enriched.clone());
+                    let ids: Vec<NodeId> = enriched.iter()
+                        .filter_map(|h| h["node"].as_u64()).collect();
+                    cache.put(key, (enriched.clone(), ids));
                     (enriched, "miss")
                 }
             };
@@ -359,6 +373,18 @@ fn handle(
             let area = Area::parse(area).ok_or_else(|| format!("unknown area '{area}'"))?;
             apply(s, j, Op::SetArea { node, area, at: *clock })?;
             Ok(json!({ "area": format!("{area:?}") }))
+        }
+
+        "mark_useful" => {
+            // ML-2: record a retrieval-usefulness vote (agent recall hook /
+            // TUI thumbs). Counters only — the search score bias they feed
+            // lives in search.rs (USEFULNESS_BIAS).
+            let node = p_node(params, "node")?;
+            let useful = params.get("useful").and_then(|u| u.as_bool()).unwrap_or(true);
+            apply(s, j, Op::RecordUsefulness { node, useful, at: *clock })?;
+            let (u, un) = s.nodes.get(&node)
+                .map(|n| (n.useful, n.unhelpful)).unwrap_or((0, 0));
+            Ok(json!({ "node": node, "useful": u, "unhelpful": un }))
         }
 
         "forget" => {

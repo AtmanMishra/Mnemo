@@ -36,6 +36,7 @@ impl StoreData {
                         detail: format!("node created as {label}"),
                     }],
                     context: vec![], created_at: *at, deleted: false,
+                    useful: 0, unhelpful: 0,
                 });
                 self.next_node = self.next_node.max(id + 1);
                 self.state_memo.remove(id);
@@ -126,6 +127,17 @@ impl StoreData {
                 });
                 self.state_memo.remove(node);
             }
+            Op::RecordUsefulness { node, useful, .. } => {
+                // ML-2: a vote is counted, never LOGGED — node_text embeds
+                // a node's last-3 log entries, and vote noise would dilute
+                // the very content the vote rewards, drifting a heavily-
+                // voted node away from its topic. The counters stay
+                // model-visible through `state_of` text, which is display-
+                // only and never embedded.
+                let n = self.get_mut(*node)?;
+                if *useful { n.useful += 1; } else { n.unhelpful += 1; }
+                self.state_memo.remove(node);
+            }
         }
         Ok(())
     }
@@ -165,6 +177,9 @@ impl StoreData {
         s.push_str(&format!("context chunks: {}\n", n.context.len()));
         for c in &n.context {
             s.push_str(&format!("  <- #{} [dim {}]: {}\n", c.from, c.dim, c.note));
+        }
+        if n.useful > 0 || n.unhelpful > 0 {
+            s.push_str(&format!("usefulness votes: {} useful / {} unhelpful\n", n.useful, n.unhelpful));
         }
         self.state_memo.insert(id, s.clone());
         Ok(s)

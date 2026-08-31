@@ -70,7 +70,8 @@ fn main() {
             | Op::SupersedeFact { at, .. } | Op::SetArea { at, .. } | Op::DeleteNode { at, .. }
             | Op::Link { at, .. } | Op::Unlink { at, .. }
             | Op::Reweight { at, .. } | Op::RecordOutcome { at, .. }
-            | Op::PushContext { at, .. } | Op::CommitLog { at, .. } => *at,
+            | Op::PushContext { at, .. } | Op::CommitLog { at, .. }
+            | Op::RecordUsefulness { at, .. } => *at,
         };
         max_seen = max_seen.max(at);
     }

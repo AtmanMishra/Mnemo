@@ -221,3 +221,112 @@ mod p1 {
             "kind filter leaked through expansion: {r:?}");
     }
 }
+
+/// ML-2: retrieval-usefulness votes feed a small bias into the retrieval
+/// score (two counters, one multiplier — NOT a learning-to-rank system).
+#[cfg(test)]
+mod p5_feedback {
+    use crate::model::*;
+    use crate::search::{build_vectors, search, USEFULNESS_BIAS, SearchOpts};
+    use crate::store::StoreData;
+    use crate::vec::HashingEmbedder;
+
+    fn t() -> Millis { 1_700_000_000_000 }
+
+    /// Two nodes with IDENTICAL text (their vectors are byte-equal, so raw
+    /// cosine scores are exactly equal — a true tie) + a clearly unrelated
+    /// node.
+    fn near_tie_store() -> (StoreData, NodeId, NodeId, NodeId) {
+        let mut s = StoreData::new();
+        s.apply(&Op::CreateNode { id: 1, kind: NodeKind::Aspect,
+            label: "rollback runbook".into(), at: t() }).unwrap();
+        s.apply(&Op::AddFact { node: 1, fact_id: 1, key: "notes".into(),
+            value: "helm rollback release notes".into(), at: t() }).unwrap();
+        s.apply(&Op::CreateNode { id: 2, kind: NodeKind::Aspect,
+            label: "rollback runbook".into(), at: t() }).unwrap();
+        s.apply(&Op::AddFact { node: 2, fact_id: 2, key: "notes".into(),
+            value: "helm rollback release notes".into(), at: t() }).unwrap();
+        s.apply(&Op::CreateNode { id: 3, kind: NodeKind::Aspect,
+            label: "python venv setup".into(), at: t() }).unwrap();
+        s.apply(&Op::AddFact { node: 3, fact_id: 3, key: "venv".into(),
+            value: "create virtualenv with python3".into(), at: t() }).unwrap();
+        (s, 1, 2, 3)
+    }
+
+    fn search_top2(s: &StoreData, query: &str) -> (f32, f32) {
+        let emb = HashingEmbedder;
+        let vectors = build_vectors(s, &emb);
+        let r = search(s, &vectors, &emb, query, 5, t() + 1, &SearchOpts::default());
+        let a = r.iter().find(|x| x.node == 1).map(|x| x.score).unwrap_or(0.0);
+        let b = r.iter().find(|x| x.node == 2).map(|x| x.score).unwrap_or(0.0);
+        (a, b)
+    }
+
+    #[test]
+    fn zero_votes_leave_retrieval_exactly_unchanged() {
+        let (s, ..) = near_tie_store();
+        let (a, b) = search_top2(&s, "helm rollback release");
+        assert!((a - b).abs() < 1e-6, "no votes -> no bias: {a} vs {b}");
+    }
+
+    #[test]
+    fn useful_votes_break_a_near_tie_toward_the_voted_node() {
+        let (mut s, a, b, _) = near_tie_store();
+        for i in 0..5u32 {
+            s.apply(&Op::RecordUsefulness { node: a, useful: true, at: t() + 10 + i as u64 }).unwrap();
+        }
+        let (sa, sb) = search_top2(&s, "helm rollback release");
+        assert!(sa > sb, "voted node must win the tie: {sa} vs {sb}");
+        assert!((sa - sb - 5.0 * USEFULNESS_BIAS).abs() < 1e-4,
+            "bias must be exactly (useful - unhelpful) * multiplier: {sa} vs {sb}");
+    }
+
+    #[test]
+    fn unhelpful_votes_push_a_near_tie_down() {
+        let (mut s, a, b, _) = near_tie_store();
+        for i in 0..5u32 {
+            s.apply(&Op::RecordUsefulness { node: b, useful: false, at: t() + 10 + i as u64 }).unwrap();
+        }
+        let (sa, sb) = search_top2(&s, "helm rollback release");
+        assert!(sa > sb, "voted-down node must lose the tie: {sa} vs {sb}");
+    }
+
+    #[test]
+    fn a_handful_of_votes_cannot_hijack_a_clear_winner() {
+        let (mut s, a, _, _) = near_tie_store();
+        // vote the UNRELATED node useful a few times: it gains bias but the
+        // genuine match must still win
+        s.apply(&Op::RecordUsefulness { node: 3, useful: true, at: t() + 10 }).unwrap();
+        s.apply(&Op::RecordUsefulness { node: 3, useful: true, at: t() + 11 }).unwrap();
+        let emb = HashingEmbedder;
+        let vectors = build_vectors(&s, &emb);
+        let r = search(&s, &vectors, &emb, "helm rollback release", 5, t() + 12, &SearchOpts::default());
+        assert!(r[0].node == a || r[0].node == 2,
+            "a couple of votes on junk must not outrank the real match: {r:?}");
+    }
+
+    #[test]
+    fn votes_are_journaled_and_replay_exact() {
+        let (mut s, a, b, _) = near_tie_store();
+        s.apply(&Op::RecordUsefulness { node: a, useful: true, at: t() + 10 }).unwrap();
+        s.apply(&Op::RecordUsefulness { node: b, useful: false, at: t() + 11 }).unwrap();
+        // a fresh store replaying the same ops reaches identical counters
+        let mut s2 = StoreData::new();
+        let ops: Vec<Op> = vec![
+            Op::CreateNode { id: 1, kind: NodeKind::Aspect, label: "rollback runbook".into(), at: t() },
+            Op::CreateNode { id: 2, kind: NodeKind::Aspect, label: "rollback runbook".into(), at: t() },
+            Op::RecordUsefulness { node: 1, useful: true, at: t() + 10 },
+            Op::RecordUsefulness { node: 2, useful: false, at: t() + 11 },
+        ];
+        for op in &ops { s2.apply(op).unwrap(); }
+        assert_eq!(s2.nodes[&1].useful, s.nodes[&a].useful);
+        assert_eq!(s2.nodes[&2].unhelpful, s.nodes[&b].unhelpful);
+        // votes must NEVER touch the node log: node_text embeds the last-3
+        // log entries, and vote noise would dilute the very content the
+        // vote rewards (this was a real bug found by the crafted corpus)
+        assert!(!s2.nodes[&1].log.iter().any(|l| l.kind == "useful"));
+        // the counters are model-visible through state text instead
+        let st = s2.state_of(1).unwrap();
+        assert!(st.contains("usefulness votes: 1 useful / 0 unhelpful"));
+    }
+}

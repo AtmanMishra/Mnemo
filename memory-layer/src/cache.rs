@@ -13,7 +13,7 @@
 //! accepted for now — a memory layer is a cache of its own facts anyway —
 //! and if stale reads ever show up the fix is per-key invalidation on the
 //! journal ops that touch matching nodes, not a time-based cache.
-use crate::model::Area;
+use crate::model::{Area, NodeId, Op};
 use std::collections::{HashMap, VecDeque};
 
 /// Default bound for search-result caching (entries, not bytes).
@@ -77,10 +77,47 @@ impl<V> SearchCache<V> {
         }
     }
 
+    /// Drop every entry whose value fails `keep`. This is the per-key
+    /// invalidation prescribed by ML-1's "add when stale reads show up":
+    /// re-runs of the same query must see mutations, so journal ops that
+    /// touch a node invalidate the cached keys that reference it. Strictly
+    /// more cache misses — results are always recomputed identically.
+    pub fn retain(&mut self, mut keep: impl FnMut(&V) -> bool) {
+        let doomed: Vec<SearchKey> = self.map.iter()
+            .filter(|(_, v)| !keep(v))
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in &doomed {
+            self.map.remove(k);
+        }
+        self.order.retain(|k| !doomed.contains(k));
+    }
+
     pub fn len(&self) -> usize {
         self.map.len()
     }
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
+    }
+}
+
+/// Nodes a journal op changes the derived text of. Used to drop cached
+/// search results that reference a mutated node, so a re-run of the same
+/// query observes the mutation. Edge-only ops (Unlink/Reweight/
+/// RecordOutcome) change nothing a cached hit shows (facts/log/context/
+/// area/label), so they are not listed; `Link` topologically touches both
+/// endpoints, so it is.
+pub fn touched_nodes(op: &Op) -> Vec<NodeId> {
+    match op {
+        Op::CreateNode { id, .. } => vec![*id],
+        Op::AddFact { node, .. } => vec![*node],
+        Op::SupersedeFact { node, .. } => vec![*node],
+        Op::SetArea { node, .. } => vec![*node],
+        Op::DeleteNode { node, .. } => vec![*node],
+        Op::Link { src, dst, .. } => vec![*src, *dst],
+        Op::PushContext { to, .. } => vec![*to],
+        Op::CommitLog { node, .. } => vec![*node],
+        Op::RecordUsefulness { node, .. } => vec![*node],
+        Op::Unlink { .. } | Op::Reweight { .. } | Op::RecordOutcome { .. } => vec![],
     }
 }

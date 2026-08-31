@@ -2,7 +2,7 @@
 #[cfg(test)]
 mod lru_tests {
     use crate::cache::{normalize_query, SearchCache, SearchKey};
-    use crate::model::Area;
+    use crate::model::*;
 
     fn key(q: &str, areas: &[Area], k: usize) -> SearchKey {
         SearchKey { query: normalize_query(q), areas: areas.to_vec(), k }
@@ -42,6 +42,39 @@ mod lru_tests {
         assert_eq!(c.get(&key("a", &[], 1)), Some(&"A2"));
         assert_eq!(c.get(&key("b", &[], 1)), None);
         assert_eq!(c.get(&key("c", &[], 1)), Some(&"C"));
+    }
+
+    #[test]
+    fn retain_drops_only_matching_entries() {
+        let mut c = SearchCache::new(8);
+        c.put(key("a", &[], 1), vec![1u64]);
+        c.put(key("b", &[], 1), vec![2u64]);
+        c.put(key("c", &[], 1), vec![1u64, 3u64]);
+        c.retain(|ids| !ids.contains(&1)); // invalidate keys touching node 1
+        assert_eq!(c.get(&key("a", &[], 1)), None);
+        assert_eq!(c.get(&key("b", &[], 1)), Some(&vec![2u64]));
+        assert_eq!(c.get(&key("c", &[], 1)), None);
+        assert_eq!(c.len(), 1);
+    }
+
+    #[test]
+    fn touched_nodes_maps_every_op_variant() {
+        use crate::cache::touched_nodes;
+        let t = 1_700_000_000_000u64;
+        assert_eq!(touched_nodes(&Op::CreateNode { id: 7, kind: NodeKind::Aspect, label: "x".into(), at: t }), vec![7]);
+        assert_eq!(touched_nodes(&Op::AddFact { node: 7, fact_id: 1, key: "k".into(), value: "v".into(), at: t }), vec![7]);
+        assert_eq!(touched_nodes(&Op::SupersedeFact { node: 7, old_fact: 1, new_key: "k".into(), new_value: "v".into(), new_fact_id: 2, at: t }), vec![7]);
+        assert_eq!(touched_nodes(&Op::SetArea { node: 7, area: Area::Salience, at: t }), vec![7]);
+        assert_eq!(touched_nodes(&Op::DeleteNode { node: 7, hard: false, at: t }), vec![7]);
+        let mut both = touched_nodes(&Op::Link { id: 9, src: 7, dst: 8, kind: EdgeKind::PartOf, at: t });
+        both.sort();
+        assert_eq!(both, vec![7, 8]);
+        assert_eq!(touched_nodes(&Op::Unlink { edge: 9, at: t }), Vec::<u64>::new());
+        assert_eq!(touched_nodes(&Op::Reweight { edge: 9, delta: 0.1, at: t }), Vec::<u64>::new());
+        assert_eq!(touched_nodes(&Op::RecordOutcome { edge: 9, success: true, at: t }), Vec::<u64>::new());
+        assert_eq!(touched_nodes(&Op::PushContext { to: 7, chunk: ContextChunk { from: 8, dim: 4, vec: vec![], note: "n".into() }, at: t }), vec![7]);
+        assert_eq!(touched_nodes(&Op::CommitLog { node: 7, kind: "k".into(), detail: "d".into(), at: t }), vec![7]);
+        assert_eq!(touched_nodes(&Op::RecordUsefulness { node: 7, useful: true, at: t }), vec![7]);
     }
 
     #[test]
