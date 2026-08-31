@@ -33,7 +33,7 @@ The terminal UI is **one unified surface** — no tab switching. The transcript 
 - Authentication: `/login` and `/logout` manage API keys per provider
 
 **Testing & Quality**
-- 330+ green tests across all packages
+- 329 green tests across all packages
 - Mock agent for offline testing
 - Test fixtures for common scenarios (session resume, search, overlays, key dispatch)
 - go vet clean, zero warnings

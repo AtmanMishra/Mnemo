@@ -275,10 +275,10 @@ editor / export-import-share / /name / path-tab / /thinking.
   open / palette / search states, ANSI-free by contract, -update to regold,
   regolding documented in README. 314 → 316.
 - W5 (c76861e): pi-parity ergonomics (@-mention file menu, queue alt+up/down,
-  u=undo exchange, ^c clear-draft) + the recorded gap list. 316 → 330.
+  u=undo exchange, ^c clear-draft) + the recorded gap list. 316 → 329.
 
 **Verification evidence**: `go vet ./...` clean at every commit; `go test
-./...` 330 tests green (was 275 at pass start / 270+ at handover); offline
+./...` 329 tests green (was 275 at pass start / 270+ at handover); offline
 --dump still renders; auth package schema test pins the agent's auth.json
 contract; memory wire tests use the fakeSrv pattern (no network); goldens
 byte-stable across machines (fixed pseudo-paths). Commits are on main, one
