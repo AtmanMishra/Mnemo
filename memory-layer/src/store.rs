@@ -10,6 +10,11 @@ pub struct StoreData {
     pub next_node: NodeId,
     pub next_edge: EdgeId,
     pub next_fact: u64,
+    /// ML-1: memoized `state_of` snapshots. DERIVED scratch state — never
+    /// journaled, never serialized (a snapshot must replay identically);
+    /// invalidated by `apply` on any op that touches the node.
+    #[serde(skip)]
+    pub state_memo: HashMap<NodeId, String>,
 }
 
 impl StoreData {
@@ -33,6 +38,7 @@ impl StoreData {
                     context: vec![], created_at: *at, deleted: false,
                 });
                 self.next_node = self.next_node.max(id + 1);
+                self.state_memo.remove(id);
             }
             Op::AddFact { node, fact_id, key, value, at } => {
                 let n = self.get_mut(*node)?;
@@ -42,6 +48,7 @@ impl StoreData {
                 });
                 n.log.push(LogEntry { at: *at, kind: "fact_added".into(), detail: format!("{key}: {value}") });
                 self.next_fact = self.next_fact.max(fact_id + 1);
+                self.state_memo.remove(node);
             }
             Op::SupersedeFact { node, old_fact, new_key, new_value, new_fact_id, at } => {
                 let n = self.get_mut(*node)?;
@@ -67,6 +74,7 @@ impl StoreData {
                     at: *at, kind: "area_set".into(),
                     detail: format!("{old:?} -> {area:?}"),
                 });
+                self.state_memo.remove(node);
             }
             Op::DeleteNode { node, hard, at } => {
                 let n = self.get_mut(*node)?;
@@ -76,6 +84,7 @@ impl StoreData {
                     self.nodes.remove(node);
                 }
                 // kill outgoing/incoming context edges (soft-invalidated by Unlink ops at journal level)
+                self.state_memo.remove(node);
             }
             Op::Link { id, src, dst, kind, at } => {
                 self.must_exist(*src)?; self.must_exist(*dst)?;
@@ -88,6 +97,10 @@ impl StoreData {
                     success: 0, failure: 0,
                 });
                 self.next_edge = self.next_edge.max(id + 1);
+                // a new edge topologically touches both endpoints (future
+                // state text may cite feeders); invalidate defensively
+                self.state_memo.remove(src);
+                self.state_memo.remove(dst);
             }
             Op::Unlink { edge, at } => {
                 let e = self.edge_mut(*edge)?;
@@ -105,11 +118,13 @@ impl StoreData {
             }
             Op::PushContext { to, chunk, .. } => {
                 self.get_mut(*to)?.context.push(chunk.clone());
+                self.state_memo.remove(to);
             }
             Op::CommitLog { node, kind, detail, at } => {
                 self.get_mut(*node)?.log.push(LogEntry {
                     at: *at, kind: kind.clone(), detail: detail.clone(),
                 });
+                self.state_memo.remove(node);
             }
         }
         Ok(())
@@ -126,7 +141,17 @@ impl StoreData {
     }
 
     /// DERIVED state snapshot for the agent to read cheaply.
-    pub fn state_of(&self, id: NodeId) -> Result<String, String> {
+    ///
+    /// ML-1: memoized per node — the TUI memory pane and search enrichment
+    /// call this a lot and it is pure recompute (active facts + last-5 log +
+    /// context chunks). Every journal op that touches the node invalidates
+    /// the entry in `apply`, so the memo is never stale under the
+    /// replay-exact mutation discipline. Errors (missing node) are not
+    /// memoized.
+    pub fn state_of(&mut self, id: NodeId) -> Result<String, String> {
+        if let Some(s) = self.state_memo.get(&id) {
+            return Ok(s.clone());
+        }
         let n = self.nodes.get(&id).ok_or_else(|| format!("node {id} missing"))?;
         let mut s = format!("[{:?}/{:?}] {} #{}\n", n.kind, n.area, n.label, n.id);
         s.push_str("facts:\n");
@@ -141,6 +166,7 @@ impl StoreData {
         for c in &n.context {
             s.push_str(&format!("  <- #{} [dim {}]: {}\n", c.from, c.dim, c.note));
         }
+        self.state_memo.insert(id, s.clone());
         Ok(s)
     }
 

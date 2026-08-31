@@ -17,7 +17,7 @@ pub enum NodeKind {
 /// Specialized memory region. See research/brain-areas-design.md.
 /// Derived from `NodeKind` at creation, but stored on the node so it can be
 /// reassigned (Salience/Executive nodes have no dedicated kind).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum Area {
     Episodic,   // hippocampus: episodes + outcomes
     #[default]

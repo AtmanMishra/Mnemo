@@ -8,6 +8,7 @@ use memory_layer::model::*;
 use memory_layer::persist::{self, Journal};
 use memory_layer::remote::OpenRouterEmbedder;
 use memory_layer::search::{build_vectors, route_query, search, SearchOpts};
+use memory_layer::cache::{normalize_query, SearchCache, SearchKey, SEARCH_CACHE_CAP};
 use memory_layer::consolidate::consolidate;
 use memory_layer::steering::{reinforce, steer, Correction};
 use memory_layer::store::StoreData;
@@ -41,6 +42,10 @@ fn main() {
 
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();
+    // ML-1: in-memory LRU for search results. Keyed on the resolved inputs
+    // (normalized query, area filter, k); bounded; no TTL. A hit returns
+    // exactly what the uncached path would — it sits after scoring.
+    let mut search_cache: SearchCache<Vec<serde_json::Value>> = SearchCache::new(SEARCH_CACHE_CAP);
     for line in stdin.lock().lines() {
         let line = match line { Ok(l) => l, Err(_) => break };
         if line.trim().is_empty() { continue; }
@@ -57,7 +62,7 @@ fn main() {
 
         // bump logical clock so every op is strictly newer than the last
         clock += 1;
-        let reply = handle(&method, &params, &mut s, &mut journal, embedder.as_ref(), &mut clock);
+        let reply = handle(&method, &params, &mut s, &mut journal, embedder.as_ref(), &mut clock, &mut search_cache);
         match reply {
             Ok(result) => write_msg(&mut out, &id, true, &result),
             Err(err) => write_msg(&mut out, &id, false, &json!(err)),
@@ -137,6 +142,7 @@ fn handle(
     j: &mut Journal,
     emb: &dyn Embedder,
     clock: &mut Millis,
+    cache: &mut SearchCache<Vec<serde_json::Value>>,
 ) -> Result<serde_json::Value, String> {
     let mut apply = |s: &mut StoreData, j: &mut Journal, op: Op| -> Result<(), String> {
         s.apply(&op)?;
@@ -218,25 +224,37 @@ fn handle(
             // areas to PREFER — out-of-area nodes are discounted, not dropped
             let asked = parse_areas(params)?;
             let routed = if asked.is_empty() { route_query(query) } else { asked.clone() };
-            let opts = SearchOpts::areas(asked).prefer(routed.clone());
-            let vectors = build_vectors(s, emb);
-            let results = search(s, &vectors, emb, query, k, *clock, &opts);
-            // enrich hits with label + derived state so the caller can READ
-            // what was found (scores alone are useless to an LLM)
-            let enriched: Vec<serde_json::Value> = results.iter().map(|r| {
-                json!({
-                    "node": r.node,
-                    "score": r.score,
-                    "via_graph": r.via_graph,
-                    "label": s.nodes.get(&r.node).map(|n| n.label.clone()).unwrap_or_default(),
-                    "kind": s.nodes.get(&r.node).map(|n| format!("{:?}", n.kind)).unwrap_or_default(),
-                    "area": s.nodes.get(&r.node).map(|n| format!("{:?}", n.area)).unwrap_or_default(),
-                    "state": s.state_of(r.node).unwrap_or_default(),
-                })
-            }).collect();
+            // ML-1: LRU key on the resolved inputs. `prefer` is derived from
+            // the query/filter, so (query, areas, k) fully determines the
+            // result. A hit skips routing+embed+scoring entirely.
+            let key = SearchKey { query: normalize_query(query), areas: asked.clone(), k };
+            let (results, from_cache) = match cache.get(&key) {
+                Some(hits) => (hits.clone(), "hit"),
+                None => {
+                    let opts = SearchOpts::areas(asked).prefer(routed.clone());
+                    let vectors = build_vectors(s, emb);
+                    let results = search(s, &vectors, emb, query, k, *clock, &opts);
+                    // enrich hits with label + derived state so the caller can READ
+                    // what was found (scores alone are useless to an LLM)
+                    let enriched: Vec<serde_json::Value> = results.iter().map(|r| {
+                        json!({
+                            "node": r.node,
+                            "score": r.score,
+                            "via_graph": r.via_graph,
+                            "label": s.nodes.get(&r.node).map(|n| n.label.clone()).unwrap_or_default(),
+                            "kind": s.nodes.get(&r.node).map(|n| format!("{:?}", n.kind)).unwrap_or_default(),
+                            "area": s.nodes.get(&r.node).map(|n| format!("{:?}", n.area)).unwrap_or_default(),
+                            "state": s.state_of(r.node).unwrap_or_default(),
+                        })
+                    }).collect();
+                    cache.put(key, enriched.clone());
+                    (enriched, "miss")
+                }
+            };
             Ok(json!({
-                "results": enriched,
+                "results": results,
                 "routed": routed.iter().map(|a| format!("{a:?}")).collect::<Vec<_>>(),
+                "cache": from_cache,
             }))
         }
 

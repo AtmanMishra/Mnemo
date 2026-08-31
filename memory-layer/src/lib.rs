@@ -1,4 +1,5 @@
 pub mod ann;
+pub mod cache;
 pub mod consolidate;
 pub mod model;
 pub mod persist;
@@ -11,6 +12,8 @@ pub mod vec;
 
 #[cfg(test)]
 mod p0_tests;
+#[cfg(test)]
+mod cache_tests;
 #[cfg(test)]
 mod steering_tests;
 #[cfg(test)]
