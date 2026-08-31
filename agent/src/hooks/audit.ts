@@ -18,7 +18,7 @@ export interface AuditAttrs extends Record<string, unknown> {
   tool?: string;
   matched?: boolean;
   command?: string;
-  exit?: number;
+  exit?: number | null;
   duration_ms?: number;
   timed_out?: boolean;
   block?: boolean;

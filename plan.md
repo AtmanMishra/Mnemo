@@ -90,8 +90,8 @@ tool_result (modify) interception — NOT a replacement of pi's events.
 - [x] 9.3 Event wiring: PreToolUse on pi tool_call, PostToolUse on tool_result, lifecycle hooks on turn_end/session_start/session_shutdown, UserPromptSubmit
 - [x] 9.4 Audit trail: every invocation (match, command, duration, exit, block reason, delta) through the existing ~/.mnemo/logs tracer with redaction
 - [x] 9.5 `/hook list|test|add|disable`; add scaffolds the hook file into the chosen scope (script or harness bundle)
-- [ ] 9.6 Memory indexing: hooks recorded as Procedural nodes (reuse harness indexing path) so sessions recall which hooks exist and why
-- [ ] 9.7 Tests: matcher unit, scope precedence, exit-code semantics, arg-rewrite/modify, audit lines, /hook flows; all deterministic, temp dirs, fake pi events (memory_lifecycle.test.ts pattern)
+- [x] 9.6 Memory indexing: hooks recorded as Procedural nodes (reuse harness indexing path) so sessions recall which hooks exist and why
+- [x] 9.7 Tests: matcher unit, scope precedence, exit-code semantics, arg-rewrite/modify, audit lines, /hook flows; all deterministic, temp dirs, fake pi events (memory_lifecycle.test.ts pattern)
 
 ## AREA 10 — SCHEDULES & TRIGGERS (research/all-in-one-agent-design.md Part B; design done, implementation pending)
 

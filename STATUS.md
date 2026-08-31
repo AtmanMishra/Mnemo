@@ -295,3 +295,61 @@ Verification + the deferred discovery-indexing item + the bounded B3 retrieval e
 - **B2 idempotent discovery-time harness indexing** (c9920fd). Round 1 wired create-time indexing only; discovery-time was unwired because it could not dedupe. Now `list_skills` runs a discovery pass: `findHarnessBundles → indexDiscoveredHarnesses → ensureHarnessIndexed`, which looks up an existing Harness node by manifest identity (label + bundle path, verified exactly via `dump` + `state` facts) before `create_node` — the same bundle discovered twice, or created then rediscovered, yields exactly one node. `create_harness` goes through the same idempotent entry, so a reused bundle name across sessions stops duplicating nodes in the persistent journal. Lookup is dump+state (deterministic, exact), not semantic search; a dead sidecar falls through to the create path whose own failure is reported, never thrown. 10 new deterministic tests: RPC-shape fakes, an in-memory memsrv-like fake proving two discovery passes → one node, a broken bundle not stopping the pass, a real memsrv over a temp journal (reindex reuses / path-move forks / purpose recalls), and a list_skills wiring test in its own process (env set before first import, setProjectRoot/setSkillsHome overrides, temp journal). One test-time lesson: the shared memsrv client must be stopped in tests or the suite hangs, and its journal path binds at first module load, so the wiring test needed its own file/process.
 - **B3 bounded query-side alias map** (b199616). The P2 miss — "who gets paged when latency spikes" → "alert routing" — was pinned as a permanent corpus gap (embedding-level stem fix regressed 68% → 64% Hit@1 and was reverted). RUN 2 tried the sanctioned different mechanism: a tiny curated alias table applied to the QUERY only, at exact token boundary (`paged → page on-call`). Node text never changes, so blast radius is exactly queries containing "paged" — in the eval corpus, one query. Measured with a full before/after `memeval --hash` diff: the case flips rank 999 → 1, and the summary moves Hit@1 68% → 73%, Hit@3 73% → 77%, MRR 0.697 → 0.743, with all 21 other rows byte-identical — both gates pass. The pinned "left failing" verdict is superseded; root cause pins updated to the retrieved state (paging query → alert routing first, dashboards query untouched, exact-token-only contract), and any future alias entry must win the same two gates.
 - **Not done, honestly**: B3's alias map is deliberately ONE entry (paged) — no speculative expansion beyond the measured case. No live-LLM runs (deterministic-only per ground rules). Still deferred from round 1: per-P2 multi-hop expansion and shipping a learned steer policy. Everything committed is pushed; nothing blocked.
+
+### HOOKS ENGINE — AREA 9 (2026-08-31)
+The user-facing scoped hooks system (research/all-in-one-agent-design.md Part A):
+plain-script hooks wired to pi's tool_call (block/rewrite), tool_result (modify),
+input (block/transform), and the session lifecycle trio — scoped
+project→user→global, audited, recallable in memory. All seven 9.x checkboxes
+landed, committed per increment, each increment green before the next.
+
+- **9.1 manifest + matcher + scopes** (bf7c438). {id, trigger, matcher{tool
+  regex, path glob}, command, timeout, on{block,audit,modify}} with a
+  dependency-free glob engine (*/? never cross "/", ** does). Scope roots:
+  project `.mnemo/hooks` → user `~/.mnemo/hooks` → global
+  `~/.config/mnemo/hooks`; scoped-then-id order, per-id override (project
+  replaces the same user/global id), and a disabled project copy surfaces the
+  lower-scope copy instead of killing it. Disabled set persists to
+  ~/.mnemo/hook-state.json (0600). 15 tests.
+- **9.2 + 9.4 executor + audit** (fbbd5f0). Exit 0 = allow (stdout JSON = the
+  response), exit 2 = block with stderr-first reason, other exit or timeout =
+  allow + error (a stuck hook never breaks the loop); commands run via sh -c,
+  relative commands resolve against the manifest dir. Every invocation writes
+  a redacted "hook" span into the SAME ~/.mnemo/logs/<date>.jsonl as the
+  tracers (redaction included) — nothing a hook does is invisible. Injected
+  clock + timeoutMsOverride keep tests deterministic with real temp scripts.
+  12 tests.
+- **9.3 + 9.5 engine wiring + /hook commands** (0a26c9b). attachHooks() maps
+  the pi-agnostic engine onto tool_call/tool_result/input/turn_end/
+  session_start/session_shutdown (tests drive the same adapter through a fake
+  PiLike). Args rewrite in place only with on.modify; PostToolUse patches
+  content/details/isError; UserPromptSubmit blocks with a notify or
+  transforms. Registries rebuild per event → mid-session hook edits go live
+  immediately. `/hook list|test|add|disable|enable` with a quote-aware
+  tokenizer (pi passes args verbatim); add scaffolds manifest + chmod+755
+  stub script into the chosen scope; test dry-runs. Registered as the
+  sea-hooks extension (mnemo.ts factories); extension load smoke-tested
+  through a real `mnemo --help` run. 16 tests.
+- **9.6 memory indexing** (this pass). Each effective hook indexes as a
+  Procedural node (kind Harness, label `hook:<id>`, role/trigger/matcher/
+  scope/location/description facts — role=hook keeps them distinct from real
+  harness bundles), idempotent on (label, location) via dump+state, same rule
+  as the harness path; self-contained compact memsrv client (env-driven
+  binary/journal, deterministic hashing embedder unless remote opted in).
+  Wired at SessionStart and after /hook add, best-effort always. Fake-client
+  tests + a real-memsrv-over-temp-journal test proving a hook is searched
+  back from its stated purpose. 9 tests.
+
+Verification evidence: suite went 236 → 288 agent tests, all green,
+`npx tsc --noEmit` clean; each increment committed + pushed
+(bf7c438, fbbd5f0, 0a26c9b, and the 9.6 commit), always on top of whatever
+the parallel backend/tui agents had just landed; no shared files touched
+(backend's memory-layer.ts/harness.ts/skills.ts edits rode their own commits).
+
+**Not done, honestly**: harness-bundle scaffolding in `/hook add` (a hook
+whose command is produced by create_harness — v1 scaffolds plain scripts
+only); the Notification trigger (Part B schedules); `on.network` is declared
+in the manifest but not enforced (hooks inherit the parent's network); no
+live-LLM verification (deterministic-only ground rules). Duplicate memsrv
+sidecar: hooks-inline owns a second compact client alongside the memory-layer
+extension's — same journal, same protocol, acceptable for v1.
