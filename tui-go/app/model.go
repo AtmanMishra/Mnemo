@@ -100,6 +100,13 @@ type Model struct {
 	// the call it belongs to rather than being appended as a new line.
 	openTool map[string]*chat.Block
 
+	// wizard names the provider the login flow is setting up. Non-empty only
+	// while the model step of that wizard is on screen; the /model surface
+	// sets it to the empty string. It decides both what a late catalogue is
+	// scoped to and whether picking a model also repoints the default
+	// provider.
+	wizard string
+
 	mem *memory.Client
 
 	// cmds is every slash command: built-ins, skills, plugins, bundles.

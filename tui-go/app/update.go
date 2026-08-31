@@ -690,6 +690,9 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 	ov := m.ov
 
 	if key.Matches(msg, k.Back) {
+		if m.ov.Kind == overlay.Models {
+			m.wizard = "" // skipping the wizard's model step is a choice, not a stuck flag
+		}
 		m.ov = nil
 		m.mode = keymap.Insert
 		return m.prompt.Focus()
@@ -760,6 +763,20 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 
 func (m *Model) chooseOverlay() tea.Cmd {
 	ov := m.ov
+	// The models list gets its enter BEFORE anything about a selection:
+	// enter on empty is a question — "write it anyway" — answered by
+	// whatever the filter query holds: a typed model name, or the build's
+	// default when the wizard cannot produce a catalogue at all.
+	if ov.Kind == overlay.Models {
+		m.ov = nil
+		m.mode = keymap.Insert
+		wizard := m.wizard
+		m.wizard = ""
+		if id, ok := ov.Selected(); ok {
+			return tea.Batch(m.prompt.Focus(), m.chooseModel(id, wizard))
+		}
+		return tea.Batch(m.prompt.Focus(), m.chooseTypedModel(wizard, ov.Query()))
+	}
 	id, ok := ov.Selected()
 	if !ok {
 		return nil
@@ -776,10 +793,6 @@ func (m *Model) chooseOverlay() tea.Cmd {
 		m.ov = nil
 		m.mode = keymap.Insert
 		return tea.Batch(m.prompt.Focus(), m.resume(id))
-	case overlay.Models:
-		m.ov = nil
-		m.mode = keymap.Insert
-		return tea.Batch(m.prompt.Focus(), m.chooseModel(id))
 	case overlay.Login:
 		m.ov = nil
 		m.mode = keymap.Insert
@@ -1223,8 +1236,20 @@ func (m *Model) openLogin() tea.Cmd {
 // immediately saying it is loading. An interface that freezes while it thinks
 // is one people stop pressing.
 func (m *Model) openModels() tea.Cmd {
+	return m.openModelsFor("")
+}
+
+// openModelsFor is the same list, scoped to one provider — the wizard's
+// model step. During a login you can only pick that provider's models, else
+// the stored key you just pasted cannot serve what you picked.
+func (m *Model) openModelsFor(provider string) tea.Cmd {
+	m.wizard = provider
+	purpose := "every model your logged-in providers offer — enter makes it the default"
+	if provider != "" {
+		purpose = "pick " + provider + "'s default model — enter makes it the default, enter on empty keeps the build default"
+	}
 	m.ov = overlay.NewList(overlay.Models,
-		"every model your logged-in providers offer — enter makes it the default",
+		purpose,
 		nil,
 		"Asking the agent for the catalogue…",
 		"This takes about half a second.",
@@ -1233,27 +1258,41 @@ func (m *Model) openModels() tea.Cmd {
 	repo := m.cfg.Repo
 	return func() tea.Msg {
 		models, err := auth.Fetch(repo)
-		return modelsMsg{models: models, err: err}
+		return modelsMsg{models: models, err: err, provider: provider}
 	}
 }
 
 // modelsMsg carries the catalogue back from the goroutine that asked for it.
+// provider is non-empty when the wizard asked for one provider's models.
 type modelsMsg struct {
-	models []auth.Model
-	err    error
+	models   []auth.Model
+	err      error
+	provider string
 }
 
 func (m *Model) onModels(msg modelsMsg) tea.Cmd {
 	if m.ov == nil || m.ov.Kind != overlay.Models {
 		return nil // the reader moved on; do not yank them back
 	}
+	// The wizard only ever pictures one provider; a login must not end up
+	// offering a model the key it just stored cannot run.
+	if msg.provider != "" {
+		var scoped []auth.Model
+		for _, mo := range msg.models {
+			if mo.Provider == msg.provider {
+				scoped = append(scoped, mo)
+			}
+		}
+		msg.models = scoped
+	}
 	if msg.err != nil {
 		m.ov = overlay.NewList(overlay.Models,
-			"every model your logged-in providers offer", nil,
+			"every model your logged-in providers offer — enter makes it the default", nil,
 			"Could not ask the agent for the catalogue.",
 			msg.err.Error(),
 			"An empty list and a failed question are different things —",
-			"this is the second.",
+			"this is the second. Type a model name to pick one anyway,",
+			"or enter on empty to keep the provider's default.",
 		)
 		m.armOverlay()
 		return nil
@@ -1269,27 +1308,77 @@ func (m *Model) onModels(msg modelsMsg) tea.Cmd {
 			Label: mo.Name, Detail: detail, Group: mo.Provider, ID: "model:" + mo.String(),
 		})
 	}
-	m.ov = overlay.NewList(overlay.Models,
-		"every model your logged-in providers offer — enter makes it the default",
-		items,
-		"No models available.",
-		"Log in to a provider first: /login",
-	)
+	if msg.provider != "" {
+		m.ov = overlay.NewList(overlay.Models,
+			"pick "+msg.provider+"'s default model — type to filter, enter to pick",
+			items,
+			"Nothing listed for "+msg.provider+".",
+			"Type a model name and enter anyway, or enter on empty",
+			"to keep the build's default.",
+		)
+	} else {
+		m.ov = overlay.NewList(overlay.Models,
+			"every model your logged-in providers offer — enter makes it the default",
+			items,
+			"No models available.",
+			"Log in to a provider first: /login",
+		)
+	}
 	m.armOverlay()
 	return nil
 }
 
-// chooseModel records a model as its provider's default.
-func (m *Model) chooseModel(id string) tea.Cmd {
+// chooseModel records a chosen row as its provider's default. wizard is
+// non-empty when the pick came out of the login flow.
+func (m *Model) chooseModel(id, wizard string) tea.Cmd {
 	provider, name, ok := strings.Cut(strings.TrimPrefix(id, "model:"), "/")
 	if !ok {
 		return nil
 	}
+	return m.applyModel(provider, name, wizard == "")
+}
+
+// chooseTypedModel is the catalogue-less fallback: enter with no row picked
+// uses what was typed as the model name. An empty typed name on the wizard
+// step keeps the canonical default of the build — deepseek-v4-flash under
+// opencode-go — so first run works even when the agent cannot be asked.
+func (m *Model) chooseTypedModel(wizard, query string) tea.Cmd {
+	query = strings.TrimSpace(query)
+	provider := wizard
+	if provider == "" {
+		provider = auth.Load(m.cfg.Home).EffectiveProvider()
+		if provider == "" {
+			return m.notify("log in a provider first: /login")
+		}
+	}
+	if query == "" {
+		if provider == "opencode-go" {
+			query = "deepseek-v4-flash"
+		} else {
+			return m.notify("type a model name, or pick one from the list")
+		}
+	}
+	return m.applyModel(provider, query, wizard == "")
+}
+
+// applyModel writes the choice. repoint says whether picking also switches
+// which account new sessions use: yes from /model — that is what the surface
+// is for — and never from the login wizard, where the provider was decided by
+// the key you just pasted, and repointing would silently steal the default
+// from one account while setting up another.
+func (m *Model) applyModel(provider, name string, repoint bool) tea.Cmd {
 	if _, err := auth.SetDefaultModel(m.cfg.Home, provider, name); err != nil {
 		return m.notify(err.Error())
 	}
-	// The running agent keeps the model it started with. Saying so is the
-	// difference between "nothing happened" and "it applies next time".
+	if repoint {
+		if _, err := auth.SetDefaultProvider(m.cfg.Home, provider); err != nil {
+			return m.notify(err.Error())
+		}
+		// The running agent keeps the model it started with. Saying so is
+		// the difference between "nothing happened" and "it applies next
+		// time".
+		return m.notify("picked " + provider + "/" + name + " — new sessions run on it")
+	}
 	return m.notify("default model is now " + name + " · new sessions use it")
 }
 
@@ -1306,7 +1395,10 @@ func (m *Model) login(args string) tea.Cmd {
 	if _, err := auth.SetKey(m.cfg.Home, provider, key, "", time.Now()); err != nil {
 		return m.notify(err.Error())
 	}
-	return m.notify("logged in to " + provider + " · /model picks one")
+	// The wizard's third step: the key is in, so the model list follows —
+	// Rust's Provider → Key → Model → Done, without the reader having to
+	// guess the next command.
+	return tea.Batch(m.notify("logged in to "+provider+" — now pick its default model"), m.openModelsFor(provider))
 }
 
 func (m *Model) logout(args string) tea.Cmd {

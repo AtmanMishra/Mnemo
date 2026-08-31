@@ -1277,7 +1277,7 @@ func TestChoosingAModelWritesItAsTheProviderDefault(t *testing.T) {
 	if got := auth.Load(m.Home()).DefaultModelFor("opencode-go"); got != "kimi" {
 		t.Fatalf("default model = %q, want kimi", got)
 	}
-	if !strings.Contains(screen(m), "default model is now kimi") {
+	if !strings.Contains(screen(m), "picked opencode-go/kimi") {
 		t.Fatalf("choosing a model must say what happened:\n%s", screen(m))
 	}
 }
@@ -1305,5 +1305,131 @@ func TestModelOnlyMakesSenseForALoggedInProvider(t *testing.T) {
 	m.Update(modelsMsg{models: nil, err: nil})
 	if !strings.Contains(screen(m), "Log in to a provider first: /login") {
 		t.Fatalf("an empty catalogue must say what fills it:\n%s", screen(m))
+	}
+}
+
+// --- the login wizard: provider → key → model -----------------------------
+
+func TestLoggingInFlowsIntoTheModelStepOfTheWizard(t *testing.T) {
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "/login opencode-go sk-oc-test-key-1234")
+	press(t, m, "enter")
+	if m.Overlay() == nil || m.Overlay().Kind != overlay.Models {
+		t.Fatalf("the key is in, so the model step must follow, got %v", m.Overlay())
+	}
+	if !strings.Contains(screen(m), "now pick its default model") {
+		t.Fatalf("the notice must say what is next:\n%s", screen(m))
+	}
+	// The catalogue arrives; the wizard only pictures the provider just
+	// logged in, because a model another provider offers cannot be served by
+	// the key that was just pasted.
+	m.Update(modelsMsg{provider: "opencode-go", models: []auth.Model{
+		{Provider: "opencode-go", Name: "deepseek-v4-flash"},
+		{Provider: "opencode-go", Name: "kimi"},
+		{Provider: "anthropic", Name: "claude-x"},
+	}, err: nil})
+	s := screen(m)
+	if !strings.Contains(s, "deepseek-v4-flash") || !strings.Contains(s, "kimi") {
+		t.Fatalf("the provider's own models must be listed:\n%s", s)
+	}
+	if strings.Contains(s, "claude-x") {
+		t.Fatalf("another provider's model must not be offered during a login:\n%s", s)
+	}
+	press(t, m, "enter") // deepseek-v4-flash is first
+	f := auth.Load(m.Home())
+	if f.DefaultProvider != "opencode-go" || f.DefaultModelFor("opencode-go") != "deepseek-v4-flash" {
+		t.Fatalf("provider → key → model must land on the canonical pair, got %+v", f)
+	}
+	if !strings.Contains(screen(m), "default model is now deepseek-v4-flash") {
+		t.Fatalf("the wizard must confirm the pick:\n%s", screen(m))
+	}
+}
+
+func TestTheWizardFallsBackToTheCanonicalDefaultWithoutACatalogue(t *testing.T) {
+	// No --repo means no agent to ask; first run must still finish. Enter on
+	// the failed model step writes this build's canonical default.
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "/login opencode-go sk-oc-test-key-1234")
+	press(t, m, "enter")
+	m.Update(modelsMsg{provider: "opencode-go", err: errors.New("no repository configured")})
+	if !strings.Contains(screen(m), "Could not ask the agent for the catalogue.") {
+		t.Fatalf("the failure must be named:\n%s", screen(m))
+	}
+	press(t, m, "enter") // nothing selected, nothing typed
+	f := auth.Load(m.Home())
+	if f.DefaultProvider != "opencode-go" || f.DefaultModelFor("opencode-go") != "deepseek-v4-flash" {
+		t.Fatalf("enter on empty must keep the build default, got %+v", f)
+	}
+}
+
+func TestTheWizardDoesNotStealAnotherProvidersDefault(t *testing.T) {
+	// Picking a model while setting up a SECOND provider must not silently
+	// repoint which account new sessions use — the first login already
+	// earned that spot, and the key pasted now does not ask for it.
+	m := fixture(t, 100, 30)
+	if _, err := auth.SetKey(m.Home(), "openrouter", "sk-or-test-key-1234", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	typeIn(t, m, "/login opencode-go sk-oc-test-key-1234")
+	press(t, m, "enter")
+	m.Update(modelsMsg{provider: "opencode-go", models: []auth.Model{
+		{Provider: "opencode-go", Name: "deepseek-v4-flash"},
+		{Provider: "opencode-go", Name: "kimi"},
+	}, err: nil})
+	press(t, m, "down")
+	press(t, m, "enter") // pick kimi
+	f := auth.Load(m.Home())
+	if f.DefaultProvider != "openrouter" {
+		t.Fatalf("the wizard must not steal the default, got %q", f.DefaultProvider)
+	}
+	if f.DefaultModelFor("opencode-go") != "kimi" {
+		t.Fatalf("the model itself must still be remembered, got %+v", f.DefaultModelFor("opencode-go"))
+	}
+}
+
+func TestAModelPickFromModelSwitchesTheAccount(t *testing.T) {
+	// /model is the deliberate surface: picking a row there means "run new
+	// sessions on this provider with this model", unlike the wizard.
+	m := fixture(t, 100, 30)
+	if _, err := auth.SetKey(m.Home(), "openrouter", "sk-or-test-key-1234", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.SetKey(m.Home(), "opencode-go", "sk-oc-test-key-1234", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	press(t, m, "/")
+	typeIn(t, m, "model")
+	press(t, m, "enter")
+	m.Update(modelsMsg{models: []auth.Model{
+		{Provider: "openrouter", Name: "deepseek-r1"},
+		{Provider: "opencode-go", Name: "deepseek-v4-flash"},
+	}, err: nil})
+	press(t, m, "down")
+	press(t, m, "enter") // opencode-go/deepseek-v4-flash
+	f := auth.Load(m.Home())
+	if f.DefaultProvider != "opencode-go" {
+		t.Fatalf("picking a model from /model must move the account there, got %q", f.DefaultProvider)
+	}
+	if !strings.Contains(screen(m), "picked opencode-go/deepseek-v4-flash") {
+		t.Fatalf("the switch must be said out loud:\n%s", screen(m))
+	}
+}
+
+func TestATypedModelNameWorksWhenTheCatalogueCannotBeAsked(t *testing.T) {
+	// Rust parity: "type a model name — the catalog could not be read". A
+	// list is still a list, and the filter query is the typed name.
+	m := fixture(t, 100, 30)
+	if _, err := auth.SetKey(m.Home(), "anthropic", "sk-ant-test-key-1234", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	press(t, m, "/")
+	typeIn(t, m, "model")
+	press(t, m, "enter")
+	m.Update(modelsMsg{err: errors.New("no repository configured")})
+	typeIn(t, m, "claude-opus-6")
+	press(t, m, "enter")
+	f := auth.Load(m.Home())
+	if f.DefaultProvider != "anthropic" || f.DefaultModelFor("anthropic") != "claude-opus-6" {
+		t.Fatalf("the typed name must be written, got %+v", f)
 	}
 }
