@@ -321,6 +321,14 @@ export async function recallFor(
   }
   const picked = selectRecall(hits, k);
   if (picked.length === 0) return "";
+  // ML-2: every node pulled into context earns one useful vote. Fire-and-
+  // forget, never awaited, errors swallowed — a slow or dead sidecar must
+  // not slow the turn or break the loop ("memory must never break the
+  // agent"), and the vote is a counter on the node, not a round-trip the
+  // prompt depends on.
+  for (const h of picked) {
+    client.request("mark_useful", { node: h.node }).catch(() => {});
+  }
   const body = picked
     .map((h) => `- ${h.label} (${h.kind} #${h.node})\n${summariseState(h.state ?? "")}`)
     .join("\n");

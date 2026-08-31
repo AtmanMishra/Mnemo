@@ -88,3 +88,44 @@ test("the directive no longer demands a search that already happened", () => {
   assert.match(MEMORY_DIRECTIVE, /memory_search/, "it is still available on demand");
   assert.match(MEMORY_DIRECTIVE, /never claim you lack information without searching/i);
 });
+
+/**
+ * ML-2: the recall hook marks every node it pulled into context as useful —
+ * one fire-and-forget mark_useful per picked hit. A vote must never slow or
+ * break the turn: not awaited, errors swallowed.
+ */
+function hitNode(label: string, score: number, node: number): Recalled {
+  return { kind: "Aspect", label, node, score, state: `[Aspect] ${label}\nfacts:\n  - k: v` };
+}
+
+test("recalled nodes earn one useful vote each, fire-and-forget", async () => {
+  const votes: Array<[string, any]> = [];
+  const c = {
+    request: async (m: string, p?: any) => {
+      if (m === "search") {
+        return { ok: true, result: { results: [hitNode("a", 0.5, 11), hitNode("b", 0.4, 22), hitNode("c", 0.2, 33)] } };
+      }
+      votes.push([m, p]);
+      return { ok: true, result: {} };
+    },
+  };
+  const out = await recallFor(c, "when is the deploy window");
+  assert.match(out, /Recalled from memory/);
+  // the long tail (c, 0.2 < 0.6 * best) is not voted on: only what entered
+  // the prompt earns a vote
+  assert.deepEqual(votes, [
+    ["mark_useful", { node: 11 }],
+    ["mark_useful", { node: 22 }],
+  ]);
+});
+
+test("a failing vote never breaks the recall path", async () => {
+  const c = {
+    request: async (m: string) => {
+      if (m === "search") return { ok: true, result: { results: [hit("a", 0.5), hit("b", 0.4)] } };
+      throw new Error("sidecar died mid-vote");
+    },
+  };
+  const out = await recallFor(c, "when is the deploy window");
+  assert.match(out, /Recalled from memory/, "votes must be fire-and-forget");
+});
