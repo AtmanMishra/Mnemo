@@ -7,6 +7,8 @@ package ui
 import (
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/theme"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -214,4 +216,75 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// Float composites a panel over a backdrop, centred.
+//
+// An overlay that REPLACES the body throws away the thing you opened it to
+// act on: you pick a session while looking at a blank screen, and the
+// transcript you were reading is simply gone. Floating keeps the context
+// underneath, which is the whole reason a modal is a modal and not a page.
+//
+// The backdrop is dimmed rather than left bright. Two live-looking layers is
+// worse than one — the eye has no way to tell which one the keyboard is
+// talking to.
+func Float(t *theme.Theme, backdrop, panel string, w, h int) string {
+	if w < 4 || h < 3 {
+		return panel
+	}
+	pw, ph := lipgloss.Size(panel)
+	x := (w - pw) / 2
+	y := (h - ph) / 2
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+	// Pad to height FIRST, then to width: the other order pads the lines
+	// that exist and leaves the blank ones it appends at zero width, so the
+	// backdrop has ragged rows the panel does not cover.
+	// A Compositor, not a Canvas: Canvas.Compose draws layers in order at the
+	// origin and ignores their X and Y, so the panel landed in the top-left
+	// corner with the backdrop painted over.
+	return lipgloss.NewCompositor(
+		lipgloss.NewLayer(Dim(t, Pad(PadTo(backdrop, h), w))),
+		lipgloss.NewLayer(panel).X(x).Y(y).Z(1),
+	).Render()
+}
+
+// Dim strips a block back to one quiet colour.
+//
+// It is not a transparency effect — a terminal has none. It repaints, which
+// also means the backdrop stops competing for attention with its own reds and
+// greens while something else has the keys.
+func Dim(t *theme.Theme, s string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = t.Faint.Render(ansi.Strip(l))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// PanelChrome is what a panel costs around its content: a border cell and a
+// padding cell on each side.
+const PanelChrome = 4
+
+// Panel frames an overlay so it reads as sitting ON the screen rather than
+// cut into it: a border in the accent, and an opaque interior, because
+// anything showing through the gaps looks like a rendering fault.
+//
+// `content` is the width the BODY was rendered at. lipgloss's Width is the
+// TOTAL, border and padding included, so the body width has to be grown by
+// both before it is passed in. Passing it straight through leaves the content
+// four cells short and every line wraps, which looked on screen like the
+// overlay had been put through a shredder.
+func Panel(t *theme.Theme, body string, content int) string {
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.P.Accent).
+		Background(t.P.Ground).
+		Padding(0, 1).
+		Width(content + PanelChrome).
+		Render(body)
 }

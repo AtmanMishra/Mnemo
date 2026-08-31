@@ -173,9 +173,32 @@ func (m *Model) refilter() {
 // the keybinding, and the palette starts returning rows for no reason the
 // reader can see. Per-field is stricter and predictable.
 func matches(it Item, q string) bool {
-	return subsequence(strings.ToLower(it.Label), q) ||
-		subsequence(strings.ToLower(it.Detail), q) ||
-		subsequence(strings.ToLower(it.Group), q)
+	return nameMatch(it.Label, q) || nameMatch(it.Group, q) || proseMatch(it.Detail, q)
+}
+
+// proseLen is where a field stops being a name and starts being a sentence.
+const proseLen = 32
+
+// nameMatch is a subsequence: every character of the query, in order.
+//
+// Right for a NAME, where you are typing the letters you remember out of a
+// short string — "sess" finds /sessions, "hevd" finds /high-end-visual-design.
+func nameMatch(field, q string) bool {
+	f := strings.ToLower(field)
+	if len(f) > proseLen {
+		return proseMatch(field, q)
+	}
+	return subsequence(f, q)
+}
+
+// proseMatch is a substring.
+//
+// A subsequence over a SENTENCE matches almost everything: "fol" found a skill
+// whose description happened to contain an f, then an o, then an l, thirty
+// words apart. The palette then answers a three-letter query with the entire
+// list, which is the same as not filtering at all.
+func proseMatch(field, q string) bool {
+	return q != "" && strings.Contains(strings.ToLower(field), q)
 }
 
 // subsequence is the whole matcher: every character of the query appears in

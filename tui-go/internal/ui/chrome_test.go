@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"charm.land/lipgloss/v2"
 	"strings"
 	"testing"
 
@@ -165,5 +166,65 @@ func TestColumnsGiveTheDividerAir(t *testing.T) {
 	got := ansi.Strip(Columns(th(), 1, "abc", 3, "xyz", 3))
 	if got != "abc "+theme.Heavy.V+" xyz" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFloatCentresThePanelOverTheBackdrop(t *testing.T) {
+	back := strings.Repeat("backdrop\n", 12)
+	panel := Panel(th(), "hello", 20)
+	out := Float(th(), back, panel, 60, 12)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 12 {
+		t.Fatalf("float drew %d rows, want the 12 it was given", len(lines))
+	}
+	for i, l := range lines {
+		if got := ansi.StringWidth(l); got != 60 {
+			t.Fatalf("row %d is %d cells, want 60 — a ragged backdrop shows as a hole", i, got)
+		}
+	}
+	plain := ansi.Strip(out)
+	if !strings.Contains(plain, "hello") {
+		t.Fatal("the panel must be on top")
+	}
+	if !strings.Contains(plain, "backdrop") {
+		t.Fatal("the backdrop must survive — that is the whole point of floating")
+	}
+	// Centred: the first and last rows belong to the backdrop, not the panel.
+	if strings.Contains(lines[0], "╭") || strings.Contains(lines[len(lines)-1], "╰") {
+		t.Fatal("the panel is flush against an edge instead of centred")
+	}
+}
+
+func TestPanelDoesNotWrapContentThatFits(t *testing.T) {
+	// lipgloss counts border AND padding inside Width, so a body passed
+	// through at its own width comes back four cells short and every line
+	// wraps.
+	body := strings.Repeat("x", 40)
+	out := Panel(th(), body, 40)
+	if n := strings.Count(out, "\n") + 1; n != 3 {
+		t.Fatalf("panel is %d rows, want 3 (border, body, border) — the body wrapped", n)
+	}
+	if w, _ := lipgloss.Size(out); w != 40+PanelChrome {
+		t.Fatalf("panel is %d cells, want content plus %d", w, PanelChrome)
+	}
+}
+
+func TestDimFlattensTheBackdropToOneColour(t *testing.T) {
+	// Two live-looking layers is worse than one: the eye has no way to tell
+	// which one the keyboard is talking to.
+	lit := th().OK.Render("green") + th().Fail.Render("red")
+	out := Dim(th(), lit)
+	if strings.Contains(out, "0;228;54") || strings.Contains(out, "255;0;77") {
+		t.Fatalf("the backdrop kept its own colours: %q", out)
+	}
+	if ansi.Strip(out) != "greenred" {
+		t.Fatalf("dimming lost text: %q", ansi.Strip(out))
+	}
+}
+
+func TestFloatDegradesRatherThanCrashingWhenThereIsNoRoom(t *testing.T) {
+	panel := Panel(th(), "x", 10)
+	for _, wh := range [][2]int{{0, 0}, {2, 1}, {3, 2}, {8, 4}} {
+		_ = Float(th(), "back", panel, wh[0], wh[1])
 	}
 }

@@ -980,3 +980,75 @@ func TestTheForgetKeyIsAdvertisedWhereItWorks(t *testing.T) {
 			lastLine(screen(m)))
 	}
 }
+
+func TestAnOverlayFloatsOverTheTranscript(t *testing.T) {
+	// An overlay that replaces the body throws away the thing you opened it
+	// to act on: you pick a session while looking at a blank screen.
+	m := fixture(t, 110, 30)
+	m.Chat().Append(&chat.Block{Kind: chat.User, Body: []string{"unmistakable"}})
+	press(t, m, "ctrl+s")
+	s := screen(m)
+	if !strings.Contains(s, "unmistakable") {
+		t.Fatalf("the transcript vanished behind the overlay:\n%s", s)
+	}
+	if !strings.Contains(s, "SESSIONS") {
+		t.Fatalf("the overlay is missing:\n%s", s)
+	}
+	if !strings.Contains(s, "╭") || !strings.Contains(s, "╰") {
+		t.Fatal("a floating panel needs a border, or it reads as text spilled over text")
+	}
+}
+
+func TestTheRegionRuleSurvivesAnOverlay(t *testing.T) {
+	m := fixture(t, 110, 30)
+	press(t, m, "ctrl+k")
+	if !strings.Contains(screen(m), "TRANSCRIPT") {
+		t.Fatal("the transcript is still there, so its label still applies")
+	}
+}
+
+func TestOverlaysNeverOverflowAnySize(t *testing.T) {
+	for _, wh := range [][2]int{{40, 12}, {60, 16}, {80, 24}, {100, 30}, {200, 60}} {
+		for _, chord := range []string{"ctrl+k", "ctrl+s", "ctrl+m", "ctrl+l", "ctrl+h"} {
+			m := fixture(t, wh[0], wh[1])
+			press(t, m, chord)
+			lines := strings.Split(screen(m), "\n")
+			if len(lines) != wh[1] {
+				t.Fatalf("%s at %dx%d drew %d rows", chord, wh[0], wh[1], len(lines))
+			}
+			for i, l := range lines {
+				if got := ansi.StringWidth(l); got > wh[0] {
+					t.Fatalf("%s at %dx%d: row %d is %d cells", chord, wh[0], wh[1], i, got)
+				}
+			}
+		}
+	}
+}
+
+func TestThePaletteDoesNotAnswerAShortQueryWithEverything(t *testing.T) {
+	// A subsequence over a DESCRIPTION matches almost anything: "fol" found
+	// skills whose prose happened to contain an f, an o and an l thirty words
+	// apart, so a three-letter query returned the whole list.
+	m := fixture(t, 110, 30)
+	press(t, m, "ctrl+k")
+	all := m.Overlay().Count()
+	typeIn(t, m, "fol")
+	got := m.Overlay().Count()
+	if got == 0 {
+		t.Fatal("the folder explorer should still be found by its description")
+	}
+	if got > all/4 {
+		t.Fatalf("filtering to %d of %d is not filtering", got, all)
+	}
+}
+
+func TestNamesStillMatchByTheirInitials(t *testing.T) {
+	// The other half of the trade: a short name must stay a subsequence
+	// match, or you have to type it exactly.
+	m := fixture(t, 110, 30)
+	press(t, m, "ctrl+k")
+	typeIn(t, m, "sess")
+	if _, ok := m.Overlay().Selected(); !ok {
+		t.Fatal("sess should find /sessions")
+	}
+}

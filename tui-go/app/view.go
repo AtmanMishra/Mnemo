@@ -55,10 +55,8 @@ func (m *Model) rows() rows {
 	if m.spacious() {
 		y++
 	}
-	if m.ov == nil {
-		r.rule = y
-		y++
-	}
+	r.rule = y
+	y++
 	r.bodyTop = y
 	r.bodyRows = m.bodyHeight()
 	y += r.bodyRows
@@ -119,11 +117,7 @@ func (m *Model) compose() string {
 	if m.spacious() {
 		rows = append(rows, "")
 	}
-	// An overlay draws its own labelled rule, so the region rule would be a
-	// blank row above it. A wasted row is a row of transcript.
-	if m.ov == nil {
-		rows = append(rows, m.bodyRule())
-	}
+	rows = append(rows, m.bodyRule())
 	rows = append(rows, strings.Split(m.body(), "\n")...)
 	if m.spacious() {
 		rows = append(rows, "")
@@ -195,11 +189,22 @@ func (m *Model) transcriptLabel() string {
 
 func (m *Model) body() string {
 	h := m.bodyHeight()
-	if m.ov != nil {
-		m.ov.SetSize(m.inner(), h+1)
-		return ui.Pad(ui.PadTo(m.ov.View(m.th), h), m.inner())
-	}
 	left := m.chatOrWelcome(h)
+
+	if m.ov != nil {
+		// The overlay floats over whatever was on screen, so the thing you
+		// opened it to act on is still visible behind it.
+		pw := m.overlayWidth()
+		m.ov.SetSize(pw, m.overlayHeight())
+		backdrop := left
+		if r := m.explorerWidth(); r > 0 {
+			backdrop = ui.Columns(m.th, h,
+				ui.PadTo(left, h), m.leftWidth(),
+				ui.PadTo(m.explorer.View(m.th, false), h), r)
+		}
+		return ui.Float(m.th, backdrop, ui.Panel(m.th, m.ov.View(m.th), pw), m.inner(), h)
+	}
+
 	right := m.explorerWidth()
 	if right == 0 {
 		return ui.Pad(ui.PadTo(left, h), m.inner())
@@ -207,6 +212,38 @@ func (m *Model) body() string {
 	return ui.Columns(m.th, h,
 		ui.PadTo(left, h), m.leftWidth(),
 		ui.PadTo(m.explorer.View(m.th, m.explorerFocus), h), right)
+}
+
+// overlayWidth and overlayHeight size the floating panel.
+//
+// Two thirds of the screen, bounded: wide enough that a session title is not
+// truncated, narrow enough that the transcript is still readable around it.
+// A modal that fills the screen is a page wearing a border.
+func (m *Model) overlayWidth() int {
+	// The content width: what the overlay renders at, before the border and
+	// padding are added around it.
+	w := m.inner()*2/3 - ui.PanelChrome
+	if w > 72 {
+		w = 72
+	}
+	if room := m.inner() - ui.PanelChrome - 4; w > room {
+		w = room // always some backdrop down each side
+	}
+	if w < 24 {
+		w = m.inner() - ui.PanelChrome
+	}
+	if w < 8 {
+		w = 8
+	}
+	return w
+}
+
+func (m *Model) overlayHeight() int {
+	h := m.bodyHeight() - 4 // the border and a row of backdrop above and below
+	if h < 4 {
+		h = 4
+	}
+	return h
 }
 
 // leftWidth is the transcript column when the explorer is open.
@@ -226,9 +263,6 @@ func (m *Model) leftWidth() int {
 // row of the screen was blank and every command looked like it did nothing.
 func (m *Model) bodyHeight() int {
 	chrome := 3
-	if m.ov != nil {
-		chrome = 2
-	}
 	if m.spacious() {
 		chrome += 3 // a blank row under the header, over the prompt, over the status
 	}
