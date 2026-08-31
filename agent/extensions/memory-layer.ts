@@ -372,13 +372,120 @@ export interface HarnessIndexInput {
   bundleId?: string;
 }
 
+/** One live node as memsrv `dump` reports it (identity fields only). */
+interface DumpedNode {
+  id: number;
+  kind: string;
+  area: string;
+  label: string;
+}
+
+/**
+ * Parse memsrv `state` text into its facts. state_of renders facts as
+ * `  - key: value` lines; log entries (`  [at] kind: ...`) and context chunks
+ * (`  <- #...`) never start with `- `, so the marker is unambiguous.
+ */
+export function factsFromState(state: string): Map<string, string> {
+  const facts = new Map<string, string>();
+  for (const line of state.split("\n")) {
+    const m = line.match(/^\s*-\s*([^:]+):\s?(.*)$/);
+    if (m) facts.set(m[1].trim(), m[2].trim());
+  }
+  return facts;
+}
+
+/**
+ * Deterministic identity lookup: is there already a Harness node with this
+ * manifest identity (label + bundle path)? `dump` lists live nodes; a
+ * candidate must have kind Harness and the exact label, and — when the
+ * bundle carries a location — an exactly matching `location` fact. An older
+ * name-only node (indexed before locations were recorded) matches on label
+ * alone rather than spawning a duplicate. `null` means "not found" (or the
+ * lookup itself failed; the create path then reports the real error).
+ */
+export async function findHarnessNode(
+  client: Pick<MemClient, "request">,
+  bundle: HarnessIndexInput,
+): Promise<number | null> {
+  let dump;
+  try {
+    dump = await client.request("dump");
+  } catch {
+    return null;
+  }
+  if (!dump.ok) return null;
+  const nodes = (dump.result?.nodes ?? []) as DumpedNode[];
+  for (const n of nodes) {
+    if (n.kind !== "Harness" || n.label !== bundle.name) continue;
+    if (!bundle.dir) return n.id; // name-only identity: label is enough
+    let stateRes;
+    try {
+      stateRes = await client.request("state", { node: n.id });
+    } catch {
+      continue; // one unreadable candidate must not abort the lookup
+    }
+    if (!stateRes.ok) continue;
+    const loc = factsFromState(String(stateRes.result?.state ?? "")).get("location");
+    if (loc === bundle.dir || loc === undefined) return n.id;
+  }
+  return null;
+}
+
+/**
+ * Idempotent index: create a Harness node for the bundle UNLESS a node with
+ * the same manifest identity (label + bundle path) already exists — on a
+ * hit the existing node is returned and nothing is written. This is the
+ * single entry point for both create-time and discovery-time indexing, so
+ * re-running either must never duplicate a node.
+ */
+export async function ensureHarnessIndexed(
+  client: Pick<MemClient, "request">,
+  bundle: HarnessIndexInput,
+): Promise<{ ok: true; node: number; existed: boolean } | { ok: false; error: string }> {
+  const existing = await findHarnessNode(client, bundle);
+  if (existing !== null) return { ok: true, node: existing, existed: true };
+  const res = await indexHarness(client, bundle);
+  if (!res.ok) return res;
+  return { ok: true, node: res.node, existed: false };
+}
+
+/**
+ * One discovery pass: idempotently index every discovered bundle. Best-effort
+ * per bundle — one dead RPC must not stop the rest of the pass, and the pass
+ * must never throw (discovery runs inside list_skills). Callers see counts so
+ * "discovered twice -> one node" is assertable.
+ */
+export async function indexDiscoveredHarnesses(
+  client: Pick<MemClient, "request">,
+  bundles: HarnessIndexInput[],
+  log: (line: string) => void = () => {},
+): Promise<{ created: number; existing: number; failed: string[] }> {
+  const out = { created: 0, existing: 0, failed: [] as string[] };
+  for (const b of bundles) {
+    const res = await ensureHarnessIndexed(client, b);
+    if (!res.ok) {
+      out.failed.push(`${b.name}: ${res.error}`);
+      continue;
+    }
+    if (res.existed) {
+      out.existing++;
+      log(`harness ${b.name} already indexed as node #${res.node}`);
+    } else {
+      out.created++;
+      log(`harness ${b.name} indexed as node #${res.node}`);
+    }
+  }
+  return out;
+}
+
 /**
  * Index a harness bundle into memory: a Harness kind node in the Procedural
  * area with the manifest carried as facts, so a later procedural search can
  * recall "we built a tool for this" instead of only a disk path.
  *
- * Failures are reported, never thrown — indexing must not break the tool call
- * that created the harness.
+ * Creates unconditionally — callers who need idempotency (discovery, create
+ * retries) use ensureHarnessIndexed. Failures are reported, never thrown —
+ * indexing must not break the tool call that created the harness.
  */
 export async function indexHarness(
   client: Pick<MemClient, "request">,

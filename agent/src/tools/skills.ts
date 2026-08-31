@@ -11,7 +11,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Type } from "typebox";
 import { discoverSkills } from "../skills/discovery.ts";
-import { syncBundlesToSkills, skillLocations } from "../skills/harness-bridge.ts";
+import { findHarnessBundles, syncBundlesToSkills, skillLocations } from "../skills/harness-bridge.ts";
+import { sharedMem, indexDiscoveredHarnesses } from "../../extensions/memory-layer.ts";
 import { textResult, type SeaTool } from "./types.ts";
 
 let skillsHomeOverride: string | null = null;
@@ -60,8 +61,16 @@ export const listSkillsTool: SeaTool = {
     "List discovered skills (name, scope, description). Use load_skill to read the full instructions of one.",
   parameters: listParams,
   async execute() {
+    const locations = skillLocations(projectRoot());
     // harness bundles (created via harness-engine) become discoverable skills
-    try { syncBundlesToSkills(skillLocations(projectRoot())); } catch { /* best-effort */ }
+    try { syncBundlesToSkills(locations); } catch { /* best-effort */ }
+    // ...and each one is indexed into memory on discovery. Idempotent by
+    // manifest identity (label + bundle path): a node already recorded by a
+    // previous discovery pass (or by create_harness) is reused, never
+    // duplicated. Best-effort — a dead memsrv must not fail listing.
+    try {
+      await indexDiscoveredHarnesses(sharedMem, findHarnessBundles(locations));
+    } catch { /* memory indexing must never break list_skills */ }
     const skills = await discoverSkills({ cwd: projectRoot(), home: skillsHome() });
     if (skills.length === 0) return textResult("(no skills found)", { skills: [] });
     const width = Math.max(...skills.map((s) => s.name.length));

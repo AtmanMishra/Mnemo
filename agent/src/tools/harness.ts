@@ -9,7 +9,7 @@
 import { Type } from "typebox";
 import * as path from "node:path";
 import { textResult, type SeaTool } from "./types.ts";
-import { indexHarness, sharedMem, type HarnessIndexInput } from "../../extensions/memory-layer.ts";
+import { ensureHarnessIndexed, sharedMem, type HarnessIndexInput } from "../../extensions/memory-layer.ts";
 
 const toolSpec = Type.Object({
   name: Type.String({ description: "Tool identifier, [a-z0-9_-]." }),
@@ -83,13 +83,15 @@ export function makeCreateHarnessTool(deps: CreateHarnessDeps = {}): SeaTool {
         });
         const pretty = (res.tools as string[]).map((t) =>
           t.replace(/^tools\//, "").replace(/\.mjs$/, ""));
-        // index the bundle into memory: best-effort, never breaks the call
+        // index the bundle into memory: best-effort, never breaks the call.
+        // Idempotent — re-creating a bundle this session or in a past session
+        // (journal persists) reuses the existing node instead of duplicating.
         let memNote = "";
         try {
           const index = deps.indexHarness ?? (async (bundle: HarnessIndexInput) => {
-            const r = await indexHarness(sharedMem, bundle);
+            const r = await ensureHarnessIndexed(sharedMem, bundle);
             return r.ok
-              ? `\nmemory: harness indexed as node #${r.node}`
+              ? `\nmemory: harness ${r.existed ? "already known as" : "indexed as"} node #${r.node}`
               : `\nmemory: index failed (${r.error})`;
           });
           memNote = await index({
