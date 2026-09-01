@@ -105,6 +105,20 @@ export function globMatch(pattern: string, value: string): boolean {
   return new RegExp(rx, "s").test(value);
 }
 
+// --- 12.5 (audit 3c265f44): bash allow-rules match ONE command, not a line --
+
+/**
+ * Operators that turn one bash line into several commands (or move data
+ * around): separators, pipes, redirection, substitution. An allow rule may
+ * not speak for anything after these — `ls*` names `ls`, not `ls ; rm -rf /`.
+ */
+const SHELL_CONTROL = /(?:[;&|<>\n`]|\$\()/;
+
+/** True when the command is a single simple command with no shell operators. */
+export function isSimpleCommand(command: string): boolean {
+  return !SHELL_CONTROL.test(command);
+}
+
 /** First matching rule wins; `default` applies when nothing matches. */
 export function resolveAction(
   perms: Permissions,
@@ -114,6 +128,12 @@ export function resolveAction(
   const subject = subjectOf(toolName, input);
   for (const r of perms.rules) {
     if (r.tool !== "*" && r.tool !== toolName) continue;
+    // 12.5: an allow rule never approves more than it names. A bash line
+    // carrying shell control operators is MANY commands, so allow rules
+    // skip it entirely (the next rule / the default applies — usually a
+    // prompt). Deny rules are unaffected: they match the raw line, and a
+    // deny that fails open would be theatre.
+    if (r.action === "allow" && toolName === "bash_exec" && !isSimpleCommand(subject)) continue;
     if (globMatch(r.pattern, subject)) return r.action;
   }
   return perms.default;
