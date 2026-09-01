@@ -122,7 +122,7 @@ Ordered queue; every item references the finding id(s) in audit/FINDINGS.jsonl.
 - [ ] 12.2 harness safety gate on EVERY load (not just create): watcher/disk-loaded bundles (ccdbbb2b+51b81dda), relative/abs import bypass (747c8c3b), computed/backtick specifiers (56b733fa, f685ee0a, a0dfa43b) — gate that can't be regex-bypassed. (harness-engine + agent)
 - [ ] 12.3 memsrv journal resilience: tolerant load + quarantine + atomic writes (ab99acb1 — would-elevate-high, empirical 0-ops proof), non-UTF8 kill (e8e7d9e2), lock-less read_all (dbfee81a), frame/size bounds (f7c2c763). (memory-layer)
 - [x] 12.4 web_fetch SSRF filter (localhost/private/metadata + redirects) (3927a1ac). (agent)
-- [ ] 12.5 bash allow-glob approves whole command string — match tokens, not raw string (3c265f44). (agent)
+- [x] 12.5 bash allow-glob approves whole command string — match tokens, not raw string (3c265f44). (agent)
 - [ ] 12.6 file tools path containment (no absolute paths straight through; symlink canonicalization) (e00cd116). (agent)
 - [ ] 12.7 API key not inherited by children via process.env (68846059). (agent)
 - [ ] 12.8 trace redaction gaps (URL tokens, sk-or-/tvly- shapes, 120-char verbatim args) (2fefd9ce). (agent)
