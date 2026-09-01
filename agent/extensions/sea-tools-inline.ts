@@ -44,7 +44,17 @@ function toToolDefinition(tool: any): any {
 export function seaToolsFactory(pi: any): void {
   // MCP tools are discovered before main() runs; see bin/mnemo.ts
   const tools = [...allTools, ...makeMemoryTools(), ...getMcpTools()];
-  for (const tool of tools) {
+
+  // A globally-installed pi package (e.g. pi-web-access) may already
+  // register web_search/web_fetch. Two tools with the same name make pi
+  // refuse to load OUR extension entirely ("Tool X conflicts with ..."),
+  // which kills the whole agent at session start. We can't ask the runtime
+  // what it has while the extension is still LOADING (getAllTools is an
+  // action method), so: register everything except the conflict-prone web
+  // tools now, and claim those at session_start only if nobody else did.
+  const webTools = tools.filter((t) => t.name === "web_search" || t.name === "web_fetch");
+  const immediate = tools.filter((t) => t.name !== "web_search" && t.name !== "web_fetch");
+  for (const tool of immediate) {
     pi.registerTool(toToolDefinition(tool));
   }
 
@@ -54,11 +64,27 @@ export function seaToolsFactory(pi: any): void {
   // have prompted resolves to allow exactly as it does in a non-TTY run —
   // while a deny rule and plan mode still block.
   const perms = loadPermissions();
-  sharedKernel.setToolDispatcher(
-    makeKernelDispatcher(tools, (name, args) =>
-      decideApproval({ toolName: name, input: args },
-        { confirm: async () => true }, process.env, false, perms)),
-  );
+  const setDispatcher = (list: any[]) =>
+    sharedKernel.setToolDispatcher(
+      makeKernelDispatcher(list, (name, args) =>
+        decideApproval({ toolName: name, input: args },
+          { confirm: async () => true }, process.env, false, perms)),
+    );
+  setDispatcher(immediate);
+
+  if (webTools.length > 0) {
+    // Claim web tools at session_start when the runtime is queryable and
+    // nobody else owns the name. Tools registered here are refreshed in the
+    // same session before the first turn (see pi docs: registerTool works
+    // in session_start), and the dispatcher follows the same list.
+    pi.on("session_start", () => {
+      const existing = new Set((pi.getAllTools?.() ?? []).map((t: any) => t.name));
+      const add = webTools.filter((t) => !existing.has(t.name));
+      if (add.length === 0) return;
+      for (const tool of add) pi.registerTool(toToolDefinition(tool));
+      setDispatcher([...immediate, ...add]);
+    });
+  }
 }
 
 /** Named inline extension so it shows as <inline:sea-tools> at startup. */

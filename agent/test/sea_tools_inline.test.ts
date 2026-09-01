@@ -38,17 +38,40 @@ function fakePi() {
     registerTool(tool: any) {
       registered.push(tool);
     },
+    getAllTools: () => [] as any[],
   };
 }
 
 test("registers exactly the sea tools, with stable names", () => {
   const pi = fakePi();
+  pi.getAllTools = () => [];
   seaToolsFactory(pi);
+  // web tools defer to session_start (a runtime package like pi-web-access
+  // may already own the names, and a duplicate would kill the extension load)
+  const deferred = (n: string) => n === "web_search" || n === "web_fetch";
+  assert.deepEqual(
+    pi.registered.map((t) => t.name).sort(),
+    [...EXPECTED.filter((n) => !deferred(n))].sort(),
+  );
+  for (const fn of pi.handlers.session_start ?? []) fn();
   assert.deepEqual(
     pi.registered.map((t) => t.name).sort(),
     [...EXPECTED].sort(),
+    "session_start claims the web tools when nobody else owns them",
   );
-  assert.equal(pi.registered.length, EXPECTED.length);
+});
+
+test("web tools defer to an existing runtime tool instead of conflicting", () => {
+  const pi = fakePi();
+  // pi-web-access-style runtime: the names are already taken
+  pi.getAllTools = () => [{ name: "web_search" }, { name: "web_fetch" }];
+  seaToolsFactory(pi);
+  for (const fn of pi.handlers.session_start ?? []) fn();
+  assert.ok(
+    !pi.registered.some((t) => t.name === "web_search"),
+    "must not register a web_search that conflicts with the runtime's",
+  );
+  assert.ok(!pi.registered.some((t) => t.name === "web_fetch"));
 });
 
 test("SEA_TOOL_NAMES matches registered names", () => {
