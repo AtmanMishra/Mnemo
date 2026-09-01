@@ -119,11 +119,11 @@ NON-GOALS (explicitly not in this area — see doc table): learned embedding/rou
 Ordered queue; every item references the finding id(s) in audit/FINDINGS.jsonl.
 
 - [x] 12.1 CRITICAL-EQUIVALENT — approval-gate chain: ipy_run into GATED_TOOLS (0384ee03); subagent children approval-capable or fail CLOSED non-TTY (b6afa93e). (agent)
-- [ ] 12.2 harness safety gate on EVERY load (not just create): watcher/disk-loaded bundles (ccdbbb2b+51b81dda), relative/abs import bypass (747c8c3b), computed/backtick specifiers (56b733fa, f685ee0a, a0dfa43b) — gate that can't be regex-bypassed. (harness-engine + agent)
+- [x] 12.2 harness safety gate on EVERY load (not just create): watcher/disk-loaded bundles (ccdbbb2b+51b81dda), relative/abs import bypass (747c8c3b), computed/backtick specifiers (56b733fa, f685ee0a, a0dfa43b) — gate that can't be regex-bypassed. (harness-engine + agent) — DONE 2026-09-01: loadBundle is the single gated entry (create/watcher/CLI all pass through it), relative imports resolved+confined+rescanned (depth 3), non-literal import()/require() rejected, net-class+process blocked by default; execute() still in-process (a739fbd8 documented).
 - [ ] 12.3 memsrv journal resilience: tolerant load + quarantine + atomic writes (ab99acb1 — would-elevate-high, empirical 0-ops proof), non-UTF8 kill (e8e7d9e2), lock-less read_all (dbfee81a), frame/size bounds (f7c2c763). (memory-layer)
 - [x] 12.4 web_fetch SSRF filter (localhost/private/metadata + redirects) (3927a1ac). (agent)
 - [x] 12.5 bash allow-glob approves whole command string — match tokens, not raw string (3c265f44). (agent)
-- [ ] 12.6 file tools path containment (no absolute paths straight through; symlink canonicalization) (e00cd116). (agent)
+- [x] 12.6 file tools path containment (no absolute paths straight through; symlink canonicalization) (e00cd116). (agent)
 - [ ] 12.7 API key not inherited by children via process.env (68846059). (agent)
 - [ ] 12.8 trace redaction gaps (URL tokens, sk-or-/tvly- shapes, 120-char verbatim args) (2fefd9ce). (agent)
 - [ ] 12.9 CI secrets gate actually green + regex coverage + history scan; GITHUB_TOKEN perms; npm ci; pinned tags (5e28efcf, f5efc6ba, 3f198bdf, 144c276d, 23e58063, 89697e08). (CI-repo)
@@ -132,7 +132,7 @@ Ordered queue; every item references the finding id(s) in audit/FINDINGS.jsonl.
 - [ ] 12.12 search cache invalidation on Unlink/Reweight/RecordOutcome (cddd21c0). (memory-layer)
 - [ ] 12.13 tui-go memory client: timeout must not leak reader goroutine (4745e2a2); cmd/mnemo os.Exit must run deferred Close (7bbead71). (tui-go)
 - [ ] 12.14 test coverage: internal/agent 0% (572d7d4d), internal/pi contract vs real protocol + pin policy (af582760), markdown 0%/prompt 25%/bin/mnemo.ts no tests (0ada275f, edfe2f6a, b7b6c912); drop --test-force-exit masking (01c4ef84). (tui-go + agent)
-- [ ] 12.15 low batch: MCP SIGTERM orphan (1c31b0fe), kernel limits (e4cc567c), embed retries stall RPC (6f96adc6), scope shadowing (b02291c2), manifest refs escape bundle dir (dcd8c081), watcher symlink (593e9a39), doc go version (2bf9a1a9), CI drift checks (2f298097)
+- [ ] 12.15 low batch: MCP SIGTERM orphan (1c31b0fe), kernel limits (e4cc567c), embed retries stall RPC (6f96adc6), scope shadowing (b02291c2) **DONE 2026-09-01** — registry records ShadowEvent + warns on broader-scope shadowing, manifest refs escape bundle dir (dcd8c081) **DONE 2026-09-01** — refs enforced relative/no-'..'/realpath-confined, watcher symlink (593e9a39) **DONE 2026-09-01** — realpath'd roots, escaping symlinks ignored+logged, doc go version (2bf9a1a9), CI drift checks (2f298097)
 - [ ] 12.16 design confirmations (not defects): in-process unsandboxed harness (a739fbd8), in-kernel tools.* skip prompting (48236eda), embeddings egress (509e8ec5), kernel pipe attrs (467cb8ad)
 NB: 4b24b4b0 (working-tree red) = AREA 10.5 schedules overlay in-flight/uncommitted — resolve by completing AREA 10.5, not as an audit fix.
 
