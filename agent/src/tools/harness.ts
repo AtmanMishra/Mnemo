@@ -20,7 +20,10 @@ const toolSpec = Type.Object({
   source: Type.String({
     description:
       "JS function body of the tool. Receives `params`, must return a string. " +
-      "Example: return `hello ${params.name}`. No imports of fs/child_process.",
+      "Example: return `hello ${params.name}`. The safety gate (run on every load) rejects: " +
+      "fs/child_process and net-class imports (http, https, net, tls, dns, os), any process access, " +
+      "absolute imports, non-literal import()/require() specifiers (variables, joins), " +
+      "and relative imports that leave the bundle or import blocked modules.",
   }),
 });
 

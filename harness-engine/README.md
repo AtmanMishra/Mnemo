@@ -148,29 +148,57 @@ npm install && npm test     # node:test, no LLM calls, no network
 npm run typecheck           # tsc --noEmit
 ```
 
-19 tests cover: bundle create/dispose roundtrip, scope override precedence,
-watched-dir pickup latency (<1s), invalidation on file rewrite and on deletion,
-loader-tool activation, and all safety-gate rejection paths.
+50 tests cover: bundle create/dispose roundtrip, scope override precedence
+(and loud shadow warnings), watched-dir pickup latency (<1s), invalidation on
+file rewrite and on deletion, symlink-escape containment, loader-tool
+activation, and all safety-gate rejection paths.
 
 ## Security notes — read before loading agent-written code
 
+**The gate runs on EVERY load path.** `loadBundle()` (src/bundle.ts) is the
+single entry point every caller — `createHarness`, the watcher, the CLI —
+goes through, and it gates the on-disk source of every tool file BEFORE it
+is imported. A bundle that appears on disk (or is rewritten) is gated just
+as hard as one created through the API.
+
 The safety gate (`src/safety.ts`) does:
 
-- scan static `import`, dynamic `import()`, and `require()` specifiers;
-- reject `fs`, `fs/promises`, `child_process` (and their `node:` forms) unless
-  passed via the `allowModules` option;
+- scan static `import`, dynamic `import()`, and `require()` specifiers —
+  including backtick template literals (`import(\`fs\`)`) via a paren/string-
+  aware scanner;
+- reject ANY `import()`/`require()` whose specifier is NOT a literal string
+  (variable, concatenation, `.join(...)`) — unverifiable means rejected;
+- reject `fs`, `fs/promises`, `child_process` AND the net-class / host-info
+  modules (`http`, `https`, `net`, `tls`, `dns`, `os`, `process`, plus
+  `node:` forms) unless passed via the `allowModules` option;
+- reject direct `process` / `globalThis.process` access even with no import;
+- reject absolute imports; relative imports are resolved against the file,
+  confined to the bundle dir (lexically AND after realpath), and the target
+  file's source is scanned recursively (depth cap 3, cycle-guarded) — a
+  bundle-shipped helper doing the real work is caught;
+- enforce manifest shape: non-empty string tool refs, no `..`/absolute/symlink-
+  escaping paths (refs must stay inside the bundle dir);
 - enforce a JSON-schema object with `type: "object"` per tool and an `execute`
   function;
 - syntax-check source via an `AsyncFunction` compile (imports stripped,
-  `export default` transformed to `return`) before anything is written to disk.
+  `export default` transformed to `return`) before anything is imported.
+
+Fail-closed posture: anything the scanner cannot verify (missing helper file,
+  unreadable target, non-literal request) is a rejection, not a pass. The
+  watcher records the error and skips the bundle without crashing.
+
+The registry also makes scope shadowing loud: registering a project/session
+bundle whose tool names hide broader-scope tools records a `ShadowEvent`
+(`registry.shadowEvents`) and warns — nearest-shadows is the design, but it
+is never silent.
 
 It does **NOT** sandbox anything:
 
-- Registered tools execute **inside this Node process with full privileges**.
-- The gate only inspects literal specifier strings; runtime-built specifiers
-  (e.g. ``import(["child","_process"].join(""))``), non-blocked dangerous
-  builtins (`os`, `net`, `http`, `process`, ...), prototype pollution, and
-  infinite loops are not caught.
+- Registered tools execute **inside this Node process with full privileges**
+  (a739fbd8 — documented, accepted risk). The gate filters what gets LOADED;
+  it cannot constrain what a loaded tool does at runtime.
+- Escapes the gate cannot see: `fetch()` (global, no import), prototype
+  pollution, infinite loops, and obfuscation inside `eval`/`Function` bodies.
 - ESM caches cannot be surgically evicted; unregistering drops the strong
   reference and every reload uses a unique URL nonce so stale module instances
   are never reused (they become garbage-collectable). Memory of dead modules is

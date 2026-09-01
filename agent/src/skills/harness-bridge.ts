@@ -33,7 +33,7 @@ export function skillLocations(root?: string): string[] {
   ];
 }
 
-/** Find harness-engine bundles (manifest.json with name+tools) under dirs. */
+/** Find harness-engine bundles (manifest.json with name+tools) under dirs. Read-only: metadata only, never imports tool code (the gated load lives in harness-engine's loadBundle). */
 export function findHarnessBundles(dirs: string[]): HarnessBundleInfo[] {
   const found: HarnessBundleInfo[] = [];
   for (const dir of dirs) {
@@ -44,7 +44,13 @@ export function findHarnessBundles(dirs: string[]): HarnessBundleInfo[] {
       if (!fs.existsSync(manifestPath)) continue;
       try {
         const m = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-        if (typeof m.name === "string" && Array.isArray(m.tools)) {
+        // strict manifest shape: non-empty string tool refs only
+        if (
+          typeof m.name === "string" &&
+          Array.isArray(m.tools) &&
+          m.tools.length > 0 &&
+          m.tools.every((t: unknown) => typeof t === "string" && t.length > 0)
+        ) {
           found.push({
             name: m.name,
             version: m.version ?? "0.0.0",
