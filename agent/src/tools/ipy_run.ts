@@ -8,10 +8,10 @@
  * pending calls execute strictly in submission order.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { textResult, type SeaTool } from "./types.ts";
+import { scrubChildEnv } from "../childenv.ts";
 
 const BRIDGE_PATH = fileURLToPath(new URL("../../kernel/ipy_bridge.py", import.meta.url));
 
@@ -172,6 +172,8 @@ export class IPyKernel {
       this.ponged = false;
       const proc = spawn(this.pythonBin, ["-u", this.bridgePath], {
         stdio: ["pipe", "pipe", "pipe"],
+        // 12.7: a Python cell must not read credentials out of os.environ
+        env: scrubChildEnv(),
       });
       proc.stdout?.on("data", (chunk: Buffer) => this.handleStdoutChunk(chunk));
       proc.stderr?.on("data", (chunk: Buffer) => {
@@ -350,6 +352,10 @@ export const ipyRunTool: SeaTool = {
     if (!res.ok && res.error?.includes("timed out")) {
       throw new Error(res.error); // timeouts surface as tool errors per pi convention
     }
+    // SAFETY: `res` is the kernel's JSON result payload — its fields are
+    // already plain JSON (ok/error/output/result), so it is structurally
+    // compatible with pi's `details` object; we assert only the shape pi
+    // requires, never a truth the kernel didn't produce.
     return textResult(formatIpyResult(res), res as unknown as Record<string, unknown>);
   },
 };
