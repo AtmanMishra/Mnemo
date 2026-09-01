@@ -127,6 +127,58 @@ test("the user's real environment values are redacted by value", () => {
     "a value too short to be a key is not treated as one");
 });
 
+// --- 12.8 (2fefd9ce): URL-embedded tokens and sk-or-/tvly- shapes ----------
+
+test("URL query params named like secrets have their values scrubbed", () => {
+  assert.equal(
+    redactString("curl 'https://api.example.com/data?api_key=sk-abc123&count=5'", []),
+    "curl 'https://api.example.com/data?api_key=[redacted]&count=5'",
+  );
+  assert.equal(
+    redactString("https://h.example.com/x?access_token=aaa.bbb.ccc&next=y", []),
+    "https://h.example.com/x?access_token=[redacted]&next=y",
+  );
+  assert.equal(
+    redactString("https://h.example.com/1?secret=supersecret123&token=tok987", []),
+    "https://h.example.com/1?secret=[redacted]&token=[redacted]",
+  );
+  assert.equal(redactString("https://h.example.com/x?key=plain-enough", []),
+    "https://h.example.com/x?key=[redacted]", "'key' alone is a query secret too");
+  assert.equal(redactString("https://h.example.com/x?q=search+term", []),
+    "https://h.example.com/x?q=search+term", "innocent params survive");
+});
+
+test("credentials embedded in a URL userinfo are scrubbed", () => {
+  assert.equal(
+    redactString("fetch https://admin:hunter2@internal.example.com/x", []),
+    "fetch https://[redacted]@internal.example.com/x",
+  );
+});
+
+test("sk-or- and tvly- key shapes are scrubbed even outside URLs", () => {
+  assert.equal(
+    redactString("export OPENROUTER_API_KEY=sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789", []),
+    `export OPENROUTER_API_KEY=${REDACTED}`,
+  );
+  assert.equal(
+    redactString("tavily key tvly-12345678901234567890 used", []),
+    `tavily key ${REDACTED} used`,
+  );
+});
+
+test("URL-embedded tokens are scrubbed in a written span too", () => {
+  const home = tmpHome("redact-url");
+  const tracer = new Tracer({ home, session: "s", level: "info" });
+  tracer.start("tool", "web_fetch", {
+    args: { url: "https://api.x.com/?api_key=sk-or-v1-abcde12345&token=tvly-1234567890abc" },
+  })({ ok: true });
+  const raw = fs.readFileSync(logFile(home), "utf8");
+  assert.doesNotMatch(raw, /sk-or-v1-abcde12345/, "embedded key must not reach disk");
+  assert.doesNotMatch(raw, /tvly-1234567890abc/, "tvly token must not reach disk");
+  assert.match(raw, /\[redacted\]/);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
 test("a written span is redacted, not just the rendering", () => {
   const home = tmpHome("redact-disk");
   const tracer = new Tracer({ home, session: "s", level: "info" });

@@ -68,11 +68,24 @@ const SECRET_KEY =
 
 /** Shapes that are a secret whatever they are called. */
 const SECRET_VALUE = [
-  /\bsk-[A-Za-z0-9_-]{8,}/g,          // openai/anthropic style
+  /\bsk-[A-Za-z0-9_-]{8,}/g,          // openai/anthropic style (covers sk-or-)
+  /\btvly-[A-Za-z0-9_-]{8,}/g,         // 12.8: tavily (audit 2fefd9ce)
   /\bghp_[A-Za-z0-9]{20,}/g,           // github
   /\bxox[baprs]-[A-Za-z0-9-]{10,}/g,   // slack
   /\bAKIA[0-9A-Z]{16}\b/g,             // aws access key id
 ];
+
+/**
+ * 12.8: query params whose value is a secret regardless of the URL. Applied
+ * to URL-shaped content anywhere in a string, e.g. `?api_key=sk-...` or
+ * `?token=abc&secret=xyz`. The value is scrubbed; the param name stays so
+ * the trace still shows WHAT was requested.
+ */
+const URL_QUERY_SECRET =
+  /([?&](?:api[_-]?key|apikey|access[_-]?token|token|secret|key|auth|password|passwd|signature)[^=]*=)[^&"'\s]*/gi;
+
+/** https://user:pass@host — credentials embedded in the userinfo part. */
+const URL_USERINFO_SECRET = /\/\/[^/@\s]+:[^/@\s]+@/g;
 
 export const REDACTED = "[redacted]";
 
@@ -89,6 +102,9 @@ export function redactString(value: string, secrets: string[] = envSecrets()): s
     if (s && out.includes(s)) out = out.split(s).join(REDACTED);
   }
   for (const rx of SECRET_VALUE) out = out.replace(rx, REDACTED);
+  out = out.replace(URL_QUERY_SECRET, (whole, prefix: string) =>
+    `${prefix}${REDACTED}`);
+  out = out.replace(URL_USERINFO_SECRET, "//" + REDACTED + "@");
   return out;
 }
 
