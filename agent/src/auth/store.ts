@@ -69,6 +69,25 @@ export function saveAuth(auth: AuthFile, home = os.homedir()): void {
   const dir = authDir(home);
   fs.mkdirSync(dir, { recursive: true });
   const file = authFile(home);
+  // 12.11 (dd3118fb): never follow a pre-planted symlink when writing the
+  // API key — either the auth.json target itself OR ~/.mnemo as a whole
+  // (a planted directory symlink would silently redirect the key elsewhere
+  // and the chmod would follow along).
+  try {
+    if (fs.lstatSync(dir).isSymbolicLink()) {
+      throw new Error(`refusing to write auth: ${dir} is a symlink`);
+    }
+  } catch (err: any) {
+    // ENOENT means mkdirSync just created it as a real directory
+    if (err?.code !== "ENOENT") throw err;
+  }
+  try {
+    if (fs.lstatSync(file).isSymbolicLink()) {
+      throw new Error(`refusing to write auth: ${file} is a symlink (possible credential theft)`);
+    }
+  } catch (err: any) {
+    if (err?.code !== "ENOENT") throw err;
+  }
   fs.writeFileSync(file, JSON.stringify(auth, null, 2), { mode: 0o600 });
   try { fs.chmodSync(file, 0o600); } catch { /* some filesystems */ }
 }
