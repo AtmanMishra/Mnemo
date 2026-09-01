@@ -153,6 +153,41 @@ mod tolerant_load_tests {
     }
 
     #[test]
+    fn read_all_blocks_while_a_writer_holds_the_journal_lock() {
+        // dbfee81a: without the fd-lock, a reader racing a writer could see
+        // the writer's in-flight partial line and quarantine an op that was
+        // about to complete. read_all must wait for the same lock append()
+        // takes, so the reader only ever sees complete lines.
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let dir = temp_dir("lock");
+        let jpath = dir.join("journal.jsonl");
+        write_ops(&jpath, &sample_ops()[..1]); // one complete op on disk
+
+        // a writer takes the lock exactly the way Journal::append does
+        let lock_file = std::fs::OpenOptions::new().create(true).write(true)
+            .open(dir.join("journal.lock")).unwrap();
+        let mut lock = fd_lock::RwLock::new(lock_file);
+        let guard = lock.write().unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        let jpath2 = jpath.clone();
+        let reader = std::thread::spawn(move || {
+            let ops = Journal::read_all(&jpath2).unwrap();
+            tx.send(ops.len()).unwrap();
+        });
+
+        // while the writer holds the lock, read_all must NOT complete
+        assert!(rx.recv_timeout(Duration::from_millis(400)).is_err(),
+            "read_all must wait for the writer's fd-lock instead of reading a torn line");
+        drop(guard); // writer done: the line on disk is complete
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), 1,
+            "read_all resumes after the writer releases and sees the complete op");
+        reader.join().unwrap();
+    }
+
+    #[test]
     fn replay_of_tolerantly_loaded_ops_is_exact_for_survivors() {
         // end-to-end: damaged journal -> load -> replay == live store minus
         // exactly the damaged op's effect (the AddFact), never zero nodes

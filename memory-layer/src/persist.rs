@@ -71,12 +71,24 @@ impl Journal {
 
     /// Tolerant read with a corruption report: how many lines were skipped
     /// (and quarantined) so callers can log — never silently — what was lost.
+    ///
+    /// dbfee81a: takes the SAME fd-lock `append` takes (shared/read side),
+    /// so a reader can never observe a writer's in-flight partial line —
+    /// without this, a reader racing an append could see the torn half of
+    /// an op and quarantine a line the writer was about to complete.
     pub fn read_all_reported(path: impl AsRef<Path>) -> std::io::Result<LoadReport> {
         let path = path.as_ref();
         let mut report = LoadReport::default();
         if !path.exists() {
             return Ok(report);
         }
+        // lock file protocol mirrors append(): <journal>.lock, shared side
+        let mut lock_path = path.to_path_buf();
+        lock_path.set_extension("lock");
+        let lock_file = OpenOptions::new().read(true).write(true).create(true)
+            .open(&lock_path)?;
+        let lock = fd_lock::RwLock::new(lock_file);
+        let _guard = lock.read()?; // held across the entire read
         let mut reader = BufReader::new(File::open(path)?);
         loop {
             let mut raw: Vec<u8> = Vec::new();
