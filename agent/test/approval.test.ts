@@ -13,8 +13,15 @@ import {
   resetApprovalState,
   isAlwaysAllowed,
 } from "../src/approval.ts";
-import { bashExecTool, writeFileTool, applyEditTool } from "../src/tools/index.ts";
+import { bashExecTool, writeFileTool, applyEditTool, setWorkspaceRoot, getWorkspaceRoot } from "../src/tools/index.ts";
 import { textOf } from "../src/tools/types.ts";
+
+/** Point the workspace jail at a test dir; returns a restore function. */
+function setWorkspaceRootForTest(root: string): () => void {
+  const prev = getWorkspaceRoot();
+  setWorkspaceRoot(root);
+  return () => setWorkspaceRoot(prev);
+}
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const childFixture = path.join(here, "fixtures", "approval_child.ts");
@@ -165,6 +172,9 @@ test("wiring: write_file 'a' allowlists then later writes proceed unprompted", a
   try {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sea-appr-"));
     const file = path.join(dir, "out.txt");
+    // 12.6: file tools are jailed to the workspace root, so the test must
+    // point the root at its own temp dir (the old pass-through is gone)
+    const prevRoot = setWorkspaceRootForTest(dir);
     try {
       scripted("a");
       const res1 = await writeFileTool.execute("t2", { path: file, content: "one\ntwo\nthree" });
@@ -175,6 +185,7 @@ test("wiring: write_file 'a' allowlists then later writes proceed unprompted", a
       assert.match(textOf(res2), /Wrote/);
       assert.equal(fs.readFileSync(file, "utf8"), "second write");
     } finally {
+      prevRoot();
       fs.rmSync(dir, { recursive: true, force: true });
     }
   } finally {

@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Type } from "typebox";
-import { getWorkspaceRoot } from "./workspace.ts";
+import { resolveInWorkspace } from "./workspace.ts";
 import { textResult, type SeaTool } from "./types.ts";
 
 const MAX_RESULTS = 1000;
@@ -17,7 +17,9 @@ export const globListTool: SeaTool = {
   description: "List files under the workspace root matching a glob pattern.",
   parameters,
   async execute(_id, params) {
-    const root = params.root ? path.resolve(params.root) : getWorkspaceRoot();
+    // 12.6: a custom root goes through the same jail as file paths — a
+    // glob over ~/.ssh is recon even if it only lists names
+    const root = resolveInWorkspace(params.root ?? ".");
     const matches: string[] = [];
     try {
       for await (const entry of fs.glob(params.pattern, { cwd: root })) {
