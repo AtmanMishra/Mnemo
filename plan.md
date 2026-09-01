@@ -114,6 +114,28 @@ NOT built. Retrieval changes MUST keep memeval --hash at Hit@1 ≥ 73% / Hit@3 �
 - [x] 11.4 Tests + eval gate for all of the above: deterministic (real memsrv + temp journal, fake pi, setProjectRoot/setSkillsHome overrides), memeval --hash pinned 73/77/0.743 no-regression per retrieval change, cargo test + agent npm test green.
 NON-GOALS (explicitly not in this area — see doc table): learned embedding/router ML pipeline (no journal signal yet), per-kind recency decay (Supersede covers staleness), cluster summaries, proactive ActivatedWith recall, journal GC, parallel memsrv reads, diff/timeline ops.
 
+## AREA 12 — AUDIT REMEDIATION (audit/SUMMARY.md — 53 findings from the security & testing audit)
+
+Ordered queue; every item references the finding id(s) in audit/FINDINGS.jsonl.
+
+- [x] 12.1 CRITICAL-EQUIVALENT — approval-gate chain: ipy_run into GATED_TOOLS (0384ee03); subagent children approval-capable or fail CLOSED non-TTY (b6afa93e). (agent)
+- [ ] 12.2 harness safety gate on EVERY load (not just create): watcher/disk-loaded bundles (ccdbbb2b+51b81dda), relative/abs import bypass (747c8c3b), computed/backtick specifiers (56b733fa, f685ee0a, a0dfa43b) — gate that can't be regex-bypassed. (harness-engine + agent)
+- [ ] 12.3 memsrv journal resilience: tolerant load + quarantine + atomic writes (ab99acb1 — would-elevate-high, empirical 0-ops proof), non-UTF8 kill (e8e7d9e2), lock-less read_all (dbfee81a), frame/size bounds (f7c2c763). (memory-layer)
+- [ ] 12.4 web_fetch SSRF filter (localhost/private/metadata + redirects) (3927a1ac). (agent)
+- [ ] 12.5 bash allow-glob approves whole command string — match tokens, not raw string (3c265f44). (agent)
+- [ ] 12.6 file tools path containment (no absolute paths straight through; symlink canonicalization) (e00cd116). (agent)
+- [ ] 12.7 API key not inherited by children via process.env (68846059). (agent)
+- [ ] 12.8 trace redaction gaps (URL tokens, sk-or-/tvly- shapes, 120-char verbatim args) (2fefd9ce). (agent)
+- [ ] 12.9 CI secrets gate actually green + regex coverage + history scan; GITHUB_TOKEN perms; npm ci; pinned tags (5e28efcf, f5efc6ba, 3f198bdf, 144c276d, 23e58063, 89697e08). (CI-repo)
+- [ ] 12.10 hook executor default timeout + scope confinement (41ab8d40); block-reason not persisted raw to traces (fa244d3f). (agent)
+- [ ] 12.11 auth.json write: O_NOFOLLOW / realpath before writing key (dd3118fb). (agent)
+- [ ] 12.12 search cache invalidation on Unlink/Reweight/RecordOutcome (cddd21c0). (memory-layer)
+- [ ] 12.13 tui-go memory client: timeout must not leak reader goroutine (4745e2a2); cmd/mnemo os.Exit must run deferred Close (7bbead71). (tui-go)
+- [ ] 12.14 test coverage: internal/agent 0% (572d7d4d), internal/pi contract vs real protocol + pin policy (af582760), markdown 0%/prompt 25%/bin/mnemo.ts no tests (0ada275f, edfe2f6a, b7b6c912); drop --test-force-exit masking (01c4ef84). (tui-go + agent)
+- [ ] 12.15 low batch: MCP SIGTERM orphan (1c31b0fe), kernel limits (e4cc567c), embed retries stall RPC (6f96adc6), scope shadowing (b02291c2), manifest refs escape bundle dir (dcd8c081), watcher symlink (593e9a39), doc go version (2bf9a1a9), CI drift checks (2f298097)
+- [ ] 12.16 design confirmations (not defects): in-process unsandboxed harness (a739fbd8), in-kernel tools.* skip prompting (48236eda), embeddings egress (509e8ec5), kernel pipe attrs (467cb8ad)
+NB: 4b24b4b0 (working-tree red) = AREA 10.5 schedules overlay in-flight/uncommitted — resolve by completing AREA 10.5, not as an audit fix.
+
 ## DONE (reference)
 
 [x] Memory layer core+steering+sidecar (19+2 tests)
