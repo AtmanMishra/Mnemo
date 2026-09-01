@@ -1,26 +1,78 @@
 //! OpenRouter embedding provider + on-disk response cache.
 //! User choice: OPENROUTER_API_KEY set -> remote embeddings; else offline hashing.
+//!
+//! 6f96adc6: embed calls are TIME-BOUNDED and RETRY-BOUNDED. The memsrv RPC
+//! loop is single-threaded by design, and embed() sits on that loop — an
+//! unbounded HTTP call (ureq 3 defaults to NO timeout) would stall every
+//! client behind it. Bounds: 2 attempts (initial + one retry) x a 10 s
+//! global timeout + a fixed 1 s backoff = ~21 s worst case, vs unbounded
+//! per attempt x 4 attempts + 9 s of exponential sleeps before.
+//!
+//! Why the minimal fix and not a full async redesign: the remote path is
+//! per-text cached on disk (only uncached texts hit the API), memeval and
+//! the whole test suite run on the hashing embedder (no key), so an async
+//! redesign could not be validated against real remote behaviour without
+//! regressing the eval — and the hash fallback stays first-class: no key
+//! -> hashing, and a failed remote call degrades to an empty vector (the
+//! node simply scores 0 for that query), never an error, never a stall.
+//! If journal-embedded agents ever make the remote path hot, the next step
+//! is a background warm loop; that is deliberately NOT built yet.
 use crate::vec::Embedder;
 use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+/// End-to-end timeout for one embed HTTP call (DNS .. body read).
+pub const EMBED_TIMEOUT: Duration = Duration::from_secs(10);
+/// Total attempts for one embed call (initial + one retry).
+pub const EMBED_ATTEMPTS: u32 = 2;
+/// Fixed backoff between attempts (rate-limit courtesy, not a stall).
+pub const EMBED_BACKOFF: Duration = Duration::from_secs(1);
+
+const DEFAULT_ENDPOINT: &str = "https://openrouter.ai/api/v1/embeddings";
 
 pub struct OpenRouterEmbedder {
     api_key: String,
     model: String,
+    endpoint: String,
     cache_path: PathBuf,
     cache: Mutex<HashMap<String, Vec<f32>>>,
+    /// every call through this agent carries the global timeout above
+    agent: ureq::Agent,
 }
 
 impl OpenRouterEmbedder {
-    /// Load disk cache (text-hash -> vector) so identical text never re-hits the API.
-    pub fn new(api_key: String, model: String, cache_dir: &Path) -> Self {
+    /// Full constructor (endpoint/timeout injectable for tests and
+    /// self-hosted gateways via OPENROUTER_EMBED_URL / OPENROUTER_EMBED_TIMEOUT_MS).
+    pub fn new_with_endpoint(
+        api_key: String,
+        model: String,
+        cache_dir: &Path,
+        endpoint: String,
+        timeout: Duration,
+    ) -> Self {
         let cache_path = cache_dir.join("embed-cache.json");
         let cache = std::fs::read(&cache_path).ok()
             .and_then(|raw| serde_json::from_slice(&raw).ok())
             .unwrap_or_default();
-        Self { api_key, model, cache_path, cache: Mutex::new(cache) }
+        let agent = ureq::config::Config::builder()
+            .timeout_global(Some(timeout))
+            .build()
+            .new_agent();
+        Self { api_key, model, endpoint, cache_path, cache: Mutex::new(cache), agent }
+    }
+
+    /// Load disk cache (text-hash -> vector) so identical text never re-hits the API.
+    pub fn new(api_key: String, model: String, cache_dir: &Path) -> Self {
+        let endpoint = std::env::var("OPENROUTER_EMBED_URL")
+            .unwrap_or_else(|_| DEFAULT_ENDPOINT.into());
+        let timeout = std::env::var("OPENROUTER_EMBED_TIMEOUT_MS").ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(Duration::from_millis)
+            .unwrap_or(EMBED_TIMEOUT);
+        Self::new_with_endpoint(api_key, model, cache_dir, endpoint, timeout)
     }
 
     pub fn from_env(cache_dir: &Path) -> Option<Self> {
@@ -43,11 +95,13 @@ impl OpenRouterEmbedder {
     fn call_api(&self, text: &str) -> Result<Vec<f32>, String> {
         let body = serde_json::json!({ "model": self.model, "input": text });
         let mut last_err = String::new();
-        for attempt in 0..4u32 {
+        // bounded: EMBED_ATTEMPTS tries, each under the agent's global
+        // timeout — the RPC loop that calls this can never stall unbounded
+        for attempt in 0..EMBED_ATTEMPTS {
             if attempt > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(1500 * (1 << (attempt - 1))));
+                std::thread::sleep(EMBED_BACKOFF);
             }
-            match ureq::post("https://openrouter.ai/api/v1/embeddings")
+            match self.agent.post(&self.endpoint)
                 .header("Authorization", &format!("Bearer {}", self.api_key))
                 .header("Content-Type", "application/json")
                 .send(serde_json::to_string(&body).map_err(|e| e.to_string())?)

@@ -26,3 +26,4 @@ mod consolidate_tests;
 mod policy_tests;
 #[cfg(test)]
 mod rootcause_tests;
+mod remote_tests;
