@@ -9,6 +9,7 @@
  * set, which is more useful to the model than the tool not existing.
  */
 import { Type } from "typebox";
+import { lookup as dnsLookup } from "node:dns";
 import { textResult, type SeaTool } from "./types.ts";
 
 /** Injectable so tests never touch the network. */
@@ -78,18 +79,111 @@ export function assertFetchableUrl(url: string): URL {
   return parsed;
 }
 
+// --- 12.4: SSRF filter (audit 3927a1ac) ------------------------------------
+
+/** Resolves a hostname to its addresses; injectable so tests never hit DNS. */
+export type HostResolver = (host: string) => Promise<string[]>;
+
+const defaultResolveHost: HostResolver = (host) =>
+  new Promise((resolve, reject) => {
+    dnsLookup(host, { all: true }, (err, addrs) =>
+      err ? reject(err) : resolve((addrs ?? []).map((a: { address: string }) => a.address)));
+  });
+
+function isBlockedIpv4(s: string): boolean {
+  const parts = s.split(".");
+  if (parts.length !== 4) return false;
+  const o = parts.map(Number);
+  if (o.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  const [a, b] = o as [number, number];
+  return (
+    a === 0 ||                                   // "this" network
+    a === 10 ||                                  // 10/8 private
+    a === 127 ||                                 // 127/8 loopback
+    (a === 172 && b >= 16 && b <= 31) ||         // 172.16/12 private
+    (a === 192 && b === 168) ||                  // 192.168/16 private
+    (a === 169 && b === 254) ||                  // 169.254/16 link-local (cloud metadata)
+    (a === 100 && b >= 64 && b <= 127)           // 100.64/10 CGNAT (tailscale/docker)
+  );
+}
+
+/** True for loopback/private/reserved targets a fetched URL must never hit. */
+export function isBlockedAddress(addr: string): boolean {
+  const a = addr.replace(/^\[|\]$/g, "").toLowerCase();
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(a)) return isBlockedIpv4(a);
+  if (a === "" || a === "::" || a === "::1") return true;    // unspecified / loopback
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(a); // IPv4-mapped IPv6
+  if (mapped) return isBlockedIpv4(mapped[1]!);
+  if (/^f[cd][0-9a-f]{2}:/.test(a)) return true;             // fc00::/7 unique-local
+  if (/^fe[89ab][0-9a-f]:/.test(a)) return true;             // fe80::/10 link-local
+  return false;
+}
+
+function isBlockedName(host: string): boolean {
+  const h = host.replace(/^\[|\]$/g, "").toLowerCase().replace(/\.$/, "");
+  return h === "localhost" || h.endsWith(".localhost") || isBlockedAddress(h);
+}
+
+/**
+ * Scheme + SSRF validation for one hop. A hostname that is not a literal IP
+ * is RESOLVED and every address it maps to must be public — a DNS name that
+ * points inside the network is the classic SSRF bounce. Throws on any
+ * blocked target; returns the parsed URL otherwise.
+ */
+export async function assertSsrfSafeUrl(
+  url: string,
+  resolveHost: HostResolver = defaultResolveHost,
+): Promise<URL> {
+  const parsed = assertFetchableUrl(url);
+  const host = parsed.hostname.toLowerCase();
+  if (isBlockedName(host)) {
+    throw new Error(`web_fetch: ${parsed.hostname} is loopback/private/reserved and is not allowed (SSRF filter)`);
+  }
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host) || host.includes(":")) {
+    return parsed; // an IP literal: the range check above already decided
+  }
+  let addrs: string[];
+  try {
+    addrs = await resolveHost(host);
+  } catch {
+    throw new Error(`web_fetch: cannot resolve "${host}"`);
+  }
+  for (const addr of addrs) {
+    if (isBlockedAddress(addr)) {
+      throw new Error(`web_fetch: "${host}" resolves to private/reserved ${addr} (SSRF filter)`);
+    }
+  }
+  return parsed;
+}
+
+const MAX_REDIRECTS = 5;
+
 export async function fetchUrl(
   url: string,
   maxChars = DEFAULT_MAX_CHARS,
   doFetch: FetchLike = fetch as unknown as FetchLike,
+  resolveHost: HostResolver = defaultResolveHost,
 ): Promise<string> {
-  const parsed = assertFetchableUrl(url);
-  const res = await doFetch(parsed.href, { redirect: "follow" });
-  if (!res.ok) throw new Error(`web_fetch: ${parsed.href} returned HTTP ${res.status}`);
-  const body = await res.text();
-  const type = res.headers.get("content-type") ?? "";
-  const text = /html/i.test(type) ? htmlToText(body) : body;
-  return truncate(text, maxChars);
+  // redirect: "manual" + re-validating EVERY hop: with "follow" an
+  // allowed-looking external URL could bounce to an internal target the
+  // filter never saw (3927a1ac)
+  let current = url;
+  for (let hop = 0; ; hop++) {
+    const parsed = await assertSsrfSafeUrl(current, resolveHost);
+    const res = await doFetch(parsed.href, { redirect: "manual" });
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      if (!loc) throw new Error(`web_fetch: ${parsed.href} returned HTTP ${res.status} with no Location header`);
+      if (hop >= MAX_REDIRECTS) throw new Error(`web_fetch: too many redirects (max ${MAX_REDIRECTS})`);
+      current = new URL(loc, parsed.href).href; // relative Locations resolve against this hop
+      continue;
+    }
+    if (!res.ok) throw new Error(`web_fetch: ${parsed.href} returned HTTP ${res.status}`);
+    const body = await res.text();
+    const type = res.headers.get("content-type") ?? "";
+    const text = /html/i.test(type) ? htmlToText(body) : body;
+    return truncate(text, maxChars);
+  }
 }
 
 export const webFetchTool: SeaTool = {
