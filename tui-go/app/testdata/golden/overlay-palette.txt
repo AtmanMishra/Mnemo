@@ -11,18 +11,18 @@
                   │   /sessions                       ^s  resume a conversation  │                
     tab moves betw│   /memory                          ^m  what Mnemo remembers  │                
     esc goes up on│   /logs                       ^l  every run as a call graph  │                
-    In the transcr│   /thinking                   ^e  open every thinking block  │                
-                  │   /tools                          ^r  open every tool block  │                
-  ▊ how does the f│   /expand                               ^a  open everything  │                
-                  │   /collapse                            ^a  close everything  │                
-  · ▸ thinking    │   /copy                        Y  copy the whole transcript  │                
-                  │   /clear                                start a new session  │                
-  │ It reads flags│   /login                                                     │                
-                  │   /model                                                     │                
-  ● ▸ read  limit=│   /logout      forget a provider's key — /logout <provider>  │           40 ln
-                  │   /quit                                           ^d  leave  │                
-  ● ▸ bash  go tes╰──────────────────────────────────────────────────────────────╯          exit 1
-                                                                                                  
+    In the transcr│   /schedules                     ^o  schedules and triggers  │                
+                  │   /thinking                   ^e  open every thinking block  │                
+  ▊ how does the f│   /tools                          ^r  open every tool block  │                
+                  │   /expand                               ^a  open everything  │                
+  · ▸ thinking    │   /collapse                            ^a  close everything  │                
+                  │   /copy                        Y  copy the whole transcript  │                
+  │ It reads flags│   /clear                                start a new session  │                
+                  │   /login                                                     │                
+  ● ▸ read  limit=│   /model                                                     │           40 ln
+                  │   /logout      forget a provider's key — /logout <provider>  │                
+  ● ▸ bash  go tes│   /quit                                           ^d  leave  │          exit 1
+                  ╰──────────────────────────────────────────────────────────────╯                
   ● ▸ 1 sub-agent                                                                                 
   
   ▊ ask, or press ^k                                                                              

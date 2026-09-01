@@ -29,6 +29,7 @@ const (
 	Help
 	Models
 	Login
+	Schedules
 )
 
 func (k Kind) String() string {
@@ -47,6 +48,8 @@ func (k Kind) String() string {
 		return "model"
 	case Login:
 		return "login"
+	case Schedules:
+		return "schedules"
 	}
 	return ""
 }
@@ -87,6 +90,16 @@ func NewList(k Kind, purpose string, items []Item, empty ...string) *Model {
 		width: 60, height: 12, typing: true}
 	m.refilter()
 	return m
+}
+
+// SetItems replaces a flat overlay's rows (the schedules pause/resume path
+// re-renders the list in place so the surface never closes mid-action).
+func (m *Model) SetItems(items []Item) {
+	if m.tree != nil {
+		return
+	}
+	m.items = items
+	m.refilter()
 }
 
 // NewTree builds a hierarchical overlay. Typing is inert until `/` is

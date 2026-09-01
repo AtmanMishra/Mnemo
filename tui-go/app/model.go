@@ -120,6 +120,10 @@ type Model struct {
 	files []string
 	mem *memory.Client
 
+	// schedSeen remembers which job results have already been toasted on the
+	// status line, so a finished schedule chips exactly once per run.
+	schedSeen map[string]string
+
 	// cmds is every slash command: built-ins, skills, plugins, bundles.
 	// Loaded once at start; /reload picks up a skill you just wrote.
 	cmds []command.Command
@@ -138,17 +142,18 @@ func New(cfg Config) *Model {
 	}
 	th := theme.New(theme.PICO8, theme.Heavy, cfg.Dark)
 	m := &Model{
-		cfg:      cfg,
-		th:       th,
-		keys:     keymap.New(),
-		mode:     keymap.Insert,
-		w:        80,
-		h:        24,
-		chat:     chat.New(),
-		prompt:   prompt.New(cfg.Dark),
-		explorer: tree.New(filetree.Root(cfg.CWD)),
-		agent:    cfg.Agent,
-		openTool: map[string]*chat.Block{},
+		cfg:       cfg,
+		th:        th,
+		keys:      keymap.New(),
+		mode:      keymap.Insert,
+		w:         80,
+		h:         24,
+		chat:      chat.New(),
+		prompt:    prompt.New(cfg.Dark),
+		explorer:  tree.New(filetree.Root(cfg.CWD)),
+		agent:     cfg.Agent,
+		openTool:  map[string]*chat.Block{},
+		schedSeen: map[string]string{},
 	}
 	m.chat.SetMarkdown(markdown.New(th))
 	m.cmds = command.Load(cfg.CWD, cfg.Home, cfg.HarnessDir)

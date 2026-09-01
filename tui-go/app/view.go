@@ -197,7 +197,13 @@ func (m *Model) body() string {
 		// opened it to act on is still visible behind it.
 		pw := m.overlayWidth()
 		m.ov.SetSize(pw, m.overlayHeight())
-		m.ov.SetFooter(m.memoryEditorLine()) // "" when there is no editor
+		if m.editing() && m.ov.Kind == overlay.Memory {
+			m.ov.SetFooter(m.memoryEditorLine())
+		} else if m.ov.Kind != overlay.Schedules {
+			// Schedules sets its own footer at open time; every other overlay
+			// gets an empty one unless it supplies its own.
+			m.ov.SetFooter("")
+		}
 		backdrop := left
 		if r := m.explorerWidth(); r > 0 {
 			backdrop = ui.Columns(m.th, h,
@@ -386,6 +392,11 @@ func (m *Model) status() string {
 					}
 				}
 				hints = append(hints, keymap.Entry{Key: m.keys.Forget.Help().Key, Desc: m.keys.Forget.Help().Desc})
+			}
+			if m.ov.Kind == overlay.Schedules {
+				// The fire key belongs on the row with the other actions;
+				// advertising a key that does nothing is how hints die.
+				hints = append(hints, keymap.Entry{Key: m.keys.Add.Help().Key, Desc: "fire this now"})
 			}
 		}
 		for _, e := range hints {

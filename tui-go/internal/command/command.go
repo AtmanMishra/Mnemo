@@ -65,6 +65,7 @@ func Builtins() []Command {
 		{Name: "sessions", Desc: "resume a conversation", Kind: Builtin, Chord: "^s"},
 		{Name: "memory", Desc: "what Mnemo remembers", Kind: Builtin, Chord: "^m"},
 		{Name: "logs", Desc: "every run as a call graph", Kind: Builtin, Chord: "^l"},
+		{Name: "schedules", Desc: "schedules and triggers", Kind: Builtin, Chord: "^o"},
 		{Name: "thinking", Desc: "open every thinking block", Kind: Builtin, Chord: "^e"},
 		{Name: "tools", Desc: "open every tool block", Kind: Builtin, Chord: "^r"},
 		{Name: "expand", Desc: "open everything", Kind: Builtin, Chord: "^a"},

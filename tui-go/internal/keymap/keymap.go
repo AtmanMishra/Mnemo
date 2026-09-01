@@ -41,6 +41,7 @@ type Map struct {
 	Sessions  key.Binding
 	Memory    key.Binding
 	Logs      key.Binding
+	Schedules key.Binding
 	AllThink  key.Binding
 	AllTools  key.Binding
 	AllBlocks key.Binding
@@ -96,9 +97,11 @@ type Map struct {
 // New builds the shipping key map.
 //
 // The chords are chosen so that every surface is reachable in one press from
-// anywhere: ^k palette, ^t explorer, ^s sessions, ^m memory, ^l logs. The two
-// that matter most for reading are ^e and ^r — one press opens every thinking
-// block, or every tool block, across the whole transcript.
+// anywhere: ^k palette, ^t explorer, ^s sessions, ^m memory, ^l logs,
+// ^o schedules. The two that matter most for reading are ^e and ^r — one
+// press opens every thinking block, or every tool block, across the whole
+// transcript. (^j is taken by newline in the prompt, which is why schedules
+// gets ^o instead.)
 func New() Map {
 	b := func(help, desc string, keys ...string) key.Binding {
 		return key.NewBinding(key.WithKeys(keys...), key.WithHelp(help, desc))
@@ -109,6 +112,7 @@ func New() Map {
 		Sessions:  b("^s", "sessions and sub-agents", "ctrl+s"),
 		Memory:    b("^m", "memory", "ctrl+m"),
 		Logs:      b("^l", "logs", "ctrl+l"),
+		Schedules: b("^o", "schedules and triggers", "ctrl+o"),
 		AllThink:  b("^e", "open every thinking block", "ctrl+e"),
 		AllTools:  b("^r", "open every tool block", "ctrl+r"),
 		AllBlocks: b("^a", "open everything", "ctrl+a"),
@@ -183,7 +187,7 @@ func (m Map) Help() []Entry {
 	}
 	var out []Entry
 	// Global first: these are the ones that remove the most keystrokes.
-	out = append(out, group(Insert, m.Palette, m.Explorer, m.Sessions, m.Memory, m.Logs,
+	out = append(out, group(Insert, m.Palette, m.Explorer, m.Sessions, m.Memory, m.Logs, m.Schedules,
 		m.AllThink, m.AllTools, m.AllBlocks, m.Find, m.Cycle, m.CycleBack,
 		m.KeysHelp, m.Interrupt, m.Quit, m.Back)...)
 	out = append(out, group(Insert, m.Send, m.Steer, m.Newline, m.Complete, m.HistPrev, m.HistNext)...)

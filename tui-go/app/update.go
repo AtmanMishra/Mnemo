@@ -20,6 +20,7 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/pi"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/session"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/schedule"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/theme"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/trace"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/tree"
@@ -52,6 +53,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tick++
 		m.chat.SetTick(m.tick)
 		if m.working {
+			m.schedPoll()
 			return m, tickCmd()
 		}
 		return m, nil
@@ -167,15 +169,15 @@ func (m *Model) fold(msg tea.Msg) tea.Cmd {
 		// A queued message is a promise; keep it.
 		if next, ok := m.prompt.PopQueue(); ok {
 			m.layout()
-			return m.send(next)
+			return tea.Batch(m.send(next), m.schedPoll())
 		}
-		return nil
+		return m.schedPoll()
 
 	case agent.Failed:
 		m.working = false
 		m.settle()
 		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{msg.Err.Error()}})
-		return nil
+		return m.schedPoll()
 
 	case agent.Stats:
 		m.stats = msg.TurnStats
@@ -315,6 +317,9 @@ func (m *Model) global(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 
 	case key.Matches(msg, k.Logs):
 		return m.openLogs(), true
+
+	case key.Matches(msg, k.Schedules):
+		return m.openSchedules(), true
 
 	case key.Matches(msg, k.KeysHelp):
 		return m.openHelp(), true
@@ -716,6 +721,8 @@ func (m *Model) runSlash(c command.Command, args string) tea.Cmd {
 		return m.openMemory()
 	case "logs":
 		return m.openLogs()
+	case "schedules":
+		return m.openSchedules()
 	case "thinking":
 		return m.toggleAll(chat.Think, "thinking")
 	case "tools":
@@ -924,6 +931,15 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 	if ov.Kind == overlay.Memory && key.Matches(msg, k.Forget) && !ov.Typing() {
 		return m.forgetSelected()
 	}
+	// Schedules' action keys reuse the list-wide Add/Edit bindings where they
+	// mean something (Login+Forget is the precedent: a key that is inert in
+	// other lists never fires by surprise). n = fire this job now.
+	if ov.Kind == overlay.Schedules && key.Matches(msg, k.Add) {
+		if id, ok := ov.Selected(); ok {
+			return m.scheduleFireNow(id)
+		}
+		return nil
+	}
 	// The same key, the same shape: d removes the thing under the cursor,
 	// wherever removing is a thing this list can do. The login list is a FLAT
 	// list, so it is always "typing" — unlike the memory tree, and the guard
@@ -1028,6 +1044,11 @@ func (m *Model) chooseOverlay() tea.Cmd {
 		m.ov = nil
 		m.mode = keymap.Insert
 		return tea.Batch(m.prompt.Focus(), m.login(strings.TrimPrefix(id, "login:")))
+	case overlay.Schedules:
+		// Pausing/resuming stays in the surface: the row you toggled is
+		// still there, already re-rendered, so a sweep of the list never
+		// means opening and closing it job by job.
+		return m.scheduleToggle(id)
 	default:
 		m.ov = nil
 		m.mode = keymap.Insert
@@ -1137,6 +1158,7 @@ func (m *Model) actions() []action {
 		{"sessions", k.Sessions.Help().Desc, k.Sessions.Help().Key, (*Model).openSessions},
 		{"memory", k.Memory.Help().Desc, k.Memory.Help().Key, (*Model).openMemory},
 		{"logs", k.Logs.Help().Desc, k.Logs.Help().Key, (*Model).openLogs},
+		{"schedules", k.Schedules.Help().Desc, k.Schedules.Help().Key, (*Model).openSchedules},
 		{"keys", k.KeysHelp.Help().Desc, k.KeysHelp.Help().Key, (*Model).openHelp},
 		{"copy", "copy the whole transcript", k.YankAll.Help().Key,
 			func(m *Model) tea.Cmd {
@@ -1259,6 +1281,179 @@ func (m *Model) memory() ([]*tree.Node, error) {
 // than a flat scroll. That is the difference between "what happened" and
 // "what happened inside what" — and it is the only view where a slow turn
 // shows you which call was slow.
+// openSchedules floats the job store (10.5). Flat, like the palette: type to
+// filter, enter pauses/resumes the selected job, n fires it now (the agent's
+// /now command), esc back. Adding is deliberately out of reach here — a
+// scheduler editor is a place for mistakes; `mnemo schedule add` and
+// /schedule add are the honest surface for creating one.
+func (m *Model) openSchedules() tea.Cmd {
+	jobs, err := schedule.Load(m.cfg.Home)
+	if err != nil {
+		m.ov = overlay.NewList(overlay.Schedules,
+			"all schedules and triggers — enter pauses, n fires now", nil,
+			"Could not read the schedules file.",
+			err.Error(),
+			"Fix ~/.mnemo/schedules.json, then ^o again.",
+		)
+		m.armOverlay()
+		return nil
+	}
+	items := make([]overlay.Item, 0, len(jobs))
+	for _, j := range jobs {
+		items = append(items, scheduleItem(j))
+	}
+	m.ov = overlay.NewList(overlay.Schedules,
+		"all schedules and triggers — enter pauses, n fires now", items,
+		"No schedules yet.",
+		"One is written when you run",
+		"mnemo schedule add --cron \"0 9 * * *\" --prompt \"…\"",
+		"or /schedule add inside a session.",
+	)
+	m.ov.SetFooter(m.schedulesFooter())
+	m.armOverlay()
+	return m.schedPoll()
+}
+
+// scheduleItem is one job row: name, what it runs, and where it stands.
+func scheduleItem(j schedule.Job) overlay.Item {
+	mark := "runs — " + schedule.Describe(j)
+	group := "schedule"
+	if j.Trigger != nil {
+		group = "trigger"
+	}
+	if !j.Enabled {
+		group = "paused"
+		mark = "paused — " + schedule.Describe(j)
+	}
+	detail := mark
+	if j.LastRun != nil {
+		when := time.UnixMilli(*j.LastRun).Format("01-02 15:04")
+		if j.Result != nil {
+			detail = "last " + when + " " + runWord(j.Result) + " · " + mark
+		} else {
+			detail = "last " + when + " · " + mark
+		}
+	} else {
+		detail = mark + " · never run"
+	}
+	return overlay.Item{Label: j.Name, Detail: detail, Group: group, ID: j.ID}
+}
+
+func runWord(r *schedule.JobResult) string {
+	if r.OK {
+		return "ok"
+	}
+	if r.Detail != "" {
+		return "failed · " + r.Detail
+	}
+	return "failed"
+}
+
+// schedulesFooter is the overlay's one action line. It says what the keys do
+// and where new jobs come from, because a surface that hides its own add
+// path is a surface that reads like it is broken.
+func (m *Model) schedulesFooter() string {
+	return "enter pause/resume · n fires now · esc back · add via mnemo schedule add"
+}
+
+// scheduleToggle flips one job's enabled flag in the shared store and
+// re-renders the list in place, so pausing several jobs never closes the
+// surface you are standing in.
+func (m *Model) scheduleToggle(id string) tea.Cmd {
+	jobs, err := schedule.Load(m.cfg.Home)
+	if err != nil {
+		return m.notify("schedules file unreadable — " + err.Error())
+	}
+	name, ok := schedule.Find(jobs, id)
+	if !ok {
+		return m.notify("no job " + id)
+	}
+	enabled, ok := schedule.ToggleEnabled(jobs, id)
+	if !ok {
+		return m.notify("no job " + id)
+	}
+	if err := schedule.Save(m.cfg.Home, jobs); err != nil {
+		return m.notify("could not save — " + err.Error())
+	}
+	items := make([]overlay.Item, 0, len(jobs))
+	for _, j := range jobs {
+		items = append(items, scheduleItem(j))
+	}
+	m.ov.SetItems(items)
+	word := "paused"
+	if enabled {
+		word = "resumed"
+	}
+	return m.notify(word + " " + name.Name + " — " + schedule.Describe(FindJob(jobs, id)))
+}
+
+// scheduleFireNow sends the agent its /now command, the same universal test
+// button the CLI and the in-session ticker share (10.4).
+func (m *Model) scheduleFireNow(id string) tea.Cmd {
+	jobs, err := schedule.Load(m.cfg.Home)
+	if err != nil {
+		return m.notify("schedules file unreadable — " + err.Error())
+	}
+	name, ok := schedule.Find(jobs, id)
+	if !ok {
+		return m.notify("no job " + id)
+	}
+	return tea.Batch(
+		m.send("/now "+id),
+		m.notify("firing "+name.Name+" now"),
+	)
+}
+
+// schedPoll toasts each finished job once, as a status-line chip, like the
+// hooks reports and the memory notices already do. Polling the 200-byte
+// store at the points the app already wakes up (start, each turn end, each
+// spinner tick, opening the overlay) is the honest cheap channel — a push
+// event from the daemon into the TUI would mean growing the agent protocol
+// just for this.
+func (m *Model) schedPoll() tea.Cmd {
+	jobs, err := schedule.Load(m.cfg.Home)
+	if err != nil {
+		return nil
+	}
+	now := time.Now().UnixMilli()
+	for _, j := range jobs {
+		if j.Result == nil {
+			continue
+		}
+		sig := itoa64(j.Result.At) + ":" + boolWord(j.Result.OK) + ":" + itoa64(j.Result.DurationMs)
+		if m.schedSeen[j.ID] == sig {
+			continue
+		}
+		m.schedSeen[j.ID] = sig
+		if !schedule.Recent(j, now, 5*60_000) {
+			continue
+		}
+		word := "ok"
+		if !j.Result.OK {
+			word = "failed"
+		}
+		return m.notify("⏱ " + j.Name + ": " + word + " · " + itoa64(j.Result.DurationMs/1000) + "s")
+	}
+	return nil
+}
+
+func itoa64(n int64) string {
+	return itoa(int(n))
+}
+
+func boolWord(b bool) string {
+	if b {
+		return "ok"
+	}
+	return "no"
+}
+
+// FindJob is the app-local lookup used by the pause notice.
+func FindJob(jobs []schedule.Job, id string) schedule.Job {
+	j, _ := schedule.Find(jobs, id)
+	return j
+}
+
 func (m *Model) openLogs() tea.Cmd {
 	nodes := trace.Nodes(trace.Read(m.cfg.Home))
 	m.ov = overlay.NewTree(overlay.Logs,
