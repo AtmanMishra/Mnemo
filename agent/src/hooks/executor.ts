@@ -15,6 +15,13 @@
  * gives natural arg splitting and PATH lookup). A relative command resolves
  * against the manifest's own directory, so project hooks stay portable.
  * Duration uses an injected clock — tests never wait on real time.
+ *
+ * 12.10 (audit 41ab8d40) adds two bounds:
+ *   - scope: a RELATIVE command may not escape the manifest's directory via
+ *     `..` or a symlink (canonicalized containment); an explicit absolute
+ *     path is an operator-authored choice and is left alone.
+ *   - time: a manifest without a timeout gets a finite default, so a stuck
+ *     hook cannot hang a tool call forever.
  */
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
@@ -103,10 +110,55 @@ export function resolveCommand(hook: Hook | HookManifest, home?: string): string
   return path.join(base, hook.command);
 }
 
-/** Timeout in ms for a hook; unset -> no timeout. */
-export function timeoutMs(hook: Hook | HookManifest): number | null {
+/** Timeout in ms for a hook; unset (or nonsense) -> a finite default (12.10). */
+export const DEFAULT_HOOK_TIMEOUT_MS = 30_000;
+
+/**
+ * realpath of `p`, tolerating a not-yet-existing tail: the deepest EXISTING
+ * ancestor is canonicalized and the missing tail is appended verbatim.
+ */
+function canonicalize(p: string): string {
+  let cur = p;
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync(cur), ...tail.reverse());
+    } catch {
+      const parent = path.dirname(cur);
+      if (parent === cur) {
+        throw new Error(`hook: cannot resolve "${p}"`);
+      }
+      tail.push(path.basename(cur));
+      cur = parent;
+    }
+  }
+}
+
+/**
+ * 12.10 scope: the resolved command, with sneaky escapes refused.
+ * A RELATIVE command must stay inside the manifest's own directory after
+ * canonicalization (`..` walks and symlinked subdirs can otherwise smuggle
+ * a hook out of the repo it ships in). An explicit absolute path is treated
+ * as operator intent — the operator wrote it in their own manifest.
+ */
+export function scopeCommand(hook: Hook | HookManifest, home?: string): string {
+  const command = resolveCommand(hook, home);
+  if (path.isAbsolute(hook.command)) return command;
+  const root = canonicalize(hook.file ? path.dirname(hook.file) : process.cwd());
+  const dir = canonicalize(path.dirname(command));
+  if (dir !== root && !dir.startsWith(root + path.sep)) {
+    throw new Error(
+      `hook ${hook.id}: command "${hook.command}" resolves to ${dir}, outside the ` +
+      `hook's directory (${root}). Hooks may only run commands inside their own manifest directory.`,
+    );
+  }
+  return command;
+}
+
+/** Timeout in ms for a hook; unset -> DEFAULT_HOOK_TIMEOUT_MS. */
+export function timeoutMs(hook: Hook | HookManifest): number {
   const secs = hook.timeout ?? 0;
-  return secs > 0 ? secs * 1000 : null;
+  return secs > 0 ? secs * 1000 : DEFAULT_HOOK_TIMEOUT_MS;
 }
 
 /**
@@ -115,7 +167,20 @@ export function timeoutMs(hook: Hook | HookManifest): number | null {
  */
 export function executeHook(req: ExecRequest): Promise<ExecOutcome> {
   const start = (req.now ?? Date.now)();
-  const command = resolveCommand(req.hook, req.env?.HOME);
+  let command: string;
+  try {
+    command = scopeCommand(req.hook, req.env?.HOME);
+  } catch (err: any) {
+    return Promise.resolve({
+      status: "error",
+      message: `hook ${req.hook.id} refused: ${err?.message ?? err}`,
+      exit: null,
+      timedOut: false,
+      stdout: "",
+      stderr: "",
+      durationMs: (req.now ?? Date.now)() - start,
+    });
+  }
   const cwd = req.cwd ?? (req.hook.file ? path.dirname(req.hook.file) : process.cwd());
   const ttl = req.timeoutMsOverride ?? timeoutMs(req.hook);
 

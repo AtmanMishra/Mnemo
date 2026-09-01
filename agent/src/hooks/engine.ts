@@ -27,6 +27,21 @@ import { matchesHook } from "./matcher.ts";
 import { executeHook, responsePatches, type ExecOutcome } from "./executor.ts";
 import { HookAudit, type AuditAttrs, type AuditSink } from "./audit.ts";
 import { canModify, type Hook, type Trigger } from "./types.ts";
+import { REDACTED, redactString } from "../trace.ts";
+
+/**
+ * 12.10 (fa244d3f): a hook's block reason is model-visible text that may echo
+ * tool args or anything a script read. The trace redactor only knows named
+ * shapes, so a high-entropy string (a token, a key, any 32+ char blob) would
+ * persist to ~/.mnemo/logs verbatim. This runs the reason through the same
+ * redaction as other values PLUS a high-entropy scrub, so echoed secrets stay
+ * off disk while the prose survives.
+ */
+const HIGH_ENTROPY = /\b[A-Za-z0-9_\-]{32,}\b/g;
+
+function auditSafeReason(reason: string): string {
+  return redactString(reason).replace(HIGH_ENTROPY, REDACTED).slice(0, 400);
+}
 
 export interface EngineOptions {
   /** User home: user + global hook roots. Defaults to os.homedir(). */
@@ -110,12 +125,16 @@ export class HookEngine {
   }
 
   private auditInvocation(hook: Hook, attrs: Partial<AuditAttrs>): void {
+    const scrubbed = { ...attrs };
+    // 12.10: a hook block reason may echo arbitrary bytes; scrub before
+    // it reaches the audit sink / trace file
+    if (typeof scrubbed.reason === "string") scrubbed.reason = auditSafeReason(scrubbed.reason);
     this.audit.event("hook", {
       hook: hook.id,
       scope: hook.scope,
       trigger: hook.trigger,
       command: hook.file ? hook.file : hook.command,
-      ...attrs,
+      ...scrubbed,
     } as AuditAttrs);
   }
 

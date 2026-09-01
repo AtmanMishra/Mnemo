@@ -363,3 +363,34 @@ test("/hook disable + enable round-trip through the state file", async () => {
     assert.ok(e.includes("enabled"), e);
   } finally { fs.rmSync(w.base, { recursive: true, force: true }); }
 });
+// --- 12.10 (fa244d3f): block reasons are scrubbed before the audit sink ------
+
+test("a hook echoed secret in its block reason never reaches the audit record raw", async () => {
+  const w = world();
+  try {
+    const SECRET = "sk-or-v1-hookechoedlongtokenthatmustneverpersist123456789";
+    const cmd = script(w.base, "leak.sh", sh(`echo "DENIED leaked=${SECRET}" >&2\nexit 2`));
+    writeManifest(projectHookRoot(w.project), "leaker.json",
+      { id: "leaker", trigger: "PreToolUse", command: cmd });
+
+    // narrow recording sink instead of the real tracer, so we assert on the
+    // exact attrs the engine hands the audit layer
+    const seen: Array<Record<string, unknown>> = [];
+    const engine = new HookEngine({
+      home: w.home,
+      audit: { event: (_name: string, attrs: any) => { seen.push(attrs); return attrs as any; } },
+    });
+
+    const dec = await engine.preToolUse(
+      { toolName: "bash_exec", toolCallId: "c", input: { command: "ls" } },
+      { cwd: w.project },
+    );
+    assert.equal(dec?.block, true);
+    const record = seen.find((s) => s.hook === "leaker" && s.block === true);
+    assert.ok(record, "the invocation was audited");
+    const reason = String(record!.reason ?? "");
+    assert.ok(!reason.includes(SECRET), "the raw echoed secret must not be in the audit attrs");
+    assert.ok(!reason.includes("sk-or-v1-hookechoed"), "the sk-or- shape must be scrubbed too");
+    assert.match(reason, /\[redacted\]/, "the scrubbed reason still reads as a block");
+  } finally { fs.rmSync(w.base, { recursive: true, force: true }); }
+});

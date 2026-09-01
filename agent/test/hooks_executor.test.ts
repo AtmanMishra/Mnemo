@@ -9,8 +9,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-  blockReason, executeHook, parseResponse, resolveCommand, timeoutMs,
-  type ExecRequest,
+  blockReason, executeHook, parseResponse, resolveCommand, scopeCommand, timeoutMs,
+  DEFAULT_HOOK_TIMEOUT_MS, type ExecRequest,
 } from "../src/hooks/executor.ts";
 import { HookAudit, auditInvocation } from "../src/hooks/audit.ts";
 import { readSpans } from "../src/trace.ts";
@@ -159,7 +159,9 @@ test("relative commands resolve against the manifest directory", async () => {
     const abs = script(base, "abs.sh", sh("exit 0"));
     assert.equal(resolveCommand(manifest(base, { command: abs })), abs);
     assert.equal(timeoutMs(manifest(base, { timeout: 3 })), 3000);
-    assert.equal(timeoutMs(manifest(base, {})), null);
+    // 12.10: a manifest without a timeout gets a finite default, so a stuck
+    // hook can never hang a tool call forever
+    assert.equal(timeoutMs(manifest(base, {})), DEFAULT_HOOK_TIMEOUT_MS);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
@@ -233,6 +235,68 @@ test("combined: a blocking hook against a temp tree writes its audit row", async
     const spans = readSpans(home);
     assert.equal(spans.length, 1);
     assert.equal(spans[0]!.attrs.hook, "freeze");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+// --- 12.10 (41ab8d40): scope confinement -----------------------------------
+
+test("a relative command that escapes the manifest dir is refused before running", async () => {
+  const base = tmpBase("escape");
+  try {
+    const outside = tmpBase("outside");
+    try {
+      script(outside, "evil.sh", sh("touch /tmp/escaped-marker 2>/dev/null; exit 2"));
+      const rel = path.relative(path.dirname(base), outside);
+      const out = await executeHook({
+        hook: manifest(base, { command: path.join("..", rel, "evil.sh") }),
+        payload: {},
+      });
+      assert.equal(out.status, "error");
+      const msg = out.status === "error" ? out.message : "";
+      assert.match(msg, /refused/);
+      assert.match(msg, /outside the hook's directory/);
+      assert.ok(!fs.existsSync("/tmp/escaped-marker"), "the escaping command must never run");
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("scopeCommand: plain .. escapes refused; absolute and inside-relative pass", () => {
+  const base = tmpBase("scope");
+  try {
+    assert.throws(() => scopeCommand(manifest(base, { command: "../../evil.sh" })),
+      /outside the hook's directory/);
+    const abs = script(base, "ok.sh", sh("exit 0"));
+    assert.equal(scopeCommand(manifest(base, { command: abs })), abs,
+      "an explicit absolute path is operator intent and survives");
+    assert.equal(scopeCommand(manifest(base, { command: "bin/fine.sh" })),
+      path.join(base, "bin/fine.sh"), "relative commands inside the manifest dir pass");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("a symlinked subdirectory that points outside is refused (canonicalized)", async () => {
+  const base = tmpBase("symlink-escape");
+  try {
+    const outside = tmpBase("symlink-target");
+    try {
+      script(outside, "evil.sh", sh("exit 2"));
+      fs.symlinkSync(outside, path.join(base, "link"));
+      const out = await executeHook({
+        hook: manifest(base, { command: "link/evil.sh" }),
+        payload: {},
+      });
+      assert.equal(out.status, "error");
+      const msg = out.status === "error" ? out.message : "";
+      assert.match(msg, /outside the hook's directory/);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
