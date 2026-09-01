@@ -125,7 +125,7 @@ Ordered queue; every item references the finding id(s) in audit/FINDINGS.jsonl.
 - [x] 12.5 bash allow-glob approves whole command string — match tokens, not raw string (3c265f44). (agent)
 - [x] 12.6 file tools path containment (no absolute paths straight through; symlink canonicalization) (e00cd116). (agent)
 - [x] 12.7 API key not inherited by children via process.env (68846059). (agent)
-- [ ] 12.8 trace redaction gaps (URL tokens, sk-or-/tvly- shapes, 120-char verbatim args) (2fefd9ce). (agent)
+- [x] 12.8 trace redaction gaps (URL tokens, sk-or-/tvly- shapes, 120-char verbatim args) (2fefd9ce). (agent)
 - [x] 12.9 CI secrets gate actually green + regex coverage + history scan; GITHUB_TOKEN perms; npm ci; pinned tags (5e28efcf, f5efc6ba, 3f198bdf, 144c276d, 23e58063, 89697e08). (CI-repo) — DONE 2026-09-01: gate was red on its own fixture (hooks_executor.test.ts excluded as trace.test.ts); exclusion list fixed after verifying the exact git grep red BEFORE and green AFTER; regex extended to sk-or-v1-/github_pat_/generic api_key assignment; bounded history sweep (last 200 commits, early-exit; full-history scan deferred & documented); permissions: contents: read; npm ci for agent + harness-engine; actions pinned to SHAs with resolved-tag comments (rust-toolchain tracks stable by design).
 - [ ] 12.10 hook executor default timeout + scope confinement (41ab8d40); block-reason not persisted raw to traces (fa244d3f). (agent)
 - [ ] 12.11 auth.json write: O_NOFOLLOW / realpath before writing key (dd3118fb). (agent)
