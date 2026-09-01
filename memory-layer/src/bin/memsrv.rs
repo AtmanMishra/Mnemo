@@ -23,11 +23,30 @@ fn main() {
     load_dotenv();
 
     let mut s = StoreData::new();
-    let ops = Journal::read_all(&jpath).unwrap_or_default();
+    // ab99acb1: tolerant load. A corrupt/partial line costs that line only;
+    // the damage is reported, never silently zeroed. Only a genuine I/O
+    // error on the journal file itself starts empty (and says so loudly).
+    let report = match Journal::read_all_reported(&jpath) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[memsrv] journal read failed ({e}); starting from EMPTY memory");
+            Default::default()
+        }
+    };
     let mut clock: Millis = 1_700_000_000_000;
-    for op in &ops {
-        if s.apply(op).is_err() { eprintln!("[memsrv] skipping corrupt op"); }
+    let mut skipped_apply = 0usize;
+    for op in &report.ops {
+        if let Err(e) = s.apply(op) {
+            eprintln!("[memsrv] skipping unappliable op: {e}");
+            skipped_apply += 1;
+        }
         clock = clock.max(op_at(op) + 1);
+    }
+    if report.skipped > 0 {
+        eprintln!("[memsrv] quarantined {} corrupt journal line(s) to {jpath}.corrupt — check it, never silent amnesia", report.skipped);
+    }
+    if skipped_apply > 0 {
+        eprintln!("[memsrv] skipped {} unappliable op(s) (id collisions / missing refs)", skipped_apply);
     }
     let mut journal = match Journal::open(&jpath) {
         Ok(j) => j,
@@ -38,7 +57,7 @@ fn main() {
         Some(e) => { eprintln!("[memsrv] embedder=openrouter ({})", e.model_name()); Arc::new(e) }
         None => { eprintln!("[memsrv] embedder=hashing (no OPENROUTER_API_KEY)"); Arc::new(HashingEmbedder) }
     };
-    eprintln!("[memsrv] ready: {jpath} ({} ops)", ops.len());
+    eprintln!("[memsrv] ready: {jpath} ({} ops)", report.ops.len());
 
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();

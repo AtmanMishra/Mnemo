@@ -13,6 +13,8 @@ pub mod vec;
 #[cfg(test)]
 mod p0_tests;
 #[cfg(test)]
+mod persist_tests;
+#[cfg(test)]
 mod cache_tests;
 #[cfg(test)]
 mod steering_tests;

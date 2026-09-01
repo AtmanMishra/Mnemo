@@ -60,7 +60,11 @@ fn main() {
     };
 
     let mut s = StoreData::new();
-    let prior = Journal::read_all(&jpath).unwrap_or_default();
+    let report = Journal::read_all_reported(&jpath).unwrap_or_default();
+    if report.skipped > 0 {
+        eprintln!("warning: {} corrupt journal line(s) quarantined to {jpath}.corrupt", report.skipped);
+    }
+    let prior = report.ops;
     let n_prior = prior.len();
     let mut max_seen: Millis = 0;
     for op in &prior {
