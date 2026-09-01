@@ -8,7 +8,7 @@
     "mnemo-install": "./bin/install.ts"
   },
   "scripts": {
-    "test": "node --test --test-force-exit \"test/*.test.ts\"",
+    "test": "node --test \"test/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "start": "node ./bin/mnemo.ts",
     "install:mnemo": "node ./bin/install.ts"
