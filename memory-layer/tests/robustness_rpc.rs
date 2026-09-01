@@ -73,6 +73,55 @@ fn non_utf8_frame_is_rejected_with_error_and_loop_survives() {
 }
 
 #[test]
+fn oversize_frame_is_rejected_drained_and_loop_survives() {
+    // f7c2c763: a >1 MiB frame must be answered with a structured error,
+    // DRAINED (so the stream resynchronises), and the sidecar keeps serving.
+    let jpath = temp_journal("oversize");
+    let (mut child, mut stdin, mut reader) = spawn(&jpath);
+
+    // 1.5 MiB of payload with no newline until the end — one giant frame
+    let huge = vec![b'a'; (3 << 19) + 100]; // 1.5 MiB
+    stdin.write_all(&huge).unwrap();
+    stdin.write_all(b"\n").unwrap();
+    stdin.flush().unwrap();
+    let err = read(&mut reader);
+    assert_eq!(err["ok"], false, "oversize frame must be answered with an error");
+    assert!(err["error"].as_str().unwrap().contains("too large"),
+        "error must name the cause: {}", err["error"]);
+
+    // the stream must be resynchronised on the NEXT newline: ping works
+    send(&mut stdin, 1, "ping", serde_json::json!({}));
+    assert_eq!(read(&mut reader)["result"]["pong"], true);
+
+    drop(stdin);
+    assert!(child.wait().unwrap().success(),
+        "the sidecar must still exit cleanly after serving an oversize frame");
+}
+
+#[test]
+fn oversize_frame_without_trailing_newline_does_not_eat_the_next_request() {
+    // drain must resync even when the giant frame's newline arrives in a
+    // later write — the next well-formed request still gets its reply
+    let jpath = temp_journal("oversize-late-nl");
+    let (mut child, mut stdin, mut reader) = spawn(&jpath);
+
+    let huge = vec![b'x'; (2 << 20) + 5]; // just over 2 MiB, newline comes after
+    stdin.write_all(&huge).unwrap();
+    stdin.write_all(b"\n").unwrap();
+    stdin.flush().unwrap();
+    let err = read(&mut reader);
+    assert_eq!(err["ok"], false);
+
+    send(&mut stdin, 7, "ping", serde_json::json!({}));
+    let pong = read(&mut reader);
+    assert_eq!(pong["id"], 7);
+    assert_eq!(pong["result"]["pong"], true);
+
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
 fn garbage_json_frame_is_rejected_with_error_and_loop_survives() {
     let jpath = temp_journal("badjson");
     let (mut child, mut stdin, mut reader) = spawn(&jpath);

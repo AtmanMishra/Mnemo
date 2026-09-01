@@ -18,6 +18,63 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 use std::sync::Arc;
 
+/// f7c2c763: hard cap on one stdin request frame. A request bigger than
+/// this is answered with a structured error and discarded — the loop never
+/// buffers an unbounded frame (a stray paste of a binary blob must not eat
+/// all of the sidecar's memory, and the old read_until would have).
+const MAX_FRAME: usize = 1 << 20; // 1 MiB
+
+enum FrameRead {
+    /// one newline-terminated frame, at most `cap` bytes (newline included)
+    Line(Vec<u8>),
+    /// a frame that exceeded `cap`; the rest of its line has been drained,
+    /// the stream is resynchronised on the next newline
+    Oversize,
+    /// clean EOF (parent closed stdin); a trailing partial line is a Line
+    Eof,
+}
+
+/// Read one frame with a hard byte cap. Uses fill_buf/consume so an
+/// oversize frame is DRAINED, never buffered: memory stays O(cap).
+fn read_frame(reader: &mut impl BufRead, cap: usize) -> std::io::Result<FrameRead> {
+    let mut line: Vec<u8> = Vec::new();
+    loop {
+        let buf = reader.fill_buf()?;
+        if buf.is_empty() {
+            return Ok(if line.is_empty() { FrameRead::Eof } else { FrameRead::Line(line) });
+        }
+        match buf.iter().position(|&b| b == b'\n') {
+            Some(i) => {
+                line.extend_from_slice(&buf[..=i]);
+                reader.consume(i + 1);
+                return Ok(if line.len() > cap { FrameRead::Oversize } else { FrameRead::Line(line) });
+            }
+            None => {
+                line.extend_from_slice(buf);
+                let n = buf.len();
+                reader.consume(n);
+                if line.len() <= cap { continue; }
+                // oversize and still no newline: discard the rest of this
+                // line via the buffer — never accumulate it
+                loop {
+                    // compute what to consume before re-borrowing the reader
+                    let (nl_at, n) = {
+                        let buf = reader.fill_buf()?;
+                        if buf.is_empty() { (None, 0) }
+                        else { match buf.iter().position(|&b| b == b'\n') {
+                            Some(i) => (Some(i), i + 1),
+                            None => (None, buf.len()),
+                        }}
+                    };
+                    if n == 0 { return Ok(FrameRead::Oversize); } // EOF mid-drain
+                    reader.consume(n);
+                    if nl_at.is_some() { return Ok(FrameRead::Oversize); }
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     let jpath = std::env::args().nth(1).unwrap_or_else(|| "data/memcli-journal.jsonl".into());
     load_dotenv();
@@ -70,29 +127,36 @@ fn main() {
     // ML-1 names; mark_useful must be observable on the next identical query).
     let mut search_cache: SearchCache<(Vec<serde_json::Value>, Vec<NodeId>)> =
         SearchCache::new(SEARCH_CACHE_CAP);
-    // e8e7d9e2: read BYTES, not lines. `lines()` yields Err on a non-UTF8
-    // frame and the old loop `break`-ed on any Err — one bad byte stream
-    // killed the sidecar (the pi extension then owns a dead child). Here a
-    // non-UTF8 frame is rejected with a structured error and the loop keeps
-    // serving the next line.
+    // e8e7d9e2 + f7c2c763: read BYTES, not lines, with a hard frame cap.
+    // `lines()` yields Err on a non-UTF8 frame and the old loop `break`-ed
+    // on any Err — one bad byte stream killed the sidecar (the pi extension
+    // then owns a dead child). Here a non-UTF8 frame is rejected with a
+    // structured error, an oversize frame is drained and rejected the same
+    // way, and the loop keeps serving the next line.
     loop {
-        let mut frame: Vec<u8> = Vec::new();
-        let n = match reader.read_until(b'\n', &mut frame) {
-            Ok(n) => n,
+        let frame = match read_frame(&mut reader, MAX_FRAME) {
+            Ok(f) => f,
             Err(e) => {
                 eprintln!("[memsrv] stdin read error: {e}");
                 break;
             }
         };
-        if n == 0 { break; } // EOF: parent closed stdin
-        let line = match String::from_utf8(frame) {
-            Ok(l) => l,
-            Err(e) => {
-                let ue = e.utf8_error();
+        let line = match frame {
+            FrameRead::Eof => break, // parent closed stdin
+            FrameRead::Oversize => {
                 write_err(&mut out, &serde_json::Value::Null,
-                    &format!("invalid utf-8 request frame (first bad byte at {} of the line); frame rejected", ue.valid_up_to()));
+                    &format!("frame too large: single request frames are capped at {} bytes", MAX_FRAME));
                 continue;
             }
+            FrameRead::Line(bytes) => match String::from_utf8(bytes) {
+                Ok(l) => l,
+                Err(e) => {
+                    let ue = e.utf8_error();
+                    write_err(&mut out, &serde_json::Value::Null,
+                        &format!("invalid utf-8 request frame (first bad byte at {} of the line); frame rejected", ue.valid_up_to()));
+                    continue;
+                }
+            },
         };
         if line.trim().is_empty() { continue; }
         let req: serde_json::Value = match serde_json::from_str(&line) {
