@@ -71,7 +71,9 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Crea
 
   // 3. Load it. This compiles every tool file; failures roll back the folder.
   try {
-    const bundle = await loadBundle(dir, null);
+    // loadBundle re-runs the gate on the on-disk source (with the bundle dir
+    // as root, so relative imports get resolved + scanned there too).
+    const bundle = await loadBundle(dir, null, { allowModules: options.safety?.allowModules });
     // Cross-check declared vs loaded tool names so manifests can't lie.
     for (const t of spec.tools) {
       if (!bundle.tools.has(t.name)) {

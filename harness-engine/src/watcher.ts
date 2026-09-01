@@ -10,6 +10,7 @@ import * as path from "node:path";
 import type { Disposable, ScopeName } from "./types.ts";
 import type { ToolRegistry } from "./registry.ts";
 import { loadBundle } from "./bundle.ts";
+import { isWithin } from "./safety.ts";
 
 export interface WatchedDir {
   path: string;
@@ -31,6 +32,7 @@ export class SkillsWatcher implements Disposable {
   #watchers: FSWatcher[] = [];
   #timers = new Map<string, ReturnType<typeof setTimeout>>();
   #pending = new Map<string, { root: string; scope: ScopeName; child: string | null }>();
+  #realDirs = new Map<string, string>(); // lexical bundle dir -> canonical dir (last good load)
   #started = false;
   /** Last invalidation/reload errors, most recent first. */
   errors: Array<{ bundleDir: string; message: string }> = [];
@@ -44,7 +46,9 @@ export class SkillsWatcher implements Disposable {
 
   /**
    * Attach fs.watch to every watched dir. Resolves only after all watchers are
-   * attached, so writes issued after `await start()` cannot be missed.
+   * attached, so writes issued after `await start()` cannot be missed. Each
+   * watched root is realpath'd (593e9a39) so bundle containment checks compare
+   * canonical paths.
    */
   async start(): Promise<void> {
     if (this.#started) return;
@@ -52,6 +56,7 @@ export class SkillsWatcher implements Disposable {
     for (const dir of this.#dirs) {
       await fs.mkdir(dir.path, { recursive: true });
       if (!this.#started) return;
+      dir.path = await fs.realpath(dir.path);
       const w = watch(dir.path, { recursive: true }, (_event, filename) => {
         this.#schedule(dir, filename ? String(filename) : null);
       });
@@ -92,15 +97,53 @@ export class SkillsWatcher implements Disposable {
     for (const name of children) {
       if (!NAME_RE.test(name)) continue;
       const bundleDir = path.join(dir.path, name);
+      let realBundle: string;
       try {
-        const bundle = await loadBundle(bundleDir, dir.scope);
+        realBundle = await fs.realpath(bundleDir);
+      } catch (err) {
+        // Deleted (or unreachable) bundle: drop whatever was registered.
+        this.#unregister(bundleDir);
+        this.#recordError(bundleDir, err as Error);
+        continue;
+      }
+      // 593e9a39: a bundle reached via a symlink that resolves OUTSIDE the
+      // watched root is ignored — never loaded, never imported.
+      if (!isWithin(dir.path, realBundle)) {
+        this.#unregister(bundleDir);
+        this.#recordError(
+          realBundle,
+          new Error(
+            `bundle "${name}" resolves outside watched root ${dir.path} ` +
+              `(symlink escape): ignored`,
+          ),
+        );
+        continue;
+      }
+      try {
+        const bundle = await loadBundle(realBundle, dir.scope);
+        this.#realDirs.set(bundleDir, realBundle);
         this.#registry.register(bundle, dir.scope); // replaces same-name entry in this scope
       } catch (err) {
-        // Invalidated: broken rewrite or deleted bundle -> drop previous version.
-        this.#registry.unregisterByDir(bundleDir);
-        this.#recordError(bundleDir, err as Error);
+        // Invalidated: broken rewrite, deleted files, or a bundle the safety
+        // gate rejected -> drop previous version, record the error, keep going.
+        this.#unregister(bundleDir);
+        this.#recordError(realBundle, err as Error);
       }
     }
+  }
+
+  /**
+   * Drop any registration for `bundleDir`. loadBundle canonicalizes dirs via
+   * realpath (e.g. /var -> /private/var on macOS), so we unregister both the
+   * remembered canonical path and the lexical one.
+   */
+  #unregister(bundleDir: string): void {
+    const real = this.#realDirs.get(bundleDir);
+    if (real) {
+      this.#registry.unregisterByDir(real);
+      this.#realDirs.delete(bundleDir);
+    }
+    this.#registry.unregisterByDir(bundleDir);
   }
 
   #recordError(where: string, err: Error): void {

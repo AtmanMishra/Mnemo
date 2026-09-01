@@ -10,7 +10,12 @@ import type {
   ToolModule,
   ToolSchema,
 } from "./types.ts";
-import { checkToolSource, validateToolShape, type SafetyOptions } from "./safety.ts";
+import {
+  checkToolSource,
+  isWithin,
+  validateToolShape,
+  type SafetyOptions,
+} from "./safety.ts";
 
 let loadNonce = 0;
 
@@ -38,10 +43,16 @@ export interface BundleSpec {
 export interface LoadedBundle {
   /** Stable id: "<manifest.name>@<version>". */
   id: string;
+  /** Real (canonical) bundle directory — symlinks resolved. */
   dir: string;
   manifest: BundleManifest;
   scope: ScopeName | null;
   tools: Map<string, ToolDefinition>;
+}
+
+export interface LoadBundleOptions {
+  /** Module specifiers allowed past the blocklist (see safety.ts). */
+  allowModules?: string[];
 }
 
 const NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_-]*$/;
@@ -113,9 +124,50 @@ export async function importToolFile(fileAbsPath: string): Promise<ToolModule> {
   return (await import(/* @vite-ignore */ url)) as ToolModule;
 }
 
-/** Read + load a bundle directory. Throws on invalid manifests/tools/broken sources. */
-export async function loadBundle(dir: string, scope: ScopeName | null = null): Promise<LoadedBundle> {
-  const manifestPath = path.join(dir, "manifest.json");
+/**
+ * Resolve a manifest tool ref against the bundle dir, enforcing containment
+ * (dcd8c081): refs must be relative, must not contain ".." segments, and must
+ * resolve inside the bundle dir — both lexically and after realpath (so a
+ * symlinked tool file cannot escape the bundle).
+ */
+export async function resolveToolRef(bundleDir: string, ref: string): Promise<string> {
+  if (typeof ref !== "string" || ref.trim() === "") {
+    throw new Error(`manifest tool refs must be non-empty strings (got ${JSON.stringify(ref)})`);
+  }
+  if (path.isAbsolute(ref) || ref.startsWith("~")) {
+    throw new Error(`manifest tool ref "${ref}" must be relative to the bundle dir`);
+  }
+  if (ref.split(/[\\/]+/).includes("..")) {
+    throw new Error(`manifest tool ref "${ref}" must not traverse with ".."`);
+  }
+  const lexical = path.resolve(bundleDir, ref);
+  if (!isWithin(bundleDir, lexical)) {
+    throw new Error(`manifest tool ref "${ref}" resolves outside the bundle dir`);
+  }
+  // Follow symlinks: the real file must still live inside the real bundle dir.
+  const realFile = await fs.realpath(lexical);
+  if (!isWithin(bundleDir, realFile)) {
+    throw new Error(
+      `manifest tool ref "${ref}" resolves outside the bundle dir (symlink escape)`,
+    );
+  }
+  return realFile;
+}
+
+/**
+ * Read + load a bundle directory. THE gated load path (ccdbbb2b / 51b81dda):
+ * every caller — createHarness, the watcher, the CLI — goes through here, and
+ * here the safety gate runs on every tool file's on-disk source BEFORE it is
+ * ever imported. Manifest shape and tool-ref containment are enforced too.
+ * Throws on invalid manifests/tools/broken sources; never imports rejected code.
+ */
+export async function loadBundle(
+  dir: string,
+  scope: ScopeName | null = null,
+  opts: LoadBundleOptions = {},
+): Promise<LoadedBundle> {
+  const realDir = await fs.realpath(dir); // throws if missing (deleted bundle)
+  const manifestPath = path.join(realDir, "manifest.json");
   const raw = JSON.parse(await fs.readFile(manifestPath, "utf8")) as BundleManifest;
   if (!NAME_RE.test(String(raw?.name))) throw new Error(`${manifestPath}: invalid or missing name`);
   if (!Array.isArray(raw?.tools) || raw.tools.length === 0) {
@@ -127,9 +179,28 @@ export async function loadBundle(dir: string, scope: ScopeName | null = null): P
     description: String(raw.description ?? ""),
     tools: raw.tools.map(String),
   };
+
   const tools = new Map<string, ToolDefinition>();
   for (const ref of manifest.tools) {
-    const fileAbs = path.resolve(dir, ref);
+    const fileAbs = await resolveToolRef(realDir, ref);
+
+    // Safety gate on the on-disk source, BEFORE import. Relative imports are
+    // resolved and scanned from here (rootDir set), so a bundle helper doing
+    // the real work is caught too (747c8c3b).
+    const source = await fs.readFile(fileAbs, "utf8");
+    const gateOpts: SafetyOptions = {
+      allowModules: opts.allowModules,
+      rootDir: realDir,
+      baseDir: path.dirname(fileAbs),
+    };
+    const report = checkToolSource(source, gateOpts);
+    if (!report.ok) {
+      const detail = report.issues.map((i) => `[${i.kind}] ${i.message}`).join("; ");
+      throw new Error(
+        `bundle "${manifest.name}": tool ${ref} rejected by safety gate: ${detail}`,
+      );
+    }
+
     let mod: ToolModule;
     try {
       mod = await importToolFile(fileAbs);
@@ -148,7 +219,7 @@ export async function loadBundle(dir: string, scope: ScopeName | null = null): P
   }
   return {
     id: `${manifest.name}@${manifest.version}`,
-    dir: path.resolve(dir),
+    dir: realDir,
     manifest,
     scope,
     tools,
