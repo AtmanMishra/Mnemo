@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/tree"
 )
@@ -224,5 +225,78 @@ func TestAnAreaWithNoNameIsFiledNotDropped(t *testing.T) {
 	got := Nodes([]Node{{ID: 1, Label: "loose", Facts: 1}}, nil)
 	if len(got) != 1 || got[0].Label != "unfiled" {
 		t.Fatalf("got %#v", got)
+	}
+}
+
+// TestATimedOutCallDoesNotEatTheNextReply is the regression for the leaked
+// reader: the old Call spawned a reader goroutine per request and left it
+// alive on timeout, so when that reader finally woke it kept racing the next
+// call's reader on the same bufio.Reader — and could consume the line that
+// answered the NEXT call, discarding it on an id mismatch. The single
+// readLoop drops the late reply instead: nobody wants it, nobody loses theirs.
+func TestATimedOutCallDoesNotEatTheNextReply(t *testing.T) {
+	// The first request takes a second to answer; every other one answers
+	// immediately. The first reply is therefore late — the caller that asked
+	// for it has already timed out and gone home.
+	c := open(t, fakeSrv(t, `while IFS= read -r line; do
+  case "$line" in *'"exit"'*) exit 0;; esac
+  id=$(printf '%s' "$line" | sed 's/.*"id":\([0-9]*\).*/\1/')
+  if [ "$id" = "1" ]; then sleep 1; fi
+  printf '{"id":%s,"ok":true,"result":{"nodes":[]}}\n' "$id"
+done`))
+	c.callTimeout = 50 * time.Millisecond
+
+	if _, err := c.Dump(); err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("the first call must time out, got: %v", err)
+	}
+	// Let the sidecar finish sleeping and flush the late reply for id 1.
+	// The reader must drop it, not hand it to — or steal from — anyone.
+	time.Sleep(1100 * time.Millisecond)
+
+	// A generous timeout for the second call: it is answered immediately, so
+	// any failure here is the late reply having eaten it, not slowness.
+	c.callTimeout = 5 * time.Second
+	if _, err := c.Dump(); err != nil {
+		t.Fatalf("a late reply to a timed-out call must not eat the next one: %v", err)
+	}
+}
+
+// TestACallAfterTheSidecarDiedFailsFast pins the readErr path: once the
+// connection is known dead, waiting out a full timeout for a reply that can
+// never come is just a hung overlay with a clock.
+func TestACallAfterTheSidecarDiedFailsFast(t *testing.T) {
+	// Answers its one request, then dies: the reply proves the protocol
+	// worked, so the failure that follows is the death, not a bug.
+	c := open(t, fakeSrv(t, `IFS= read -r line
+printf '{"id":1,"ok":true,"result":{"nodes":[]}}\n'`))
+	// Generous for the setup: a shell sidecar's round trip can take hundreds
+	// of milliseconds; the fast-fail claim is only about the call AFTER the
+	// death is known.
+	if _, err := c.Dump(); err != nil {
+		t.Fatalf("setup: the first call should be answered, got: %v", err)
+	}
+	// The death is noticed asynchronously (EOF rides on the child exiting);
+	// wait for the client to know it — bounded, because a hang here is a
+	// bug, not a pass.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		c.wmu.Lock()
+		re := c.readErr
+		c.wmu.Unlock()
+		if re != nil || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// A tight bound for the assertion: the readErr check returns before any
+	// waiting begins, so anything near a timeout here is the slow path.
+	c.callTimeout = 50 * time.Millisecond
+	start := time.Now()
+	_, err := c.Dump()
+	if err == nil || !strings.Contains(err.Error(), "closed the connection") {
+		t.Fatalf("a call on a dead sidecar must say the connection is gone, got: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed >= c.callTimeout {
+		t.Fatalf("a known-dead connection must fail fast, took the whole timeout: %v", elapsed)
 	}
 }

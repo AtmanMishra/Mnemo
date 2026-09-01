@@ -13,33 +13,58 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/pi"
 )
 
-func main() {
-	var (
-		home = flag.String("home", "", "override the home directory sessions are read from")
-		cwd  = flag.String("cwd", "", "override the working directory")
-		dump = flag.Bool("dump", false, "render one frame to stdout and exit (for scripts and screenshots)")
-		cols = flag.Int("cols", 100, "width for --dump")
-		rows = flag.Int("rows", 32, "height for --dump")
-		keys = flag.String("keys", "", "comma-separated keys to press before --dump, e.g. ctrl+t,down,down")
-		repo = flag.String("repo", "", "repository root holding agent/bin/mnemo.ts; enables the live agent")
-		sess = flag.String("session", "", "resume this pi session file")
-		msrv = flag.String("memsrv", "", "path to the built memsrv binary")
-		jrnl = flag.String("journal", "", "path to the memory journal memsrv should open")
-		hdir = flag.String("bundles", "", "directory of harness tool bundles")
-	)
-	flag.Parse()
+// options is everything the flags say. Parsed apart from running so the run
+// path is testable without owning the process's argument list.
+type options struct {
+	home, cwd, keys, repo, session, memsrv, journal, bundles string
+	dump                                                     bool
+	cols, rows                                               int
+}
 
-	cfg := app.Config{Home: *home, CWD: *cwd, Dark: true, MemsrvBin: *msrv, MemJournal: *jrnl, HarnessDir: *hdir, Repo: *repo}
+func parseFlags(args []string) options {
+	fs := flag.NewFlagSet("mnemo", flag.ContinueOnError)
+	var o options
+	fs.StringVar(&o.home, "home", "", "override the home directory sessions are read from")
+	fs.StringVar(&o.cwd, "cwd", "", "override the working directory")
+	fs.BoolVar(&o.dump, "dump", false, "render one frame to stdout and exit (for scripts and screenshots)")
+	fs.IntVar(&o.cols, "cols", 100, "width for --dump")
+	fs.IntVar(&o.rows, "rows", 32, "height for --dump")
+	fs.StringVar(&o.keys, "keys", "", "comma-separated keys to press before --dump, e.g. ctrl+t,down,down")
+	fs.StringVar(&o.repo, "repo", "", "repository root holding agent/bin/mnemo.ts; enables the live agent")
+	fs.StringVar(&o.session, "session", "", "resume this pi session file")
+	fs.StringVar(&o.memsrv, "memsrv", "", "path to the built memsrv binary")
+	fs.StringVar(&o.journal, "journal", "", "path to the memory journal memsrv should open")
+	fs.StringVar(&o.bundles, "bundles", "", "directory of harness tool bundles")
+	// A flag error is a usage question, not a crash; ContinueOnError hands
+	// it back instead of taking the process down.
+	_ = fs.Parse(args)
+	return o
+}
+
+func main() {
+	// os.Exit lives HERE and only here. run() holds every defer — the agent
+	// stream, the model — and an os.Exit inside run on a p.Run failure used
+	// to skip them all, orphaning a spawned pi process on the way out.
+	if err := run(parseFlags(os.Args[1:])); err != nil {
+		fmt.Fprintln(os.Stderr, "mnemo:", err)
+		os.Exit(1)
+	}
+}
+
+func run(o options) error {
+	cfg := app.Config{Home: o.home, CWD: o.cwd, Dark: true,
+		MemsrvBin: o.memsrv, MemJournal: o.journal, HarnessDir: o.bundles, Repo: o.repo}
 
 	// The live backend is opt-in by path rather than discovered, so running
 	// the interface never silently spawns a node process somebody did not ask
 	// for. Without it, sending fails loudly instead of pretending to think.
-	if *repo != "" && !*dump {
-		s, err := pi.Spawn(*repo, firstNonEmpty(*cwd, "."), *sess)
+	if o.repo != "" && !o.dump {
+		s, err := pi.Spawn(o.repo, firstNonEmpty(o.cwd, "."), o.session)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "mnemo: could not start the agent:", err)
-			os.Exit(1)
+			return fmt.Errorf("could not start the agent: %w", err)
 		}
+		// Runs even when p.Run fails below: that is the whole reason run
+		// returns errors instead of exiting mid-flight.
 		defer s.Close()
 		cfg.Agent = s
 	} else {
@@ -50,23 +75,21 @@ func main() {
 
 	// --dump exists because a TUI cannot be screenshotted from a script, and
 	// "it looked right when I ran it" is not a check anyone else can repeat.
-	if *dump {
-		m.Resize(*cols, *rows)
-		for _, k := range strings.Split(*keys, ",") {
+	if o.dump {
+		m.Resize(o.cols, o.rows)
+		for _, k := range strings.Split(o.keys, ",") {
 			if k = strings.TrimSpace(k); k != "" {
 				m.Press(k)
 			}
 		}
 		fmt.Println(m.Render())
-		return
+		return nil
 	}
 
 	defer m.Close()
 	p := tea.NewProgram(m)
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "mnemo:", err)
-		os.Exit(1)
-	}
+	_, err := p.Run()
+	return err
 }
 
 func firstNonEmpty(ss ...string) string {

@@ -39,14 +39,32 @@ type Node struct {
 	Feeders int
 }
 
+// reply is one answered request: the result object, or why there isn't one.
+type reply struct {
+	v   map[string]any
+	err error
+}
+
 // Client is one long-lived memsrv process.
 type Client struct {
 	cmd    *exec.Cmd
 	in     io.WriteCloser
 	out    *bufio.Reader
-	mu     sync.Mutex
+	mu     sync.Mutex // serialises requests: one write, one wait, at a time
 	nextID int
 	closed bool
+
+	// wmu guards the waiter table shared with readLoop. It is its own lock
+	// because a Call holds mu for its whole 10-second wait — a reader that
+	// needed mu to deliver an answer would deadlock against the very call
+	// it is answering.
+	wmu     sync.Mutex
+	waiters map[int]chan reply
+	readErr error // set once, when the sidecar's output ended
+
+	// callTimeout bounds each request; Timeout is the default. A field (not
+	// the const) so a test can time out in milliseconds, not seconds.
+	callTimeout time.Duration
 }
 
 // Open starts memsrv against a journal.
@@ -68,7 +86,17 @@ func Open(bin, journal string) (*Client, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return &Client{cmd: cmd, in: in, out: bufio.NewReaderSize(out, 1<<20), nextID: 1}, nil
+	c := &Client{
+		cmd: cmd, in: in, out: bufio.NewReaderSize(out, 1<<20),
+		nextID: 1, waiters: map[int]chan reply{}, callTimeout: Timeout,
+	}
+	// ONE reader for the life of the client. A reader spawned per Call and
+	// abandoned on timeout stays alive past the call that made it, and two
+	// readers on one bufio.Reader race: the abandoned one can consume the
+	// line that answers the NEXT call and discard it on an id mismatch. A
+	// late reply here just finds no waiter and is dropped.
+	go c.readLoop()
+	return c, nil
 }
 
 // Call makes one request and returns its result object.
@@ -78,8 +106,28 @@ func (c *Client) Call(method string, params map[string]any) (map[string]any, err
 	if c.closed {
 		return nil, errors.New("memsrv is closed")
 	}
+	c.wmu.Lock()
+	if c.readErr != nil {
+		// The sidecar's output already ended; say so now instead of writing
+		// into a dead pipe and waiting out the timeout for nothing.
+		err := c.readErr
+		c.wmu.Unlock()
+		return nil, err
+	}
 	id := c.nextID
 	c.nextID++
+	ch := make(chan reply, 1) // buffered: readLoop never blocks on a caller that gave up
+	c.waiters[id] = ch
+	c.wmu.Unlock()
+	// Whether this call is answered, times out or fails, its waiter entry
+	// must go: a stale entry is how a future call's reply gets delivered to
+	// nobody, and a late reply to a dead entry is dropped by the reader.
+	defer func() {
+		c.wmu.Lock()
+		delete(c.waiters, id)
+		c.wmu.Unlock()
+	}()
+
 	if params == nil {
 		params = map[string]any{}
 	}
@@ -91,35 +139,6 @@ func (c *Client) Call(method string, params map[string]any) (map[string]any, err
 		return nil, fmt.Errorf("memsrv write failed: %w", err)
 	}
 
-	type reply struct {
-		v   map[string]any
-		err error
-	}
-	ch := make(chan reply, 1)
-	go func() {
-		for {
-			line, err := c.out.ReadString('\n')
-			if err != nil {
-				ch <- reply{err: errors.New("memsrv closed the connection")}
-				return
-			}
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			var v map[string]any
-			if json.Unmarshal([]byte(line), &v) != nil {
-				continue // stray output is not a protocol failure
-			}
-			// Replies can interleave in principle; match on id.
-			if n, ok := v["id"].(float64); !ok || int(n) != id {
-				continue
-			}
-			ch <- reply{v: v}
-			return
-		}
-	}()
-
 	select {
 	case r := <-ch:
 		if r.err != nil {
@@ -130,9 +149,57 @@ func (c *Client) Call(method string, params map[string]any) (map[string]any, err
 		}
 		res, _ := r.v["result"].(map[string]any)
 		return res, nil
-	case <-time.After(Timeout):
+	case <-time.After(c.callTimeout):
 		return nil, errors.New("memory query timed out")
 	}
+}
+
+// readLoop owns c.out for the whole life of the client: every reply line is
+// read exactly once and handed to the call waiting on its id — or dropped,
+// when the call that asked has already timed out. Dropping is the point: the
+// reply nobody wants must not sit in front of one somebody does.
+func (c *Client) readLoop() {
+	for {
+		line, err := c.out.ReadString('\n')
+		if err != nil {
+			c.failAll(errors.New("memsrv closed the connection"))
+			return
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var v map[string]any
+		if json.Unmarshal([]byte(line), &v) != nil {
+			continue // stray output is not a protocol failure
+		}
+		n, ok := v["id"].(float64)
+		if !ok {
+			continue
+		}
+		c.wmu.Lock()
+		ch, waiting := c.waiters[int(n)]
+		if waiting {
+			delete(c.waiters, int(n))
+		}
+		c.wmu.Unlock()
+		if waiting {
+			ch <- reply{v: v}
+		}
+		// A reply with no waiter is a late answer to a call that timed out:
+		// dropped, never eaten.
+	}
+}
+
+// failAll answers every waiting call with err and marks the client unreadable.
+func (c *Client) failAll(err error) {
+	c.wmu.Lock()
+	c.readErr = err
+	for id, ch := range c.waiters {
+		ch <- reply{err: err}
+		delete(c.waiters, id)
+	}
+	c.wmu.Unlock()
 }
 
 // Dump lists every memory in the store.
