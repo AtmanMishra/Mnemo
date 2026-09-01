@@ -59,22 +59,39 @@ mod lru_tests {
 
     #[test]
     fn touched_nodes_maps_every_op_variant() {
+        // cddd21c0: edge-only ops resolve their endpoints through the store,
+        // because they change via_graph scores that cached hits carry.
         use crate::cache::touched_nodes;
+        use crate::store::StoreData;
         let t = 1_700_000_000_000u64;
-        assert_eq!(touched_nodes(&Op::CreateNode { id: 7, kind: NodeKind::Aspect, label: "x".into(), at: t }), vec![7]);
-        assert_eq!(touched_nodes(&Op::AddFact { node: 7, fact_id: 1, key: "k".into(), value: "v".into(), at: t }), vec![7]);
-        assert_eq!(touched_nodes(&Op::SupersedeFact { node: 7, old_fact: 1, new_key: "k".into(), new_value: "v".into(), new_fact_id: 2, at: t }), vec![7]);
-        assert_eq!(touched_nodes(&Op::SetArea { node: 7, area: Area::Salience, at: t }), vec![7]);
-        assert_eq!(touched_nodes(&Op::DeleteNode { node: 7, hard: false, at: t }), vec![7]);
-        let mut both = touched_nodes(&Op::Link { id: 9, src: 7, dst: 8, kind: EdgeKind::PartOf, at: t });
+        let mut s = StoreData::new();
+        s.apply(&Op::CreateNode { id: 7, kind: NodeKind::Aspect, label: "x".into(), at: t }).unwrap();
+        s.apply(&Op::CreateNode { id: 8, kind: NodeKind::TaskEpisode, label: "y".into(), at: t }).unwrap();
+        s.apply(&Op::Link { id: 9, src: 7, dst: 8, kind: EdgeKind::SuppliesContext, at: t }).unwrap();
+
+        assert_eq!(touched_nodes(&s, &Op::CreateNode { id: 7, kind: NodeKind::Aspect, label: "x".into(), at: t }), vec![7]);
+        assert_eq!(touched_nodes(&s, &Op::AddFact { node: 7, fact_id: 1, key: "k".into(), value: "v".into(), at: t }), vec![7]);
+        assert_eq!(touched_nodes(&s, &Op::SupersedeFact { node: 7, old_fact: 1, new_key: "k".into(), new_value: "v".into(), new_fact_id: 2, at: t }), vec![7]);
+        assert_eq!(touched_nodes(&s, &Op::SetArea { node: 7, area: Area::Salience, at: t }), vec![7]);
+        assert_eq!(touched_nodes(&s, &Op::DeleteNode { node: 7, hard: false, at: t }), vec![7]);
+        let mut both = touched_nodes(&s, &Op::Link { id: 10, src: 7, dst: 8, kind: EdgeKind::PartOf, at: t });
         both.sort();
         assert_eq!(both, vec![7, 8]);
-        assert_eq!(touched_nodes(&Op::Unlink { edge: 9, at: t }), Vec::<u64>::new());
-        assert_eq!(touched_nodes(&Op::Reweight { edge: 9, delta: 0.1, at: t }), Vec::<u64>::new());
-        assert_eq!(touched_nodes(&Op::RecordOutcome { edge: 9, success: true, at: t }), Vec::<u64>::new());
-        assert_eq!(touched_nodes(&Op::PushContext { to: 7, chunk: ContextChunk { from: 8, dim: 4, vec: vec![], note: "n".into() }, at: t }), vec![7]);
-        assert_eq!(touched_nodes(&Op::CommitLog { node: 7, kind: "k".into(), detail: "d".into(), at: t }), vec![7]);
-        assert_eq!(touched_nodes(&Op::RecordUsefulness { node: 7, useful: true, at: t }), vec![7]);
+        // edge-only ops now map to BOTH endpoints (resolved via the store)
+        let mut ends = touched_nodes(&s, &Op::Unlink { edge: 9, at: t });
+        ends.sort();
+        assert_eq!(ends, vec![7, 8], "Unlink changes via_graph scores of both endpoints");
+        let mut ends = touched_nodes(&s, &Op::Reweight { edge: 9, delta: 0.1, at: t });
+        ends.sort();
+        assert_eq!(ends, vec![7, 8], "Reweight changes via_graph scores of both endpoints");
+        let mut ends = touched_nodes(&s, &Op::RecordOutcome { edge: 9, success: true, at: t });
+        ends.sort();
+        assert_eq!(ends, vec![7, 8], "RecordOutcome nudges edge weight -> both endpoints");
+        // unknown edge id degrades to no invalidation, not an error
+        assert_eq!(touched_nodes(&s, &Op::Unlink { edge: 999, at: t }), Vec::<u64>::new());
+        assert_eq!(touched_nodes(&s, &Op::PushContext { to: 7, chunk: ContextChunk { from: 8, dim: 4, vec: vec![], note: "n".into() }, at: t }), vec![7]);
+        assert_eq!(touched_nodes(&s, &Op::CommitLog { node: 7, kind: "k".into(), detail: "d".into(), at: t }), vec![7]);
+        assert_eq!(touched_nodes(&s, &Op::RecordUsefulness { node: 7, useful: true, at: t }), vec![7]);
     }
 
     #[test]

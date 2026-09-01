@@ -93,3 +93,104 @@ fn memsrv_search_cache_is_transparent_and_keyed_by_resolved_inputs() {
     for op in &ops { s.apply(op).unwrap(); }
     assert_eq!(s.nodes.len(), 2);
 }
+// cddd21c0: the search LRU must invalidate on edge ops (Unlink/Reweight/
+// RecordOutcome) — they change edge liveness/weight, and cached hits carry
+// score+via_graph from graph expansion over live edges. The ONLY mutation
+// in this test is the edge op itself (unlink), so a stale cache hit would
+// be the test failing — no other op can inadvertently invalidate.
+#[test]
+fn cache_invalidates_on_unlink_of_a_relevant_edge() {
+    let dir = std::env::temp_dir().join(format!("memlayer-rpc-cache-inval-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let jpath: PathBuf = dir.join("journal.jsonl");
+
+    let (mut child, mut stdin, mut reader) = spawn(&jpath);
+
+    // aspect A is the only node matching the query text
+    send(&mut stdin, 1, "create_node", serde_json::json!({"kind": "aspect", "label": "ingress annotations"}));
+    let a = read(&mut reader)["result"]["node"].as_u64().unwrap();
+    send(&mut stdin, 2, "fact", serde_json::json!({"node": a, "key": "rewrite", "value": "nginx rewrite-target annotation routes paths"}));
+    read(&mut reader);
+
+    // episode E shares ZERO query tokens -> only reachable via graph expansion
+    send(&mut stdin, 3, "episode", serde_json::json!({"label": "shipped ingress fix"}));
+    let e = read(&mut reader)["result"]["episode"].as_u64().unwrap();
+    send(&mut stdin, 4, "link", serde_json::json!({"src": a, "dst": e}));
+    let edge = read(&mut reader)["result"]["edge"].as_u64().unwrap();
+    assert_eq!(edge, 1);
+
+    // 1st run: miss; E appears purely via_graph (seed A expands to neighbor E)
+    send(&mut stdin, 5, "search", serde_json::json!({"query": "rewrite annotation routing", "k": 3}));
+    let r1 = read(&mut reader);
+    assert_eq!(r1["result"]["cache"], "miss");
+    let e1 = r1["result"]["results"].as_array().unwrap().iter()
+        .find(|h| h["node"].as_u64() == Some(e))
+        .expect("episode must be hit via graph expansion from aspect A");
+    assert_eq!(e1["via_graph"], true);
+
+    // 2nd identical run: cache hit, byte-identical
+    send(&mut stdin, 6, "search", serde_json::json!({"query": "rewrite annotation routing", "k": 3}));
+    let r2 = read(&mut reader);
+    assert_eq!(r2["result"]["cache"], "hit");
+
+    // unlink the edge A->E. ONLY this op runs; nothing else touches E or A.
+    send(&mut stdin, 7, "unlink", serde_json::json!({"edge": edge}));
+    assert_eq!(read(&mut reader)["result"]["unlinked"], edge);
+
+    // 3rd identical run MUST be a miss (invalidation) and E must be GONE:
+    // the edge is no longer alive, so graph expansion cannot surface E
+    send(&mut stdin, 8, "search", serde_json::json!({"query": "rewrite annotation routing", "k": 3}));
+    let r3 = read(&mut reader);
+    assert_eq!(r3["result"]["cache"], "miss",
+        "an unlink must invalidate cached entries referencing its endpoints");
+    let r3_nodes: Vec<u64> = r3["result"]["results"].as_array().unwrap().iter()
+        .filter_map(|h| h["node"].as_u64()).collect();
+    assert!(!r3_nodes.contains(&e),
+        "the unlinked episode must disappear from a fresh search result");
+
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
+// record_outcome (failure) also changes via_graph weight down; the cache
+// must not serve a stale score for the endpoint.
+#[test]
+fn cache_invalidates_on_recordoutcome() {
+    let dir = std::env::temp_dir().join(format!("memlayer-rpc-cache-inval-oc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let jpath: PathBuf = dir.join("journal.jsonl");
+
+    let (mut child, mut stdin, mut reader) = spawn(&jpath);
+
+    send(&mut stdin, 1, "create_node", serde_json::json!({"kind": "aspect", "label": "ingress annotations"}));
+    let a = read(&mut reader)["result"]["node"].as_u64().unwrap();
+    send(&mut stdin, 2, "fact", serde_json::json!({"node": a, "key": "rewrite", "value": "nginx rewrite-target annotation routes paths"}));
+    read(&mut reader);
+    send(&mut stdin, 3, "episode", serde_json::json!({"label": "shipped ingress fix"}));
+    let e = read(&mut reader)["result"]["episode"].as_u64().unwrap();
+    send(&mut stdin, 4, "link", serde_json::json!({"src": a, "dst": e}));
+    read(&mut reader);
+
+    send(&mut stdin, 5, "search", serde_json::json!({"query": "rewrite annotation routing", "k": 3}));
+    let r1 = read(&mut reader);
+    let e1 = r1["result"]["results"].as_array().unwrap().iter()
+        .find(|h| h["node"].as_u64() == Some(e)).unwrap().clone();
+    assert_eq!(r1["result"]["cache"], "miss");
+
+    // record_outcome(success=false): weight 0.5 -> 0.4, E's via_graph score drops
+    send(&mut stdin, 6, "record_outcome", serde_json::json!({"edge": 1, "success": false}));
+    assert_eq!(read(&mut reader)["result"]["edge"], 1);
+
+    send(&mut stdin, 7, "search", serde_json::json!({"query": "rewrite annotation routing", "k": 3}));
+    let r3 = read(&mut reader);
+    assert_eq!(r3["result"]["cache"], "miss", "record_outcome must invalidate edge-endpoint entries");
+    let e3 = r3["result"]["results"].as_array().unwrap().iter()
+        .find(|h| h["node"].as_u64() == Some(e)).unwrap();
+    assert_ne!(e1["score"], e3["score"],
+        "the weakened edge must change the via_graph score: {} vs {}", e1["score"], e3["score"]);
+
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}

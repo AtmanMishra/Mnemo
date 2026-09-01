@@ -258,10 +258,12 @@ fn handle(
     let mut apply = |s: &mut StoreData, j: &mut Journal, op: Op| -> Result<(), String> {
         s.apply(&op)?;
         j.append(&op).map_err(|e| format!("journal write failed: {e}"))?;
-        // ML-1 invalidation: an op touching a node drops every cached search
-        // result that references it, so re-running the same query observes
-        // the mutation (votes included — feedback is immediate).
-        for node in touched_nodes(&op) {
+        // ML-1 invalidation + cddd21c0: an op touching a node drops every
+        // cached search result that references it, so re-running the same
+        // query observes the mutation. Edge ops (Unlink/Reweight/
+        // RecordOutcome) resolve their endpoints through the store — they
+        // change via_graph scores that cached hits carry.
+        for node in touched_nodes(s, &op) {
             cache.retain(|(_, nodes)| !nodes.contains(&node));
         }
         Ok(())
@@ -333,6 +335,31 @@ fn handle(
             let id = s.next_edge;
             apply(s, j, Op::Link { id, src, dst, kind: EdgeKind::SuppliesContext, at: *clock })?;
             Ok(json!({ "edge": id }))
+        }
+
+        "unlink" => {
+            // cddd21c0: edge lifecycle over RPC. Soft invalidation (sets
+            // invalid_at) — the op goes through the same apply+journal+
+            // cache-invalidation path as every other mutation, so a cached
+            // search result referencing either endpoint drops.
+            let edge = p_node(params, "edge")?;
+            apply(s, j, Op::Unlink { edge, at: *clock })?;
+            Ok(json!({ "unlinked": edge }))
+        }
+
+        "reweight" => {
+            let edge = p_node(params, "edge")?;
+            let delta = params.get("delta").and_then(|d| d.as_f64()).unwrap_or(0.0) as f32;
+            apply(s, j, Op::Reweight { edge, delta, at: *clock })?;
+            let weight = s.edges.get(&edge).map(|e| e.weight).unwrap_or(0.0);
+            Ok(json!({ "edge": edge, "weight": weight }))
+        }
+
+        "record_outcome" => {
+            let edge = p_node(params, "edge")?;
+            let success = params.get("success").and_then(|b| b.as_bool()).unwrap_or(true);
+            apply(s, j, Op::RecordOutcome { edge, success, at: *clock })?;
+            Ok(json!({ "edge": edge }))
         }
 
         "search" => {
@@ -505,7 +532,7 @@ fn handle(
             Ok(json!({ "forgot": node, "label": label }))
         }
 
-        other => Err(format!("unknown method '{other}' (supported: ping stats dump state create_node episode fact link search recall_brief remember set_area forget steer good consolidate mark_useful)")),
+        other => Err(format!("unknown method '{other}' (supported: ping stats dump state create_node episode fact link unlink reweight record_outcome search recall_brief remember set_area forget steer good consolidate mark_useful)")),
     }
 }
 

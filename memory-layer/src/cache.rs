@@ -13,7 +13,7 @@
 //! accepted for now — a memory layer is a cache of its own facts anyway —
 //! and if stale reads ever show up the fix is per-key invalidation on the
 //! journal ops that touch matching nodes, not a time-based cache.
-use crate::model::{Area, NodeId, Op};
+use crate::model::{Area, EdgeId, NodeId, Op};
 use std::collections::{HashMap, VecDeque};
 
 /// Default bound for search-result caching (entries, not bytes).
@@ -101,13 +101,22 @@ impl<V> SearchCache<V> {
     }
 }
 
-/// Nodes a journal op changes the derived text of. Used to drop cached
-/// search results that reference a mutated node, so a re-run of the same
-/// query observes the mutation. Edge-only ops (Unlink/Reweight/
-/// RecordOutcome) change nothing a cached hit shows (facts/log/context/
-/// area/label), so they are not listed; `Link` topologically touches both
-/// endpoints, so it is.
-pub fn touched_nodes(op: &Op) -> Vec<NodeId> {
+/// Nodes a journal op changes the retrieval-relevant derived state of.
+/// Used to drop cached search results that reference a mutated node, so a
+/// re-run of the same query observes the mutation.
+///
+/// cddd21c0: Unlink/Reweight/RecordOutcome are INCLUDED now — they change
+/// edge liveness/weight, and cached hits carry `score` + `via_graph`, both
+/// of which derive from graph expansion over live edges. The op only names
+/// an edge id, so the edge's endpoints are resolved through the store
+/// (apply keeps the row for all three ops); an unknown edge id degrades to
+/// no invalidation rather than an error.
+pub fn touched_nodes(store: &crate::store::StoreData, op: &Op) -> Vec<NodeId> {
+    let edge_endpoints = |edge: &EdgeId| -> Vec<NodeId> {
+        store.edges.get(edge)
+            .map(|e| vec![e.src, e.dst])
+            .unwrap_or_default()
+    };
     match op {
         Op::CreateNode { id, .. } => vec![*id],
         Op::AddFact { node, .. } => vec![*node],
@@ -118,6 +127,8 @@ pub fn touched_nodes(op: &Op) -> Vec<NodeId> {
         Op::PushContext { to, .. } => vec![*to],
         Op::CommitLog { node, .. } => vec![*node],
         Op::RecordUsefulness { node, .. } => vec![*node],
-        Op::Unlink { .. } | Op::Reweight { .. } | Op::RecordOutcome { .. } => vec![],
+        Op::Unlink { edge, .. }
+        | Op::Reweight { edge, .. }
+        | Op::RecordOutcome { edge, .. } => edge_endpoints(edge),
     }
 }
