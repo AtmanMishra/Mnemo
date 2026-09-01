@@ -3,13 +3,21 @@
  * tool_call hook.
  *
  * Gate policy (identical to the pre-migration readline gate):
- * - Only bash_exec, write_file, apply_edit are gated.
+ * - Gated (mutating) tools: bash_exec, write_file, apply_edit, ipy_run.
+ *   ipy_run is gated because a Python cell is full fs/network/process
+ *   access — leaving it out would make the bash/write gate bypassable
+ *   (audit 0384ee03).
  * - MNEMO_APPROVAL_MODE=interactive AND stdin is a TTY -> prompt once per call
  *   via ctx.ui.confirm() (native TUI dialog).
  * - Deny blocks the call; the block reason is returned to the model as the
  *   tool result.
  * - Any other mode (unset / 0) or a non-TTY stdin auto-approves: the gate
  *   fails OPEN so piped/automated runs keep working.
+ * - EXCEPT a sub-agent child (MNEMO_SUBAGENT_CHILD=1): a delegated child has
+ *   no operator behind it, so an "ask" on a mutating tool fails CLOSED
+ *   (audit b6afa93e). An explicit allow rule in ~/.mnemo/permissions.json is
+ *   the way to pre-approve a tool for children; a deny rule is honored as
+ *   everywhere else. See src/permissions.ts for the full policy text.
  *
  * While this extension is loaded it also flips src/approval.ts into
  * "delegated" mode, so the in-tool readline gate auto-approves instead of
@@ -20,7 +28,20 @@ import { setDelegatedApproval } from "../src/approval.ts";
 import { DEFAULT_PERMISSIONS, loadPermissions, resolveAction, type Permissions } from "../src/permissions.ts";
 import { isPlanMode, planModeFromEnv, setPlanMode, withPlanMode, PLAN_MODE_REASON } from "../src/plan_mode.ts";
 
-export const GATED_TOOLS: ReadonlySet<string> = new Set(["bash_exec", "write_file", "apply_edit"]);
+export const GATED_TOOLS: ReadonlySet<string> = new Set([
+  "bash_exec",
+  "write_file",
+  "apply_edit",
+  "ipy_run", // 0384ee03: a Python cell is bash wearing a kernel — same gate
+]);
+
+/** Set on children spawned by spawn_subagent (see src/tools/subagent.ts). */
+export const SUBAGENT_CHILD_ENV = "MNEMO_SUBAGENT_CHILD";
+
+/** True when this process is a delegated sub-agent child (no operator). */
+export function isSubagentChild(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[SUBAGENT_CHILD_ENV] === "1";
+}
 
 /** Minimal shape of the event + UI surface this extension needs (test-friendly). */
 export interface ApprovalDecisionInput {
@@ -44,6 +65,11 @@ export function summarizeToolCall(toolName: string, input: Record<string, unknow
       const content = String((input as any).content ?? "");
       const lines = content.length === 0 ? 0 : content.split("\n").length;
       return `write ${lines} lines (${content.length} bytes) to ${String((input as any).path ?? "")}`;
+    }
+    case "ipy_run": {
+      const code = String((input as any).code ?? "");
+      const firstLine = code.split("\n")[0] ?? "";
+      return `py> ${firstLine.slice(0, 80)} (${code.length} chars, ${code.split("\n").length} lines)`;
     }
     case "apply_edit":
       return `replace a ${String((input as any).old_str ?? "").length}-char match with ` +
@@ -86,7 +112,25 @@ export async function decideApproval(
 
   if (!GATED_TOOLS.has(ev.toolName)) return {}; // not gated
   if ((env.MNEMO_APPROVAL_MODE ?? env.SEA_APPROVAL_MODE ?? "") !== "interactive") return {}; // mode off
-  if (!tty) return {}; // non-TTY: fail open like the old gate
+  if (!tty) {
+    // b6afa93e: a delegated sub-agent child has no TTY and no operator to
+    // ask. Failing open here let model-authored children run bash/write
+    // unprompted while the user trusted the parent's prompts, so an "ask"
+    // on a mutating tool fails CLOSED in a child. Deny/allow rules were
+    // already resolved above, so an explicit allow rule still passes.
+    if (isSubagentChild(env)) {
+      const summary = summarizeToolCall(ev.toolName, ev.input);
+      return {
+        block: true,
+        reason:
+          `ERROR: ${ev.toolName} is a mutating tool and this non-interactive sub-agent has ` +
+          `no operator to approve it. Action was NOT executed: ${summary}. ` +
+          `Pre-approve it with an allow rule in ~/.mnemo/permissions.json, ` +
+          `or run it in the parent session.`,
+      };
+    }
+    return {}; // non-TTY parent: fail open like the old gate
+  }
 
   const summary = summarizeToolCall(ev.toolName, ev.input);
   const ok = await ui.confirm(`Approve ${ev.toolName}?`, summary);

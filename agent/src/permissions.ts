@@ -12,6 +12,18 @@
  * deliberately fails OPEN without a TTY so piped/automated sessions keep
  * working; a deny rule that also failed open would be decoration, so denies
  * are enforced regardless of TTY.
+ *
+ * SUB-AGENT POLICY (audit b6afa93e, fix 12.1): children spawned by
+ * spawn_subagent carry MNEMO_SUBAGENT_CHILD=1 and have no TTY and no operator
+ * behind them. For those processes the gate treats "ask" on a mutating tool
+ * (bash_exec / write_file / apply_edit / ipy_run) as DENY — failing open
+ * there would let a model-authored child execute unapproved mutations while
+ * the user trusts the parent's prompts. The escape hatches, in order:
+ *   1. an explicit `allow` rule for the tool (pre-approval),
+ *   2. a `deny` rule is honored as everywhere else,
+ *   3. running the tool in the parent session where the operator can prompt.
+ * A parent process without a TTY (piped/automated runs) still fails open —
+ * the operator opted into automation for the whole run.
  */
 import * as fs from "node:fs";
 import * as os from "node:os";

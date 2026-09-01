@@ -143,5 +143,28 @@ describe("spawn_subagent", () => {
     }
   });
 
+  test("runSubagent marks the child so the approval gate fails closed there", async () => {
+    const childSeen = path.join(tmp, "child-flag.json");
+    const flagCli = path.join(tmp, "flag-agent.mjs");
+    writeFileSync(flagCli, `
+      import { writeFileSync } from "node:fs";
+      writeFileSync(${JSON.stringify(childSeen)}, JSON.stringify({
+        child: process.env.MNEMO_SUBAGENT_CHILD ?? null,
+      }));
+      console.log("ANSWER: flag-checked");
+    `);
+    const prev = process.env.MNEMO_AGENT_BIN;
+    process.env.MNEMO_AGENT_BIN = flagCli;
+    try {
+      const r = await runSubagent({ task: "check flag", timeoutMs: 15000 });
+      assert.equal(r.exitCode, 0);
+      const seen = JSON.parse(await import("node:fs").then((f) => f.readFileSync(childSeen, "utf8")));
+      assert.equal(seen.child, "1", "child must carry MNEMO_SUBAGENT_CHILD=1 (12.1)");
+    } finally {
+      if (prev === undefined) delete process.env.MNEMO_AGENT_BIN;
+      else process.env.MNEMO_AGENT_BIN = prev;
+    }
+  });
+
   test("cleanup", () => { rmSync(tmp, { recursive: true, force: true }); });
 });

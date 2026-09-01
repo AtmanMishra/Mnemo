@@ -9,9 +9,14 @@
  *
  * Overridable for tests: MNEMO_AGENT_BIN points at any command that prints the
  * child's final answer to stdout.
+ *
+ * The child is spawned with MNEMO_SUBAGENT_CHILD=1 so the approval gate can
+ * tell a delegated child (no TTY, no operator) from an automated parent run:
+ * in a child, an "ask" on a mutating tool fails CLOSED (audit b6afa93e).
  */
 import { spawn } from "node:child_process";
 import { activeTracing, childTraceEnv as traceEnvFor } from "../../extensions/tracing.ts";
+import { SUBAGENT_CHILD_ENV } from "../../extensions/approval-gate.ts";
 import * as path from "node:path";
 import { Type } from "typebox";
 import { textResult, type SeaTool } from "./types.ts";
@@ -105,8 +110,15 @@ export function runSubagent(
       // the child must share the parent's memory graph and sidecar, even when
       // the parent was configured through the legacy SEA_* names. The trace
       // env makes the child's spans hang off this call's span, so `mnemo
-      // traces` shows the whole delegation tree (5.4).
-      env: { ...process.env, ...childMemoryEnv(), ...childTraceEnv(), ...(opts.env ?? {}) },
+      // traces` shows the whole delegation tree (5.4). MNEMO_SUBAGENT_CHILD
+      // marks the process as a delegated child for the approval gate (12.1).
+      env: {
+        ...process.env,
+        ...childMemoryEnv(),
+        ...childTraceEnv(),
+        [SUBAGENT_CHILD_ENV]: "1",
+        ...(opts.env ?? {}),
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
