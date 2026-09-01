@@ -421,3 +421,31 @@ seven NON-GOAL rows of research/memory-layer-improvements.md left unbuilt.
   no learned router, no recency decay, no cluster summaries, no proactive
   ActivatedWith recall, no journal GC, no parallel reads, no diff/timeline
   ops.
+
+### SECURITY & TESTING AUDIT + REMEDIATION (2026-08-31/09-01)
+- **Audit**: 3 parallel read-only auditors ran through the audit/record.py hook
+  (flock + atomic replace; the hook's own write race was found, fixed, logged
+  as fixed). 53 findings logged (4 high / 22 medium / 22 low / 5 info):
+  audit/FINDINGS.jsonl + audit/SUMMARY.md.
+- **Top critical**: the interactive approval gate was bypassable in two hops —
+  ipy_run outside GATED_TOOLS (arbitrary Python unprompted) and subagent
+  children failing open non-TTY (delegated mutating tools unprompted).
+- **AREA 12 remediation (all dispatched to four fix agents, all green)**:
+  12.1 approval chain (ipy_run gated + fail-closed children); 12.2 harness
+  gate on every load path (watcher/disk/create), regex-proof scanning,
+  relative-import confinement; 12.3 journal amnesia fixed with
+  tolerant-load+quarantine; 12.4 web_fetch SSRF; 12.5 bash allow-glob made
+  structurally safe; 12.6 workspace path containment; 12.7 child env scrubbed
+  of credentials; 12.8 trace redaction extended; 12.9 CI secrets gate green +
+  least-privilege + npm ci + SHA pins; 12.10 hook executor 30s default +
+  containment; 12.11 auth.json symlink refusal; 12.12 search cache
+  invalidation; 12.13 tui-go goroutine leak + os.Exit; 12.14 coverage
+  (internal/agent 0%→tested, markdown, prompt, pi-contract line pins).
+- **Live bug fixed**: agent process exited at session start — pi-web-access
+  (global pi package) web tools conflicted with Mnemo's; sea-tools now
+  defers web_search/web_fetch to session_start when the runtime owns them.
+- **Final totals at HEAD**: agent 389, tui-go 20 pkg, memory-layer 75 lib,
+  harness-engine 31; memeval --hash 73/77/0.743; tsc + go vet clean.
+- **Earned lesson**: audit's own hook race (partial-line JSONL append) was the
+  same failure class as the memsrv journal amnesia — one fix pattern (tolerant
+  load + quarantine + atomic write) applied to both.
