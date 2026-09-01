@@ -242,3 +242,17 @@ func TestCloseIsIdempotent(t *testing.T) {
 		t.Fatalf("closing twice must be safe: %v", err)
 	}
 }
+
+func TestSpawnRejectsARepoWithoutTheAgentScript(t *testing.T) {
+	dir := t.TempDir() // empty: no agent/bin/mnemo.ts anywhere in it
+	s, err := Spawn(dir, dir, "")
+	if s != nil {
+		t.Fatalf("Spawn must not return a session for a bad repo root; got %+v", s)
+	}
+	if err == nil {
+		t.Fatal("Spawn must error when the repo root lacks agent/bin/mnemo.ts")
+	}
+	if !strings.Contains(err.Error(), "--repo must point at the repository root") {
+		t.Fatalf("error should tell the user what --repo means, got: %v", err)
+	}
+}

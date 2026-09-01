@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -207,10 +208,17 @@ type Session struct {
 // directory, so resuming without it forks the session into the wrong project.
 func Spawn(repoRoot, cwd, sessionFile string) (*Session, error) {
 	entry := filepath.Join(repoRoot, "agent", "bin", "mnemo.ts")
+	if _, err := os.Stat(entry); err != nil {
+		return nil, fmt.Errorf("no agent script at %s (--repo must point at the repository root, not a subdirectory)", entry)
+	}
 	args := []string{entry, "--mode", "rpc", "--no-builtin-tools"}
 	if sessionFile != "" {
 		args = append(args, "--session", sessionFile)
 	}
+	// SAFETY: args is a slice (never a shell string) and entry is a file path
+	// resolved under the operator-provided --repo root; exec.Command passes
+	// argv verbatim with no shell interpretation, so a hostile repo path
+	// cannot execute extra commands.
 	cmd := exec.Command("node", args...)
 	cmd.Dir = cwd
 	return Start(cmd)
