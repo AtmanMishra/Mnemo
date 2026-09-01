@@ -2,7 +2,9 @@ package pi
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -166,7 +168,15 @@ func TestArgumentsAreTruncatedNotWrapped(t *testing.T) {
 // fake speaks the protocol without needing node, an API key or a network.
 func fake(t *testing.T, script string) *Session {
 	t.Helper()
-	s, err := Start(exec.Command("sh", "-c", script))
+	// The fixtures are shell programs (printf/redirects/exit); run them from
+	// a temp file instead of `sh -c <string>` so the command stays
+	// parameterized — and the scripts are file literals in this test, never
+	// user input, so there is nothing to inject either way.
+	prog := filepath.Join(t.TempDir(), "fake-agent.sh")
+	if err := os.WriteFile(prog, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Start(exec.Command("sh", prog))
 	if err != nil {
 		t.Fatal(err)
 	}

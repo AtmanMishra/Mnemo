@@ -9,6 +9,7 @@ The terminal UI is **one unified surface** — no tab switching. The transcript 
 ### Core features delivered
 
 **Navigation & Input**
+
 - Three keyboard modes: Insert (typing), Read (esc activates), Browse (tree focus)
 - Global chords reachable in one press: `^k` palette, `^t` explorer, `^s` sessions, `^m` memory, `^l` logs
 - `esc` always goes up one level — complete model
@@ -17,6 +18,7 @@ The terminal UI is **one unified surface** — no tab switching. The transcript 
 - Search via `^f`: live query, case-insensitive, wraps around, highlights in context
 
 **Rendering & Layout**
+
 - Markdown rendering via Glamour with palette-generated stylesheet
 - Hierarchical transcript: user/agent/think/tool/delegation/notice block types
 - One-key toggle (`^e` think/`^r` tools/`^a` all) opens/closes blocks by type across the whole transcript
@@ -25,6 +27,7 @@ The terminal UI is **one unified surface** — no tab switching. The transcript 
 - Lazy-loaded folder explorer with size display
 
 **State & Integration**
+
 - Sessions browser: project → session → sub-agent hierarchy
 - Memory management: read-only view with forget capability (`d` key, requires confirmation)
 - Live agent integration: spawns pi process, streams messages, handles interrupts
@@ -33,6 +36,7 @@ The terminal UI is **one unified surface** — no tab switching. The transcript 
 - Authentication: `/login` and `/logout` manage API keys per provider
 
 **Testing & Quality**
+
 - 329 green tests across all packages
 - Mock agent for offline testing
 - Test fixtures for common scenarios (session resume, search, overlays, key dispatch)
@@ -43,7 +47,7 @@ The terminal UI is **one unified surface** — no tab switching. The transcript 
 ### Package map
 
 | Package | Owns | Key exports |
-|---------|------|-------------|
+| --------- | ------ | ------------- |
 | `internal/theme` | Palette, glyphs, styles. Single source of color. | Theme struct, 14-colour PICO-8, dither ramp, spinner |
 | `internal/brand` | Nyx mascot and wordmark, marker-based art system | Paint(), CatFor(), Wordmark sizes, walk cycle, blink |
 | `internal/tree` | Hierarchical list model, one impl, three uses | Model, Node, ExpandAll/CollapseAll, Filter, Toggle |
@@ -130,12 +134,14 @@ go build -o mnemo ./cmd/mnemo
 ### If continued
 
 **High value, reasonable scope**:
+
 - Onboarding integration: Move auth flow to Go so --repo works for first-timers
 - Memory write operations: full CRUD (currently read + forget only)
 - Acceptance test harness: automated screenshots for regression testing
 - Tool output capture in transcript: currently quoted as text, could render natively
 
 **Medium value, higher scope**:
+
 - Plugin system UI: create/upload/manage plugins from within TUI (plugin API exists)
 - Dockable panes: sessions/memory/logs as toggleable columns, not modals
 - Theme picker: user-selectable palettes (already structured for it)
@@ -181,6 +187,7 @@ Go modules only (go.mod). Pin versions; no k8s-style floating.
 - github.com/charmbracelet/x/ansi: ANSI-aware string ops
 
 Rust (memory-layer only, if memsrv used):
+
 - serde/serde_json: serialization
 - tokio: async runtime
 - jsonrpc: RPC protocol
@@ -190,5 +197,5 @@ Rust (memory-layer only, if memsrv used):
 - **Design spec**: DESIGN.md (root)
 - **Code graph**: graft/ (auto-indexed)
 - **Test suite**: `go test ./...` runs all, `go test ./app/` for a package
-- **Live view**: `go run ./cmd/mnemo -- --repo $(pwd)`
+- **Live view**: `go run ../tui-go/cmd/mnemo -- --repo $(pwd)` — run from the REPO ROOT (--repo must be the root containing agent/, not tui-go/)
 - **Original Rust TUI**: archived on branch `archive/tui-rust`; not in the main system.
