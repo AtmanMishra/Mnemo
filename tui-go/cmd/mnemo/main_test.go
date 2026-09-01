@@ -114,3 +114,30 @@ func TestADumpInTheCwdOfARealFolder(t *testing.T) {
 		t.Fatalf("the explorer should list the file in --cwd:\n%s", out)
 	}
 }
+
+func TestDefaultMemorySidecarDerivesFromRepoAndHome(t *testing.T) {
+	o := options{repo: "/somewhere/self-evolving-agent", home: "/Users/tester"}
+	defaultMemorySidecar(&o)
+	if want := "/somewhere/self-evolving-agent/memory-layer/target/debug/memsrv"; o.memsrv != want {
+		t.Fatalf("memsrv = %q, want %q", o.memsrv, want)
+	}
+	if want := "/Users/tester/.mnemo/journal.jsonl"; o.journal != want {
+		t.Fatalf("journal = %q, want %q", o.journal, want)
+	}
+}
+
+func TestDefaultMemorySidecarRespectsExplicitFlags(t *testing.T) {
+	o := options{repo: "/r", home: "/h", memsrv: "/custom/memsrv", journal: "/custom/journal.jsonl"}
+	defaultMemorySidecar(&o)
+	if o.memsrv != "/custom/memsrv" || o.journal != "/custom/journal.jsonl" {
+		t.Fatalf("explicit flags must win; got memsrv=%q journal=%q", o.memsrv, o.journal)
+	}
+}
+
+func TestDefaultMemorySidecarNoRepoMeansNoDerivation(t *testing.T) {
+	o := options{home: "/h"}
+	defaultMemorySidecar(&o)
+	if o.memsrv != "" || o.journal != "" {
+		t.Fatalf("with no repo, nothing should be derived; got memsrv=%q journal=%q", o.memsrv, o.journal)
+	}
+}

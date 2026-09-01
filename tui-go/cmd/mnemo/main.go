@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -51,7 +52,29 @@ func main() {
 	}
 }
 
+// defaultMemorySidecar fills empty --memsrv/--journal from the repo and home
+// dirs so a live run's Memory pane works without the caller learning the
+// sidecar layout. Explicit flags always win; no repo means no derivation
+// (offline/--dump stays exactly as configured).
+func defaultMemorySidecar(o *options) {
+	if o.memsrv == "" && o.repo != "" {
+		o.memsrv = filepath.Join(o.repo, "memory-layer", "target", "debug", "memsrv")
+	}
+	if o.journal == "" && (o.memsrv != "" || o.repo != "") {
+		home := o.home
+		if home == "" {
+			if h, err := os.UserHomeDir(); err == nil {
+				home = h
+			}
+		}
+		if home != "" {
+			o.journal = filepath.Join(home, ".mnemo", "journal.jsonl")
+		}
+	}
+}
+
 func run(o options) error {
+	defaultMemorySidecar(&o)
 	cfg := app.Config{Home: o.home, CWD: o.cwd, Dark: true,
 		MemsrvBin: o.memsrv, MemJournal: o.journal, HarnessDir: o.bundles, Repo: o.repo}
 
