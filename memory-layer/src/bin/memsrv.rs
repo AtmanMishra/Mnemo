@@ -60,6 +60,7 @@ fn main() {
     eprintln!("[memsrv] ready: {jpath} ({} ops)", report.ops.len());
 
     let stdin = std::io::stdin();
+    let mut reader = stdin.lock();
     let mut out = std::io::stdout();
     // ML-1: in-memory LRU for search results. Keyed on the resolved inputs
     // (normalized query, area filter, k); bounded; no TTL. A hit returns
@@ -69,8 +70,30 @@ fn main() {
     // ML-1 names; mark_useful must be observable on the next identical query).
     let mut search_cache: SearchCache<(Vec<serde_json::Value>, Vec<NodeId>)> =
         SearchCache::new(SEARCH_CACHE_CAP);
-    for line in stdin.lock().lines() {
-        let line = match line { Ok(l) => l, Err(_) => break };
+    // e8e7d9e2: read BYTES, not lines. `lines()` yields Err on a non-UTF8
+    // frame and the old loop `break`-ed on any Err — one bad byte stream
+    // killed the sidecar (the pi extension then owns a dead child). Here a
+    // non-UTF8 frame is rejected with a structured error and the loop keeps
+    // serving the next line.
+    loop {
+        let mut frame: Vec<u8> = Vec::new();
+        let n = match reader.read_until(b'\n', &mut frame) {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("[memsrv] stdin read error: {e}");
+                break;
+            }
+        };
+        if n == 0 { break; } // EOF: parent closed stdin
+        let line = match String::from_utf8(frame) {
+            Ok(l) => l,
+            Err(e) => {
+                let ue = e.utf8_error();
+                write_err(&mut out, &serde_json::Value::Null,
+                    &format!("invalid utf-8 request frame (first bad byte at {} of the line); frame rejected", ue.valid_up_to()));
+                continue;
+            }
+        };
         if line.trim().is_empty() { continue; }
         let req: serde_json::Value = match serde_json::from_str(&line) {
             Ok(v) => v, Err(e) => {
