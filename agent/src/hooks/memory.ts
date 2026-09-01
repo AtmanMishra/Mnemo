@@ -18,6 +18,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Hook } from "./types.ts";
+import { scrubChildEnv } from "../childenv.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const DEFAULT_BINARY = path.join(REPO_ROOT, "memory-layer", "target", "debug", "memsrv");
@@ -82,9 +83,13 @@ export class HookMemsrvClient {
       throw new Error(`memsrv binary not found at ${this.binaryPath} (build with cargo build --bin memsrv)`);
     }
     // deterministic hashing embedder unless remote is opted in, like the
-    // memory-layer extension does
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    if (env.MNEMO_MEMORY_REMOTE !== "1" && env.SEA_MEMORY_REMOTE !== "1") delete env.OPENROUTER_API_KEY;
+    // memory-layer extension does. 12.7: scrub ALL credential-shaped vars
+    // (not just OPENROUTER) — remote mode re-adds exactly the one it needs.
+    const remote = process.env.MNEMO_MEMORY_REMOTE === "1" || process.env.SEA_MEMORY_REMOTE === "1";
+    const env: NodeJS.ProcessEnv = scrubChildEnv();
+    if (remote && process.env.OPENROUTER_API_KEY) {
+      env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+    }
 
     const proc = spawn(this.binaryPath, [this.journalPath], { cwd: REPO_ROOT, env, stdio: ["pipe", "pipe", "pipe"] });
     this.proc = proc;

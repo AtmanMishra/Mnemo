@@ -17,6 +17,7 @@
 import { spawn } from "node:child_process";
 import { activeTracing, childTraceEnv as traceEnvFor } from "../../extensions/tracing.ts";
 import { SUBAGENT_CHILD_ENV } from "../../extensions/approval-gate.ts";
+import { scrubChildEnv } from "../childenv.ts";
 import * as path from "node:path";
 import { Type } from "typebox";
 import { textResult, type SeaTool } from "./types.ts";
@@ -112,8 +113,10 @@ export function runSubagent(
       // env makes the child's spans hang off this call's span, so `mnemo
       // traces` shows the whole delegation tree (5.4). MNEMO_SUBAGENT_CHILD
       // marks the process as a delegated child for the approval gate (12.1).
+      // 12.7: the env is scrubbed of credentials — the child re-authenticates
+      // from ~/.mnemo/auth.json, so a delegated model never sees the key.
       env: {
-        ...process.env,
+        ...scrubChildEnv(),
         ...childMemoryEnv(),
         ...childTraceEnv(),
         [SUBAGENT_CHILD_ENV]: "1",

@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import { Type } from "typebox";
 import { textResult, type SeaTool } from "./types.ts";
 import { approvalGate } from "../approval.ts";
+import { scrubChildEnv } from "../childenv.ts";
 
 const parameters = Type.Object({
   command: Type.String({ description: "Shell command to execute (run via /bin/sh -c)" }),
@@ -42,6 +43,9 @@ export async function runBash(
       cwd,
       signal: opts.signal,
       stdio: ["ignore", "pipe", "pipe"],
+      // 12.7: an approved command must not be able to read the provider key
+      // (or any other credential) out of our environment
+      env: scrubChildEnv(),
     });
 
     const timer = setTimeout(() => {

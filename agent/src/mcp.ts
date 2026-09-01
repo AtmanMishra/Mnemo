@@ -15,6 +15,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { textResult, type ImageContent, type SeaTool, type ToolResult } from "./tools/types.ts";
+import { scrubChildEnv } from "./childenv.ts";
 
 export interface McpServerConfig {
   command: string;
@@ -92,7 +93,8 @@ export class McpClient {
     if (this.alive) return;
     const proc = spawn(this.config.command, this.config.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ...(this.config.env ?? {}) },
+      // 12.7: an MCP server is third-party code; it never needs OUR keys
+      env: { ...scrubChildEnv(), ...(this.config.env ?? {}) },
     });
     this.proc = proc;
     this.buffer = "";
