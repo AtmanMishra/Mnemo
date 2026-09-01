@@ -1,7 +1,12 @@
 /**
  * Scoped tool registry (dsh pattern): three layers, global < project < session.
- * Same-named tools in a nearer scope shadow farther ones. register() returns a
- * Disposable; dispose() unregisters and deactivates the bundle's tools.
+ * Same-named tools in a nearer scope shadow farther ones — that is the DESIGN,
+ * but it is LOUD (b02291c2): registering a bundle whose tool names shadow
+ * broader-scope tools records a ShadowEvent (registry.shadowEvents) and warns
+ * via console.warn / the onShadowWarning constructor hook, so a project or
+ * session bundle can never silently replace a global tool.
+ * register() returns a Disposable; dispose() unregisters and deactivates the
+ * bundle's tools.
  */
 import { SCOPE_ORDER, type Disposable, type ScopeName, type ToolDefinition } from "./types.ts";
 import type { LoadedBundle } from "./bundle.ts";
@@ -18,12 +23,32 @@ export interface ToolInfo {
   active: boolean;
 }
 
+/** A bundle was registered whose tools shadow same-named tools in broader scopes. */
+export interface ShadowEvent {
+  bundle: string;
+  scope: ScopeName;
+  /** Tool names that now hide a broader-scope tool. */
+  tools: string[];
+}
+
+export interface ToolRegistryOptions {
+  /** Called (in addition to console.warn) whenever a bundle shadows broader-scope tools. */
+  onShadowWarning?: (event: ShadowEvent) => void;
+}
+
 export class ToolRegistry {
   #layers = new Map<ScopeName, Map<string, RegisteredBundle>>(
     SCOPE_ORDER.map((s) => [s, new Map()] as const),
   );
   /** Tool names activated via setActive()/the loader tool. */
   #active = new Set<string>();
+  /** Recent shadowing events, most recent first (capped at 50). */
+  shadowEvents: ShadowEvent[] = [];
+  #onShadowWarning?: ToolRegistryOptions["onShadowWarning"];
+
+  constructor(options: ToolRegistryOptions = {}) {
+    this.#onShadowWarning = options.onShadowWarning;
+  }
 
   /**
    * Register a loaded bundle at `scope` (default "session"). If the same layer
@@ -38,6 +63,29 @@ export class ToolRegistry {
       for (const name of prev.tools.keys()) this.#active.delete(name);
     }
     layer.set(bundle.manifest.name, entry);
+
+    // b02291c2: nearest-shadows is the design — but never silent. If this
+    // bundle hides tools that broader scopes already provide, say so.
+    const shadowedTools = [...bundle.tools.keys()].filter((name) => {
+      for (const broader of SCOPE_ORDER) {
+        if (broader === scope) break; // only layers BELOW this scope are shadowed
+        if ([...this.#layers.get(broader)!.values()].some((b) => b.tools.has(name))) {
+          return true;
+        }
+      }
+      return false;
+    });
+    if (shadowedTools.length > 0) {
+      const event: ShadowEvent = { bundle: bundle.manifest.name, scope, tools: shadowedTools };
+      this.shadowEvents.unshift(event);
+      this.shadowEvents.length = Math.min(this.shadowEvents.length, 50);
+      (this.#onShadowWarning ?? ((e: ShadowEvent) =>
+        console.warn(
+          `[harness-registry] warning: bundle "${e.bundle}" (${e.scope}) shadows ` +
+            `broader-scope tools: ${e.tools.join(", ")}`,
+        )))(event);
+    }
+
     let disposed = false;
     return {
       dispose: () => {

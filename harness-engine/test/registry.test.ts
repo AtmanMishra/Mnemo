@@ -76,3 +76,49 @@ test("registering a same-name bundle into the same scope replaces the old one", 
   void dir3;
   await fs.rm(root, { recursive: true, force: true });
 });
+
+test("shadowing a broader-scope tool is loud: event recorded + warning fired (b02291c2)", async () => {
+  const root = await makeTmpDir();
+  const events: import("../src/registry.ts").ShadowEvent[] = [];
+  const registry = new ToolRegistry({ onShadowWarning: (e) => events.push(e) });
+
+  const mk = async (bundle: string, scope: "global" | "project" | "session", toolName: string) => {
+    const dir = await writeBundleDir(root, bundle, [
+      { name: toolName, source: `export default { name:${JSON.stringify(toolName)}, schema:{type:"object"}, async execute(){ return "x"; } };` },
+    ]);
+    return registry.register(await loadBundle(dir, scope), scope);
+  };
+
+  // global tool, nothing shadowed
+  const dg = await mk("g-bundle", "global", "shared");
+  assert.equal(registry.shadowEvents.length, 0);
+  assert.equal(events.length, 0);
+
+  // DIFFERENT name at project scope: still silent
+  await mk("p-clean", "project", "other");
+  assert.equal(registry.shadowEvents.length, 0);
+
+  // same name at project scope -> shadows global: event + warning
+  const dp = await mk("p-bundle", "project", "shared");
+  assert.equal(registry.shadowEvents.length, 1);
+  assert.deepEqual(events[0]!.tools, ["shared"]);
+  assert.equal(events[0]!.bundle, "p-bundle");
+  assert.equal(events[0]!.scope, "project");
+  // the shadowed tool still resolves to the nearest scope (design unchanged)
+  assert.equal(registry.resolve("shared")?.scope, "project");
+
+  // same name at session scope -> shadows project+global: one more event
+  const ds = await mk("s-bundle", "session", "shared");
+  assert.equal(registry.shadowEvents.length, 2);
+  assert.deepEqual(events[1]!.tools, ["shared"]);
+  assert.equal(events[1]!.scope, "session");
+
+  // dispose nearest -> falls back, no new events
+  await ds.dispose();
+  assert.equal(registry.resolve("shared")?.scope, "project");
+  await dp.dispose();
+  await dg.dispose();
+  assert.equal(events.length, 2, "no spurious events");
+
+  await fs.rm(root, { recursive: true, force: true });
+});
