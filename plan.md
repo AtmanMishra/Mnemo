@@ -99,7 +99,7 @@ tool_result (modify) interception — NOT a replacement of pi's events.
 - [x] 10.2 `mnemo schedule` daemon + in-session ticker; double-fire prevented via an agent-side lockfile lease (O_EXCL + pid + stale detection) — memsrv left untouched per the parallel-agent guard
 - [x] 10.3 Every tick = TaskEpisode in the journal → steering + consolidation + mempolicy apply to scheduled work (verified: pi emits session_start/shutdown in one-shot print mode; probe-spawn test proves the shared MNEMO_MEMORY_JOURNAL reaches the child)
 - [x] 10.4 /trigger: on_failure (turn_end), on_uncommitted (git dirty poll), on_cost_over (trace-cost budget); /now fires any job (on_push deferred — webhook listener needs a real HTTP surface, noted)
-- [ ] 10.5 Notifications (TUI status chip + opt-in OS notify) + Schedules overlay in tui-go
+- [x] 10.5 Notifications (TUI status chip + opt-in OS notify) + Schedules overlay in tui-go — DONE 2026-09-01: one-press-from-every-mode schedules overlay floats the shared store (^o); enter pauses/resumes in place, n fires /now <id>, finished jobs chip once on the status line; corrupt stores say so; palette/help list it (6ec29a5).
 
 ## AREA 11 — MEMORY-LAYER IMPROVEMENTS (research/memory-layer-improvements.md; curated — do NOT bloat the graph model)
 
@@ -126,15 +126,15 @@ Ordered queue; every item references the finding id(s) in audit/FINDINGS.jsonl.
 - [x] 12.6 file tools path containment (no absolute paths straight through; symlink canonicalization) (e00cd116). (agent)
 - [x] 12.7 API key not inherited by children via process.env (68846059). (agent)
 - [ ] 12.8 trace redaction gaps (URL tokens, sk-or-/tvly- shapes, 120-char verbatim args) (2fefd9ce). (agent)
-- [ ] 12.9 CI secrets gate actually green + regex coverage + history scan; GITHUB_TOKEN perms; npm ci; pinned tags (5e28efcf, f5efc6ba, 3f198bdf, 144c276d, 23e58063, 89697e08). (CI-repo)
+- [x] 12.9 CI secrets gate actually green + regex coverage + history scan; GITHUB_TOKEN perms; npm ci; pinned tags (5e28efcf, f5efc6ba, 3f198bdf, 144c276d, 23e58063, 89697e08). (CI-repo) — DONE 2026-09-01: gate was red on its own fixture (hooks_executor.test.ts excluded as trace.test.ts); exclusion list fixed after verifying the exact git grep red BEFORE and green AFTER; regex extended to sk-or-v1-/github_pat_/generic api_key assignment; bounded history sweep (last 200 commits, early-exit; full-history scan deferred & documented); permissions: contents: read; npm ci for agent + harness-engine; actions pinned to SHAs with resolved-tag comments (rust-toolchain tracks stable by design).
 - [ ] 12.10 hook executor default timeout + scope confinement (41ab8d40); block-reason not persisted raw to traces (fa244d3f). (agent)
 - [ ] 12.11 auth.json write: O_NOFOLLOW / realpath before writing key (dd3118fb). (agent)
 - [ ] 12.12 search cache invalidation on Unlink/Reweight/RecordOutcome (cddd21c0). (memory-layer)
-- [ ] 12.13 tui-go memory client: timeout must not leak reader goroutine (4745e2a2); cmd/mnemo os.Exit must run deferred Close (7bbead71). (tui-go)
-- [ ] 12.14 test coverage: internal/agent 0% (572d7d4d), internal/pi contract vs real protocol + pin policy (af582760), markdown 0%/prompt 25%/bin/mnemo.ts no tests (0ada275f, edfe2f6a, b7b6c912); drop --test-force-exit masking (01c4ef84). (tui-go + agent)
+- [x] 12.13 tui-go memory client: timeout must not leak reader goroutine (4745e2a2); cmd/mnemo os.Exit must run deferred Close (7bbead71). (tui-go) — DONE 2026-09-01: single readLoop dispatches by id, drops late replies, fails fast on dead sidecar; run()/main split so defers fire before exit (b36368f).
+- [x] 12.14 test coverage: internal/agent 0% (572d7d4d), internal/pi contract vs real protocol + pin policy (af582760), markdown 0%/prompt 25%/bin/mnemo.ts no tests (0ada275f, edfe2f6a, b7b6c912); drop --test-force-exit masking (01c4ef84). (tui-go + agent) — DONE 2026-09-01: agent/markdown/prompt suites added (agent real message-order turn, markdown cache/render/re-wrap, prompt history/menu/queue basics); pi contract pinned to pi 0.84.4 docs/rpc.md verbatim fixtures incl. deliberate non-events; caret pin kept & drift risk documented as the tripwire (af582760); --test-force-exit dropped after the suite verified to exit cleanly on its own (373 pass, exit 0) (5275fa8).
 - [ ] 12.15 low batch: MCP SIGTERM orphan (1c31b0fe), kernel limits (e4cc567c), embed retries stall RPC (6f96adc6), scope shadowing (b02291c2) **DONE 2026-09-01** — registry records ShadowEvent + warns on broader-scope shadowing, manifest refs escape bundle dir (dcd8c081) **DONE 2026-09-01** — refs enforced relative/no-'..'/realpath-confined, watcher symlink (593e9a39) **DONE 2026-09-01** — realpath'd roots, escaping symlinks ignored+logged, doc go version (2bf9a1a9), CI drift checks (2f298097)
 - [ ] 12.16 design confirmations (not defects): in-process unsandboxed harness (a739fbd8), in-kernel tools.* skip prompting (48236eda), embeddings egress (509e8ec5), kernel pipe attrs (467cb8ad)
-NB: 4b24b4b0 (working-tree red) = AREA 10.5 schedules overlay in-flight/uncommitted — resolve by completing AREA 10.5, not as an audit fix.
+NB: 4b24b4b0 (working-tree red) = AREA 10.5 schedules overlay in-flight/uncommitted — resolved by completing AREA 10.5 (6ec29a5), not as an audit fix.
 
 ## DONE (reference)
 
