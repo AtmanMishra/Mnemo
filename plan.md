@@ -124,7 +124,7 @@ Ordered queue; every item references the finding id(s) in audit/FINDINGS.jsonl.
 - [x] 12.4 web_fetch SSRF filter (localhost/private/metadata + redirects) (3927a1ac). (agent)
 - [x] 12.5 bash allow-glob approves whole command string — match tokens, not raw string (3c265f44). (agent)
 - [x] 12.6 file tools path containment (no absolute paths straight through; symlink canonicalization) (e00cd116). (agent)
-- [ ] 12.7 API key not inherited by children via process.env (68846059). (agent)
+- [x] 12.7 API key not inherited by children via process.env (68846059). (agent)
 - [ ] 12.8 trace redaction gaps (URL tokens, sk-or-/tvly- shapes, 120-char verbatim args) (2fefd9ce). (agent)
 - [ ] 12.9 CI secrets gate actually green + regex coverage + history scan; GITHUB_TOKEN perms; npm ci; pinned tags (5e28efcf, f5efc6ba, 3f198bdf, 144c276d, 23e58063, 89697e08). (CI-repo)
 - [ ] 12.10 hook executor default timeout + scope confinement (41ab8d40); block-reason not persisted raw to traces (fa244d3f). (agent)
