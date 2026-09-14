@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,28 +9,9 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/tree"
 )
 
-// fakeSrv writes a stand-in memsrv into the test's own temp directory. The
-// real one replays a journal and may want an API key; the protocol is what is
-// under test, and the protocol is a line of JSON in and a line of JSON out.
-func fakeSrv(t *testing.T, body string) string {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "memsrv")
-	script := "#!/bin/sh\n" + body + "\n"
-	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
-// echoSrv replies to every request with the same result, echoing the id back.
-func echoSrv(t *testing.T, result string) string {
-	t.Helper()
-	return fakeSrv(t, `while IFS= read -r line; do
-  case "$line" in *'"exit"'*) exit 0;; esac
-  id=$(printf '%s' "$line" | sed 's/.*"id":\([0-9]*\).*/\1/')
-  printf '{"id":%s,"ok":true,"result":%s}\n' "$id" '`+result+`'
-done`)
-}
+// fakeSrv and echoSrv live in fakesrv_test.go: the stand-in sidecar is this
+// test binary re-executed, because a `#!/bin/sh` fixture is not something
+// Windows can run.
 
 func open(t *testing.T, bin string) *Client {
 	t.Helper()
@@ -55,28 +35,21 @@ func TestDumpParsesTheStore(t *testing.T) {
 }
 
 func TestAnErrorReplyIsAnError(t *testing.T) {
-	c := open(t, fakeSrv(t, `while IFS= read -r line; do
-  case "$line" in *'"exit"'*) exit 0;; esac
-  printf '{"id":1,"ok":false,"error":"no such node"}\n'
-done`))
+	c := open(t, fakeSrv(t, fakeSpec{Error: "no such node"}))
 	if _, err := c.Dump(); err == nil || !strings.Contains(err.Error(), "no such node") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestStrayOutputIsNotAProtocolFailure(t *testing.T) {
-	c := open(t, fakeSrv(t, `while IFS= read -r line; do
-  case "$line" in *'"exit"'*) exit 0;; esac
-  printf 'loading journal...\n'
-  printf '{"id":1,"ok":true,"result":{"nodes":[]}}\n'
-done`))
+	c := open(t, fakeSrv(t, fakeSpec{Result: `{"nodes":[]}`, Stray: true}))
 	if _, err := c.Dump(); err != nil {
 		t.Fatalf("a non-JSON line must be skipped, not fail the call: %v", err)
 	}
 }
 
 func TestASidecarThatDiesIsReportedNotHungOn(t *testing.T) {
-	c := open(t, fakeSrv(t, `exit 1`))
+	c := open(t, fakeSrv(t, fakeSpec{Die: true}))
 	if _, err := c.Dump(); err == nil {
 		t.Fatal("a dead sidecar must be an error, or the overlay just never opens")
 	}
@@ -115,10 +88,7 @@ func TestFactsRenderEveryShape(t *testing.T) {
 
 func TestAFailedStateCallStillSaysSomething(t *testing.T) {
 	// A memory that renders blank is indistinguishable from one that is empty.
-	c := open(t, fakeSrv(t, `while IFS= read -r line; do
-  case "$line" in *'"exit"'*) exit 0;; esac
-  printf '{"id":1,"ok":false,"error":"gone"}\n'
-done`))
+	c := open(t, fakeSrv(t, fakeSpec{Error: "gone"}))
 	got := c.Facts(9)
 	if len(got) == 0 || !strings.Contains(got[0], "gone") {
 		t.Fatalf("got %#v", got)
@@ -238,12 +208,7 @@ func TestATimedOutCallDoesNotEatTheNextReply(t *testing.T) {
 	// The first request takes a second to answer; every other one answers
 	// immediately. The first reply is therefore late — the caller that asked
 	// for it has already timed out and gone home.
-	c := open(t, fakeSrv(t, `while IFS= read -r line; do
-  case "$line" in *'"exit"'*) exit 0;; esac
-  id=$(printf '%s' "$line" | sed 's/.*"id":\([0-9]*\).*/\1/')
-  if [ "$id" = "1" ]; then sleep 1; fi
-  printf '{"id":%s,"ok":true,"result":{"nodes":[]}}\n' "$id"
-done`))
+	c := open(t, fakeSrv(t, fakeSpec{Result: `{"nodes":[]}`, DelayOnce: 1000}))
 	c.callTimeout = 50 * time.Millisecond
 
 	if _, err := c.Dump(); err == nil || !strings.Contains(err.Error(), "timed out") {
@@ -267,11 +232,10 @@ done`))
 func TestACallAfterTheSidecarDiedFailsFast(t *testing.T) {
 	// Answers its one request, then dies: the reply proves the protocol
 	// worked, so the failure that follows is the death, not a bug.
-	c := open(t, fakeSrv(t, `IFS= read -r line
-printf '{"id":1,"ok":true,"result":{"nodes":[]}}\n'`))
-	// Generous for the setup: a shell sidecar's round trip can take hundreds
-	// of milliseconds; the fast-fail claim is only about the call AFTER the
-	// death is known.
+	c := open(t, fakeSrv(t, fakeSpec{Result: `{"nodes":[]}`, Once: true}))
+	// Generous for the setup: the sidecar's round trip can take hundreds of
+	// milliseconds on a loaded machine; the fast-fail claim is only about the
+	// call AFTER the death is known.
 	if _, err := c.Dump(); err != nil {
 		t.Fatalf("setup: the first call should be answered, got: %v", err)
 	}

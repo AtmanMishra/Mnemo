@@ -29,6 +29,14 @@ import (
 // bit" is a regression wearing a fresh coat of paint.
 var update = flag.Bool("update", false, "rewrite the golden frames in app/testdata/golden")
 
+// crlf and lf are spelled out as bytes rather than as escapes: the comparison
+// below is the one that must not drift, and a literal backslash escape is easy
+// to mangle in review or in a patch.
+var (
+	crlf = string([]byte{13, 10})
+	lf   = string([]byte{10})
+)
+
 // goldenModel is the app every scenario shares, pointed at paths that cannot
 // exist on any machine — the header must be byte-identical on every developer
 // and every runner, and a temp directory is not.
@@ -93,8 +101,13 @@ func TestAcceptanceGoldenFrames(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			path := filepath.Join("testdata", "golden", c.name+".txt")
-			want, err := os.ReadFile(path)
+			raw, err := os.ReadFile(path)
 			got := c.run(t).Render()
+			// A checkout can hand this file over as CRLF (core.autocrlf on
+			// Windows, or a clone made before .gitattributes existed). The
+			// frame is compared as text, so normalise first — otherwise a
+			// line-ending conversion reads as a visual change.
+			want := strings.ReplaceAll(string(raw), crlf, lf)
 			switch {
 			case err != nil && *update:
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -110,7 +123,7 @@ func TestAcceptanceGoldenFrames(t *testing.T) {
 			}
 
 			if *update {
-				if string(want) != got {
+				if want != got {
 					if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
 						t.Fatal(err)
 					}
@@ -119,7 +132,7 @@ func TestAcceptanceGoldenFrames(t *testing.T) {
 				return
 			}
 
-			if string(want) != got {
+			if want != got {
 				t.Fatalf("%s changed. If the change is intentional, regold with:\n\n"+
 					"\tgo test ./app/ -run 'TestAcceptanceGoldenFrames/%s' -update\n\n"+
 					"and review the diff — a golden that 'just changed a bit' is a\n"+

@@ -118,10 +118,12 @@ func TestADumpInTheCwdOfARealFolder(t *testing.T) {
 func TestDefaultMemorySidecarDerivesFromRepoAndHome(t *testing.T) {
 	o := options{repo: "/somewhere/self-evolving-agent", home: "/Users/tester"}
 	defaultMemorySidecar(&o)
-	if want := "/somewhere/self-evolving-agent/memory-layer/target/debug/memsrv"; o.memsrv != want {
+	// Built with filepath.Join, not a literal: the derivation is a path
+	// join, so the expectation has to be one too or it only holds on Unix.
+	if want := filepath.Join("/somewhere/self-evolving-agent", "memory-layer", "target", "debug", "memsrv"); o.memsrv != want {
 		t.Fatalf("memsrv = %q, want %q", o.memsrv, want)
 	}
-	if want := "/Users/tester/.mnemo/journal.jsonl"; o.journal != want {
+	if want := filepath.Join("/Users/tester", ".mnemo", "journal.jsonl"); o.journal != want {
 		t.Fatalf("journal = %q, want %q", o.journal, want)
 	}
 }

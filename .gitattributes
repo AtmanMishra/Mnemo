@@ -1,0 +1,26 @@
+# Line endings, once, for every platform.
+#
+# Without this file git applies the contributor's core.autocrlf, so a Windows
+# checkout turns every text file into CRLF. That is invisible for compilers and
+# invisible in `git status` (git compares after normalising), but the TUI's
+# acceptance frames are compared byte-for-byte — so on Windows the golden test
+# failed while the file looked unchanged. Normalise on the way in, hand every
+# platform the same bytes.
+* text=auto eol=lf
+
+# The golden frames are an exact contract: never converted, on any machine.
+tui-go/app/testdata/golden/*.txt text eol=lf
+
+# Binaries are never text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.pyc binary
+*.zip binary

@@ -1516,24 +1516,15 @@ func TestATypedModelNameWorksWhenTheCatalogueCannotBeAsked(t *testing.T) {
 // scripted replies are what a real store returns for dump, state and fact.
 func scriptedMemSrv(t *testing.T, capture string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "memsrv")
-	script := `#!/bin/sh
-while IFS= read -r line; do
-  case "$line" in *'"exit"'*) exit 0;; esac
-  printf '%s\n' "$line" >> '` + capture + `'
-  id=$(printf '%s' "$line" | sed 's/.*"id":\([0-9]*\).*/\1/')
-  case "$line" in
-    *'"method":"dump"'*) printf '{"id":%s,"ok":true,"result":{"nodes":[{"id":22,"kind":"Aspect","area":"Semantic","label":"project","facts":1,"feeders":0}]}}\n' "$id";;
-    *'"method":"state"'*) printf '{"id":%s,"ok":true,"result":{"state":"- port: 8080"}}\n' "$id";;
-    *'"method":"fact"'*) printf '{"id":%s,"ok":true,"result":{"fact":7}}\n' "$id";;
-    *) printf '{"id":%s,"ok":true,"result":{}}\n' "$id";;
-  esac
-done
-`
-	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return p
+	return fakeSrv(t, fakeSpec{
+		Capture: capture,
+		Replies: map[string]string{
+			"dump":  `{"nodes":[{"id":22,"kind":"Aspect","area":"Semantic","label":"project","facts":1,"feeders":0}]}`,
+			"state": `{"state":"- port: 8080"}`,
+			"fact":  `{"fact":7}`,
+		},
+		Default: `{}`,
+	})
 }
 
 // memFixture is an app whose memory overlay talks to a scripted sidecar: the

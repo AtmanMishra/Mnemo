@@ -3,6 +3,7 @@ package filetree
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/tree"
@@ -84,6 +85,21 @@ func TestChildrenAreNotReadUntilTheNodeOpens(t *testing.T) {
 }
 
 func TestAnUnreadableDirectorySaysSoInsteadOfLookingEmpty(t *testing.T) {
+	// Windows does not deny reads through POSIX modes — a 0o000 directory
+	// still lists — so on this platform the same branch is exercised with a
+	// path that is not a directory at all. Either way children() must report
+	// the error instead of handing back an empty folder.
+	if runtime.GOOS == "windows" {
+		notDir := filepath.Join(t.TempDir(), "not-a-directory")
+		if err := os.WriteFile(notDir, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := kids(Root(notDir))
+		if len(got) != 1 || got[0] == "" {
+			t.Fatalf("expected one explanatory row, got %v", got)
+		}
+		return
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root can read anything")
 	}

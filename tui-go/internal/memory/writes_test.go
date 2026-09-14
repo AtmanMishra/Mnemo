@@ -7,19 +7,12 @@ import (
 	"testing"
 )
 
-// srvFor writes a memsrv stand-in that captures every request body (minus the
+// srvFor arms a stand-in memsrv that captures every request body (minus the
 // exit call) into `capture` and answers everything else with `result`, a JSON
 // object. Reading the captured line is how a test pins a wire shape.
 func srvFor(t *testing.T, capture, result string) string {
 	t.Helper()
-	return fakeSrv(t, `while IFS= read -r line; do
-  case "$line" in *'"exit"'*) exit 0;; esac
-  printf '%s\n' "$line" > '`+capture+`'
-  id=$(printf '%s' "$line" | sed 's/.*"id":\([0-9]*\).*/\1/')
-  printf '{"id":%s,"ok":true,"result":' "$id"
-  printf '%s' '`+result+`'
-  printf '}\n'
-done`)
+	return fakeSrv(t, fakeSpec{Result: result, Capture: capture})
 }
 
 func captured(t *testing.T, path string) string {
