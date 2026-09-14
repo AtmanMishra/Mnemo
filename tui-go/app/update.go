@@ -98,7 +98,7 @@ func (m *Model) onAgent(msg tea.Msg) tea.Cmd {
 func isAgentMsg(msg tea.Msg) bool {
 	switch msg.(type) {
 	case agent.Started, agent.Think, agent.Text, agent.ToolStart, agent.ToolEnd,
-		agent.Delegated, agent.Done, agent.Failed, agent.Stats:
+		agent.Delegated, agent.Done, agent.Failed, agent.Stats, agent.Commands:
 		return true
 	}
 	return false
@@ -182,8 +182,42 @@ func (m *Model) fold(msg tea.Msg) tea.Cmd {
 	case agent.Stats:
 		m.stats = msg.TurnStats
 		return nil
+
+	case agent.Commands:
+		// The agent's own list, folded into the one the palette, the slash
+		// menu and ^h read. Nothing else has to learn about it: there is
+		// still exactly one list.
+		m.cmds = command.Merge(m.cmds, agentCommands(msg.List))
+		return nil
 	}
 	return nil
+}
+
+// agentCommands maps the backend's records onto this list's shape.
+//
+// The two vocabularies differ on purpose — the backend says where a command
+// came from (source, location), the interface says how to run it and how to
+// head its group (kind, scope) — and this is the one place they meet.
+func agentCommands(list []agent.CommandInfo) []command.Command {
+	out := make([]command.Command, 0, len(list))
+	for _, c := range list {
+		if c.Name == "" {
+			continue
+		}
+		scope := c.Source
+		if c.Location != "" {
+			if scope == "" {
+				scope = c.Location
+			} else {
+				scope += " · " + c.Location
+			}
+		}
+		out = append(out, command.Command{
+			Name: c.Name, Desc: c.Description, Kind: command.Agent,
+			Scope: scope, Path: c.Path,
+		})
+	}
+	return out
 }
 
 // settle clears every Running marker. A turn that ended must not leave a
@@ -684,24 +718,58 @@ func argsAfter(line string) string {
 }
 
 // slash runs a typed command line.
+//
+// The interface's own list is the first table a router consults, not a gate.
+// A name it does not know is not therefore unknown: pi implements extension
+// commands, prompt templates and /skill:name that no client can enumerate from
+// disk, and sending the line is how they are reached. With no backend attached
+// there is nothing to route to, and the refusal stands — that case is real
+// (offline runs, --dump) and it is the only one where refusing is honest.
 func (m *Model) slash(line string) tea.Cmd {
 	name := strings.TrimPrefix(line, "/")
 	if i := strings.IndexAny(name, " \n"); i >= 0 {
 		name = name[:i]
 	}
-	c, ok := command.Find(m.cmds, name)
-	if !ok {
-		// Never silently send an unknown command to the model as prose: it
-		// would answer a question about a slash you meant as an instruction.
+	if c, ok := command.Find(m.cmds, name); ok {
+		return m.runSlash(c, argsAfter(line))
+	}
+	if name == "" || !m.liveAgent() {
 		return m.notify("no command called /" + name + " · ^k lists them all")
 	}
-	return m.runSlash(c, argsAfter(line))
+	return m.route(line, name)
+}
+
+// route hands a line the agent might implement to the backend.
+//
+// While a turn is running the line is queued rather than sent, the way typed
+// text is: pi executes an extension command mid-stream but rejects a prompt
+// template or skill command while streaming, and one path that is right for
+// all three beats a rule that depends on which kind you happened to type.
+func (m *Model) route(line, name string) tea.Cmd {
+	if m.working {
+		m.prompt.Queue(line)
+		m.layout()
+		return m.notify("queued /" + name)
+	}
+	return tea.Batch(m.send(line), m.notify("sent /"+name+" to the agent"))
 }
 
 // runSlash executes one command. Built-ins are handled here; a skill, plugin
 // or bundle becomes a prompt that names it and its file, so the agent can
 // read the instructions rather than guess at them.
 func (m *Model) runSlash(c command.Command, args string) tea.Cmd {
+	if c.Kind == command.Agent {
+		// The agent's own command. pi is what executes an extension command
+		// and what expands a prompt template, so the line has to arrive the
+		// way its own editor would have sent it — rewritten into a "use the
+		// X skill" prompt it would stop being a command and become a
+		// sentence about one.
+		line := "/" + c.Name
+		if args != "" {
+			line += " " + args
+		}
+		return m.route(line, c.Name)
+	}
 	if c.Kind != command.Builtin {
 		if m.working {
 			m.prompt.Queue(c.Prompt(args))
@@ -1033,6 +1101,16 @@ func (m *Model) chooseOverlay() tea.Cmd {
 		m.ov = nil
 		m.mode = keymap.Insert
 		return tea.Batch(m.prompt.Focus(), m.runCommand(id))
+	case overlay.Help:
+		// Most rows here are keys, and a key is not something to run — it is
+		// something to read. A command row is the exception, and it runs the
+		// same way the palette's does.
+		m.ov = nil
+		m.mode = keymap.Insert
+		if strings.HasPrefix(id, "cmd:") {
+			return tea.Batch(m.prompt.Focus(), m.runCommand(id))
+		}
+		return m.prompt.Focus()
 	case overlay.Sessions:
 		if ov.Tree() != nil && ov.Tree().Descend() {
 			return nil
@@ -1122,9 +1200,16 @@ func (m *Model) toggleExplorer() tea.Cmd {
 }
 
 func (m *Model) openHelp() tea.Cmd {
-	items := make([]overlay.Item, 0, 40)
+	items := make([]overlay.Item, 0, 40+len(m.cmds))
 	for _, e := range m.keys.Help() {
 		items = append(items, overlay.Item{Label: e.Desc, Detail: e.Key, Group: e.Mode.String(), ID: ""})
+	}
+	// The commands follow the keys, because the built-in promises "every key
+	// and command" and an agent's own commands are exactly the ones no other
+	// surface would show. They are the same rows the palette draws, built the
+	// same way, so the two lists cannot disagree.
+	for _, c := range m.cmds {
+		items = append(items, commandItem(c))
 	}
 	m.ov = overlay.NewList(overlay.Help, "every key, generated from the same table the program dispatches on", items)
 	m.armOverlay()
@@ -1174,20 +1259,28 @@ func (m *Model) actions() []action {
 	}
 }
 
+// commandItem is one command as an overlay row.
+//
+// One builder, because two surfaces now draw these rows — the palette and the
+// help list — and a row that looks runnable in one and differs in the other is
+// how a list stops being the list.
+func commandItem(c command.Command) overlay.Item {
+	// The group heading already says what kind it is; the row should spend its
+	// width on what the thing DOES.
+	detail := c.Desc
+	if c.Chord != "" {
+		detail = c.Chord + "  " + c.Desc
+	}
+	return overlay.Item{Label: "/" + c.Name, Detail: detail, Group: c.Kind.String(), ID: "cmd:" + c.Name}
+}
+
 // openPalette lists everything: the built-in actions and every skill, plugin
-// and bundle on disk. One surface, so there is nowhere a command can hide.
+// and bundle on disk, plus whatever the agent says it implements. One surface,
+// so there is nowhere a command can hide.
 func (m *Model) openPalette() tea.Cmd {
 	items := make([]overlay.Item, 0, len(m.cmds))
 	for _, c := range m.cmds {
-		// The group heading already says what kind it is; the row should
-		// spend its width on what the thing DOES.
-		detail := c.Desc
-		if c.Chord != "" {
-			detail = c.Chord + "  " + c.Desc
-		}
-		items = append(items, overlay.Item{
-			Label: "/" + c.Name, Detail: detail, Group: c.Kind.String(), ID: "cmd:" + c.Name,
-		})
+		items = append(items, commandItem(c))
 	}
 	m.ov = overlay.NewList(overlay.Palette,
 		"every command, skill and plugin — type to filter, enter to run", items)

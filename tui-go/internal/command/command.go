@@ -28,6 +28,11 @@ const (
 	Harness
 	// File is a @-mention completion — a reference to a file, not a runnable.
 	File
+	// Agent is a command the agent implements. The interface does not run it
+	// and does not rewrite it: the line goes to pi as typed, which is what
+	// executes an extension command and expands a prompt template or
+	// /skill:name. Kept last so it cannot move the kinds already in use.
+	Agent
 )
 
 func (k Kind) String() string {
@@ -40,6 +45,8 @@ func (k Kind) String() string {
 		return "harness"
 	case File:
 		return "file"
+	case Agent:
+		return "agent"
 	}
 	return "built-in"
 }
@@ -331,6 +338,32 @@ func Match(cs []Command, q string) []Command {
 		}
 	}
 	return append(exact, contains...)
+}
+
+// Merge folds commands the agent implements into the list the interface built
+// for itself.
+//
+// The interface's copy wins a name collision. Its commands are client
+// affordances — they open overlays, fold the transcript, move the reader
+// around — and nothing sent to the agent can do any of that, so a shadowed
+// name is dropped rather than renamed: two rows that read the same and behave
+// differently is worse than one row missing.
+func Merge(base, extra []Command) []Command {
+	out := make([]Command, 0, len(base)+len(extra))
+	seen := make(map[string]bool, len(base)+len(extra))
+	take := func(cs []Command) {
+		for _, c := range cs {
+			name := strings.ToLower(c.Name)
+			if c.Name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			out = append(out, c)
+		}
+	}
+	take(base)
+	take(extra)
+	return out
 }
 
 // Find returns the command with exactly this name.

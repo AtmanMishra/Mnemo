@@ -34,9 +34,21 @@ func ParseEvent(v map[string]any) tea.Msg {
 		return agent.Done{}
 
 	case "response":
-		// A command acknowledgement is only interesting when it failed.
+		// A command acknowledgement is only interesting when it failed —
+		// except for the one answer we asked for. get_commands carries data,
+		// so a successful reply to it is not an acknowledgement: it is the
+		// list of commands the agent implements.
 		if ok, is := v["success"].(bool); is && !ok {
+			if str(v, "command") == "get_commands" {
+				// Non-fatal on purpose: a backend that will not answer
+				// leaves the interface with exactly the list it already
+				// had, which is a working interface.
+				return nil
+			}
 			return agent.Failed{Err: errors.New(errText(v))}
+		}
+		if str(v, "command") == "get_commands" {
+			return agent.Commands{List: commandList(v)}
 		}
 		return nil
 
@@ -88,6 +100,43 @@ func ParseEvent(v map[string]any) tea.Msg {
 		}}
 	}
 	return nil
+}
+
+// commandList reads the get_commands answer.
+//
+// pi's docs mark description, location and path optional, so a command with
+// only a name is still a command — the palette has a row for it either way. An
+// entry with no name is the one thing that cannot be shown or run, and is
+// dropped rather than rendered as an empty row.
+//
+// The docs print location and path flat, and the installed pi (0.84) sends
+// neither: it nests them in a sourceInfo object (`scope` and `path`). Both are
+// read, because a row that says where a command came from is the point, and
+// which of the two shapes carries it is pi's business, not ours.
+func commandList(v map[string]any) []agent.CommandInfo {
+	data, _ := v["data"].(map[string]any)
+	raw, _ := data["commands"].([]any)
+	out := make([]agent.CommandInfo, 0, len(raw))
+	for _, r := range raw {
+		m, _ := r.(map[string]any)
+		if str(m, "name") == "" {
+			continue
+		}
+		out = append(out, agent.CommandInfo{
+			Name:        str(m, "name"),
+			Description: str(m, "description"),
+			Source:      str(m, "source"),
+			Location:    first(str(m, "location"), nested(m, "sourceInfo", "scope")),
+			Path:        first(str(m, "path"), nested(m, "sourceInfo", "path")),
+		})
+	}
+	return out
+}
+
+// nested reads one string field out of a sub-object.
+func nested(v map[string]any, obj, key string) string {
+	sub, _ := v[obj].(map[string]any)
+	return str(sub, key)
 }
 
 // summary is the one line a collapsed tool block shows.
@@ -239,6 +288,16 @@ func Start(cmd *exec.Cmd) (*Session, error) {
 	}
 	s := &Session{cmd: cmd, stdin: stdin, msgs: make(chan tea.Msg, 256), nextID: 1, model: "pi"}
 	go s.read(stdout)
+	// One question, asked once, at the start: which commands do you implement?
+	// pi is the authority on that — extension commands like /hook, prompt
+	// templates, /skill:name — and asking is the only way a client can know
+	// them rather than keep a copy that drifts.
+	//
+	// The answer is not required. A write that fails, a backend too old to
+	// answer, a reply that never comes: the interface keeps the list it
+	// discovered on disk and carries on, so the error is dropped here on
+	// purpose.
+	_ = s.write(map[string]any{"type": "get_commands"})
 	return s, nil
 }
 

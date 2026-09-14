@@ -292,3 +292,52 @@ func TestDeepTreesDoNotHang(t *testing.T) {
 		t.Fatal("expected some roots")
 	}
 }
+
+// --- the agent's own commands --------------------------------------------
+
+func TestTheAgentsCommandsJoinTheListWithoutDisplacingIt(t *testing.T) {
+	// pi's answer: what it implements (an extension command and a prompt
+	// template), plus two shapes that happen in the wild — a name that is
+	// already taken, and an entry with no name at all.
+	base := []Command{
+		{Name: "help", Desc: "every key and command", Kind: Builtin, Chord: "^h"},
+		{Name: "tidy", Desc: "clean up", Kind: Skill, Scope: "project", Path: "/p/SKILL.md"},
+	}
+	got := Merge(base, []Command{
+		{Name: "help", Desc: "the agent's own help", Kind: Agent},
+		{Name: "hook", Desc: "list hooks", Kind: Agent, Scope: "extension"},
+		{Name: "", Desc: "nameless", Kind: Agent},
+		{Name: "hook", Desc: "a second hook", Kind: Agent, Scope: "extension"},
+	})
+	if len(got) != 3 {
+		t.Fatalf("got %v", names(got))
+	}
+
+	// The interface's own command keeps the name: it is the one that can open
+	// a surface, and an agent command cannot do that for it.
+	help, _ := Find(got, "help")
+	if help.Kind != Builtin || help.Chord != "^h" || help.Desc != "every key and command" {
+		t.Fatalf("the agent displaced the interface's own command: %#v", help)
+	}
+	// The agent's row is kept, in its own kind, with what the backend said.
+	hook, ok := Find(got, "hook")
+	if !ok || hook.Kind != Agent || hook.Kind.String() != "agent" || hook.Scope != "extension" {
+		t.Fatalf("got %#v", hook)
+	}
+	// And the agent's rows come after everything the interface found itself.
+	if got[len(got)-1].Name != "hook" {
+		t.Fatalf("the agent's rows should follow the interface's: %v", names(got))
+	}
+}
+
+func TestMergeOfAnEmptyAnswerChangesNothing(t *testing.T) {
+	// A backend that says nothing — no reply, a failed reply, an empty list —
+	// must leave the list it already had, not an empty one.
+	base := Builtins()
+	for _, extra := range [][]Command{nil, {}, {{Name: "", Desc: "nameless"}}} {
+		got := Merge(base, extra)
+		if len(got) != len(base) || strings.Join(names(got), ",") != strings.Join(names(base), ",") {
+			t.Fatalf("Merge(base, %#v) = %v", extra, names(got))
+		}
+	}
+}

@@ -53,6 +53,26 @@ type Done struct{}
 // Failed ends the turn badly.
 type Failed struct{ Err error }
 
+// Commands is the backend's own command list — the extension commands, prompt
+// templates and skills it implements — in answer to a question the interface
+// asked when the session started.
+//
+// It is the one part of the command surface a client cannot discover for
+// itself: the files are on disk, but which of them pi will actually run, and
+// under what name, is pi's answer to give.
+type Commands struct{ List []CommandInfo }
+
+// CommandInfo is one command as the backend describes it: the protocol's
+// fields, not the interface's. Mapping them onto the interface's own list is
+// the interface's job, because only it knows what a Kind or a Scope is.
+type CommandInfo struct {
+	Name        string
+	Description string
+	Source      string // "extension" | "prompt" | "skill"
+	Location    string // where it came from: "user" | "project" | "path" (an inline extension says "temporary")
+	Path        string // what it came from: a file, or pi's "<inline:…>" marker
+}
+
 // TurnStats is what a model round trip cost.
 type TurnStats struct {
 	Provider  string

@@ -124,8 +124,9 @@ type Model struct {
 	// status line, so a finished schedule chips exactly once per run.
 	schedSeen map[string]string
 
-	// cmds is every slash command: built-ins, skills, plugins, bundles.
-	// Loaded once at start; /reload picks up a skill you just wrote.
+	// cmds is every slash command: built-ins, skills, plugins, bundles, and
+	// the ones the agent answers with when a live session starts. It is the
+	// only list — the palette, the slash menu and help all read this one.
 	cmds []command.Command
 }
 

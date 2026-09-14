@@ -55,6 +55,73 @@ func TestTheDocumentedResponseShape(t *testing.T) {
 	}
 }
 
+// TestTheDocumentedGetCommandsReply: the doc's get_commands example, verbatim
+// — the one response that is an answer rather than an acknowledgement, and the
+// one the interface asks for at session start.
+func TestTheDocumentedGetCommandsReply(t *testing.T) {
+	got, ok := doc(t, `{
+  "type": "response",
+  "command": "get_commands",
+  "success": true,
+  "data": {
+    "commands": [
+      {"name": "session-name", "description": "Set or clear session name", "source": "extension", "path": "/home/user/.pi/agent/extensions/session.ts"},
+      {"name": "fix-tests", "description": "Fix failing tests", "source": "prompt", "location": "project", "path": "/home/user/myproject/.pi/agent/prompts/fix-tests.md"},
+      {"name": "skill:brave-search", "description": "Web search via Brave API", "source": "skill", "location": "user", "path": "/home/user/.pi/agent/skills/brave-search/SKILL.md"}
+    ]
+  }
+}`).(agent.Commands)
+	if !ok {
+		t.Fatal("doc: the get_commands example must become Commands, not an acknowledgement")
+	}
+	if len(got.List) != 3 {
+		t.Fatalf("doc: three commands in the example, got %#v", got.List)
+	}
+	ext := got.List[0]
+	if ext.Name != "session-name" || ext.Source != "extension" || ext.Location != "" {
+		t.Fatalf("doc: an extension command has no location, got %#v", ext)
+	}
+	if ext.Path != "/home/user/.pi/agent/extensions/session.ts" {
+		t.Fatalf("doc: the path must survive, got %q", ext.Path)
+	}
+	if pr := got.List[1]; pr.Source != "prompt" || pr.Location != "project" || pr.Description != "Fix failing tests" {
+		t.Fatalf("doc: prompt template fields, got %#v", pr)
+	}
+	if sk := got.List[2]; sk.Name != "skill:brave-search" || sk.Source != "skill" || sk.Location != "user" {
+		t.Fatalf("doc: skill command fields, got %#v", sk)
+	}
+
+	// The other half of the contract: a get_commands that FAILS is not a
+	// session failure. A backend too old to know the request answers this way,
+	// and the interface must keep the list it already has.
+	if m := doc(t, `{"type":"response","command":"get_commands","success":false,"error":"unknown command"}`); m != nil {
+		t.Fatalf("a failed get_commands must not surface as a failure, got %#v", m)
+	}
+	// ...and an answer with no commands in it at all is an empty list, not a
+	// crash: pi's docs mark every field but the name optional.
+	empty, ok := doc(t, `{"type":"response","command":"get_commands","success":true}`).(agent.Commands)
+	if !ok || len(empty.List) != 0 {
+		t.Fatalf("got %#v", empty)
+	}
+	partial, ok := doc(t, `{"type":"response","command":"get_commands","success":true,"data":{"commands":[{"name":"hook"},{"description":"nameless"}]}}`).(agent.Commands)
+	if !ok || len(partial.List) != 1 || partial.List[0].Name != "hook" {
+		t.Fatalf("a command with only a name is still a command; a nameless one is not: %#v", partial.List)
+	}
+
+	// And the shape the INSTALLED pi actually sends: not the doc's flat
+	// location/path but a sourceInfo object. Verified against a live
+	// get_commands reply, not assumed — the doc's own example is the other
+	// arm of this test. Both spellings must land in the same fields, or every
+	// row loses where its command came from.
+	moved, ok := doc(t, `{"type":"response","command":"get_commands","success":true,"data":{"commands":[{"name":"hook","description":"Hooks","source":"extension","sourceInfo":{"path":"<inline:sea-hooks>","source":"inline","scope":"temporary","origin":"top-level"}}]}}`).(agent.Commands)
+	if !ok || len(moved.List) != 1 {
+		t.Fatalf("got %#v", moved)
+	}
+	if c := moved.List[0]; c.Location != "temporary" || c.Path != "<inline:sea-hooks>" {
+		t.Fatalf("sourceInfo.scope/path are the installed pi's spelling of location/path: %#v", c)
+	}
+}
+
 // TestTheDocumentedMessageUpdate: the doc's streaming example, verbatim,
 // including the top-level usage field our parser must step over to reach
 // assistantMessageEvent.
