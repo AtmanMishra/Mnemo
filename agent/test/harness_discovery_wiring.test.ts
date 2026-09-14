@@ -15,7 +15,9 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
-const MEMSRV_BIN = path.join(REPO_ROOT, "memory-layer", "target", "debug", "memsrv");
+// The sidecar is memsrv.exe on Windows (cargo's naming, not ours).
+const MEMSRV_BIN = path.join(REPO_ROOT, "memory-layer", "target", "debug",
+  process.platform === "win32" ? "memsrv.exe" : "memsrv");
 
 test("list_skills indexes each discovered bundle once, never duplicates, recallable by purpose", async () => {
   const tmp = await (await import("node:fs/promises")).mkdtemp(path.join(os.tmpdir(), "sea-disc-wire-"));

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,12 +20,38 @@ import (
 type options struct {
 	home, cwd, keys, repo, session, memsrv, journal, bundles string
 	dump                                                     bool
+	version                                                  bool
 	cols, rows                                               int
+}
+
+// version is the build's identity. The release workflow sets it with
+// -ldflags "-X main.version=<tag>"; anything built by hand says "dev", so a
+// bug report against a tag cannot come from a binary that was never that tag.
+var version = "dev"
+
+// versionLine is what --version prints. The pre-alpha marker is deliberate:
+// this is a build for testers, and the first line of a bug report should say
+// which one it is.
+func versionLine() string {
+	return "mnemo " + version + " (pre-alpha)"
+}
+
+// memsrvName is the sidecar's file name on this platform. Cargo appends .exe
+// on Windows, so a derived path that says "memsrv" finds nothing there — and
+// the symptom is not an error about a missing file, it is a memory pane that
+// quietly goes offline on the one platform where the path is derived rather
+// than passed in by hand.
+func memsrvName() string {
+	if runtime.GOOS == "windows" {
+		return "memsrv.exe"
+	}
+	return "memsrv"
 }
 
 func parseFlags(args []string) options {
 	fs := flag.NewFlagSet("mnemo", flag.ContinueOnError)
 	var o options
+	fs.BoolVar(&o.version, "version", false, "print the version and exit")
 	fs.StringVar(&o.home, "home", "", "override the home directory sessions are read from")
 	fs.StringVar(&o.cwd, "cwd", "", "override the working directory")
 	fs.BoolVar(&o.dump, "dump", false, "render one frame to stdout and exit (for scripts and screenshots)")
@@ -43,10 +70,17 @@ func parseFlags(args []string) options {
 }
 
 func main() {
+	o := parseFlags(os.Args[1:])
+	// A version question is answered and forgotten — no config, no spawn, no
+	// terminal. It has to work on a machine where none of the rest does.
+	if o.version {
+		fmt.Println(versionLine())
+		return
+	}
 	// os.Exit lives HERE and only here. run() holds every defer — the agent
 	// stream, the model — and an os.Exit inside run on a p.Run failure used
 	// to skip them all, orphaning a spawned pi process on the way out.
-	if err := run(parseFlags(os.Args[1:])); err != nil {
+	if err := run(o); err != nil {
 		fmt.Fprintln(os.Stderr, "mnemo:", err)
 		os.Exit(1)
 	}
@@ -58,7 +92,7 @@ func main() {
 // (offline/--dump stays exactly as configured).
 func defaultMemorySidecar(o *options) {
 	if o.memsrv == "" && o.repo != "" {
-		o.memsrv = filepath.Join(o.repo, "memory-layer", "target", "debug", "memsrv")
+		o.memsrv = filepath.Join(o.repo, "memory-layer", "target", "debug", memsrvName())
 	}
 	if o.journal == "" && (o.memsrv != "" || o.repo != "") {
 		home := o.home

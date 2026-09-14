@@ -212,7 +212,8 @@ test("one unindexable bundle does not stop the discovery pass", async () => {
 });
 
 const MemsrvBin = process.env.MNEMO_MEMSRV_BIN
-  ?? path.join(fileURLToPath(new URL("../..", import.meta.url)), "memory-layer", "target", "debug", "memsrv");
+  ?? path.join(fileURLToPath(new URL("../..", import.meta.url)), "memory-layer", "target", "debug",
+    process.platform === "win32" ? "memsrv.exe" : "memsrv");
 
 test("a real memsrv: re-indexing reuses the node; a path move is a new bundle; purpose recalls it", async () => {
   const { MemClient } = await import("../extensions/memory-layer.ts");

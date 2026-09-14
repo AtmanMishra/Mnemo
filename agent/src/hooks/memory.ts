@@ -21,7 +21,9 @@ import type { Hook } from "./types.ts";
 import { scrubChildEnv } from "../childenv.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
-const DEFAULT_BINARY = path.join(REPO_ROOT, "memory-layer", "target", "debug", "memsrv");
+// See extensions/memory-layer.ts: the sidecar is memsrv.exe on Windows.
+const MEMSRV_NAME = process.platform === "win32" ? "memsrv.exe" : "memsrv";
+const DEFAULT_BINARY = path.join(REPO_ROOT, "memory-layer", "target", "debug", MEMSRV_NAME);
 const DEFAULT_JOURNAL = path.join(REPO_ROOT, "memory-layer", "data", "sea-agent-journal.jsonl");
 
 export interface MemClientLike {
