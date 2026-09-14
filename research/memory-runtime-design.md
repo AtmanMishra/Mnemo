@@ -103,9 +103,49 @@ Each job states its input, what it does, and the ops it is allowed to emit. The
 | **J8 eval cases** | yes | episodes with facts | proposes retrieval cases (question → expected node id) for `memeval` | none — writes a review file |
 | **J9 compaction** | no | node counts, ages, fat logs | proposes merges/retirements as a *quarantine list*, never deletes | none (report only) |
 | **J10 training rows** | no | steer ops + later outcomes | emits mempolicy training rows (`M13` in the review) | none (file) |
+| **J11 skill patch** | yes | lesson nodes + pain markers + the skills the sessions that produced them actually loaded | proposes an edit to the `SKILL.md` the lesson applies to — anchor, replacement, reason, evidence ids — and applies it only under the rules in §5.1 | `CommitLog` + `AddFact` on the skill node; the file itself is written by the `patch_skill` tool, never by the job |
 
 J0, J2, J5, J6, J9 and J10 need no model at all — they are graph arithmetic, and
 they are the ones that can run on a cron with no key configured.
+
+### 5.1 J11 — how a skill gets better
+
+Mnemo can already *create* a skill (`create_skill`). What it could not do was
+improve one: changing a skill meant overwriting the file wholesale with
+`write_file`, leaving no record of what changed, why, or how to undo it. That is
+scribbling, not learning. The loop that closes it has four parts.
+
+**What it reads.** Lesson nodes (Semantic, from J0/J1), pain markers (Salience),
+and — the part that makes this possible at all — the *Procedural* node for each
+skill the sessions that produced those lessons actually loaded. A lesson without
+a skill attached is a fact; a lesson attached to the skill that was in force when
+it was learned is a patch candidate.
+
+**What it proposes.** Never a rewrite: an edit expressed as an anchor plus a
+replacement — the shape `patch_skill` accepts, and the only shape it accepts — a
+one-line reason, and the evidence ids it is answering: the lesson and, where
+there is one, the pain marker. A proposal with no evidence is rejected before a
+model is called, not after.
+
+**How it is applied.** Through the same `patch_skill` tool the model uses in a
+session. One writer, one set of refusals (stale hash, ambiguous anchor, path
+outside Mnemo's own roots, invalid frontmatter), one history copy under
+`~/.mnemo/skill-history/<name>/`. The runtime does not get a private door into
+the file system; if the tool refuses, the job reports the refusal as its result.
+
+**How it is judged.** Not by the model, and not in the same run. The signal is
+recurrence: the next session that loads the patched skill and hits *the same pain
+signature* is evidence the patch did not work. That event — and only that event —
+triggers the revert (copy the previous body back from history) and writes a
+Salience node recording that this patch failed, which is itself the lesson the
+next proposal is built on. A patch that is never contradicted is simply a patch
+that has not been tested yet, and is recorded that way.
+
+**What it never does.** Patch a skill outside `~/.pi/agent/skills` and project
+`.agents/skills` (never `.claude/`, which belongs to another tool, and never a
+package directory). Patch during the session that diagnosed the problem, so a
+model cannot mark its own homework within one turn. Delete: `retire_skill` marks
+a skill retired and moves it aside; the file survives its retirement.
 
 ## 6. The safety model
 
