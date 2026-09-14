@@ -10,8 +10,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
-import { textResult, type SeaTool } from "./types.ts";
-import { scrubChildEnv } from "../childenv.ts";
+import { textResult, type SeaTool, type ToolContext } from "./types.ts";
+import { childShellEnv, sessionEnvFromContext, type PiSessionEnv } from "../childenv.ts";
 
 const BRIDGE_PATH = fileURLToPath(new URL("../../kernel/ipy_bridge.py", import.meta.url));
 
@@ -59,12 +59,30 @@ export class IPyKernel {
   private dispatcher: ToolDispatcher | null = null;
   private readonly pythonBin: string;
   private readonly bridgePath: string;
+  private readonly spawnImpl: typeof spawn;
+  /** Session facts the interpreter's environment publishes (D6). */
+  private session: PiSessionEnv | undefined;
 
-  constructor(pythonBin?: string, bridgePath?: string) {
+  constructor(pythonBin?: string, bridgePath?: string, spawnImpl: typeof spawn = spawn) {
     this.pythonBin = pythonBin ?? (process.env.SEA_PYTHON || "python3");
     this.bridgePath = bridgePath ?? (process.env.SEA_IPY_BRIDGE || BRIDGE_PATH);
+    this.spawnImpl = spawnImpl;
     // Never leak the interpreter into a parent that is shutting down.
     process.once("exit", () => this.stop());
+  }
+
+  /**
+   * Publish the live session's PI_* values (D6). Resolved from the tool's
+   * per-call context; the interpreter respawns with the latest values, and a
+   * cell that inspects os.environ sees them from then on.
+   */
+  setSessionEnv(session: PiSessionEnv | undefined): void {
+    this.session = session;
+  }
+
+  /** What a child spawned from an in-kernel tool call should inherit (D6). */
+  toolContext(): ToolContext | undefined {
+    return this.session ? { sessionEnv: this.session } : undefined;
   }
 
   get alive(): boolean {
@@ -170,10 +188,12 @@ export class IPyKernel {
     this.starting ||= new Promise<void>((resolve, reject) => {
       // A stale pong from a previous kernel must not fake the handshake.
       this.ponged = false;
-      const proc = spawn(this.pythonBin, ["-u", this.bridgePath], {
+      const proc = this.spawnImpl(this.pythonBin, ["-u", this.bridgePath], {
         stdio: ["pipe", "pipe", "pipe"],
-        // 12.7: a Python cell must not read credentials out of os.environ
-        env: scrubChildEnv(),
+        // 12.7 + D6: credentials out, stale inherited PI_* out, this
+        // session's PI_* in — a Python cell sees the same session variables
+        // pi's own shell tools would publish.
+        env: childShellEnv(this.session),
       });
       proc.stdout?.on("data", (chunk: Buffer) => this.handleStdoutChunk(chunk));
       proc.stderr?.on("data", (chunk: Buffer) => {
@@ -344,7 +364,10 @@ export const ipyRunTool: SeaTool = {
     "order; a failed element is a ToolError in the list instead of the result, so the rest survive. " +
     "Use it whenever the calls do not depend on each other.",
   parameters,
-  async execute(_id, params) {
+  async execute(_id, params, _signal, _onUpdate, ctx) {
+    // D6: resolve the session environment per call, so a kernel restarted mid
+    // session (or the first start after this call) sees the live values.
+    sharedKernel.setSessionEnv(sessionEnvFromContext(ctx));
     if (params.restart) {
       await sharedKernel.restart();
     }

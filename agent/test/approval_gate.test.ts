@@ -1,13 +1,20 @@
 /**
  * Approval-gate extension tests: pure decision logic, no TUI needed.
- * Policy mirrors src/approval.ts: gated tools only, SEA_APPROVAL_MODE=interactive
- * + TTY prompts via ctx.ui.confirm, deny blocks, everything else fails open.
+ *
+ * Policy (issue #15): with MNEMO_APPROVAL_MODE=interactive, gated tools ask
+ * through pi's dialog protocol whenever the run has a dialog-capable UI —
+ * ctx.hasUI / ctx.mode === "rpc", NOT stdin being a TTY. Deny rules and plan
+ * mode always block; every other mode (off, 0, unset) force-approves; a
+ * sub-agent child with no UI fails CLOSED; a run with no UI fails open.
  */
 import { test } from "node:test";
 import assert from "node:assert";
 import {
+  approvalInteractive,
+  approvalExtensionFactory,
   decideApproval,
   GATED_TOOLS,
+  hasDialogUI,
   isSubagentChild,
   summarizeToolCall,
   SUBAGENT_CHILD_ENV,
@@ -15,11 +22,26 @@ import {
 import {
   approve,
   setDelegatedApproval,
+  isDelegatedApproval,
   approvalConfig,
 } from "../src/approval.ts";
+import { DEFAULT_PERMISSIONS, type Permissions } from "../src/permissions.ts";
+import { isPlanMode, setPlanMode } from "../src/plan_mode.ts";
 import { PassThrough } from "node:stream";
+import * as fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
-const ttyEnv = () => ({ SEA_APPROVAL_MODE: "interactive" } as NodeJS.ProcessEnv);
+const interactiveEnv = () => ({ SEA_APPROVAL_MODE: "interactive" } as NodeJS.ProcessEnv);
+
+/** A pi ExtensionContext as far as the gate is concerned: a UI + hasUI flag. */
+function uiCtx(answer: boolean, calls: string[] = [], extra: Record<string, unknown> = {}) {
+  return {
+    hasUI: true,
+    mode: "tui",
+    ui: ui(answer, calls),
+    ...extra,
+  };
+}
 
 function ui(answer: boolean, calls: string[] = []) {
   return {
@@ -30,25 +52,109 @@ function ui(answer: boolean, calls: string[] = []) {
   };
 }
 
+/** Temporarily set MNEMO_APPROVAL_MODE; returns a restore function. */
+function withApprovalMode(mode: string | undefined): () => void {
+  const prev = process.env.MNEMO_APPROVAL_MODE;
+  if (mode === undefined) delete process.env.MNEMO_APPROVAL_MODE;
+  else process.env.MNEMO_APPROVAL_MODE = mode;
+  return () => {
+    if (prev === undefined) delete process.env.MNEMO_APPROVAL_MODE;
+    else process.env.MNEMO_APPROVAL_MODE = prev;
+  };
+}
+
 test("only mutating tools are gated", () => {
   assert.deepEqual([...GATED_TOOLS].sort(), ["apply_edit", "bash_exec", "ipy_run", "write_file"]);
 });
 
-import type { Permissions } from "../src/permissions.ts";
+// --- 15: a dialog UI is what makes the gate able to ask -------------------
 
-// --- 12.1 (0384ee03): ipy_run is gated like bash --------------------------
+test("hasDialogUI keys on ctx.hasUI and the rpc mode, never on stdin", () => {
+  assert.equal(hasDialogUI({ hasUI: true }), true);
+  assert.equal(hasDialogUI({ hasUI: false, mode: "rpc" }), true, "RPC dialogs are real dialogs");
+  assert.equal(hasDialogUI({ hasUI: false, mode: "print" }), false);
+  assert.equal(hasDialogUI({ hasUI: false, mode: "tui" }), false);
+  assert.equal(hasDialogUI({ mode: "print" }), false);
+  assert.equal(hasDialogUI(undefined), false);
+});
 
-test("ipy_run prompts in interactive TTY mode and denial blocks it", async () => {
+test("issue #15: with a UI, the gate asks although stdin is not a TTY (the TUI path)", async () => {
+  const calls: string[] = [];
+  const res = await decideApproval(
+    { toolName: "bash_exec", input: { command: "rm -rf build" } },
+    ui(false, calls), interactiveEnv(), true,
+  );
+  assert.equal(res.block, true, "denial must block");
+  assert.match(res.reason!, /user denied bash_exec/);
+  assert.equal(calls.length, 1, "the user was asked exactly once");
+
+  const allowed = await decideApproval(
+    { toolName: "bash_exec", input: { command: "ls" } },
+    ui(true), interactiveEnv(), true,
+  );
+  assert.deepEqual(allowed, {}, "approval lets it through");
+});
+
+test("issue #15: the gate no longer consults stdin's TTY flag", () => {
+  // The old condition was mode === interactive AND process.stdin.isTTY; the
+  // TUI spawns pi with a pipe, which is precisely how the gate failed open.
+  // No stub can make stdin a TTY, so this pins the source: the file must not
+  // reference isTTY at all, and the decision must take the UI presence from
+  // pi's context.
+  const source = fs.readFileSync(
+    fileURLToPath(new URL("../extensions/approval-gate.ts", import.meta.url)),
+    "utf8",
+  );
+  assert.ok(!/isTTY/.test(source), "the gate must not inspect stdin's TTY flag");
+  assert.match(source, /hasDialogUI\(ctx\)/, "the decision comes from pi's context");
+});
+
+test("with no UI, interactive mode still fails open (print/piped runs)", async () => {
+  const calls: string[] = [];
+  const res = await decideApproval(
+    { toolName: "bash_exec", input: { command: "ls" } },
+    ui(false, calls), interactiveEnv(), false,
+  );
+  assert.deepEqual(res, {});
+  assert.equal(calls.length, 0, "nothing to ask");
+});
+
+test("mode off/0/unset force-approves even when a UI could ask (the escape hatch)", async () => {
+  // The gate never turns itself on: prompting is the MNEMO_APPROVAL_MODE=
+  // interactive opt-in, and everything else is the force-approve hatch.
+  for (const env of [
+    {}, { MNEMO_APPROVAL_MODE: "off" }, { MNEMO_APPROVAL_MODE: "0" },
+    { SEA_APPROVAL_MODE: "off" }, { SEA_APPROVAL_MODE: "0" },
+  ] as NodeJS.ProcessEnv[]) {
+    const calls: string[] = [];
+    const res = await decideApproval(
+      { toolName: "bash_exec", input: { command: "rm -rf /" } },
+      ui(false, calls), env, true,
+    );
+    assert.deepEqual(res, {}, `${JSON.stringify(env)} must force-approve`);
+    assert.equal(calls.length, 0, "the escape hatch must not prompt");
+  }
+});
+
+test("approvalInteractive is exactly the interactive opt-in", () => {
+  assert.equal(approvalInteractive({ MNEMO_APPROVAL_MODE: "interactive" } as NodeJS.ProcessEnv), true);
+  assert.equal(approvalInteractive({ SEA_APPROVAL_MODE: " INTERACTIVE " } as NodeJS.ProcessEnv), true);
+  assert.equal(approvalInteractive({ MNEMO_APPROVAL_MODE: "off" } as NodeJS.ProcessEnv), false);
+  assert.equal(approvalInteractive({ SEA_APPROVAL_MODE: "0" } as NodeJS.ProcessEnv), false);
+  assert.equal(approvalInteractive({} as NodeJS.ProcessEnv), false);
+});
+
+test("ipy_run prompts with a UI and denial blocks it", async () => {
   const calls: string[] = [];
   const res = await decideApproval(
     { toolName: "ipy_run", input: { code: "import os\nos.system('rm -rf /')" } },
-    ui(false, calls), ttyEnv(), true,
+    ui(false, calls), interactiveEnv(), true,
   );
   assert.equal(res.block, true, "a python cell is bash wearing a kernel — it must prompt");
   assert.match(res.reason!, /user denied ipy_run/);
   assert.match(calls[0]!, /py> import os/, "the prompt shows the first line of code");
   const ok = await decideApproval(
-    { toolName: "ipy_run", input: { code: "1 + 1" } }, ui(true), ttyEnv(), true,
+    { toolName: "ipy_run", input: { code: "1 + 1" } }, ui(true), interactiveEnv(), true,
   );
   assert.deepEqual(ok, {}, "user approval lets it through");
 });
@@ -72,7 +178,7 @@ test("isSubagentChild reads the env flag", () => {
   assert.equal(isSubagentChild({} as NodeJS.ProcessEnv), false);
 });
 
-test("a sub-agent child without a TTY is denied mutating tools", async () => {
+test("a sub-agent child without a UI is denied mutating tools", async () => {
   for (const toolName of ["bash_exec", "write_file", "apply_edit", "ipy_run"]) {
     const input: Record<string, unknown> =
       toolName === "bash_exec" ? { command: "ls" } :
@@ -83,6 +189,20 @@ test("a sub-agent child without a TTY is denied mutating tools", async () => {
     assert.equal(res.block, true, `${toolName} must fail closed in a child`);
     assert.match(res.reason!, /sub-agent has no operator/, toolName);
   }
+});
+
+test("a child that WOULD have a UI asks instead of failing closed", async () => {
+  // Children are spawned non-interactively so this is theoretical, but the
+  // rule is "a child fails closed on an ask nobody can answer" — with a UI
+  // there IS someone to answer, so the ask happens.
+  const calls: string[] = [];
+  const res = await decideApproval(
+    { toolName: "bash_exec", input: { command: "ls" } },
+    ui(false, calls), childEnv(), true,
+  );
+  assert.equal(res.block, true);
+  assert.match(res.reason!, /user denied/);
+  assert.equal(calls.length, 1);
 });
 
 test("an allow rule still passes in a sub-agent child", async () => {
@@ -104,6 +224,17 @@ test("a deny rule still holds in a sub-agent child, no prompt needed", async () 
   assert.match(res.reason!, /denied by/);
 });
 
+test("a deny rule blocks even with a UI and even in off mode", async () => {
+  const perms: Permissions = { version: 1, rules: [{ tool: "bash_exec", pattern: "rm *", action: "deny" }], default: "ask" };
+  const calls: string[] = [];
+  const res = await decideApproval(
+    { toolName: "bash_exec", input: { command: "rm -rf /" } },
+    ui(true, calls), { MNEMO_APPROVAL_MODE: "off" } as NodeJS.ProcessEnv, true, perms,
+  );
+  assert.equal(res.block, true, "an escape hatch must not disable deny rules");
+  assert.equal(calls.length, 0);
+});
+
 test("non-gated tools in a child still fail open (read-only work continues)", async () => {
   const res = await decideApproval(
     { toolName: "read_file", input: { path: "x" } }, ui(false), childEnv(), false,
@@ -111,47 +242,27 @@ test("non-gated tools in a child still fail open (read-only work continues)", as
   assert.deepEqual(res, {});
 });
 
-test("a non-TTY parent (automation) is unaffected by the child rule", async () => {
+test("a run with no UI (automation) is unaffected by the child rule", async () => {
   const res = await decideApproval(
     { toolName: "bash_exec", input: { command: "ls" } },
-    ui(false), { MNEMO_APPROVAL_MODE: "interactive" } as NodeJS.ProcessEnv, false,
+    ui(false), interactiveEnv(), false,
   );
-  assert.deepEqual(res, {}, "piped parent runs keep failing open");
+  assert.deepEqual(res, {}, "piped runs with no UI keep failing open");
 });
 
-test("non-gated tool auto-approves even in interactive TTY mode", async () => {
-  const res = await decideApproval({ toolName: "read_file", input: { path: "x" } }, ui(false), ttyEnv(), true);
-  assert.deepEqual(res, {});
-});
-
-test("mode unset / non-interactive auto-approves", async () => {
-  const res = await decideApproval({ toolName: "bash_exec", input: { command: "ls" } }, ui(false), {}, true);
-  assert.deepEqual(res, {});
-  const res2 = await decideApproval(
-    { toolName: "bash_exec", input: { command: "ls" } },
-    ui(false),
-    { SEA_APPROVAL_MODE: "0" } as NodeJS.ProcessEnv,
-    true,
-  );
-  assert.deepEqual(res2, {});
-});
-
-test("non-TTY fails open even in interactive mode", async () => {
+test("non-gated tool auto-approves even with a UI", async () => {
+  const calls: string[] = [];
   const res = await decideApproval(
-    { toolName: "write_file", input: { path: "a", content: "b" } },
-    ui(false),
-    ttyEnv(),
-    false,
+    { toolName: "read_file", input: { path: "x" } }, ui(false, calls), interactiveEnv(), true,
   );
   assert.deepEqual(res, {});
+  assert.equal(calls.length, 0, "read-only tools are not gated and never prompt");
 });
 
 test("deny blocks with a reason naming the tool and action", async () => {
   const res = await decideApproval(
     { toolName: "bash_exec", input: { command: "rm -rf /" } },
-    ui(false),
-    ttyEnv(),
-    true,
+    ui(false), interactiveEnv(), true,
   );
   assert.equal(res.block, true);
   assert.match(res.reason!, /denied bash_exec/);
@@ -161,11 +272,22 @@ test("deny blocks with a reason naming the tool and action", async () => {
 test("approve allows the call", async () => {
   const res = await decideApproval(
     { toolName: "apply_edit", input: { path: "f.ts", old_str: "aa", new_str: "bb" } },
-    ui(true),
-    ttyEnv(),
-    true,
+    ui(true), interactiveEnv(), true,
   );
   assert.deepEqual(res, {});
+});
+
+test("plan mode blocks with a UI, a child or automation alike", async () => {
+  for (const [env, uiAvailable] of [
+    [{}, true], [childEnv(), false], [interactiveEnv(), false],
+  ] as Array<[NodeJS.ProcessEnv, boolean]>) {
+    const res = await decideApproval(
+      { toolName: "bash_exec", input: { command: "ls" } },
+      ui(true), env, uiAvailable, DEFAULT_PERMISSIONS, true, // plan mode
+    );
+    assert.equal(res.block, true);
+    assert.match(res.reason!, /plan mode is on/);
+  }
 });
 
 test("summaries match the in-tool gate strings", () => {
@@ -178,6 +300,59 @@ test("summaries match the in-tool gate strings", () => {
     summarizeToolCall("apply_edit", { path: "y.ts", old_str: "aaa", new_str: "b" }),
     "replace a 3-char match with 1 chars in y.ts",
   );
+});
+
+// --- factory wiring: pi's ctx is what decides -----------------------------
+
+test("the extension factory asks through pi's ctx.ui (issue #15 wiring)", async () => {
+  const handlers = new Map<string, (ev: any, ctx: any) => Promise<unknown>>();
+  const fakePi = {
+    on(event: string, fn: (ev: any, ctx: any) => Promise<unknown>) { handlers.set(event, fn); },
+  };
+  const prevPlan = isPlanMode();
+  const restoreMode = withApprovalMode("interactive");
+  approvalExtensionFactory(fakePi as any, DEFAULT_PERMISSIONS);
+  try {
+    const calls: string[] = [];
+    const blocked = await handlers.get("tool_call")!(
+      { toolName: "bash_exec", input: { command: "echo hi" } },
+      uiCtx(false, calls),
+    );
+    assert.deepEqual(blocked, { block: true, reason: "ERROR: user denied bash_exec. Action was NOT executed: $ echo hi" });
+    assert.equal(calls.length, 1, "the ctx.ui dialog was used");
+
+    // A piped/print run: ctx.hasUI false -> fail open (documented)
+    const piped = await handlers.get("tool_call")!(
+      { toolName: "bash_exec", input: { command: "echo hi" } },
+      { hasUI: false, mode: "print", ui: ui(false) },
+    );
+    assert.deepEqual(piped, {}, "no UI still fails open");
+
+    // An RPC context without the hasUI flag still counts as a UI (ctx.mode)
+    const rpcCalls: string[] = [];
+    const rpc = await handlers.get("tool_call")!(
+      { toolName: "bash_exec", input: { command: "echo hi" } },
+      { mode: "rpc", ui: ui(false, rpcCalls) },
+    );
+    assert.equal((rpc as any).block, true, "rpc mode is a dialog UI");
+    assert.equal(rpcCalls.length, 1);
+  } finally {
+    restoreMode();
+    setDelegatedApproval(false);
+    setPlanMode(prevPlan);
+  }
+});
+
+test("the factory flips the in-tool gate into delegated mode", () => {
+  const fakePi = { on() {} };
+  const prevPlan = isPlanMode();
+  try {
+    approvalExtensionFactory(fakePi as any, DEFAULT_PERMISSIONS);
+    assert.equal(isDelegatedApproval(), true, "no second prompt on the TUI-owned stdin");
+  } finally {
+    setDelegatedApproval(false);
+    setPlanMode(prevPlan);
+  }
 });
 
 test("delegated mode silences the in-tool readline gate", async () => {

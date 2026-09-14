@@ -28,7 +28,7 @@ import { listSessions, defaultSessionDir } from "../src/skills/store.ts";
 import { pickProvider, missingKeyMessage } from "../src/provider.ts";
 import * as readline from "node:readline/promises";
 import {
-  PROVIDERS, loadAuth, resolveApiKey, clearProviderAuth,
+  PROVIDERS, ENV_KEY_BY_PROVIDER, loadAuth, resolveApiKey, clearProviderAuth,
   setProviderAuth, setDefaultProvider, type ProviderId,
 } from "../src/auth/store.ts";
 import { runWizard } from "../src/auth/wizard.ts";
@@ -38,6 +38,7 @@ import { discoverMcpTools, loadMcpConfig, setMcpTools } from "../src/mcp.ts";
 import { formatTree, readSpans, sessionsOf } from "../src/trace.ts";
 import { runSchedule } from "../src/schedule/cli.ts";
 import { checkNodeVersion } from "../src/runtime_check.ts";
+import { setAgentProcessMarkers } from "../src/childenv.ts";
 import approvalExt from "../extensions/approval-gate.ts";
 import tracingExt from "../extensions/tracing.ts";
 import hooksExt from "../extensions/hooks-inline.ts";
@@ -93,10 +94,7 @@ async function handleAuth(args: string[]): Promise<void> {
     const auth = loadAuth();
     for (const p of PROVIDERS) {
       const stored = auth.providers[p];
-      const inEnv = Boolean(process.env[
-        p === "anthropic" ? "ANTHROPIC_API_KEY" :
-        p === "openai" ? "OPENAI_API_KEY" :
-        p === "openrouter" ? "OPENROUTER_API_KEY" : "OPENCODE_API_KEY"]);
+      const inEnv = Boolean(process.env[ENV_KEY_BY_PROVIDER[p]]);
       const state = inEnv ? "env key" : stored?.key || stored?.accessToken ? "stored" : "-";
       const def = auth.defaultProvider === p ? "  <- default" : "";
       console.log(`${p.padEnd(14)} ${state.padEnd(9)} ${def}`);
@@ -128,10 +126,7 @@ async function ensureAuthenticated(): Promise<void> {
   for (const p of candidates) {
     const r = resolveApiKey(p);
     if (r?.key) {
-      const envName =
-        p === "anthropic" ? "ANTHROPIC_API_KEY" :
-        p === "openai" ? "OPENAI_API_KEY" :
-        p === "openrouter" ? "OPENROUTER_API_KEY" : "OPENCODE_API_KEY";
+      const envName = ENV_KEY_BY_PROVIDER[p];
       process.env[envName] = r.key;
       if (!process.env.SEA_PROVIDER && !process.env.MNEMO_PROVIDER) {
         process.env.MNEMO_PROVIDER = p;
@@ -237,6 +232,12 @@ function factories() {
 }
 
 async function run(): Promise<void> {
+  // D6 (docs/environment-variables.md:11-18): pi's CLI and RPC entry points
+  // set these two process markers so children can identify the launching
+  // agent; we call pi's library main() instead of its CLI, so nobody would.
+  // Set unconditionally, like pi does, before any child can be spawned.
+  setAgentProcessMarkers();
+
   // 6.2: before anything else — on an old Node the next import would fail
   // with a SyntaxError that explains nothing
   const nodeProblem = checkNodeVersion();

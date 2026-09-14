@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { composeChildPrompt, extractAnswer, runSubagent, childMemoryEnv } from "../src/tools/subagent.ts";
+import { composeChildPrompt, extractAnswer, runSubagent, childMemoryEnv, subagentSpawnTool } from "../src/tools/subagent.ts";
+import { textOf } from "../src/tools/types.ts";
 
 describe("spawn_subagent", () => {
   const tmp = mkdtempSync(path.join(tmpdir(), "sea-subagent-"));
@@ -163,6 +164,91 @@ describe("spawn_subagent", () => {
     } finally {
       if (prev === undefined) delete process.env.MNEMO_AGENT_BIN;
       else process.env.MNEMO_AGENT_BIN = prev;
+    }
+  });
+
+  test("runSubagent hands the child the session's PI_* env, replacing stale values (D6)", async () => {
+    const childSeen = path.join(tmp, "child-pi-env.json");
+    const envCli = path.join(tmp, "pi-env-agent.mjs");
+    writeFileSync(envCli, `
+      import { writeFileSync } from "node:fs";
+      writeFileSync(${JSON.stringify(childSeen)}, JSON.stringify({
+        session: process.env.PI_SESSION_ID ?? null,
+        file: process.env.PI_SESSION_FILE ?? null,
+        provider: process.env.PI_PROVIDER ?? null,
+        model: process.env.PI_MODEL ?? null,
+        level: process.env.PI_REASONING_LEVEL ?? null,
+        cred: process.env.SEA_TEST_FAKE_API_KEY ?? null,
+      }));
+      console.log("ANSWER: pi-env-checked");
+    `);
+    const prev = {
+      bin: process.env.MNEMO_AGENT_BIN,
+      id: process.env.PI_SESSION_ID,
+      cred: process.env.SEA_TEST_FAKE_API_KEY,
+    };
+    process.env.MNEMO_AGENT_BIN = envCli;
+    process.env.PI_SESSION_ID = "stale-parent-session";
+    process.env.SEA_TEST_FAKE_API_KEY = "«redacted:sk-…»";
+    try {
+      const r = await runSubagent({
+        task: "check pi env",
+        timeoutMs: 15000,
+        session: {
+          sessionId: "child-sess",
+          sessionFile: "/tmp/sessions/child-sess.jsonl",
+          provider: "acme",
+          model: "m1",
+          reasoningLevel: "low",
+        },
+      });
+      assert.equal(r.exitCode, 0);
+      const seen = JSON.parse(await import("node:fs").then((f) => f.readFileSync(childSeen, "utf8")));
+      assert.equal(seen.session, "child-sess", "the live session id, not the stale one");
+      assert.equal(seen.file, "/tmp/sessions/child-sess.jsonl");
+      assert.equal(seen.provider, "acme");
+      assert.equal(seen.model, "m1");
+      assert.equal(seen.level, "low");
+      assert.equal(seen.cred, null, "12.7 still holds: credentials never reach the child");
+    } finally {
+      for (const [k, v] of Object.entries({ MNEMO_AGENT_BIN: prev.bin, PI_SESSION_ID: prev.id, SEA_TEST_FAKE_API_KEY: prev.cred })) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  test("spawn_subagent resolves the session from pi's call context (D6)", async () => {
+    const childSeen = path.join(tmp, "child-ctx-env.json");
+    const envCli = path.join(tmp, "ctx-env-agent.mjs");
+    writeFileSync(envCli, `
+      import { writeFileSync } from "node:fs";
+      writeFileSync(${JSON.stringify(childSeen)}, JSON.stringify({
+        session: process.env.PI_SESSION_ID ?? null,
+        provider: process.env.PI_PROVIDER ?? null,
+        model: process.env.PI_MODEL ?? null,
+        level: process.env.PI_REASONING_LEVEL ?? null,
+      }));
+      console.log("ANSWER: ctx-env-checked");
+    `);
+    const prevBin = process.env.MNEMO_AGENT_BIN;
+    process.env.MNEMO_AGENT_BIN = envCli;
+    try {
+      const ctx = {
+        sessionManager: { getSessionId: () => "tool-sess", getSessionFile: () => undefined },
+        model: { provider: "acme", id: "m2" },
+        thinkingLevel: "high",
+      };
+      const res = await subagentSpawnTool.execute("s1", { task: "check ctx env" }, undefined, undefined, ctx as any);
+      assert.match(textOf(res), /ctx-env-checked/);
+      const seen = JSON.parse(await import("node:fs").then((f) => f.readFileSync(childSeen, "utf8")));
+      assert.equal(seen.session, "tool-sess");
+      assert.equal(seen.provider, "acme");
+      assert.equal(seen.model, "m2");
+      assert.equal(seen.level, "high");
+    } finally {
+      if (prevBin === undefined) delete process.env.MNEMO_AGENT_BIN;
+      else process.env.MNEMO_AGENT_BIN = prevBin;
     }
   });
 

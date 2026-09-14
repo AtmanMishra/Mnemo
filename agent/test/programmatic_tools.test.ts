@@ -335,3 +335,27 @@ test("the tool description tells the model these capabilities exist", () => {
   assert.match(d, /tools\.parallel/, "so must the batch form");
   assert.match(d, /ToolError/, "and how a failure arrives");
 });
+
+test("the dispatcher hands in-kernel calls the kernel's session context (D6)", async () => {
+  // A cell calling bash_exec has no pi tool-call loop around it; the session
+  // facts the child shell should publish ride on the dispatcher's ctx.
+  const seen: unknown[] = [];
+  const spy: SeaTool = {
+    name: "spy", label: "spy", description: "d",
+    parameters: Type.Object({}),
+    execute: async (_id, _params, _signal, _onUpdate, ctx) => {
+      seen.push(ctx);
+      return textResult("ok");
+    },
+  };
+  const dispatch = makeKernelDispatcher(
+    [spy], allow, "kernel", () => ({ sessionEnv: { sessionId: "k-sess" } }),
+  );
+  assert.equal(await dispatch("spy", {}), "ok");
+  assert.deepEqual(seen[0], { sessionEnv: { sessionId: "k-sess" } });
+
+  // no provider: the tool still runs, with no ctx
+  const bare = makeKernelDispatcher([spy], allow);
+  assert.equal(await bare("spy", {}), "ok");
+  assert.equal(seen[1], undefined);
+});

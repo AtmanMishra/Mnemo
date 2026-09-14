@@ -17,7 +17,7 @@
 import { spawn } from "node:child_process";
 import { activeTracing, childTraceEnv as traceEnvFor } from "../../extensions/tracing.ts";
 import { SUBAGENT_CHILD_ENV } from "../../extensions/approval-gate.ts";
-import { scrubChildEnv } from "../childenv.ts";
+import { childShellEnv, sessionEnvFromContext, type PiSessionEnv } from "../childenv.ts";
 import * as path from "node:path";
 import { Type } from "typebox";
 import { textResult, type SeaTool } from "./types.ts";
@@ -98,6 +98,8 @@ export function runSubagent(
     task: string; context?: string; timeoutMs?: number; signal?: AbortSignal;
     /** Extra env for the child, e.g. a different model (8.7). */
     env?: Record<string, string>;
+    /** Live session facts to publish to the child (D6); see childShellEnv. */
+    session?: PiSessionEnv;
   } = { task: "" },
 ): Promise<SubagentResult> {
   const timeoutMs = opts.timeoutMs ?? 300_000;
@@ -115,8 +117,11 @@ export function runSubagent(
       // marks the process as a delegated child for the approval gate (12.1).
       // 12.7: the env is scrubbed of credentials — the child re-authenticates
       // from ~/.mnemo/auth.json, so a delegated model never sees the key.
+      // D6: it also carries the PI_* session values (the child strips them
+      // again before handing anything to its own shells, and publishes its
+      // own session there).
       env: {
-        ...scrubChildEnv(),
+        ...childShellEnv(opts.session),
         ...childMemoryEnv(),
         ...childTraceEnv(),
         [SUBAGENT_CHILD_ENV]: "1",
@@ -200,13 +205,16 @@ export const subagentSpawnTool: SeaTool = {
     "Pass ONLY the relevant context in 'context' -- the child does not see this conversation. " +
     "The child writes its findings into shared memory automatically.",
   parameters,
-  async execute(_id, params: any) {
+  async execute(_id, params: any, _signal?: AbortSignal, _onUpdate?: unknown, ctx?: any) {
     try {
       const r = await runSubagent({
         task: params.task,
         context: params.context,
         timeoutMs: params.timeout_ms,
         env: resolveModelEnv(params.model, availableModels()),
+        // D6: the child inherits this session's PI_* values in its process
+        // env; its own shells publish the child's session instead.
+        session: sessionEnvFromContext(ctx),
       });
       const answer = r.timedOut
         ? `(sub-agent timed out after ${r.durationMs}ms)`

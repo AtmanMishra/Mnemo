@@ -7,7 +7,7 @@
  * programmatic tool calling would be a way to run bash_exec without ever
  * showing the user a prompt.
  */
-import type { SeaTool } from "./types.ts";
+import type { SeaTool, ToolContext } from "./types.ts";
 import type { ToolDispatcher } from "./ipy_run.ts";
 
 /** Returns {} to allow, or { block: true, reason } to refuse. */
@@ -34,6 +34,12 @@ export function makeKernelDispatcher(
   tools: readonly SeaTool[],
   gate: Gate,
   callIdPrefix = "kernel",
+  /**
+   * Context for the tools a cell calls (D6). An in-kernel `bash_exec` has no
+   * pi tool-call loop around it, so the kernel supplies the session facts its
+   * child shells should publish; undefined is fine.
+   */
+  context?: () => ToolContext | undefined,
 ): ToolDispatcher {
   let seq = 0;
   const byName = new Map(tools.map((t) => [t.name, t]));
@@ -56,7 +62,7 @@ export function makeKernelDispatcher(
       throw new Error(decision.reason ?? `${name} was blocked`);
     }
     seq += 1;
-    const res = await tool.execute(`${callIdPrefix}-${seq}`, args ?? {});
+    const res = await tool.execute(`${callIdPrefix}-${seq}`, args ?? {}, undefined, undefined, context?.());
     return resultText(res as any);
   };
 }

@@ -1,21 +1,29 @@
 /**
- * Tool approval gate (Claude Code style).
+ * Tool approval gate (Claude Code style) — the in-process fallback gate.
  *
- * When MNEMO_APPROVAL_MODE=interactive (or legacy SEA_APPROVAL_MODE) and stdin is
- * a TTY, every gated action is
+ * This readline gate is used when a tool runs WITHOUT the approval-gate
+ * extension loaded (e.g. a tool called directly from a test or an embedder).
+ * When Mnemo runs normally, bin/mnemo.ts loads the extension, which calls
+ * setDelegatedApproval(true); the extension owns prompting and asks through
+ * pi's UI dialog protocol (ctx.ui.confirm -> extension_ui_request) whenever
+ * the run has a dialog-capable UI — see extensions/approval-gate.ts.
+ *
+ * Standalone semantics, unchanged: when MNEMO_APPROVAL_MODE=interactive (or
+ * legacy SEA_APPROVAL_MODE) and stdin is a TTY, every gated action is
  * printed and the user is asked "[y]es / [n]o / [a]lways-this-tool":
  *   y -> proceed once
  *   n -> deny (caller returns an error result to the model)
  *   a -> add the tool to this session's allowlist and proceed
  *
  * Any other mode (including unset, or value 0) auto-approves, as
- * does a non-TTY stdin (piped/automated runs) -- the gate is best-effort and
- * fails OPEN outside an interactive terminal so automation keeps working.
+ * does a non-TTY stdin (piped/automated runs) -- this fallback fails OPEN
+ * outside an interactive terminal so automation keeps working. The extension
+ * path is the one that matters in the TUI: there a mutating call asks the
+ * user (or, for a delegated child, fails closed) whatever stdin looks like.
  *
  * NOTE: this gates THIS process's tool calls only. Child processes spawned by
  * tools (e.g. spawn_subagent) run their own separate sea-agent process; they
- * do NOT share this session's allowlist, and their stdin is typically not a
- * TTY, so they auto-approve. See README.md.
+ * do NOT share this session's allowlist. See README.md.
  */
 import * as readline from "node:readline";
 

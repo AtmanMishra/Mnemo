@@ -6,6 +6,7 @@
  * standalone in tests: `await tool.execute("call-id", args)`.
  */
 import { Type, type TSchema } from "typebox";
+import type { PiSessionEnv } from "../childenv.ts";
 
 export interface TextContent {
   type: "text";
@@ -27,6 +28,29 @@ export interface ToolResult {
 
 export type ToolUpdateCallback = (partial: ToolResult) => void;
 
+/**
+ * What a tool needs to know about the run it is executing inside.
+ *
+ * Structurally the slice of pi's ExtensionContext our tools read, so pi's
+ * real context (5th argument of a tool execute()) is assignable to it, and so
+ * are the plain objects tests and the in-kernel dispatcher pass.
+ * `sessionEnv` is ours, not pi's: the dispatcher has no ExtensionContext, so
+ * it hands the already-resolved session facts over directly.
+ */
+export interface ToolContext {
+  /** Session facts for child shells (src/childenv.ts). Wins over the manager. */
+  sessionEnv?: PiSessionEnv;
+  sessionManager?: {
+    getSessionId?(): string;
+    getSessionFile?(): string | undefined | null;
+  };
+  model?: { provider?: string; id?: string } | undefined;
+  thinkingLevel?: string | undefined;
+  /** Whether dialog-capable UI is available (pi: true in tui and rpc modes). */
+  hasUI?: boolean;
+  mode?: string;
+}
+
 export interface SeaTool {
   name: string;
   label: string;
@@ -37,6 +61,7 @@ export interface SeaTool {
     params: any,
     signal?: AbortSignal,
     onUpdate?: ToolUpdateCallback,
+    ctx?: ToolContext,
   ): Promise<ToolResult>;
 }
 

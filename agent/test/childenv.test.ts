@@ -6,7 +6,17 @@
  */
 import { test } from "node:test";
 import assert from "node:assert";
-import { SECRET_ENV_NAME, scrubChildEnv } from "../src/childenv.ts";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import {
+  SECRET_ENV_NAME,
+  scrubChildEnv,
+  childShellEnv,
+  piSessionEnvVars,
+  sessionEnvFromContext,
+  setAgentProcessMarkers,
+  PI_SESSION_ENV_NAMES,
+} from "../src/childenv.ts";
 import { runBash } from "../src/tools/bash_exec.ts";
 
 test("scrubChildEnv drops every credential-shaped variable", () => {
@@ -85,4 +95,112 @@ test("the agent process env keeps the key (pi provider layer reads it there)", (
     if (before === undefined) delete process.env.FAKE_KEY_FOR_SELF;
     else process.env.FAKE_KEY_FOR_SELF = before;
   }
+});
+
+// --- 21 (D6): PI_* session environment for child shells -------------------
+
+test("sessionEnvFromContext reads pi's context, tolerating gaps", () => {
+  const ctx = {
+    sessionManager: {
+      getSessionId: () => "sess-1",
+      getSessionFile: () => "/sessions/sess-1.jsonl",
+    },
+    model: { provider: "anthropic", id: "claude-x" },
+    thinkingLevel: "medium",
+  };
+  assert.deepEqual(sessionEnvFromContext(ctx), {
+    sessionId: "sess-1",
+    sessionFile: "/sessions/sess-1.jsonl",
+    provider: "anthropic",
+    model: "claude-x",
+    reasoningLevel: "medium",
+  });
+  // no context at all, an empty one, and an ephemeral session file
+  assert.deepEqual(sessionEnvFromContext(undefined), {});
+  assert.deepEqual(sessionEnvFromContext({}), {});
+  assert.deepEqual(
+    sessionEnvFromContext({
+      sessionManager: { getSessionId: () => "s2", getSessionFile: () => undefined },
+      model: undefined,
+    }),
+    { sessionId: "s2" },
+    "unknown values are omitted, never undefined keys",
+  );
+  // a context whose accessors throw must not kill the tool call
+  assert.deepEqual(
+    sessionEnvFromContext({
+      sessionManager: { getSessionId: () => { throw new Error("gone"); } },
+    }),
+    {},
+  );
+});
+
+test("piSessionEnvVars publishes only the known values", () => {
+  assert.deepEqual(piSessionEnvVars(undefined), {});
+  assert.deepEqual(piSessionEnvVars({}), {});
+  assert.deepEqual(piSessionEnvVars({ sessionId: "a", model: "" }), { PI_SESSION_ID: "a" });
+  assert.deepEqual(
+    piSessionEnvVars({ sessionId: "a", sessionFile: "f", provider: "p", model: "m", reasoningLevel: "off" }),
+    { PI_SESSION_ID: "a", PI_SESSION_FILE: "f", PI_PROVIDER: "p", PI_MODEL: "m", PI_REASONING_LEVEL: "off" },
+  );
+  assert.equal(PI_SESSION_ENV_NAMES.length, 5);
+});
+
+test("childShellEnv replaces stale PI_* values and keeps everything else", () => {
+  const parent = {
+    PI_SESSION_ID: "stale-parent",
+    PI_SESSION_FILE: "stale-file",
+    PI_PROVIDER: "stale-provider",
+    PI_MODEL: "stale-model",
+    PI_REASONING_LEVEL: "stale-level",
+    ANTHROPIC_API_KEY: "«redacted»",
+    MNEMO_PROVIDER: "openrouter",
+    PATH: "/usr/bin",
+  } as unknown as NodeJS.ProcessEnv;
+
+  const known = childShellEnv(
+    { sessionId: "live", provider: "openrouter", model: "m1", reasoningLevel: "high" },
+    parent,
+  );
+  assert.equal(known.PI_SESSION_ID, "live");
+  assert.equal(known.PI_PROVIDER, "openrouter");
+  assert.equal(known.PI_MODEL, "m1");
+  assert.equal(known.PI_REASONING_LEVEL, "high");
+  assert.equal(known.PI_SESSION_FILE, undefined, "ephemeral session: the stale file must not survive");
+  assert.ok(!("ANTHROPIC_API_KEY" in known), "credentials are still scrubbed");
+  assert.equal(known.MNEMO_PROVIDER, "openrouter");
+  assert.equal(known.PATH, "/usr/bin");
+
+  const unknown = childShellEnv(undefined, parent);
+  for (const name of PI_SESSION_ENV_NAMES) {
+    assert.ok(!(name in unknown), `${name} must not leak from a parent process`);
+  }
+});
+
+test("runBash's default env carries no stale PI_* value", async () => {
+  // A direct runBash call (no session context) still goes through
+  // childShellEnv(): a nested Mnemo must not hand its shells the parent's
+  // session metadata. A node one-liner prints what the child actually saw.
+  const prev = process.env.PI_SESSION_ID;
+  process.env.PI_SESSION_ID = "stale-parent-session";
+  try {
+    const res = await runBash(`node -p "process.env.PI_SESSION_ID || 'unset'"`);
+    assert.equal(res.exitCode, 0, res.stderr);
+    assert.equal(res.stdout.trim(), "unset");
+  } finally {
+    if (prev === undefined) delete process.env.PI_SESSION_ID;
+    else process.env.PI_SESSION_ID = prev;
+  }
+});
+
+test("setAgentProcessMarkers stamps pi's markers unconditionally", () => {
+  const env = { AI_AGENT: "someone-else", KEEP: "1" } as unknown as NodeJS.ProcessEnv;
+  setAgentProcessMarkers(env);
+  assert.equal(env.AI_AGENT, "pi");
+  assert.equal(env.PI_CODING_AGENT, "true");
+  assert.equal(env.KEEP, "1");
+  // the shim is the only place that can set them (we call pi's library
+  // main(), not its CLI), so it must actually call the helper
+  const shim = fs.readFileSync(path.join(import.meta.dirname, "..", "bin", "mnemo.ts"), "utf8");
+  assert.match(shim, /setAgentProcessMarkers\(\)/);
 });
