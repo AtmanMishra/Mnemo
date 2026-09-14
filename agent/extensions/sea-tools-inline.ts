@@ -5,8 +5,9 @@
  *
  * Registered tools:
  *   bash_exec, read_file, write_file, apply_edit, glob_list, ipy_run,
- *   list_skills, load_skill, create_skill, create_harness, spawn_subagent,
- *   memory_search, memory_write_fact, memory_steer
+ *   list_skills, load_skill, create_skill, patch_skill, retire_skill,
+ *   create_harness, spawn_subagent, memory_search, memory_write_fact,
+ *   memory_steer
  *
  * The SeaTool objects in src/tools stay the source of truth; they are already
  * structurally compatible with pi's ToolDefinition (name/label/description/
@@ -22,21 +23,25 @@ import { loadPermissions } from "../src/permissions.ts";
 import { getMcpTools } from "../src/mcp.ts";
 import { makeMemoryTools } from "./memory-layer.ts";
 
-/** All 14 tool names this extension registers (11 core + 3 memory). */
+/** All 19 tool names this extension registers (16 core + 3 memory). */
 export const SEA_TOOL_NAMES: string[] = [
   ...allTools.map((t) => t.name),
   ...makeMemoryTools().map((t) => t.name),
 ];
 
-function toToolDefinition(tool: any): any {
+/** Exported for the adapter's own tests: normalizes a SeaTool for pi. */
+export function toToolDefinition(tool: any): any {
   return {
     name: tool.name,
     label: tool.label,
     description: tool.description,
     parameters: tool.parameters,
     // details is optional on our ToolResult but part of AgentToolResult on pi.
-    execute: async (toolCallId: string, params: any, signal?: AbortSignal) =>
-      (await tool.execute(toolCallId, params, signal)) as any,
+    // pi hands every tool its ExtensionContext (5th argument), which is how a
+    // tool learns the live session for PI_* child-shell env (D6) and whether
+    // a dialog UI exists.
+    execute: async (toolCallId: string, params: any, signal?: AbortSignal, onUpdate?: any, ctx?: any) =>
+      (await tool.execute(toolCallId, params, signal, onUpdate, ctx)) as any,
   };
 }
 
@@ -60,15 +65,19 @@ export function seaToolsFactory(pi: any): void {
 
   // 4.6/4.7: the same tools, callable as `tools.<name>(...)` from inside
   // ipy_run, and gated by the same rules a normal tool call goes through.
-  // Prompting is impossible from in here (no ctx.ui), so an "ask" that would
-  // have prompted resolves to allow exactly as it does in a non-TTY run —
-  // while a deny rule and plan mode still block.
+  // Prompting is impossible from in here (a cell is not a tool-call loop with
+  // a dialog UI), so an "ask" resolves to allow exactly as it does in a run
+  // with no UI — while a deny rule and plan mode still block. The kernel's
+  // session context rides along so a child shell spawned by an in-kernel
+  // bash_exec still publishes the session's PI_* values (D6).
   const perms = loadPermissions();
   const setDispatcher = (list: any[]) =>
     sharedKernel.setToolDispatcher(
       makeKernelDispatcher(list, (name, args) =>
         decideApproval({ toolName: name, input: args },
-          { confirm: async () => true }, process.env, false, perms)),
+          { confirm: async () => true }, process.env, false, perms),
+        "kernel",
+        () => sharedKernel.toolContext()),
     );
   setDispatcher(immediate);
 

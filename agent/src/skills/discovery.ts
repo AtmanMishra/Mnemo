@@ -18,6 +18,9 @@
  * nearer ancestors win over farther ones. The first sighting of a name wins
  * during the scan, so scan order is nearest-project-dir ... farthest,
  * then global dirs.
+ *
+ * A retired skill (frontmatter `retired:` key, written by retire_skill) stays
+ * on disk but is skipped here — retirement supersedes, it never deletes.
  */
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
@@ -124,6 +127,7 @@ export async function discoverSkills(opts: DiscoveryOptions = {}): Promise<Skill
       const name = parsed?.meta.name?.trim();
       const description = parsed?.meta.description?.trim();
       if (!parsed || !name || !description) continue; // malformed -> skip gracefully
+      if (parsed.meta.retired !== undefined) continue; // superseded via retire_skill: kept, not offered
       if (byName.has(name)) continue; // earlier (higher-precedence) location wins
       byName.set(name, { name, description, path: skillMd, scope });
     }

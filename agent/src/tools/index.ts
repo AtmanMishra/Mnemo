@@ -10,8 +10,11 @@ export {
   listSkillsTool,
   loadSkillTool,
   createSkillTool,
+  patchSkillTool,
+  retireSkillTool,
   sanitizeSkillName,
   setSkillsHome,
+  setMnemoHome,
   globalSkillDir,
 } from "./skills.ts";
 export { webFetchTool, webSearchTool, htmlToText, fetchUrl, search, formatHits,
@@ -28,7 +31,7 @@ import { globListTool } from "./glob_list.ts";
 import { ipyRunTool } from "./ipy_run.ts";
 import { subagentSpawnTool } from "./subagent.ts";
 import { createHarnessTool } from "./harness.ts";
-import { listSkillsTool, loadSkillTool, createSkillTool } from "./skills.ts";
+import { listSkillsTool, loadSkillTool, createSkillTool, patchSkillTool, retireSkillTool } from "./skills.ts";
 import { webFetchTool, webSearchTool } from "./web.ts";
 import { readImageTool } from "./read_image.ts";
 import type { SeaTool } from "./types.ts";
@@ -43,6 +46,8 @@ export const allTools: SeaTool[] = [
   listSkillsTool,
   loadSkillTool,
   createSkillTool,
+  patchSkillTool,
+  retireSkillTool,
   subagentSpawnTool,
   createHarnessTool,
   webFetchTool,

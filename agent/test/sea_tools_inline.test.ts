@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert";
-import { SEA_TOOL_NAMES, seaToolsInline, seaToolsFactory } from "../extensions/sea-tools-inline.ts";
+import { SEA_TOOL_NAMES, seaToolsInline, seaToolsFactory, toToolDefinition } from "../extensions/sea-tools-inline.ts";
 
 const EXPECTED = [
   "bash_exec",
@@ -16,6 +16,8 @@ const EXPECTED = [
   "list_skills",
   "load_skill",
   "create_skill",
+  "patch_skill",
+  "retire_skill",
   "create_harness",
   "spawn_subagent",
   "memory_search",
@@ -102,4 +104,21 @@ test("adapter execute() returns the tool result content", async () => {
   const res = await glob.execute("test-id", { pattern: "*.nonexistent-zz" });
   assert.ok(Array.isArray(res.content));
   assert.equal(res.content[0].type, "text");
+});
+
+test("adapter forwards pi's 5th-argument context to the tool (D6)", async () => {
+  // The context is how a tool learns the live session (PI_* child env) and
+  // whether a dialog UI exists, so losing it here would silently break both.
+  const seen: unknown[] = [];
+  const def = toToolDefinition({
+    name: "spy", label: "spy", description: "d", parameters: {},
+    execute: async (_id: string, _params: any, _signal?: unknown, _onUpdate?: unknown, ctx?: unknown) => {
+      seen.push(ctx);
+      return { content: [{ type: "text", text: "ok" }] };
+    },
+  });
+  const ctx = { hasUI: true, mode: "rpc", sessionManager: { getSessionId: () => "s" } };
+  const res = await def.execute("id", { x: 1 }, undefined, undefined, ctx);
+  assert.equal(seen[0], ctx);
+  assert.equal(res.content[0].text, "ok");
 });
