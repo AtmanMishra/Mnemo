@@ -241,6 +241,14 @@ export function executeHook(req: ExecRequest): Promise<ExecOutcome> {
     child.stdout?.on("data", (d: Buffer) => { stdout += d.toString("utf8"); });
     child.stderr?.on("data", (d: Buffer) => { stderr += d.toString("utf8"); });
 
+    // A hook that exits without reading its stdin — a common shape, e.g. "if
+    // this path is under /etc, exit 2" — leaves us writing into a closed pipe.
+    // Node reports that asynchronously, as an 'error' event on the stream, so
+    // the try/catch below never sees it and an unhandled EPIPE takes down the
+    // invocation: the exit code, which IS the answer, is lost. Swallow it. The
+    // hook's exit status is the result; whether it deigned to read our payload
+    // is not part of the contract.
+    child.stdin?.on("error", () => { /* EPIPE: the hook did not read stdin */ });
     try {
       child.stdin?.end(payload + "\n");
     } catch { /* stdin closed by the child already */ }

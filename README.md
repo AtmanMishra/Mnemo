@@ -16,11 +16,17 @@ interface than download it.
 git clone https://github.com/AtmanMishra/self-evolving-agent
 cd self-evolving-agent
 
+./scripts/install.sh              # macOS / Linux
+.\scripts\install.ps1             # Windows (PowerShell)
+
+# or do it by hand:
 cd memory-layer && cargo build --bin memsrv   # the Memory pane talks to this
 cd ../agent && npm install                     # the agent the TUI drives
-
 cd ../tui-go && go build -o mnemo ./cmd/mnemo  # or drop the release binary here
 ```
+
+The installers check your toolchain before touching anything, say what they are
+doing, and take `--dry-run` (`-DryRun` on Windows) to say it without doing it.
 
 `mnemo --version` says which build you are running. Bugs and rough edges belong
 in [the issue tracker](https://github.com/AtmanMishra/self-evolving-agent/issues)
