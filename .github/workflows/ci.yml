@@ -88,7 +88,18 @@ jobs:
         run: npm test || npm test
 
   tui-go:
-    runs-on: ubuntu-latest
+    # Three runners, not one. This suite was written on a POSIX host and its
+    # fixtures, its path expectations and (mostly) its golden frames assumed
+    # one; making them portable is only worth anything if something notices the
+    # next time it stops being true. The failure this guards against is quiet:
+    # on Windows the acceptance frames compared CRLF against LF and failed
+    # while `git status` showed a clean tree.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    name: tui-go (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     steps:
       # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
