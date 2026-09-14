@@ -164,6 +164,20 @@ reporting Hit@1 / Hit@3 / MRR. The `--hash` numbers are deterministic and pinned
 (73% / 77% / 0.743 on 22 cases): any change to retrieval is measured against
 them before and after, and a change that regresses is reverted.
 
+**Does a constraint survive being stated once?** That question has two halves,
+and they are measured in different places on purpose. The recall half —
+`memory-layer/tests/constraint_probe.rs`, no model, runs on every commit — seeds
+constraints (a package manager, a port, a comment style) and asks for them later
+in the words a person would use. The behavioural half —
+`scripts/eval-constraint-compliance.mjs`, needs a provider key — runs the agent
+against a throwaway project and checks it actually *complies*: the command it
+proposes uses pnpm, the URL it gives is port 4111, the comment it writes explains
+why. Compliance is judged by a deterministic rule over the answer, never by
+another model, because a judge that can be talked into a pass is not a
+measurement. The `.github/workflows/nightly-evals.yml` job runs both weekly and
+skips the second with a notice when no key is configured — a green run that
+measured nothing would be worse than a skipped one.
+
 ## 8. The state of it, honestly
 
 **Works**: the interface and its overlays; graph memory with areas, routed

@@ -1,0 +1,81 @@
+# The tier that cannot run on every commit.
+#
+# `docs/archive/EVAL-RESEARCH.md` splits evaluation three ways: every commit
+# (memeval's pinned floor + the four suites, all in ci.yml), nightly, and
+# pre-release. This is the nightly tier, and it holds exactly one thing that
+# needs a model: does the agent *behave* according to a constraint that was
+# stated once? Its deterministic half — does the graph still recall that
+# constraint — runs in ci.yml with the memory-layer suite, so a regression there
+# fails a PR rather than waiting for Monday.
+#
+# The compliance job skips rather than fails when no provider key is configured,
+# and says so in the run summary. A green run that measured nothing is the
+# failure mode this avoids: the probe exits 3 for "no key" and the step turns
+# that into a notice, never into a pass.
+
+name: evals
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # Mondays, 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Runs unconditionally and needs no secret: re-derives the deterministic
+  # constraint-recall numbers and keeps a copy next to the compliance report, so
+  # a change in behaviour can be read against a change in recall.
+  recall:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
+        with:
+          workspaces: memory-layer
+      - name: constraint recall (no model)
+        working-directory: memory-layer
+        run: cargo test --locked --test constraint_probe -- --nocapture
+
+  compliance:
+    runs-on: ubuntu-latest
+    needs: recall
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      MNEMO_MODEL: ${{ vars.EVAL_MODEL }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@1d0bbef8bf0e3fbf648482530bb1123c0aaa1a0c
+        with:
+          node-version: "22.18"
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
+        with:
+          workspaces: memory-layer
+      - name: build the sidecar the probe drives
+        working-directory: memory-layer
+        run: cargo build --locked --bin memsrv
+      - name: install the agent's dependencies
+        working-directory: agent
+        run: npm ci --ignore-scripts
+      - name: does the agent respect a constraint stated once?
+        run: |
+          set +e
+          node scripts/eval-constraint-compliance.mjs --json eval-results/constraint-compliance.json
+          code=$?
+          set -e
+          if [ "$code" -eq 3 ]; then
+            echo "::notice::no provider key configured — the compliance probe was skipped, not passed"
+            exit 0
+          fi
+          exit "$code"
+      - name: keep the report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: constraint-compliance
+          path: eval-results/
+          if-no-files-found: ignore
+          retention-days: 90
