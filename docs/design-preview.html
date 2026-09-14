@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mnemo — design preview</title>
+<style>
+  :root{
+    /* PICO-8 (shipping). Every value here is a role, exactly as in theme.go. */
+    --ground:#000000; --ink:#FFF1E8; --muted:#5F574F; --faint:#2B2825;
+    --accent:#FF77A8; --thinking:#83769C; --coat:#FFA300; --rosette:#AB5236;
+    --peach:#FFCCAA; --ok:#00E436; --fail:#FF004D; --warn:#FFEC27;
+    --link:#29ADFF; --deep:#1D2B53;
+    --page:#0b0b0d; --card:#141418; --line:#26262c; --dim:#8b8b95;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:#d7d7de;
+       font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,"DejaVu Sans Mono",monospace}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 80px}
+  h1{font-size:22px;margin:0 0 6px;color:#fff;letter-spacing:.02em}
+  h2{font-size:15px;margin:38px 0 10px;color:#fff;text-transform:uppercase;letter-spacing:.14em;
+     border-bottom:1px solid var(--line);padding-bottom:8px}
+  h3{font-size:13px;margin:22px 0 8px;color:var(--accent);letter-spacing:.06em}
+  p{margin:8px 0;color:#b9b9c4}
+  a{color:var(--link)}
+  code{background:#1b1b20;border:1px solid var(--line);border-radius:3px;padding:1px 5px;color:#e8e8ef}
+  .sub{color:var(--dim);font-size:12.5px}
+  .row{display:flex;gap:18px;flex-wrap:wrap}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 6px}
+  button{font:inherit;background:#1c1c22;color:#e6e6ee;border:1px solid var(--line);
+         border-radius:6px;padding:6px 11px;cursor:pointer}
+  button:hover{border-color:var(--accent);color:#fff}
+  button.on{border-color:var(--accent);color:var(--accent)}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:normal;text-transform:uppercase;letter-spacing:.08em;font-size:11px}
+  /* --- palette lab --- */
+  .sw{display:grid;grid-template-columns:26px 1fr auto auto;gap:10px;align-items:center;
+      padding:5px 6px;border-bottom:1px solid var(--line)}
+  .chip{width:26px;height:20px;border-radius:4px;border:1px solid #00000055}
+  .role{color:#e9e9f0}
+  .hex{color:var(--dim);font-size:12px}
+  input[type=color]{width:34px;height:22px;background:none;border:1px solid var(--line);
+                    border-radius:4px;padding:0;cursor:pointer}
+  /* --- the surface mockup --- */
+  .term{background:var(--ground);border:1px solid var(--line);border-radius:8px;padding:0;
+        overflow:hidden}
+  .term pre{margin:0;padding:14px 16px;font:12.5px/1.5 inherit;white-space:pre;overflow-x:auto}
+  .g{color:var(--muted)}          /* gutter / faint chrome */
+  .ink{color:var(--ink)}
+  .sa{color:var(--ink);background:var(--faint)}
+  .ag{color:var(--muted)}
+  .th{color:var(--thinking);font-style:normal}
+  .ac{color:var(--accent)}
+  .ok{color:var(--ok)}
+  .fa{color:var(--fail)}
+  .wa{color:var(--warn)}
+  .li{color:var(--link)}
+  .ba{color:var(--rosette)}
+  .co{color:var(--coat)}
+  .band{color:var(--rosette)}
+  .match{background:var(--warn);color:var(--ground)}
+  .mnow{background:var(--accent);color:var(--ground);font-weight:bold}
+  /* --- mascots --- */
+  .gallery{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px}
+  .mascot{background:var(--ground);border:1px solid var(--line);border-radius:8px;padding:14px;
+          min-width:230px}
+  .mascot h4{margin:0 0 2px;font-size:13px;color:#fff}
+  .mascot .ep{color:var(--dim);font-size:11.5px;margin-bottom:10px}
+  .art{font:12px/1.0 inherit;white-space:pre;color:var(--coat)}
+  .mcoat{color:var(--coat)} .mros{color:var(--rosette)} .mpeach{color:var(--peach)}
+  .macc{color:var(--accent)} .mline{color:var(--muted)} .mhole{color:transparent}
+  .foot{margin-top:34px;color:var(--dim);font-size:12px;border-top:1px solid var(--line);padding-top:14px}
+  .pill{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:2px 9px;
+        font-size:11px;color:var(--dim);margin-right:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Mnemo — design preview</h1>
+  <p class="sub">A visual read of <code>DESIGN.md</code>. Everything on this page is drawn from the
+  real source: the palette and glyphs from <code>tui-go/internal/theme/theme.go</code>, the wordmark
+  and mascot art from <code>tui-go/internal/brand/brand.go</code>. Nothing here is a mockup of a
+  mockup — if a value changes in Go, change it here too, or better: treat this page as the place to
+  decide, and then change Go.</p>
+
+  <div class="toolbar">
+    <button onclick="preset('pico')" id="b-pico" class="on">PICO-8 (shipping)</button>
+    <button onclick="preset('pottery')" id="b-pottery">Greek pottery</button>
+    <button onclick="preset('marble')" id="b-marble">Marble &amp; wine (light)</button>
+    <button onclick="preset('bronze')" id="b-bronze">Bronze age</button>
+    <button onclick="preset('winedark')" id="b-winedark">Wine-dark sea</button>
+  </div>
+  <p class="sub">Presets re-skin the palette <em>and</em> the mock transcript below. Any swatch can be
+  dragged/tweaked by its colour box — the hex label and every preview update live.</p>
+
+  <!-- ============================================================ -->
+  <h2>1 · The palette</h2>
+  <p>Fourteen values, each a <em>role</em>. The whole interface is allowed to use nothing else.
+  The rule the current palette is built on: <span class="ac">accent</span> is pink because yellow is
+  the terminal's own chrome colour, and an accent that appears everywhere is not an accent.</p>
+  <div class="card">
+    <div id="swatches"></div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2>2 · The surface — one screen, not six panes</h2>
+  <p>The transcript is the application. Everything else floats over it and is dismissed with
+  <code>esc</code>. Below: the header band, the labelled rule, the transcript with its two-cell
+  speaker gutter, a folded block, a live tool, a search hit, and the status line. Re-skin it with the
+  presets above.</p>
+  <div class="term">
+<pre id="mock"><span class="band">▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚▚</span>
+<span class="band">  mnemo · self-evolving-agent · main · opus-4.5</span>          <span class="th">●●●</span> <span class="g">running 2 tools</span>
+
+<span class="g">━━━━━━</span> <span class="ac">TRANSCRIPT</span> <span class="g">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 18 blocks · 12 folded</span>
+
+<span class="ac">▊</span> <span class="sa"> why does the memory pane show four hundred sessions</span>
+<span class="g">│</span> <span class="ink">Four hundred and six. Each one an episode node from a run that</span>
+<span class="g">│</span> <span class="ink">never wrote anything — the graph is recording <span class="match">sessions</span> it</span>
+<span class="g">│</span> <span class="ink">learned nothing from.</span><span class="mnow">▌</span>
+
+<span class="g">│</span> <span class="th">· thinking: the episode is created at session_start, so an empty</span>
+<span class="g">│</span> <span class="th">  session still leaves a node behind. That is the leak. ▾</span>
+
+<span class="g">▸</span> <span class="g">● bash_exec · rg -c 'create_node' memory-layer/src</span> <span class="ok">ok · 0.4s</span>
+<span class="g">▸</span> <span class="g">● ipy_run · 3 cells</span> <span class="wa">1 warning</span> <span class="g">· 1.8s</span>
+<span class="g">▾</span> <span class="g">● apply_edit · agent/extensions/memory-layer.ts +12 −4</span> <span class="ok">ok</span>
+
+<span class="g">━━━━━━</span> <span class="ac">PROMPT</span> <span class="g">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+<span class="ac">▊</span> <span class="ink">move it to the first write instead</span><span class="ac">█</span>
+<span class="g">insert</span>  <span class="g">alt+enter steer · ^k palette · ^t files · ^m memory · ^h help</span>       <span class="g">$0.42 · 61k tok · mem 214n/1.2k e</span></pre>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2>3 · The wordmark</h2>
+  <p>Five letters, strokes three cells thick, a half-cell lip down and to the right in rosette brown
+  — the same ink as the mascot's markings, which is what makes the logo and the mascot look related
+  rather than merely adjacent. 83 cells wide; below 87 columns a 57-cell cut takes over; below that
+  the wordmark is dropped and the tagline stands alone. <em>A wordmark that wraps is not a
+  wordmark.</em></p>
+  <div class="term">
+<pre><span class="co">███         ███   ███         ███   ████████████   ███         ███      █████████</span>
+<span class="co">██████   ██████</span><span class="ba">▒</span>  <span class="co">██████      ███</span><span class="ba">▒</span>  <span class="co">███</span><span class="ba">▒▒▒▒▒▒▒▒▒▒▒▒</span>  <span class="co">██████   ██████</span><span class="ba">▒</span>  <span class="co">███</span> <span class="ba">▒▒▒▒▒▒▒▒</span><span class="co">███</span>
+<span class="co">███</span><span class="ba">▒▒▒</span><span class="co">███</span> <span class="ba">▒▒</span><span class="co">███</span><span class="ba">▒</span>  <span class="co">███</span><span class="ba">▒▒▒</span><span class="co">███</span>   <span class="co">███</span><span class="ba">▒</span>  <span class="co">█████████</span>      <span class="co">███</span><span class="ba">▒▒▒</span><span class="co">███</span> <span class="ba">▒▒</span><span class="co">███</span><span class="ba">▒</span>  <span class="co">███</span><span class="ba">▒</span>        <span class="co">███</span><span class="ba">▒</span>
+<span class="co">███</span><span class="ba">▒</span>   <span class="ba">▒▒▒</span>  <span class="co">███</span><span class="ba">▒</span>  <span class="co">███</span><span class="ba">▒</span>   <span class="ba">▒▒</span><span class="co">██████</span><span class="ba">▒</span>  <span class="co">███</span><span class="ba">▒▒▒▒▒▒▒</span>     <span class="co">███</span><span class="ba">▒</span>   <span class="ba">▒▒▒</span>  <span class="co">███</span><span class="ba">▒</span>  <span class="co">███</span><span class="ba">▒</span>        <span class="co">███</span><span class="ba">▒</span>
+<span class="co">███</span><span class="ba">▒</span>        <span class="co">███</span><span class="ba">▒</span>  <span class="co">███</span><span class="ba">▒</span>      <span class="ba">▒▒</span><span class="co">███</span><span class="ba">▒</span>  <span class="co">████████████</span>   <span class="co">███</span><span class="ba">▒</span>        <span class="co">███</span><span class="ba">▒</span>   <span class="ba">▒▒</span><span class="co">█████████</span> <span class="ba">▒▒▒</span>
+<span class="ba"> ▒▒▒</span>         <span class="ba">▒▒▒</span>   <span class="ba">▒▒▒</span>         <span class="ba">▒▒▒</span>   <span class="ba">▒▒▒▒▒▒▒▒▒▒▒▒</span>   <span class="ba">▒▒▒</span>         <span class="ba">▒▒▒</span>      <span class="ba">▒▒▒▒▒▒▒▒▒</span></pre>
+  </div>
+  <p class="sub">tagline: <span class="ink">memory that works like a brain</span> — one line, lowercase,
+  no exclamation mark.</p>
+
+  <!-- ============================================================ -->
+  <h2>4 · Glyphs</h2>
+  <p>Every non-alphabetic character the interface may draw, from <code>theme.Heavy</code>. All of them
+  live in the standard block and box-drawing ranges, so the whole thing renders on a plain monospace
+  font. A glyph that needs Nerd Fonts is a glyph that is blank for somebody.</p>
+  <div class="card">
+    <table>
+      <tr><th>role</th><th>glyph</th><th>means</th></tr>
+      <tr><td>speaker — you</td><td class="ac">▊</td><td>you are speaking; the only accent-coloured gutter</td></tr>
+      <tr><td>speaker — agent</td><td class="ink">│</td><td>the agent's body text</td></tr>
+      <tr><td>speaker — thinking</td><td class="th">·</td><td>reasoning, folded by default</td></tr>
+      <tr><td>speaker — tool</td><td class="g">●</td><td>a tool call; the block folds to one line</td></tr>
+      <tr><td>fold closed / open</td><td class="g">▸ ▾</td><td>click or <code>enter</code> to toggle</td></tr>
+      <tr><td>tree</td><td class="g">├─ └─ │</td><td>explorer, sessions, memories — one hierarchy, one drawing</td></tr>
+      <tr><td>chrome</td><td class="g">━ ┃ ┏ ┓ ┗ ┛ ┣ ┫</td><td>heavy rules: structure, not noise</td></tr>
+      <tr><td>band</td><td class="ba">▚</td><td>the header band at rest, drawn in rosette brown so it is visible without shouting</td></tr>
+      <tr><td>density ramp</td><td class="g">░ ▒ ▓ █</td><td>the entire animation vocabulary — and the mascot's rosettes</td></tr>
+      <tr><td>spinner</td><td class="ac">⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏</td><td>one tool in flight</td></tr>
+    </table>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2>5 · Motion</h2>
+  <p>Nothing blinks. The thinking animation is a dither band whose density travels — the eye reads
+  direction, not a twitching character, and it is a pure function, so it is a unit test rather than
+  something you have to sit and watch. One vocabulary, used twice: the same ramp draws the mascot's
+  rosettes.</p>
+  <div class="card">
+    <div class="sub">wave, phase 0…7 across 28 cells</div>
+    <pre class="g" id="waves" style="margin:6px 0 0"></pre>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2>6 · Mascots</h2>
+  <p class="sub">All drawn at 2 cells per marker, 40 cells wide. <span class="co">█</span> coat ·
+  <span class="ba">▓▒</span> detail · <span class="mpeach">▒</span> highlight ·
+  <span class="ac">▄</span> the one accent pixel · eyes are <em>holes</em>, never drawn shapes.</p>
+  <div class="gallery" id="gallery"></div>
+  <div class="card" style="margin-top:16px">
+    <h3>Why the cat is hard to play with</h3>
+    <p>Nyx is 20 rows × 28 markers (56 cells) with four shades, a ringed tail, mascara lines, a
+    spotted belly and a walk cycle in four frames — three of which differ only in the legs. Every
+    change means redrawing four frames and re-pinning the installer's copy. That is a lot of art for
+    a mascot whose whole job is to say "hello, I am not a hang" on an empty screen.</p>
+    <h3>The rules the next mascot must keep</h3>
+    <table>
+      <tr><th>rule</th><th>why</th></tr>
+      <tr><td>Eyes are negative space</td><td>drawn eyes plus a mouth read as a glare with teeth at this scale — shipped once, rejected</td></tr>
+      <tr><td>Exactly one accent-coloured run</td><td>more than one and the brand colour stops being a detail and becomes decoration; a test enforces it</td></tr>
+      <tr><td>Markers, never colours</td><td>shape and palette stay one thing each: one function turns a marker into a glyph plus a colour</td></tr>
+      <tr><td>Plain monospace only</td><td>no Nerd Font requirement — the interface must render identically on a stock terminal</td></tr>
+      <tr><td>Tone from the 14-value palette</td><td>a mascot with its own colours cannot be re-themed with the rest of the UI</td></tr>
+      <tr><td>≤ 12 rows, symmetric</td><td>it must be redrawable by hand in a minute, and poseable without a walk cycle</td></tr>
+    </table>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2>7 · Direction — the Greek/Roman layer</h2>
+  <p>The name already points here: <b>Mnemo</b> from <i>Mnemosyne</i>, memory personified and mother
+  of the Muses. The interface currently speaks PICO-8 — a game console — which is where the pixel
+  grammar and the palette came from. Nothing below has to be adopted wholesale; each row is
+  independent.</p>
+  <div class="card">
+    <table>
+      <tr><th>layer</th><th>now</th><th>proposal</th><th>cost</th></tr>
+      <tr><td>palette</td><td>PICO-8: black ground, pink accent, orange coat</td>
+          <td>pottery: black gloss ground, terracotta slip ink, ochre accent, oxblood for failure; the "Greek pottery" preset above</td>
+          <td>one struct in <code>theme.go</code>; every pane follows</td></tr>
+      <tr><td>chrome</td><td>heavy box-drawing rules</td>
+          <td>a <b>meander</b> (Greek key) rule: <code>╪╪╪╪</code> / <code>▚▚▚▚</code> alternation, and a <b>laurel</b> divider for section heads</td>
+          <td>one glyph string per role — the rule is already a single function</td></tr>
+      <tr><td>structure words</td><td>blocks, gutter, band, overlay</td>
+          <td>keep the code names, use the Greek layer in <em>user-visible</em> labels: <i>agora</i> for the palette, <i>scroll</i> for the transcript, <i>amphora</i>/<i>vessel</i> for memory, <i>oracle</i> for the model</td>
+          <td>labels only; no refactor</td></tr>
+      <tr><td>memory areas</td><td>Episodic, Semantic, Procedural, Spatial, Salience, Executive</td>
+          <td>keep the code names, name them after the Muses in the Memory overlay: Calliope (episodes), Clio (history/facts), Polyhymnia (procedure), Urania (spaces), Melpomene (pain markers), Thalia (executive)</td>
+          <td>display strings in one overlay</td></tr>
+      <tr><td>mascot</td><td>Nyx, a Bengal cat (56 cells, 4 shades, walk cycle)</td>
+          <td>one of the six above — owl, tortoise, serpent, bee, amphora; the cat can stay as a rare, larger cameo</td>
+          <td>art in <code>brand.go</code> + the installer's copy + its diff test</td></tr>
+      <tr><td>voice</td><td>lowercase, no exclamation marks, states facts</td>
+          <td>unchanged. The restraint <em>is</em> the classical register — a temple does not shout</td>
+          <td>zero</td></tr>
+    </table>
+    <h3>What must not change, whatever the theme</h3>
+    <p>Fourteen colours and no more · eyes as negative space · one accent run per mascot · no Nerd
+    Fonts · the accent never takes a colour the terminal already uses for chrome (yellow is
+    <em>warning</em>) · every colour is a role, never a hue, so a second palette stays a value and
+    not a rewrite.</p>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2>8 · DESIGN.md, section by section</h2>
+  <table>
+    <tr><th>§</th><th>what it decides</th><th>seen on this page</th></tr>
+    <tr><td>1 the one idea</td><td>transcript-first, one surface, no panes</td><td>§2</td></tr>
+    <tr><td>2 the brand</td><td>the name, the wordmark, the mascot and its rules</td><td>§3, §6</td></tr>
+    <tr><td>3 palette</td><td>fourteen roles; why the accent is pink</td><td>§1</td></tr>
+    <tr><td>4 why Go / Bubble Tea</td><td>the runtime choice</td><td>—</td></tr>
+    <tr><td>5 architecture</td><td>package map, the layout owner</td><td>—</td></tr>
+    <tr><td>6 the surface</td><td>regions, overlays, what floats</td><td>§2</td></tr>
+    <tr><td>7 keys</td><td>every binding, in one table</td><td>§2 (status line)</td></tr>
+    <tr><td>8 the gutter</td><td>who is speaking, in two cells</td><td>§2, §4</td></tr>
+    <tr><td>9 folding</td><td>blocks open and close by type</td><td>§2</td></tr>
+    <tr><td>10 motion</td><td>the dither band; nothing blinks</td><td>§5</td></tr>
+    <tr><td>11 the prompt</td><td>send, queue, steer</td><td>§2</td></tr>
+    <tr><td>12–13 mouse, wrapping</td><td>selection belongs to the terminal; wrap on width</td><td>—</td></tr>
+    <tr><td>14 testing</td><td>golden frames, width sweeps, the palette is not in the contract</td><td>—</td></tr>
+    <tr><td>15–17 built / not built / adding to this</td><td>the honest ledger</td><td>—</td></tr>
+  </table>
+
+  <div class="foot">
+    <span class="pill">edit palette → theme.go</span>
+    <span class="pill">edit art → brand.go</span>
+    <span class="pill">edit rules → DESIGN.md</span>
+    Open this file in a browser; it is one file with no dependencies. Deciding here and then
+    changing the Go is the intended flow — this page exists so the decision is made by looking at
+    it, not by reading hex codes.
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------- palettes
+const PRESETS = {
+  pico:    {ground:'#000000',ink:'#FFF1E8',muted:'#5F574F',faint:'#2B2825',accent:'#FF77A8',
+            thinking:'#83769C',coat:'#FFA300',rosette:'#AB5236',peach:'#FFCCAA',ok:'#00E436',
+            fail:'#FF004D',warn:'#FFEC27',link:'#29ADFF',deep:'#1D2B53',page:'#0b0b0d',card:'#141418'},
+  pottery: {ground:'#14100E',ink:'#E8D5B7',muted:'#7A6A57',faint:'#2A221C',accent:'#C1440E',
+            thinking:'#8C6A4A',coat:'#D97B29',rosette:'#7A3B18',peach:'#E8C39E',ok:'#6A8F3C',
+            fail:'#A62B1F',warn:'#D9A441',link:'#4E7A8A',deep:'#241A14',page:'#0d0a09',card:'#1a1512'},
+  marble:  {ground:'#F4EFE6',ink:'#221C18',muted:'#8A7A6A',faint:'#D8CFC2',accent:'#7B2D3B',
+            thinking:'#6B5B7B',coat:'#B8823C',rosette:'#6E4B2A',peach:'#E7C9A9',ok:'#3E7A4E',
+            fail:'#A62B1F',warn:'#B8860B',link:'#2E5C8A',deep:'#2B2118',page:'#e9e3d8',card:'#fbf8f2'},
+  bronze:  {ground:'#0E0D0B',ink:'#F0E6D2',muted:'#6E6355',faint:'#26221C',accent:'#B08D57',
+            thinking:'#7C6E88',coat:'#C9A227',rosette:'#8C6239',peach:'#E3C9A6',ok:'#7BA05B',
+            fail:'#B33A2B',warn:'#E0B84C',link:'#5B8FA8',deep:'#1B1815',page:'#0a0908',card:'#151410'},
+  winedark:{ground:'#0B1018',ink:'#E6E9EE',muted:'#5B6472',faint:'#1B2330',accent:'#8C6BC8',
+            thinking:'#6E7A99',coat:'#C9A227',rosette:'#7A4A2A',peach:'#D8BFA1',ok:'#4F9E7A',
+            fail:'#C0392B',warn:'#D9A441',link:'#5FA8D3',deep:'#12203A',page:'#080b11',card:'#101620'},
+};
+const ROLES = ['ground','ink','muted','faint','accent','thinking','coat','rosette','peach',
+               'ok','fail','warn','link','deep'];
+const MEANS = {ground:'the page itself — nothing may sit on it that is not a role',
+  ink:'body text; the agent’s voice', muted:'de-emphasis, gutter, whiskers, timestamps',
+  faint:'inactive chrome, the user’s own line background',
+  accent:'you, and the one live thing on screen', thinking:'reasoning, folded by default',
+  coat:'the mascot’s coat', rosette:'rosettes, wordmark lip, the header band',
+  peach:'inner ear (the one colour with a single use)', ok:'success, tool ok',
+  fail:'failure', warn:'warning — and nothing else', link:'links, paths, commands', deep:'reserved'};
+
+function paintPalette(){
+  const box = document.getElementById('swatches');
+  box.innerHTML = '';
+  ROLES.forEach(r=>{
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--'+r).trim();
+    const d = document.createElement('div');
+    d.className = 'sw';
+    d.innerHTML = `<span class="chip" style="background:${v}"></span>
+      <span><span class="role">--${r}</span> <span class="hex">· ${MEANS[r]||''}</span></span>
+      <span class="hex" id="hex-${r}">${v.toUpperCase()}</span>
+      <input type="color" value="${v}" oninput="setRole('${r}',this.value)">`;
+    box.appendChild(d);
+  });
+}
+function setRole(role,value){
+  document.documentElement.style.setProperty('--'+role, value);
+  document.getElementById('hex-'+role).textContent = value.toUpperCase();
+  if(role==='ground'||role==='faint') paintMascots();
+}
+function preset(name){
+  const p = PRESETS[name];
+  Object.entries(p).forEach(([k,v])=>{
+    document.documentElement.style.setProperty('--'+k, v);
+    if(k!=='page'&&k!=='card'){
+      const el = document.getElementById('hex-'+k); if(el) el.textContent = v.toUpperCase();
+    }
+  });
+  document.querySelectorAll('.toolbar button').forEach(b=>b.classList.remove('on'));
+  const btn = document.getElementById('b-'+name); if(btn) btn.classList.add('on');
+  paintPalette(); paintMascots();
+}
+
+// ---------------------------------------------------------------- mascots
+const M = {'#':['██','mcoat'],'R':['▓▓','mros'],'r':['▒▒','mros'],'p':['▒▒','mpeach'],
+           'O':['  ','mhole'],'_':['██','mcoat'],'n':['▄▄','macc'],'-':['──','mline'],
+           '\\':['╲ ','mline'],'/':[' ╱','mline'],'.':['  ',''],'e':['▒','mros']};
+
+const ART = {
+  'nyx — the current cat':{ep:'Said to be a Bengal; 20 rows, 28 markers, walk cycle in 4 frames',rows:[
+    "..##..........##............",".#pp#........#pp#...........","..################..........",
+    ".##################.........",".##R##OO####OO##R##.........",".##################.........",
+    "-########nn########-........","..################..........","...##############...........",
+    "....############.......##...","...##############.....##R#..","..##r####R####r###....##r#..",
+    "..##R####r####R###....##R#..","..##r####R####r###....##r#..","..##R####r####R###...##R##..",
+    "..################...##r##..","..################..##R##...","...##############..##r###...",
+    "...##############.######....","...##.##..##.##...####......"]},
+  'owl — Athena’s':{ep:'"the one that was already watching" — 12 rows, 40 cells, no walk cycle',rows:[
+    "..##..........##....",".####........####...","..################..",".##################.",
+    ".##OOOO####OOOO##...",".##OOOO####OOOO##...",".#######nn#######...","..################..",
+    "..##rr########rr##..","..##RR########RR##..","..################..","...##.##....##.##..."]},
+  'tortoise — the lyre':{ep:'"slow, and it shells what it learns" — 9 rows; Hermes strung the first lyre across a tortoise shell',rows:[
+    "......######........","......#O##O#........","......##nn##........","...##rr##rr##rr##...",
+    "..#RR##rr##rr##RR#..",".##RR##rr##rr##RR##.","####################",".##################.",
+    "..##...##..##...##.."]},
+  'serpent — the coil':{ep:'"keeper of the spring" — 13 rows; one eye-band, a plain accent snout',rows:[
+    ".......##...........","......####..........","......#OO#..........",".......nn...........",
+    "....##########......","...##rr####rr##.....","..##rr######rr##....",".##rr##....##rr##...",
+    ".##rr##....##rr##...","..##rr######rr##....","...##rr####rr##.....","..################..",
+    "..################.."]},
+  'bee — the melissa':{ep:'"the one that carries it home" — 12 rows; the bee was Ephesus’s mark and Delphi’s priestesses were the melissae',rows:[
+    "...##..........##...",".....##......##.....","........####........",".......#O##O#.......",
+    "........####........","...ppp######ppp.....",".##################.",".##RR##RR##RR##RR##.",
+    ".##################.",".##RR##RR##RR##RR##.","..################..","........nn.........."]},
+  'amphora — the vessel':{ep:'"memory has to be carried in something" — 13 rows; the only non-animal, and the simplest to pose',rows:[
+    "....##########......","....#RR####RR#......","......########......",".....##RR##RR##.....",
+    "...######nn######...","..################..","..################..","..##rrrrrrrrrrrr##..",
+    "..################..","..################..","...##############...","....############....",
+    ".....##########....."]},
+};
+
+function renderArt(rows){
+  return rows.map(row=>{
+    let out='', run='', cur=null;
+    const flush=()=>{ if(run){ out += `<span class="${cur?cur[1]:''}">${run}</span>`; run=''; } };
+    for(const m of row){
+      if(cur && cur[0]!==m) flush();
+      cur = M[m] || M['.'];
+      run += cur[0];
+    }
+    flush();
+    return out;
+  }).join('\n');
+}
+function paintMascots(){
+  const g = document.getElementById('gallery');
+  g.innerHTML='';
+  Object.entries(ART).forEach(([name,spec])=>{
+    const d=document.createElement('div');
+    d.className='mascot';
+    d.innerHTML = `<h4>${name}</h4><div class="ep">${spec.ep}</div>
+                   <pre class="art">${renderArt(spec.rows)}</pre>`;
+    g.appendChild(d);
+  });
+}
+
+// ---------------------------------------------------------------- waves
+function wave(phase,width){
+  const D=[' ','░','▒','▓','█'], span=D.length*2-2;
+  let s='';
+  for(let i=0;i<width;i++){
+    const t=(i+phase)%span;
+    s += D[t>=D.length ? span-t : t];
+  }
+  return s;
+}
+function paintWaves(){
+  let out='';
+  for(let p=0;p<8;p++) out += wave(p,28) + '\n';
+  document.getElementById('waves').textContent = out.trimEnd();
+}
+
+paintPalette(); paintMascots(); paintWaves();
+</script>
+</body>
+</html>

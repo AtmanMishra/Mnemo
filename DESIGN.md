@@ -722,14 +722,14 @@ and "equivalent" means the same *properties*, not the same count.
 
 ## 15. What is built
 
-`tui-go/`, twelve packages, 235 tests.
+`tui-go/`, twenty packages, 406 passing tests, `go vet` clean.
 
 | package | owns |
 |---|---|
 | `internal/theme` | the palette, the glyphs, the styles. Nothing else names a colour |
-| `internal/brand` | Nyx and the wordmark, generated from `tui/src/brand.rs` so the two cannot drift |
+| `internal/brand` | Nyx and the wordmark, as marker strings; one `Ink()` turns a marker into a glyph and a colour |
 | `internal/tree` | one hierarchical list, used four times: folders, sessions, memory, logs |
-| `internal/chat` | the transcript: blocks, folding, focus, wrapping |
+| `internal/chat` | the transcript: blocks, folding, focus, wrapping, search |
 | `internal/ui` | chrome: rules, bands, chips. Holds no state |
 | `internal/keymap` | every binding; help and the palette render from it |
 | `internal/overlay` | one modal contract: purpose line, filter, empty state |
@@ -738,7 +738,10 @@ and "equivalent" means the same *properties*, not the same count.
 | `internal/memory` | memsrv over line-JSON-RPC |
 | `internal/filetree` | a directory as tree nodes, lazily |
 | `internal/prompt` | input, history, and the queue |
+| `internal/command` | one command list: built-ins, skills, plugin skills, harness bundles, and the agent's own |
+| `internal/markdown` | glamour rendering, cached by content and width |
 | `internal/agent` + `internal/pi` | the backend boundary, and pi's RPC behind it |
+| `internal/auth` | the key store and the model catalogue |
 | `app` | the root model: three modes, one screen |
 
 **One tree, four uses** is the modularity that matters. Folders, sessions,
@@ -756,24 +759,29 @@ binary and its journal are parameters for the same reason.
 ## 16. What is not built
 
 Stated plainly, because a design document that describes intentions as
-features is worse than no document.
+features is worse than no document. (This section is kept current: everything
+that used to be listed here — markdown rendering, floating overlays with a
+compositor, transcript search, memory forget with confirmation, the onboarding
+and auth flow, and the golden-frame tests — is built, and the ledger is
+corrected rather than preserved.)
 
-- **Markdown is not rendered.** No `glamour` yet: code blocks are wrapped text.
-- **Overlays replace the body rather than floating over it.** No Lip Gloss
-  compositor, no Harmonica spring. It is correct and dull; the layered version
-  is a later change to one function.
-- **Mouse is declared but not hit-tested.** `^g` works, wheel and click do not
-  yet fold blocks. `chat.BlockAtRow` exists and is tested; nothing calls it.
-- **No search in the transcript.** `/` filters trees only.
-- **Memory is read-only.** No forget, no confirm.
-- **Onboarding, auth and model switching are not ported.** `tui/` still owns
-  first run; the Go binary assumes you are already set up.
-- **Golden-file tests are not in yet.** The suite asserts on rendered text and
-  on widths, which catches overflow and layout, but not colour.
-- **Charm v2 is four months old** (shipped 2026-02-23). Versions are pinned;
-  do not track `latest`.
-- **The Rust build is what the installer ships.** Packaging changes last, not
-  first.
+- **Mouse works only as a way out.** `^g` hands selection back to the terminal;
+  wheel and click do not fold blocks or move focus. `chat.BlockAtRow` exists and
+  is tested; nothing calls it. The open question is whether in-app clicks are
+  worth losing the terminal's own drag-select.
+- **One palette, no picker.** The theme is a value and every pane follows it, but
+  nothing lets you choose a second one at runtime — see §18 for where that would
+  go.
+- **No dockable panes.** Sessions, memory and logs are overlays. Columns are a
+  design option, not an implementation gap.
+- **Golden frames pin text, not colour.** The four frames catch overflow,
+  wrapping and layout; a palette regression is not caught by them.
+- **Session branching, fork and compaction are not surfaced in the Go UI**, even
+  though pi supports them and the sessions browser reads their records.
+- **Charm v2 is young.** Versions are pinned; do not track `latest`.
+- **The mascot cannot be posed.** One sitting cat, one four-frame walk, and the
+  walk only runs during install and onboarding. §18 and `docs/mascots.md`
+  propose the lighter alternatives.
 
 ## 17. Adding to this
 
@@ -786,3 +794,45 @@ Before adding a pane: it is an overlay. Before adding an overlay: it is probably
 a palette entry.
 
 And before adding a key: put it in the `KeyMap`, or `?` will lie.
+
+## 18. Direction — the Greek/Roman layer
+
+**Status: proposal, nothing here is implemented.** Two artefacts exist so this
+can be decided by looking rather than by reading hex codes:
+
+- **`docs/design-preview.html`** — the whole of this document, rendered: the
+  palette, the wordmark, the glyph set, the motion vocabulary, and the mascot
+  candidates, with the surface re-skinned live. It carries five palette presets
+  (PICO-8, Greek pottery, marble &amp; wine, bronze age, wine-dark sea) and every
+  swatch is editable in place, so "what if the accent were oxblood" is a five
+  second question instead of a branch.
+- **`docs/mascots.md`** — five mascot candidates (owl, tortoise, serpent, bee,
+  amphora) in the same marker language as Nyx, each with drawn and marker art,
+  plus the rules they keep and what adopting one costs.
+
+The name already points here: **Mnemo** from *Mnemosyne*, memory personified
+and mother of the Muses. The interface currently speaks PICO-8 — a game
+console's palette and its pixel grammar — which is a coherent register and not
+an accident, but it is not the register the name is from. The layers below are
+independent; each can be adopted alone, and the first is nearly free.
+
+| layer | now | proposal |
+|---|---|---|
+| palette | PICO-8: black ground, pink accent, orange coat | pottery: black gloss ground, terracotta slip ink, ochre for warning, oxblood for failure, olive for success. **A palette swap is one struct in `theme.go`; every pane follows, because nothing else names a colour** |
+| chrome | heavy box-drawing rules | a **meander** (Greek key) alternation for the outer rule and a **laurel** divider for section heads — one glyph string per role, no layout change |
+| words | blocks, gutter, band, overlay | code names stay; user-visible labels take the classical register — *agora* for the palette, *scroll* for the transcript, *amphora* for the memory pane, *oracle* for the model, *stoa* for the sessions browser |
+| memory areas | Episodic, Semantic, Procedural, Spatial, Salience, Executive | code names stay; the Memory overlay shows the Muses instead — Calliope (episodes), Clio (facts and history), Polyhymnia (procedure), Urania (spaces), Melpomene (pain markers), Thalia (executive) |
+| mascot | Nyx, 56 cells, four tones, a walk cycle | one of the five candidates; the cat can remain as a rare, larger cameo |
+| voice | lowercase, no exclamation marks, states facts | unchanged. The restraint *is* the classical register — a temple does not shout |
+
+**What must not change, whatever the register:** fourteen colours and no more;
+eyes as negative space; exactly one accent-coloured run per mascot; no Nerd
+Fonts; the accent never takes a colour the terminal already uses for its own
+chrome (that is why yellow is warning and not the accent); and every colour is a
+formal role rather than a hue, so a second palette stays a value and not a
+rewrite.
+
+**A theme picker is the natural home for this** (§16): `theme.New(p, g, isDark)`
+already takes the palette as an argument, so a picker is a list of `Palette`
+values and one key binding — the missing piece is a place to persist the choice
+(`~/.mnemo/theme.json`), not any machinery.
