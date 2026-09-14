@@ -16,6 +16,24 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
+/**
+ * The provider list: the ONE source of truth on the agent side. Everything
+ * else derives from it — `src/provider.ts` imports both the ids and the
+ * env-var map from here, and `bin/mnemo.ts` resolves env names through
+ * `ENV_KEY_BY_PROVIDER`; `src/auth/wizard.ts` lists these ids.
+ *
+ * The Go interface cannot import TypeScript, so `tui-go/internal/auth/auth.go`
+ * keeps its own copy. The two are pinned together by a test on each side that
+ * PARSES the other side's file: `test/provider_ids.test.ts` reads auth.go, and
+ * `tui-go/internal/auth/providers_test.go` reads this file. Both fail on any
+ * divergence, in either direction.
+ *
+ * Why source-parsing tests instead of one shared JSON: a data file would need
+ * shipping and path resolution in two runtimes and two layouts, and go:embed
+ * cannot reach outside the tui-go module — so the shared-file version would
+ * still need a copy. The two source files are already present wherever either
+ * test suite runs, which makes the parse the smallest-blast-radius option.
+ */
 export const PROVIDERS = [
   "anthropic",
   "openai",

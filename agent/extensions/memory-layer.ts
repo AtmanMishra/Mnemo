@@ -1,8 +1,8 @@
 /**
  * Memory-layer extension: persistent semantic memory via the memsrv sidecar.
  *
- * Spawns memory-layer/target/debug/memsrv (line-delimited JSON-RPC over stdio,
- * banner on stderr only) and registers three pi tools:
+ * Spawns the memsrv binary (line-delimited JSON-RPC over stdio, banner on
+ * stderr only) and registers three pi tools:
  *
  *   memory_search      {query, k?}
  *   memory_write_fact  {node?, label?, key, value}
@@ -10,23 +10,20 @@
  *
  * Session lifecycle: the first write records a TaskEpisode node; every completed
  * tool call appends a commit_log entry; session shutdown logs the outcome and
- * stops the sidecar. Journal path defaults to
- * memory-layer/data/sea-agent-journal.jsonl under the repo root and can be
- * overridden with MNEMO_MEMORY_JOURNAL (legacy SEA_MEMORY_JOURNAL still works).
+ * stops the sidecar. Where the binary and journal live is NOT decided here:
+ * `resolveMemsrvPaths()` in src/hooks/memory.ts is the one resolver, defaulting
+ * to the Mnemo home and keeping the checkout only as a development fallback
+ * (MNEMO_MEMSRV_BIN / MNEMO_MEMORY_JOURNAL, legacy SEA_* still work, verified
+ * by test/memsrv_paths.test.ts).
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
+import { resolveMemsrvPaths } from "../src/hooks/memory.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
-// Cargo names the sidecar memsrv.exe on Windows. A path hardcoded to the Unix
-// name finds nothing there, and the failure surfaces far away: every memory
-// call reports a missing sidecar while the built binary sits right there.
-const MEMSRV_NAME = process.platform === "win32" ? "memsrv.exe" : "memsrv";
-const DEFAULT_BINARY = path.join(REPO_ROOT, "memory-layer", "target", "debug", MEMSRV_NAME);
-const DEFAULT_JOURNAL = path.join(REPO_ROOT, "memory-layer", "data", "sea-agent-journal.jsonl");
 
 export interface MemResult {
   ok: boolean;
@@ -63,8 +60,9 @@ export class MemClient {
   private readonly journalPath: string;
 
   constructor(opts: { binaryPath?: string; journalPath?: string } = {}) {
-    this.binaryPath = opts.binaryPath ?? ((process.env.MNEMO_MEMSRV_BIN ?? process.env.SEA_MEMSRV_BIN) || DEFAULT_BINARY);
-    this.journalPath = opts.journalPath ?? ((process.env.MNEMO_MEMORY_JOURNAL ?? process.env.SEA_MEMORY_JOURNAL) || DEFAULT_JOURNAL);
+    const paths = resolveMemsrvPaths(); // env overrides first, then home, then dev checkout
+    this.binaryPath = opts.binaryPath ?? paths.binary;
+    this.journalPath = opts.journalPath ?? paths.journal;
   }
 
   get alive(): boolean {
@@ -120,7 +118,8 @@ export class MemClient {
     if (this.alive) return;
     if (!fs.existsSync(this.binaryPath)) {
       throw new Error(
-        `memsrv binary not found at ${this.binaryPath}. Build it with:\n` +
+        `memsrv binary not found at ${this.binaryPath}. Install it there, ` +
+          `or point MNEMO_MEMSRV_BIN at one; from a checkout:\n` +
           `  cd ${path.join(REPO_ROOT, "memory-layer")} && cargo build --bin memsrv`,
       );
     }
@@ -411,8 +410,31 @@ function recallEvidence(hits: Recalled[], prompt: string): Map<number, Set<strin
 /** Shared across every registration site so all memory tools hit one episode. */
 const sessionState = newLifecycleState();
 
-/** How many NEW episodes a session must add before shutdown consolidates. */
-export const CONSOLIDATE_THRESHOLD = 3;
+/**
+ * Reads an env override once, at module load ("startup"). Anything that is
+ * not a positive integer — absent, empty, junk, zero, negative — keeps the
+ * built-in default, because a tester typing the wrong thing must get working
+ * defaults, not a session that never consolidates.
+ */
+function envPositiveInt(name: string, fallback: number): number {
+  const raw = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isInteger(raw) && raw > 0 ? raw : fallback;
+}
+
+/**
+ * The TWO consolidation thresholds, side by side — they read alike and mean
+ * different things, so each is named for what it counts. The pair, and their
+ * env overrides, are documented together in memory-layer/src/consolidate.rs.
+ *
+ *   CONSOLIDATE_EVERY_N_EPISODES (here): how many NEW episodes a session must
+ *     add before the shutdown pass RUNS AT ALL. Default 3, override
+ *     MNEMO_CONSOLIDATE_THRESHOLD.
+ *   min_sources_for_theme() (memory-layer/src/consolidate.rs): how many
+ *     DISTINCT SOURCE NODES must share a theme before it becomes a lesson —
+ *     what counts as recurring INSIDE one pass. Default 2, override
+ *     MNEMO_MIN_OCCURRENCES.
+ */
+export const CONSOLIDATE_EVERY_N_EPISODES = envPositiveInt("MNEMO_CONSOLIDATE_THRESHOLD", 3);
 
 /** Per-process memory lifecycle bookkeeping (episode, dedupe, baseline). */
 export interface LifecycleState {
@@ -623,15 +645,16 @@ export async function autoSteer(
 }
 
 /**
- * Shutdown pass: consolidate once the session has added a threshold of new
- * episodes (its own plus any sub-agent sessions sharing the journal). Returns
- * whether a consolidation ran. No baseline -> skip rather than guess.
+ * Shutdown pass: consolidate once the session has added
+ * CONSOLIDATE_EVERY_N_EPISODES new episodes (its own plus any sub-agent
+ * sessions sharing the journal). Returns whether a consolidation ran. No
+ * baseline -> skip rather than guess.
  */
 export async function consolidateIfDue(
   client: Pick<MemClient, "request">,
   state: LifecycleState,
   log: (line: string) => void = console.log,
-  threshold: number = CONSOLIDATE_THRESHOLD,
+  threshold: number = CONSOLIDATE_EVERY_N_EPISODES,
 ): Promise<boolean> {
   if (state.startEpisodes === null) return false;
   const now = await countEpisodes(client);

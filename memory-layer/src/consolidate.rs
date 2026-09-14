@@ -8,9 +8,41 @@ use crate::model::*;
 use crate::store::StoreData;
 use crate::vec::tokenize;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::OnceLock;
 
-/// How many source nodes must share a theme before it becomes a lesson.
-pub const MIN_OCCURRENCES: usize = 2;
+/// THE TWO CONSOLIDATION THRESHOLDS, documented together because they read
+/// alike and mean different things — each is named for what it counts:
+///
+/// - MIN_SOURCES_FOR_THEME (this constant, `min_sources_for_theme()` below):
+///   how many DISTINCT SOURCE NODES must share a theme before it distils into
+///   a lesson — "what counts as recurring", inside one consolidation pass.
+///   Default 2, override MNEMO_MIN_OCCURRENCES (any positive integer).
+/// - CONSOLIDATE_EVERY_N_EPISODES (agent/extensions/memory-layer.ts): how many
+///   NEW EPISODES a session must add before the shutdown consolidation pass
+///   RUNS AT ALL — "when to consolidate". Default 3, override
+///   MNEMO_CONSOLIDATE_THRESHOLD.
+pub const DEFAULT_MIN_SOURCES_FOR_THEME: usize = 2;
+
+/// MIN_SOURCES_FOR_THEME as configured for this process, read ONCE so a
+/// tester can set MNEMO_MIN_OCCURRENCES without a rebuild. Lazy on the first
+/// consolidation request rather than at process start (Rust has no module
+/// initialiser); the env is stable for a process's lifetime either way.
+pub fn min_sources_for_theme() -> usize {
+    static CONFIGURED: OnceLock<usize> = OnceLock::new();
+    *CONFIGURED.get_or_init(|| {
+        min_sources_from(std::env::var("MNEMO_MIN_OCCURRENCES").ok().as_deref())
+    })
+}
+
+/// Parses an MNEMO_MIN_OCCURRENCES value. Anything that is not a positive
+/// integer — absent, empty, junk, zero — keeps the default, so a mistyped
+/// override still consolidates instead of disabling every lesson.
+pub(crate) fn min_sources_from(raw: Option<&str>) -> usize {
+    raw.and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_MIN_SOURCES_FOR_THEME)
+}
+
 /// Cap on tokens in a lesson label, so labels stay readable.
 const MAX_SIGNATURE_TOKENS: usize = 4;
 /// A lesson needs a real theme, not one word in common: two sources that share
@@ -62,13 +94,15 @@ pub fn consolidate(store: &StoreData, now: Millis) -> (Vec<Op>, Vec<Lesson>) {
         .map(|id| (*id, theme_tokens(store, *id)))
         .collect();
 
-    // 2. a token is a theme once it shows up in MIN_OCCURRENCES distinct sources
+    // 2. a token is a theme once it shows up in min_sources_for_theme()
+    //    distinct sources (read once for the whole pass)
+    let min_sources = min_sources_for_theme();
     let mut df: BTreeMap<&str, usize> = BTreeMap::new();
     for set in tokens.values() {
         for t in set { *df.entry(t.as_str()).or_insert(0) += 1; }
     }
     let recurring: BTreeSet<&str> = df.iter()
-        .filter(|(_, n)| **n >= MIN_OCCURRENCES)
+        .filter(|(_, n)| **n >= min_sources)
         .map(|(t, _)| *t)
         .collect();
 
@@ -81,7 +115,7 @@ pub fn consolidate(store: &StoreData, now: Millis) -> (Vec<Op>, Vec<Lesson>) {
             .filter(|(_, set)| set.contains(*token))
             .map(|(id, _)| *id)
             .collect();
-        if members.len() < MIN_OCCURRENCES { continue; }
+        if members.len() < min_sources { continue; }
         let shared: Vec<String> = members.iter()
             .map(|id| &tokens[id])
             .cloned()
@@ -100,7 +134,7 @@ pub fn consolidate(store: &StoreData, now: Millis) -> (Vec<Op>, Vec<Lesson>) {
     let mut next_node = store.next_node;
     let mut next_fact = store.next_fact;
     for (sig, srcs) in groups {
-        if srcs.len() < MIN_OCCURRENCES { continue; }
+        if srcs.len() < min_sources { continue; }
         let label = format!("lesson: {}", sig.join(" "));
         let sources_value = srcs.iter().map(|id| format!("#{id}")).collect::<Vec<_>>().join(" ");
         let existing = store.nodes.values()

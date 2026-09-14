@@ -15,16 +15,83 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Hook } from "./types.ts";
 import { scrubChildEnv } from "../childenv.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
-// See extensions/memory-layer.ts: the sidecar is memsrv.exe on Windows.
-const MEMSRV_NAME = process.platform === "win32" ? "memsrv.exe" : "memsrv";
-const DEFAULT_BINARY = path.join(REPO_ROOT, "memory-layer", "target", "debug", MEMSRV_NAME);
-const DEFAULT_JOURNAL = path.join(REPO_ROOT, "memory-layer", "data", "sea-agent-journal.jsonl");
+
+// Cargo names the sidecar memsrv.exe on Windows. A path hardcoded to the Unix
+// name finds nothing there, and the failure surfaces far away: every memory
+// call reports a missing sidecar while the built binary sits right there.
+export const MEMSRV_NAME = process.platform === "win32" ? "memsrv.exe" : "memsrv";
+
+/** The per-user Mnemo home an installed build keeps its state in. */
+export function mnemoHome(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.MNEMO_HOME?.trim();
+  if (override) return override;
+  return path.join(os.homedir(), ".mnemo");
+}
+
+export interface MemsrvPaths {
+  /** The sidecar binary to spawn. */
+  binary: string;
+  /** The journal file it should open (memsrv creates it when missing). */
+  journal: string;
+}
+
+export interface MemsrvPathOverrides {
+  env?: NodeJS.ProcessEnv;
+  home?: string;
+  repoRoot?: string;
+  exists?: (p: string) => boolean;
+}
+
+/**
+ * B2: resolve the sidecar binary AND the journal for whoever is running
+ * mnemo — the ONE copy of this resolution in the agent. `extensions/
+ * memory-layer.ts` imports it rather than keeping a second version; the pair
+ * had to be kept in step by hand before this.
+ *
+ * An installed build (npm global, or the release tarball) has no checkout:
+ * nothing lives at <install>/memory-layer/target/debug, so checkout-relative
+ * defaults made every memory call report a missing sidecar. The home is the
+ * one directory an installed build is guaranteed to own:
+ *
+ *   binary : MNEMO_MEMSRV_BIN (legacy SEA_MEMSRV_BIN)
+ *            → $MNEMO_HOME/memsrv[.exe]
+ *            → the checkout's memory-layer/target/debug/memsrv[.exe],
+ *              for development only, and only when that file exists
+ *   journal: MNEMO_MEMORY_JOURNAL (legacy SEA_MEMORY_JOURNAL)
+ *            → $MNEMO_HOME/journal.jsonl (the same file the interface's
+ *              --journal defaults to)
+ *            → the checkout's memory-layer/data/sea-agent-journal.jsonl,
+ *              for development only, and only when that file exists
+ *
+ * A path that exists at the home wins even when the dev copy also exists;
+ * when neither exists the home path is returned anyway, so the error message
+ * and the file memsrv creates both point at the installed layout.
+ */
+export function resolveMemsrvPaths(over: MemsrvPathOverrides = {}): MemsrvPaths {
+  const env = over.env ?? process.env;
+  const home = over.home ?? mnemoHome(env);
+  const repoRoot = over.repoRoot ?? REPO_ROOT;
+  const exists = over.exists ?? fs.existsSync;
+
+  const envBinary = env.MNEMO_MEMSRV_BIN ?? env.SEA_MEMSRV_BIN;
+  const homeBinary = path.join(home, MEMSRV_NAME);
+  const devBinary = path.join(repoRoot, "memory-layer", "target", "debug", MEMSRV_NAME);
+  const binary = envBinary || (exists(homeBinary) ? homeBinary : exists(devBinary) ? devBinary : homeBinary);
+
+  const envJournal = env.MNEMO_MEMORY_JOURNAL ?? env.SEA_MEMORY_JOURNAL;
+  const homeJournal = path.join(home, "journal.jsonl");
+  const devJournal = path.join(repoRoot, "memory-layer", "data", "sea-agent-journal.jsonl");
+  const journal = envJournal || (exists(homeJournal) ? homeJournal : exists(devJournal) ? devJournal : homeJournal);
+
+  return { binary, journal };
+}
 
 export interface MemClientLike {
   request(method: string, params?: Record<string, unknown>): Promise<{ ok: boolean; result?: any; error?: string }>;
@@ -44,8 +111,9 @@ export class HookMemsrvClient {
   private readonly journalPath: string;
 
   constructor(opts: { binaryPath?: string; journalPath?: string } = {}) {
-    this.binaryPath = opts.binaryPath ?? process.env.MNEMO_MEMSRV_BIN ?? DEFAULT_BINARY;
-    this.journalPath = opts.journalPath ?? process.env.MNEMO_MEMORY_JOURNAL ?? DEFAULT_JOURNAL;
+    const paths = resolveMemsrvPaths();
+    this.binaryPath = opts.binaryPath ?? paths.binary;
+    this.journalPath = opts.journalPath ?? paths.journal;
   }
 
   get alive(): boolean {
@@ -82,7 +150,8 @@ export class HookMemsrvClient {
   private start(): void {
     if (this.alive) return;
     if (!fs.existsSync(this.binaryPath)) {
-      throw new Error(`memsrv binary not found at ${this.binaryPath} (build with cargo build --bin memsrv)`);
+      throw new Error(`memsrv binary not found at ${this.binaryPath} ` +
+        `(install it there, or point MNEMO_MEMSRV_BIN at one; from a checkout: cargo build --bin memsrv)`);
     }
     // deterministic hashing embedder unless remote is opted in, like the
     // memory-layer extension does. 12.7: scrub ALL credential-shaped vars

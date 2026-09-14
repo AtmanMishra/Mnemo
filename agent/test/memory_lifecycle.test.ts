@@ -10,7 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { MemClient, registerLifecycle, newLifecycleState, autoSteer,
-         consolidateIfDue, CONSOLIDATE_THRESHOLD, makeMemoryTools } from "../extensions/memory-layer.ts";
+         consolidateIfDue, CONSOLIDATE_EVERY_N_EPISODES, makeMemoryTools } from "../extensions/memory-layer.ts";
 
 interface FakePi {
   on(name: string, h: (...args: any[]) => any): void;
@@ -313,7 +313,7 @@ test("shutdown consolidates once a session adds a threshold of new episodes", as
 
     // gained = 2, threshold 3: the shutdown must NOT have consolidated
     assert.deepEqual(await semanticLessons(client), [],
-      `2 new episodes are below the threshold of ${CONSOLIDATE_THRESHOLD}; a lesson would prove consolidation ran`);
+      `2 new episodes are below the threshold of ${CONSOLIDATE_EVERY_N_EPISODES}; a lesson would prove consolidation ran`);
   } finally {
     client.stop();
     fs.rmSync(dir, { recursive: true, force: true });

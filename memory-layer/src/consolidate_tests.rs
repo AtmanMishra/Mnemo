@@ -1,7 +1,10 @@
 //! 3.5: consolidation (Episodic/Salience replay -> Semantic lessons).
 #[cfg(test)]
 mod p3 {
-    use crate::consolidate::{consolidate, Lesson, MIN_OCCURRENCES};
+    use crate::consolidate::{
+        consolidate, min_sources_from, min_sources_for_theme, Lesson,
+        DEFAULT_MIN_SOURCES_FOR_THEME,
+    };
     use crate::model::*;
     use crate::steering::steer;
     use crate::store::StoreData;
@@ -42,7 +45,7 @@ mod p3 {
         assert!(node.label.starts_with("lesson: "));
         assert!(node.label.contains("helm") || node.label.contains("rollback"),
             "lesson should name the shared theme, got {}", node.label);
-        assert!(lesson.occurrences >= MIN_OCCURRENCES);
+        assert!(lesson.occurrences >= min_sources_for_theme());
         // the distilled fact points back at the evidence
         let sources = node.active_facts().find(|f| f.key == "sources").unwrap();
         for src in &lesson.sources {
@@ -112,5 +115,21 @@ mod p3 {
         let (ops, lessons) = consolidate(&s, t() + 100);
         assert!(ops.is_empty() && lessons.is_empty(),
             "semantic nodes must not be re-consolidated: {lessons:?}");
+    }
+
+    #[test]
+    fn min_sources_override_parses_or_falls_back() {
+        // The process-wide value (min_sources_for_theme) is cached on first
+        // use, so what is pinned here is the parse: any positive integer
+        // wins, everything else keeps the default — a mistyped override must
+        // not disable every lesson.
+        assert_eq!(min_sources_from(None), DEFAULT_MIN_SOURCES_FOR_THEME);
+        assert_eq!(min_sources_from(Some(" 4 ")), 4);
+        assert_eq!(min_sources_from(Some("0")), DEFAULT_MIN_SOURCES_FOR_THEME);
+        assert_eq!(min_sources_from(Some("junk")), DEFAULT_MIN_SOURCES_FOR_THEME);
+        assert_eq!(min_sources_from(Some("")), DEFAULT_MIN_SOURCES_FOR_THEME);
+        assert_eq!(min_sources_for_theme(),
+            min_sources_from(std::env::var("MNEMO_MIN_OCCURRENCES").ok().as_deref()),
+            "the process value must agree with the parser for this environment");
     }
 }
