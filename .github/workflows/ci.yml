@@ -127,17 +127,36 @@ jobs:
       # and stops at the first hit. A full-history scan is deferred: it is
       # unbounded cost for the same single finding this already catches.
       - name: scan for credential-shaped strings
-        env:
-          GATE_PAT: >-
-            (sk-[A-Za-z0-9]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|
-            github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|
-            [Aa][Pp][Ii][_-]?[Kk][Ee][Yy][\"']?[:=][[:space:]]*[\"']?[A-Za-z0-9_-]{20,})
         run: |
-          exclude=':!agent/test/trace.test.ts :!agent/test/hooks_executor.test.ts :!.github/workflows/ci.yml'
+          # The pattern lives in the script, not in a folded YAML scalar: `>-`
+          # turns line breaks into spaces, and a space inside an alternation
+          # branch is a branch that can never match a token at line start
+          # (that bug shipped once — github_pat_ and API_KEY= only matched when
+          # something preceded them).
+          #
+          # The pattern covers the credential shapes that have actually appeared
+          # or plausibly will: session keys (sk-*; sk-or-v1-* for OpenRouter),
+          # classic and fine-grained GitHub tokens, AWS access keys, and a
+          # generic API_KEY=long-string assignment.
+          #
+          # Excluded paths are redaction FIXTURES: files that hold a realistic
+          # key shape on purpose, because a test that proves scrubbing works
+          # has to feed it something that looks real. The gate cannot tell a
+          # fixture from a leak, so every new one belongs on this list — the
+          # gate going red for a fixture is how it trains people to ignore it.
+          # audit/FINDINGS.jsonl is on the list for the same reason: the audit
+          # quotes the fixture strings as evidence, and it is a record, not code.
+          GATE_PAT="(sk-[A-Za-z0-9]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy][\"']?[:=][[:space:]]*[\"']?[A-Za-z0-9_-]{20,})"
+          exclude=':!agent/test/trace.test.ts :!agent/test/hooks_executor.test.ts :!agent/test/childenv.test.ts :!agent/test/hooks_engine.test.ts :!audit/FINDINGS.jsonl :!.github/workflows/ci.yml'
           if git grep -nE "$GATE_PAT" -- $exclude; then
             echo "::error::credential-shaped string found outside the redaction fixtures"
             exit 1
           fi
+          # The working-tree scan catches a key on disk; the history sweep
+          # catches one that was committed and then rotated. It is bounded to the
+          # most recent 200 commits (verified cheap: 80 commits in ~1.6s locally)
+          # and stops at the first hit. A full-history scan is deferred: it is
+          # unbounded cost for the same single finding this already catches.
           for sha in $(git rev-list --max-count=200 HEAD); do
             if git grep -qE "$GATE_PAT" "$sha" -- $exclude 2>/dev/null; then
               echo "::error::credential-shaped string found in commit $sha (history)"
