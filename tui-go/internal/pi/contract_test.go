@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
@@ -220,10 +221,17 @@ func TestTheDocumentedToolExecutionEvents(t *testing.T) {
 	}
 }
 
-// TestTheDocumentedIgnoredEvents: every other event type in the doc's table
-// is one the transcript deliberately does not draw. Pinned so that a new pi
+// TestTheDocumentedIgnoredEvents: every OTHER event type in the doc's table
+// is one the transcript deliberately does not draw, plus the three extension
+// UI methods this interface has no surface for. Pinned so that a new pi
 // version ADDING fields to them, or our parser ACCIDENTALLY consuming one,
 // both show up here as a change to a recorded list.
+//
+// The four families that used to be in this list — compaction, auto-retry,
+// summarization-retry and extension_error — are drawn now, and have tests of
+// their own below. The split is the point: "ignored" here means a rendering
+// decision, and it is only a defensible decision while the events that carry
+// information nothing else carries are NOT in this list.
 func TestTheDocumentedIgnoredEvents(t *testing.T) {
 	for _, line := range []string{
 		`{"type": "agent_end", "messages": [], "willRetry": false}`,
@@ -233,14 +241,17 @@ func TestTheDocumentedIgnoredEvents(t *testing.T) {
 		`{"type": "bash_execution_update", "id": "req-1", "delta": "total 48\n"}`,
 		`{"type": "tool_execution_update", "toolCallId": "call_abc123", "toolName": "bash", "args": {"command": "ls -la"}, "partialResult": {"content": [{"type": "text", "text": "partial output so far..."}], "details": {"truncation": null, "fullOutputPath": null}}}`,
 		`{"type": "queue_update", "steering": ["Focus on error handling"], "followUp": ["After that, summarize the result"]}`,
-		`{"type": "compaction_start", "reason": "threshold"}`,
-		`{"type": "compaction_end", "reason": "threshold", "result": null, "aborted": false, "willRetry": false}`,
-		`{"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3, "delayMs": 2000, "errorMessage": "529 overloaded"}`,
-		`{"type": "auto_retry_end", "success": true, "attempt": 2}`,
-		`{"type": "summarization_retry_scheduled", "attempt": 1, "maxAttempts": 3, "delayMs": 2000, "errorMessage": "terminated"}`,
-		`{"type": "summarization_retry_attempt_start", "source": "compaction", "reason": "threshold"}`,
-		`{"type": "summarization_retry_finished"}`,
-		`{"type": "extension_error", "extensionPath": "/path/to/extension.ts", "event": "tool_call", "error": "Error message..."}`,
+		// Fire-and-forget extension UI methods with no surface here:
+		// setWidget wants a panel above or below the editor, a region this
+		// interface does not have; setTitle wants the terminal window title,
+		// which View() already owns; set_editor_text would type into the
+		// reader's editor for them. None of the three changes what the agent
+		// does, so ignoring them loses no function — unlike the dialogs,
+		// which are dropped only at the cost of a parked extension.
+		`{"type": "extension_ui_request", "id": "uuid-7", "method": "setWidget", "widgetKey": "my-ext", "widgetLines": ["--- My Widget ---", "Line 1"], "widgetPlacement": "aboveEditor"}`,
+		`{"type": "extension_ui_request", "id": "uuid-8", "method": "setTitle", "title": "pi - my project"}`,
+		`{"type": "extension_ui_request", "id": "uuid-9", "method": "set_editor_text", "text": "prefilled text for the user"}`,
+		`{"type": "extension_ui_request", "id": "uuid-10", "method": "something_new"}`,
 	} {
 		// the doc prints {...} for elided objects; make the lines parseable
 		// without changing the shape we are pinning
@@ -248,6 +259,229 @@ func TestTheDocumentedIgnoredEvents(t *testing.T) {
 		if got := doc(t, line); got != nil {
 			t.Fatalf("doc lists %s as an event we do not draw, got %#v", inner(line), got)
 		}
+	}
+}
+
+// TestTheDocumentedCompactionIsDrawn: compaction rewrites what the model
+// remembers, and the two events carry the only account of it — the reason it
+// ran, the sizes before and after, and the two ways it can end badly.
+func TestTheDocumentedCompactionIsDrawn(t *testing.T) {
+	start, ok := doc(t, `{"type": "compaction_start", "reason": "threshold"}`).(agent.Compaction)
+	if !ok || !start.Started || start.Reason != "threshold" {
+		t.Fatalf("doc: compaction_start example, got %#v", start)
+	}
+
+	end, ok := doc(t, `{
+  "type": "compaction_end",
+  "reason": "threshold",
+  "result": {
+    "summary": "Summary of conversation...",
+    "firstKeptEntryId": "abc123",
+    "tokensBefore": 150000,
+    "estimatedTokensAfter": 32000,
+    "usage": {"input": 32000, "output": 1200, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 33200,
+      "cost": {"input": 0.01, "output": 0.02, "cacheRead": 0, "cacheWrite": 0, "total": 0.03}},
+    "details": {}
+  },
+  "aborted": false,
+  "willRetry": false
+}`).(agent.Compaction)
+	if !ok {
+		t.Fatal("doc: compaction_end example must become a Compaction")
+	}
+	if end.Started || end.TokensBefore != 150000 || end.TokensAfter != 32000 {
+		t.Fatalf("doc: the sizes are the point — the window shrank — got %#v", end)
+	}
+	if end.Aborted || end.WillRetry || end.Err != "" {
+		t.Fatalf("a clean compaction is none of aborted/retrying/failed: %#v", end)
+	}
+
+	// Aborted: result is null, aborted is true.
+	abort, ok := doc(t, `{"type": "compaction_end", "reason": "manual", "result": null, "aborted": true, "willRetry": false}`).(agent.Compaction)
+	if !ok || !abort.Aborted || abort.TokensBefore != 0 {
+		t.Fatalf("doc: an aborted compaction has no result and must say so: %#v", abort)
+	}
+
+	// Failed: result is null, aborted false, errorMessage explains it.
+	fail, ok := doc(t, `{"type": "compaction_end", "reason": "threshold", "result": null, "aborted": false, "errorMessage": "quota exceeded"}`).(agent.Compaction)
+	if !ok || fail.Err != "quota exceeded" || fail.Aborted {
+		t.Fatalf("doc: a failed compaction carries errorMessage, got %#v", fail)
+	}
+
+	// Overflow that succeeded: the agent retries the prompt on the smaller
+	// context, and willRetry is how the reader learns why the turn restarts.
+	overflow, ok := doc(t, `{"type": "compaction_end", "reason": "overflow", "result": {"tokensBefore": 200000, "estimatedTokensAfter": 40000}, "aborted": false, "willRetry": true}`).(agent.Compaction)
+	if !ok || !overflow.WillRetry || overflow.Reason != "overflow" {
+		t.Fatalf("doc: willRetry must survive, got %#v", overflow)
+	}
+}
+
+// TestTheDocumentedRetriesAreDrawn: a provider hiccup retried three times with
+// a two-second wait is the difference between a patient program and a hang,
+// and these two events are the only place that is said.
+func TestTheDocumentedRetriesAreDrawn(t *testing.T) {
+	start, ok := doc(t, `{
+  "type": "auto_retry_start",
+  "attempt": 1,
+  "maxAttempts": 3,
+  "delayMs": 2000,
+  "errorMessage": "529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"
+}`).(agent.Retry)
+	if !ok {
+		t.Fatal("doc: auto_retry_start example must become a Retry")
+	}
+	if start.Phase != agent.RetryStart || start.Kind != agent.RetryTurn {
+		t.Fatalf("a retry of the turn starts the turn: %#v", start)
+	}
+	if start.Attempt != 1 || start.MaxAttempts != 3 || start.Delay != 2*time.Second {
+		t.Fatalf("doc: attempt/maxAttempts/delayMs are what 'why is it waiting' means, got %#v", start)
+	}
+	if !strings.Contains(start.Err, "overloaded_error") {
+		t.Fatalf("doc: errorMessage must survive so the wait has a cause: %q", start.Err)
+	}
+
+	ok2, ok := doc(t, `{"type": "auto_retry_end", "success": true, "attempt": 2}`).(agent.Retry)
+	if !ok || ok2.Phase != agent.RetryEnd || !ok2.OK || ok2.Attempt != 2 {
+		t.Fatalf("doc: a successful retry, got %#v", ok2)
+	}
+
+	gone, ok := doc(t, `{"type": "auto_retry_end", "success": false, "attempt": 3, "finalError": "529 overloaded_error: Overloaded"}`).(agent.Retry)
+	if !ok || gone.OK || !strings.Contains(gone.Final, "overloaded") {
+		t.Fatalf("doc: exhausted retries carry finalError, got %#v", gone)
+	}
+}
+
+// TestTheDocumentedSummarizationRetriesAreDrawn: the same story for the
+// summarizer, which retries separately from the turn.
+func TestTheDocumentedSummarizationRetriesAreDrawn(t *testing.T) {
+	sched, ok := doc(t, `{
+  "type": "summarization_retry_scheduled",
+  "attempt": 1,
+  "maxAttempts": 3,
+  "delayMs": 2000,
+  "errorMessage": "terminated"
+}`).(agent.Retry)
+	if !ok || sched.Phase != agent.RetryScheduled || sched.Kind != agent.RetrySummary {
+		t.Fatalf("doc: a scheduled summarization retry, got %#v", sched)
+	}
+	if sched.Err != "terminated" || sched.Delay != 2*time.Second {
+		t.Fatalf("got %#v", sched)
+	}
+
+	comp, ok := doc(t, `{"type": "summarization_retry_attempt_start", "source": "compaction", "reason": "threshold"}`).(agent.Retry)
+	if !ok || comp.Phase != agent.RetryAttempt || comp.Kind != agent.RetryComp {
+		t.Fatalf("doc: the compaction source, got %#v", comp)
+	}
+
+	branch, ok := doc(t, `{"type": "summarization_retry_attempt_start", "source": "branchSummary"}`).(agent.Retry)
+	if !ok || branch.Kind != agent.RetryBranch {
+		t.Fatalf("doc: a branch summary says so, and has no reason field: %#v", branch)
+	}
+
+	fin, ok := doc(t, `{"type": "summarization_retry_finished"}`).(agent.Retry)
+	if !ok || fin.Phase != agent.RetryFinished {
+		t.Fatalf("doc: summarization_retry_finished must close the loop, got %#v", fin)
+	}
+}
+
+// TestTheDocumentedExtensionErrorIsDrawn: an extension that throws says
+// nothing anywhere else. This is the whole channel.
+func TestTheDocumentedExtensionErrorIsDrawn(t *testing.T) {
+	e, ok := doc(t, `{
+  "type": "extension_error",
+  "extensionPath": "/path/to/extension.ts",
+  "event": "tool_call",
+  "error": "Error message..."
+}`).(agent.ExtensionError)
+	if !ok {
+		t.Fatal("doc: extension_error example must become an ExtensionError")
+	}
+	if e.Path != "/path/to/extension.ts" || e.Event != "tool_call" || e.Err != "Error message..." {
+		t.Fatalf("all three fields are what the reader needs to find the culprit: %#v", e)
+	}
+}
+
+// TestTheDocumentedExtensionUIRequests: the doc's ten methods, asked and
+// answered. Four are dialogs and must arrive intact — an answer needs the id,
+// the method decides which response field pi reads, and a dropped request
+// parks the extension that sent it. Two are fire-and-forget notices. Three
+// are pinned as ignored in the test above.
+func TestTheDocumentedExtensionUIRequests(t *testing.T) {
+	confirm, ok := doc(t, `{
+  "type": "extension_ui_request",
+  "id": "uuid-2",
+  "method": "confirm",
+  "title": "Clear session?",
+  "message": "All messages will be lost.",
+  "timeout": 5000
+}`).(agent.UIDialog)
+	if !ok {
+		t.Fatal("doc: a confirm request is a dialog and must not be dropped")
+	}
+	if confirm.ID != "uuid-2" || confirm.Method != "confirm" || confirm.Title != "Clear session?" || confirm.Message != "All messages will be lost." {
+		t.Fatalf("got %#v", confirm)
+	}
+	if confirm.Timeout != 5*time.Second {
+		t.Fatalf("the timeout is pi's deadline and the reader should see it: %v", confirm.Timeout)
+	}
+
+	sel, ok := doc(t, `{"type": "extension_ui_request", "id": "uuid-1", "method": "select", "title": "Allow dangerous command?", "options": ["Allow", "Block"], "timeout": 10000}`).(agent.UIDialog)
+	if !ok || len(sel.Options) != 2 || sel.Options[0] != "Allow" || sel.Options[1] != "Block" {
+		t.Fatalf("doc: the options are the answer set, in pi's order: %#v", sel)
+	}
+
+	in, ok := doc(t, `{"type": "extension_ui_request", "id": "uuid-3", "method": "input", "title": "Enter a value", "placeholder": "type something..."}`).(agent.UIDialog)
+	if !ok || in.Placeholder != "type something..." || in.Timeout != 0 {
+		t.Fatalf("doc: input has a placeholder and no timeout, got %#v", in)
+	}
+
+	ed, ok := doc(t, `{"type": "extension_ui_request", "id": "uuid-4", "method": "editor", "title": "Edit some text", "prefill": "Line 1\nLine 2\nLine 3"}`).(agent.UIDialog)
+	if !ok || ed.Prefill != "Line 1\nLine 2\nLine 3" {
+		t.Fatalf("doc: the editor's prefill survives, newlines and all: %#v", ed)
+	}
+	if ed.Timeout != 0 {
+		t.Fatalf("editor waits forever; that is why it must be answerable: %v", ed.Timeout)
+	}
+
+	note, ok := doc(t, `{"type": "extension_ui_request", "id": "uuid-5", "method": "notify", "message": "Command blocked by user", "notifyType": "warning"}`).(agent.UINotify)
+	if !ok || note.Message != "Command blocked by user" || note.Kind != "warning" {
+		t.Fatalf("doc: notify is dropped nowhere — our own commands report through it: %#v", note)
+	}
+
+	st, ok := doc(t, `{"type": "extension_ui_request", "id": "uuid-6", "method": "setStatus", "statusKey": "my-ext", "statusText": "Turn 3 running..."}`).(agent.UIStatus)
+	if !ok || st.Key != "my-ext" || st.Text != "Turn 3 running..." {
+		t.Fatalf("doc: setStatus carries a key and a text, got %#v", st)
+	}
+	// Clearing omits statusText on the wire; it must read as "clear", not as
+	// a request with a missing field.
+	clear, ok := doc(t, `{"type": "extension_ui_request", "id": "uuid-6", "method": "setStatus", "statusKey": "my-ext"}`).(agent.UIStatus)
+	if !ok || clear.Key != "my-ext" || clear.Text != "" {
+		t.Fatalf("doc: an omitted statusText clears the entry, got %#v", clear)
+	}
+}
+
+// TestTheDocumentedSessionReplies: switch_session and new_session answer with
+// success + data.cancelled. A cancelled one is a success that did nothing,
+// which is exactly the reply a reader must not miss — the transcript says one
+// conversation and the model remembers another.
+func TestTheDocumentedSessionReplies(t *testing.T) {
+	moved, ok := doc(t, `{"type": "response", "command": "switch_session", "success": true, "data": {"cancelled": false}}`).(agent.SessionMoved)
+	if !ok || moved.Command != "switch_session" || moved.Cancelled {
+		t.Fatalf("doc: a completed switch, got %#v", moved)
+	}
+	refused, ok := doc(t, `{"type": "response", "command": "switch_session", "success": true, "data": {"cancelled": true}}`).(agent.SessionMoved)
+	if !ok || !refused.Cancelled {
+		t.Fatalf("doc: an extension-vetoed switch, got %#v", refused)
+	}
+	fresh, ok := doc(t, `{"type": "response", "command": "new_session", "success": true, "data": {"cancelled": false}}`).(agent.SessionMoved)
+	if !ok || fresh.Command != "new_session" || fresh.Cancelled {
+		t.Fatalf("doc: a new session, got %#v", fresh)
+	}
+
+	// A hard failure is not a cancellation: it surfaces as the failure it is.
+	f, ok := doc(t, `{"type": "response", "command": "switch_session", "success": false, "error": "Session not found: /nope.jsonl"}`).(agent.Failed)
+	if !ok || !strings.Contains(f.Err.Error(), "Session not found") {
+		t.Fatalf("a failed switch must be visible, not silent: %#v", f)
 	}
 }
 

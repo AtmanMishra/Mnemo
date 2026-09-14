@@ -255,7 +255,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 
 func TestSpawnRejectsARepoWithoutTheAgentScript(t *testing.T) {
 	dir := t.TempDir() // empty: no agent/bin/mnemo.ts anywhere in it
-	s, err := Spawn(dir, dir, "")
+	s, err := Spawn(dir, dir, "", Trust{})
 	if s != nil {
 		t.Fatalf("Spawn must not return a session for a bad repo root; got %+v", s)
 	}
@@ -264,5 +264,80 @@ func TestSpawnRejectsARepoWithoutTheAgentScript(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--repo must point at the repository root") {
 		t.Fatalf("error should tell the user what --repo means, got: %v", err)
+	}
+}
+
+// TestTheSpawnArgsSayWhichWayTrustWent: the flag is never left off. In RPC
+// mode an unstated decision means pi ignores the project's own settings,
+// extensions, prompts and skills without saying so, so "no flag" is not a
+// neutral choice — it is the silent one.
+func TestTheSpawnArgsSayWhichWayTrustWent(t *testing.T) {
+	yes := spawnArgs("/repo", "/s/session.jsonl", Trust{Approve: true})
+	no := spawnArgs("/repo", "/s/session.jsonl", Trust{})
+
+	if !hasArg(yes, "--approve") {
+		t.Fatalf("an approved project must be passed --approve: %q", yes)
+	}
+	if hasArg(yes, "--no-approve") {
+		t.Fatalf("both flags in one argv leaves the answer to pi's parser: %q", yes)
+	}
+	if !hasArg(no, "--no-approve") {
+		t.Fatalf("a project with no recorded decision must be passed --no-approve: %q", no)
+	}
+	if hasArg(no, "--approve") {
+		t.Fatalf("both flags in one argv leaves the answer to pi's parser: %q", no)
+	}
+	// And the rest of the contract still holds: rpc mode, no built-in tools,
+	// the session file appended only when there is one.
+	if !hasArg(no, "--mode") || !hasArg(no, "--no-builtin-tools") {
+		t.Fatalf("the spawn args lost their mode: %q", no)
+	}
+	if !hasArg(yes, "/s/session.jsonl") {
+		t.Fatalf("a resume must carry its session file: %q", yes)
+	}
+	if hasArg(spawnArgs("/repo", "", Trust{}), "--session") {
+		t.Fatal("a fresh spawn must not carry an empty --session")
+	}
+}
+
+func hasArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestTheChildIsToldTheApprovalModeIsInteractive: the gate in the agent reads
+// MNEMO_APPROVAL_MODE, and without it a child with no TTY takes the fail-open
+// path — where the "ask" tier of ~/.mnemo/permissions.json silently becomes
+// allow for bash_exec, write_file, apply_edit and ipy_run. A stale value in
+// the parent's environment must not be inherited over it.
+func TestTheChildIsToldTheApprovalModeIsInteractive(t *testing.T) {
+	t.Setenv(approvalEnv, "off")             // a stale parent value
+	t.Setenv("MNEMO_TEST_KEEP", "untouched") // and something innocent beside it
+
+	env := spawnEnv()
+	var seen int
+	for _, e := range env {
+		if strings.HasPrefix(strings.ToUpper(e), approvalEnv+"=") {
+			seen++
+			if e != approvalEnv+"=interactive" {
+				t.Fatalf("the child must be told interactive, got %q", e)
+			}
+		}
+	}
+	if seen != 1 {
+		t.Fatalf("%s appears %d times; the last one wins and there must be exactly one", approvalEnv, seen)
+	}
+	var kept bool
+	for _, e := range env {
+		if e == "MNEMO_TEST_KEEP=untouched" {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Fatal("the child's environment must still be the parent's, plus the one override")
 	}
 }

@@ -17,20 +17,52 @@ import (
 )
 
 // Providers Mnemo can authenticate. These ids are pi's own.
+//
+// The agent keeps the same list in TypeScript (agent/src/auth/store.ts) and
+// neither language can import the other, so the two are pinned together by a
+// test on each side that PARSES the other side's source:
+// providers_test.go here reads store.ts, and agent/test/provider_ids.test.ts
+// reads this file. A shared JSON was the alternative and was rejected as a
+// bigger blast radius: it would need shipping and path resolution in two
+// runtimes (go:embed cannot reach outside the tui-go module), and the two
+// source files are already present wherever either test suite runs.
 var Providers = []string{"anthropic", "openai", "openrouter", "opencode", "opencode-go"}
+
+// DefaultModels is the model id the login wizard proposes when the model name
+// is left empty, per provider — the data half of a data-driven wizard.
+//
+// A provider with NO entry here is not broken: the model step asks for a name
+// instead ("type a model name, or pick one from the list"). Adding a provider
+// must never require editing the wizard branch in app/update.go; add or change
+// a row here and the wizard follows.
+//
+// The one entry is the canonical default of this build. It is build-specific
+// policy, which is exactly why it lives in a table with the provider list
+// rather than inside the wizard.
+var DefaultModels = map[string]string{
+	"opencode-go": "deepseek-v4-flash",
+}
+
+// envKeyByProvider is the environment variable each provider's key is exported
+// as. The shape `"id": "ENV"`, one pair per line, is parsed against
+// agent/src/auth/store.ts by providers_test.go — keep it.
+var envKeyByProvider = map[string]string{
+	"anthropic":   "ANTHROPIC_API_KEY",
+	"openai":      "OPENAI_API_KEY",
+	"openrouter":  "OPENROUTER_API_KEY",
+	"opencode":    "OPENCODE_API_KEY",
+	"opencode-go": "OPENCODE_API_KEY",
+}
 
 // EnvKeyFor is the environment variable each provider's key is exported as.
 func EnvKeyFor(provider string) string {
-	switch provider {
-	case "anthropic":
-		return "ANTHROPIC_API_KEY"
-	case "openai":
-		return "OPENAI_API_KEY"
-	case "openrouter":
-		return "OPENROUTER_API_KEY"
-	default:
-		return "OPENCODE_API_KEY"
+	if env, ok := envKeyByProvider[provider]; ok {
+		return env
 	}
+	// Unknown ids keep the historical default. Only known providers are ever
+	// exported (Env walks LoggedIn), so this arm is for callers passing an id
+	// that is not in Providers at all.
+	return "OPENCODE_API_KEY"
 }
 
 // Provider is one stored credential.

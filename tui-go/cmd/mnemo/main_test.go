@@ -143,3 +143,53 @@ func TestDefaultMemorySidecarNoRepoMeansNoDerivation(t *testing.T) {
 		t.Fatalf("with no repo, nothing should be derived; got memsrv=%q journal=%q", o.memsrv, o.journal)
 	}
 }
+
+// TestSpawnPlanResolvesTrustForTheProject: the decision pi is given is read
+// from ~/.mnemo/trust.json under the home the run was pointed at, for the
+// project's ABSOLUTE path — and with nothing recorded it is the safe answer.
+// Nothing here reads the developer's real home: the fixture's temp dir is the
+// home, the project and the decision file both.
+func TestSpawnPlanResolvesTrustForTheProject(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+
+	cwd, trust := spawnPlan(options{home: home, cwd: project})
+	if !filepath.IsAbs(cwd) {
+		t.Fatalf("the child's working directory must be absolute (the session forks by it): %q", cwd)
+	}
+	if trust.Approve || trust.From != "" {
+		t.Fatalf("an unrecorded project must be refused, explicitly: %+v", trust)
+	}
+	if !strings.Contains(trust.Note(), "--no-approve") {
+		t.Fatalf("and the transcript must say which way it went: %q", trust.Note())
+	}
+
+	// A recorded decision is what flips it — nothing else.
+	path := filepath.Join(home, ".mnemo", "trust.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"`+strings.ReplaceAll(project, `\`, `\\`)+`": true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, trust = spawnPlan(options{home: home, cwd: project})
+	if !trust.Approve || trust.From != project {
+		t.Fatalf("a recorded yes must be used: %+v", trust)
+	}
+
+	// And an empty --cwd means the process's own directory, made absolute.
+	cwd, _ = spawnPlan(options{home: home})
+	if !filepath.IsAbs(cwd) || filepath.Base(cwd) != filepath.Base(wd(t)) {
+		t.Fatalf("an empty --cwd must resolve to the process directory, got %q", cwd)
+	}
+}
+
+// wd is the process's working directory, so the test above can compare
+// against it without assuming a root.
+func wd(t *testing.T) string {
+	t.Helper()
+	d, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}

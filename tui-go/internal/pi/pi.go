@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
@@ -35,9 +36,11 @@ func ParseEvent(v map[string]any) tea.Msg {
 
 	case "response":
 		// A command acknowledgement is only interesting when it failed —
-		// except for the one answer we asked for. get_commands carries data,
+		// except for the answers we asked for. get_commands carries data,
 		// so a successful reply to it is not an acknowledgement: it is the
-		// list of commands the agent implements.
+		// list of commands the agent implements. switch_session and
+		// new_session carry `data.cancelled`: a success that did nothing is
+		// the one reply the reader must not miss.
 		if ok, is := v["success"].(bool); is && !ok {
 			if str(v, "command") == "get_commands" {
 				// Non-fatal on purpose: a backend that will not answer
@@ -47,10 +50,75 @@ func ParseEvent(v map[string]any) tea.Msg {
 			}
 			return agent.Failed{Err: errors.New(errText(v))}
 		}
-		if str(v, "command") == "get_commands" {
+		switch str(v, "command") {
+		case "get_commands":
 			return agent.Commands{List: commandList(v)}
+		case "switch_session", "new_session":
+			data, _ := v["data"].(map[string]any)
+			return agent.SessionMoved{Command: str(v, "command"), Cancelled: boolean(data, "cancelled")}
 		}
 		return nil
+
+	case "extension_ui_request":
+		return uiRequest(v)
+
+	case "compaction_start":
+		return agent.Compaction{Started: true, Reason: str(v, "reason")}
+
+	case "compaction_end":
+		// result is null when compaction was aborted or failed, so the token
+		// counts are read defensively and stay zero — "compacted, sizes
+		// unknown" is said differently from "compacted, 150k → 32k".
+		res, _ := v["result"].(map[string]any)
+		return agent.Compaction{
+			Reason:       str(v, "reason"),
+			Aborted:      boolean(v, "aborted"),
+			WillRetry:    boolean(v, "willRetry"),
+			Err:          str(v, "errorMessage"),
+			TokensBefore: num(res, "tokensBefore"),
+			TokensAfter:  num(res, "estimatedTokensAfter"),
+		}
+
+	case "auto_retry_start":
+		return agent.Retry{
+			Phase: agent.RetryStart, Kind: agent.RetryTurn,
+			Attempt: num(v, "attempt"), MaxAttempts: num(v, "maxAttempts"),
+			Delay: millis(v, "delayMs"), Err: str(v, "errorMessage"),
+		}
+
+	case "auto_retry_end":
+		return agent.Retry{
+			Phase: agent.RetryEnd, Kind: agent.RetryTurn,
+			Attempt: num(v, "attempt"),
+			OK:      boolean(v, "success"), Final: str(v, "finalError"),
+		}
+
+	case "summarization_retry_scheduled":
+		return agent.Retry{
+			Phase: agent.RetryScheduled,
+			// RetrySummary, not RetryComp: nothing has said yet whether it
+			// is the compaction summary or a branch summary being retried;
+			// the attempt_start event that follows is where the source
+			// arrives.
+			Kind:    agent.RetrySummary,
+			Attempt: num(v, "attempt"), MaxAttempts: num(v, "maxAttempts"),
+			Delay: millis(v, "delayMs"), Err: str(v, "errorMessage"),
+		}
+
+	case "summarization_retry_attempt_start":
+		kind := agent.RetryComp
+		if src := str(v, "source"); src != "" {
+			kind = src // "compaction" | "branchSummary"
+		}
+		return agent.Retry{Phase: agent.RetryAttempt, Kind: kind}
+
+	case "summarization_retry_finished":
+		return agent.Retry{Phase: agent.RetryFinished, Kind: agent.RetrySummary}
+
+	case "extension_error":
+		return agent.ExtensionError{
+			Path: str(v, "extensionPath"), Event: str(v, "event"), Err: str(v, "error"),
+		}
 
 	case "message_update":
 		ev, _ := v["assistantMessageEvent"].(map[string]any)
@@ -131,6 +199,54 @@ func commandList(v map[string]any) []agent.CommandInfo {
 		})
 	}
 	return out
+}
+
+// uiRequest reads one extension UI request — a question pi is waiting on an
+// answer to, or a fire-and-forget notice.
+//
+// The protocol's ten methods split three ways here:
+//
+//   - select, confirm, input and editor are dialogs. They become a UIDialog
+//     and the interface must answer with a matching id, or the extension
+//     parks.
+//   - notify and setStatus are fire-and-forget. They become messages too,
+//     because dropping them is what made our own /hook, /schedule, /trigger
+//     and /now commands look like no-ops: they report through ui.notify and
+//     nothing was reading it.
+//   - setWidget, setTitle and set_editor_text are deliberately ignored.
+//     setWidget wants a panel above or below the editor — a region this
+//     interface does not have and would not invent for a message nothing
+//     depends on; setTitle wants the terminal window title, which View()
+//     already owns (an extension renaming the window would fight the
+//     program for it); set_editor_text would type into the reader's editor,
+//     i.e. put words in their mouth. All three are fire-and-forget and none
+//     of them changes what the agent does, so ignoring them loses no
+//     function — and ignoring them is not the same as dropping a question.
+func uiRequest(v map[string]any) tea.Msg {
+	id, method := str(v, "id"), str(v, "method")
+	switch method {
+	case "select", "confirm", "input", "editor":
+		d := agent.UIDialog{
+			ID: id, Method: method,
+			Title:       str(v, "title"),
+			Message:     str(v, "message"),
+			Placeholder: str(v, "placeholder"),
+			Prefill:     str(v, "prefill"),
+			Timeout:     millis(v, "timeout"),
+		}
+		if opts, ok := v["options"].([]any); ok {
+			d.Options = make([]string, 0, len(opts))
+			for _, o := range opts {
+				d.Options = append(d.Options, ResultText(o))
+			}
+		}
+		return d
+	case "notify":
+		return agent.UINotify{Message: str(v, "message"), Kind: str(v, "notifyType")}
+	case "setStatus":
+		return agent.UIStatus{Key: str(v, "statusKey"), Text: str(v, "statusText")}
+	}
+	return nil
 }
 
 // nested reads one string field out of a sub-object.
@@ -255,23 +371,69 @@ type Session struct {
 // cwd is what makes the agent work in the project you picked rather than the
 // one you launched in: pi derives its session directory from the working
 // directory, so resuming without it forks the session into the wrong project.
-func Spawn(repoRoot, cwd, sessionFile string) (*Session, error) {
+//
+// The trust decision always goes on the command line, either way, because
+// the default in RPC mode is to say nothing to anyone: an unstated decision
+// is a project whose .pi/settings.json, .pi/extensions and .agents/skills
+// silently do not load, and the failure mode of that is a project's own
+// guardrail extension not running while AGENTS.md still loads, so a partial
+// load looks total.
+func Spawn(repoRoot, cwd, sessionFile string, trust Trust) (*Session, error) {
 	entry := filepath.Join(repoRoot, "agent", "bin", "mnemo.ts")
 	if _, err := os.Stat(entry); err != nil {
 		return nil, fmt.Errorf("no agent script at %s (--repo must point at the repository root, not a subdirectory)", entry)
-	}
-	args := []string{entry, "--mode", "rpc", "--no-builtin-tools"}
-	if sessionFile != "" {
-		args = append(args, "--session", sessionFile)
 	}
 	// SAFETY: args is a slice (never a shell string) and entry is a file path
 	// resolved under the operator-provided --repo root; exec.Command passes
 	// argv verbatim with no shell interpretation, so a hostile repo path
 	// cannot execute extra commands.
-	cmd := exec.Command("node", args...)
+	cmd := exec.Command("node", spawnArgs(repoRoot, sessionFile, trust)...)
 	cmd.Dir = cwd
+	cmd.Env = spawnEnv()
 	return Start(cmd)
 }
+
+// spawnArgs is the agent's argv, split out from Spawn so the flags — in
+// particular --approve/--no-approve, which decide whether a project's own
+// settings, extensions and skills load — are assertable without starting a
+// node process.
+func spawnArgs(repoRoot, sessionFile string, trust Trust) []string {
+	args := []string{
+		filepath.Join(repoRoot, "agent", "bin", "mnemo.ts"),
+		"--mode", "rpc", "--no-builtin-tools",
+		trust.Flag(),
+	}
+	if sessionFile != "" {
+		args = append(args, "--session", sessionFile)
+	}
+	return args
+}
+
+// spawnEnv is the environment the agent runs in.
+//
+// MNEMO_APPROVAL_MODE=interactive is the reason this exists. The approval
+// gate reads it (agent/src/approval.ts) and decides from it whether an "ask"
+// tier has anyone to ask; without it a spawned child with no TTY takes the
+// fail-open path, where the ask tier of ~/.mnemo/permissions.json silently
+// becomes allow for bash_exec, write_file, apply_edit and ipy_run. The TUI
+// can answer dialogs now, so the asking path is exactly the path it should
+// take. A value already in the parent's environment is dropped rather than
+// inherited: this process knows what mode its own child runs in.
+func spawnEnv() []string {
+	parent := os.Environ()
+	out := make([]string, 0, len(parent)+1)
+	for _, e := range parent {
+		if strings.HasPrefix(strings.ToUpper(e), strings.ToUpper(approvalEnv+"=")) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return append(out, approvalEnv+"=interactive")
+}
+
+// approvalEnv is the switch the gate reads. MNEMO_ is the current spelling;
+// the gate also accepts the legacy SEA_ one, which we simply never set.
+const approvalEnv = "MNEMO_APPROVAL_MODE"
 
 // Start attaches to any command speaking the protocol. Tests use a fake.
 func Start(cmd *exec.Cmd) (*Session, error) {
@@ -343,6 +505,16 @@ func (s *Session) write(cmd map[string]any) error {
 	cmd["id"] = fmt.Sprint(s.nextID)
 	s.nextID++
 	s.mu.Unlock()
+	return s.send(cmd)
+}
+
+// send marshals and writes one line, preserving whatever id it carries.
+//
+// write's id is this session's request counter — pi echoes it back so a
+// reply can be matched — but not every message is a request: an extension UI
+// response is keyed by the id PI chose when it asked, and overwriting it
+// would answer nothing. Hence two functions, one line of difference.
+func (s *Session) send(cmd map[string]any) error {
 	b, err := json.Marshal(cmd)
 	if err != nil {
 		return err
@@ -372,6 +544,53 @@ func (s *Session) Steer(prompt string) tea.Cmd { return s.command("steer", promp
 
 // Interrupt stops the running turn.
 func (s *Session) Interrupt() tea.Cmd { return s.command("abort", "") }
+
+// SwitchSession loads a stored session file into the running conversation.
+//
+// The field is sessionPath, not sessionFile: that is the name in pi's command
+// type (dist/modes/rpc/rpc-types.js) and the name its handler reads. The
+// session file on disk is a .jsonl path either way.
+//
+// A refused switch (an extension vetoing it) is not an error: pi answers
+// success with data.cancelled, and the interface says which of the two
+// happened. A hard failure surfaces as agent.Failed through the response
+// path, like every other command.
+func (s *Session) SwitchSession(path string) tea.Cmd {
+	return func() tea.Msg {
+		if err := s.write(map[string]any{"type": "switch_session", "sessionPath": path}); err != nil {
+			return agent.Failed{Err: err}
+		}
+		return nil
+	}
+}
+
+// NewSession starts a fresh conversation on the backend.
+func (s *Session) NewSession() tea.Cmd { return s.command("new_session", "") }
+
+// Answer responds to a dialog from the extension UI protocol.
+//
+// The shape is decided by the method, because pi reads the response by it: a
+// confirm is confirmed:true/false, select/input/editor carry value, and a
+// dismissal is cancelled:true. Sending the wrong field leaves the promise on
+// the other side unresolved until its timeout, which for `editor` never
+// comes.
+func (s *Session) Answer(d agent.UIDialog, a agent.UIAnswer) tea.Cmd {
+	return func() tea.Msg {
+		cmd := map[string]any{"type": "extension_ui_response", "id": d.ID}
+		switch {
+		case a.Cancelled:
+			cmd["cancelled"] = true
+		case d.Method == "confirm":
+			cmd["confirmed"] = a.Confirmed
+		default:
+			cmd["value"] = a.Value
+		}
+		if err := s.send(cmd); err != nil {
+			return agent.Failed{Err: err}
+		}
+		return nil
+	}
+}
 
 // Model is the model the last turn ran on.
 func (s *Session) Model() string {
@@ -419,6 +638,18 @@ func f64(v map[string]any, k string) float64 {
 	}
 	f, _ := v[k].(float64)
 	return f
+}
+
+// boolean reads a JSON bool that may be absent. An absent flag reads false,
+// which is what pi's own defaults are (`aborted`, `willRetry`, `success`).
+func boolean(v map[string]any, k string) bool {
+	b, _ := v[k].(bool)
+	return b
+}
+
+// millis reads a duration pi writes in milliseconds.
+func millis(v map[string]any, k string) time.Duration {
+	return time.Duration(num(v, k)) * time.Millisecond
 }
 
 func first(ss ...string) string {

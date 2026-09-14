@@ -86,6 +86,18 @@ func main() {
 	}
 }
 
+// home is the user's home directory: the flag when given, the OS answer
+// otherwise. Shared, because the trust decision and the memory journal both
+// look things up under it — two spellings of "home" is how a decision
+// recorded for one path becomes invisible to the reader of the other.
+func home(override string) string {
+	if override != "" {
+		return override
+	}
+	h, _ := os.UserHomeDir()
+	return h
+}
+
 // defaultMemorySidecar fills empty --memsrv/--journal from the repo and home
 // dirs so a live run's Memory pane works without the caller learning the
 // sidecar layout. Explicit flags always win; no repo means no derivation
@@ -95,16 +107,29 @@ func defaultMemorySidecar(o *options) {
 		o.memsrv = filepath.Join(o.repo, "memory-layer", "target", "debug", memsrvName())
 	}
 	if o.journal == "" && (o.memsrv != "" || o.repo != "") {
-		home := o.home
-		if home == "" {
-			if h, err := os.UserHomeDir(); err == nil {
-				home = h
-			}
-		}
-		if home != "" {
-			o.journal = filepath.Join(home, ".mnemo", "journal.jsonl")
+		if h := home(o.home); h != "" {
+			o.journal = filepath.Join(h, ".mnemo", "journal.jsonl")
 		}
 	}
+}
+
+// spawnPlan is everything a live spawn needs decided before pi starts: the
+// working directory (absolute, because the agent forks its session by it) and
+// the project-trust decision that goes on the command line. Split from run so
+// the decision is testable without starting a node process.
+func spawnPlan(o options) (string, pi.Trust) {
+	cwd := firstNonEmpty(o.cwd, ".")
+	// Absolute, because project trust is recorded by directory: a relative
+	// "." would look up a different key from the one a decision was written
+	// under, and would spawn the child in a directory whose resources pi
+	// then refuses to load.
+	if abs, err := filepath.Abs(cwd); err == nil {
+		cwd = abs
+	}
+	// Resolved here, once, and said out loud in the transcript: in RPC mode
+	// pi does not ask, and an unstated decision means the project's own
+	// settings, extensions and skills silently do not load.
+	return cwd, pi.ResolveTrust(home(o.home), cwd)
 }
 
 func run(o options) error {
@@ -116,7 +141,8 @@ func run(o options) error {
 	// the interface never silently spawns a node process somebody did not ask
 	// for. Without it, sending fails loudly instead of pretending to think.
 	if o.repo != "" && !o.dump {
-		s, err := pi.Spawn(o.repo, firstNonEmpty(o.cwd, "."), o.session)
+		cwd, trust := spawnPlan(o)
+		s, err := pi.Spawn(o.repo, cwd, o.session, trust)
 		if err != nil {
 			return fmt.Errorf("could not start the agent: %w", err)
 		}
@@ -124,6 +150,7 @@ func run(o options) error {
 		// returns errors instead of exiting mid-flight.
 		defer s.Close()
 		cfg.Agent = s
+		cfg.TrustNote = trust.Note()
 	} else {
 		cfg.Agent = agent.Offline{Reason: "no agent backend: run with --repo <path to this repository> to start one"}
 	}

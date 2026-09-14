@@ -51,6 +51,11 @@ type Config struct {
 	// makes the model catalogue askable; without it /model can say why
 	// instead of showing an empty list.
 	Repo string
+
+	// TrustNote is the project-trust decision resolved at spawn — which flag
+	// pi was given and what that means — as one line for the transcript.
+	// Empty when nothing was spawned (dumps, tests, --dump).
+	TrustNote string
 }
 
 // NoticeFor is how long a one-off message stays in the status line.
@@ -128,6 +133,29 @@ type Model struct {
 	// the ones the agent answers with when a live session starts. It is the
 	// only list — the palette, the slash menu and help all read this one.
 	cmds []command.Command
+
+	// dialog is the extension's question currently on screen, and queue the
+	// ones behind it. pi sends them one at a time today, but a second
+	// request arriving while the first is unanswered must not be dropped:
+	// dropping a dialog parks the extension that asked. A text question
+	// (input, editor) is held by the prompt, the rest by an overlay — the
+	// dialog field is the one record either way.
+	dialog *agent.UIDialog
+	queue  []agent.UIDialog
+
+	// draft holds whatever the reader was writing when a text question took
+	// the prompt, so answering does not eat a half-written message.
+	draft string
+
+	// status is what extensions wrote on the status line, keyed the way pi
+	// keys it (setStatus). An extension clears its own entry; nothing here
+	// expires on its own, or the writer could not rely on it. Named
+	// extStatus because status() is already the row it draws on.
+	extStatus map[string]string
+
+	// switchTo is the session file we asked the agent to move to, kept
+	// until its acknowledgement arrives so the acknowledgement can name it.
+	switchTo string
 }
 
 // New builds the application.
@@ -155,6 +183,7 @@ func New(cfg Config) *Model {
 		agent:     cfg.Agent,
 		openTool:  map[string]*chat.Block{},
 		schedSeen: map[string]string{},
+		extStatus: map[string]string{},
 	}
 	m.chat.SetMarkdown(markdown.New(th))
 	m.cmds = command.Load(cfg.CWD, cfg.Home, cfg.HarnessDir)
@@ -167,6 +196,13 @@ func New(cfg Config) *Model {
 		m.openLogin()
 	}
 	m.welcome()
+	// The project-trust decision was made before this process started, but
+	// it decides which of the project's own settings, extensions and skills
+	// the agent loads — so it goes in the transcript, where it can be read
+	// back, rather than in a log nobody opens.
+	if cfg.TrustNote != "" {
+		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{cfg.TrustNote}})
+	}
 	m.layout()
 	return m
 }

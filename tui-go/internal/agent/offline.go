@@ -26,3 +26,12 @@ func (o Offline) Interrupt() tea.Cmd   { return nil }
 func (o Offline) Next() tea.Cmd        { return nil }
 func (o Offline) Model() string        { return "offline" }
 func (o Offline) Close() error         { return nil }
+
+// The three session/UI methods are no-ops offline on purpose. There is no
+// process to switch, no conversation to start over, and no extension to
+// answer: a Failed here would only tell the reader that the thing they just
+// did on a backend-less dump failed, which they already know. The interface
+// is still allowed to say what it did to its own view.
+func (o Offline) SwitchSession(string) tea.Cmd      { return nil }
+func (o Offline) NewSession() tea.Cmd               { return nil }
+func (o Offline) Answer(UIDialog, UIAnswer) tea.Cmd { return nil }

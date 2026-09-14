@@ -30,6 +30,11 @@ const (
 	Models
 	Login
 	Schedules
+	// Dialog is a question the agent is blocked on — an extension's
+	// select/confirm, routed here because a list of choices is exactly what
+	// this package already draws. It is the one overlay whose rows are an
+	// answer rather than an action.
+	Dialog
 )
 
 func (k Kind) String() string {
@@ -50,6 +55,8 @@ func (k Kind) String() string {
 		return "login"
 	case Schedules:
 		return "schedules"
+	case Dialog:
+		return "dialog"
 	}
 	return ""
 }

@@ -98,7 +98,9 @@ func (m *Model) onAgent(msg tea.Msg) tea.Cmd {
 func isAgentMsg(msg tea.Msg) bool {
 	switch msg.(type) {
 	case agent.Started, agent.Think, agent.Text, agent.ToolStart, agent.ToolEnd,
-		agent.Delegated, agent.Done, agent.Failed, agent.Stats, agent.Commands:
+		agent.Delegated, agent.Done, agent.Failed, agent.Stats, agent.Commands,
+		agent.UIDialog, agent.UINotify, agent.UIStatus,
+		agent.Compaction, agent.Retry, agent.ExtensionError, agent.SessionMoved:
 		return true
 	}
 	return false
@@ -189,8 +191,236 @@ func (m *Model) fold(msg tea.Msg) tea.Cmd {
 		// still exactly one list.
 		m.cmds = command.Merge(m.cmds, agentCommands(msg.List))
 		return nil
+
+	case agent.UIDialog:
+		return m.askDialog(msg)
+
+	case agent.UINotify:
+		// The status line, not the transcript: pi calls notify fire-and-
+		// forget, and our own /hook, /schedule, /trigger and /now answer
+		// through it — a line that appeared in the transcript for every
+		// one of those would bury the turn it is about.
+		return m.notify(notifyLine(msg))
+
+	case agent.UIStatus:
+		m.setExtensionStatus(msg)
+		return nil
+
+	case agent.Compaction:
+		return m.foldCompaction(msg)
+
+	case agent.Retry:
+		return m.foldRetry(msg)
+
+	case agent.ExtensionError:
+		// The only channel that carries "an extension threw". Dropping it
+		// is how a dead extension becomes a command that does nothing.
+		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{
+			"extension error · " + msg.Path + " · in " + msg.Event + " · " + msg.Err,
+		}})
+		return nil
+
+	case agent.SessionMoved:
+		return m.foldSessionMoved(msg)
 	}
 	return nil
+}
+
+// notifyLine renders an extension's notification the way its kind asks.
+//
+// The kind is words rather than colour: this lands on the one status row
+// every terminal has, and a warning that is only distinguishable by a colour
+// the reader cannot see is not a warning.
+func notifyLine(n agent.UINotify) string {
+	switch n.Kind {
+	case "warning":
+		return "warning: " + n.Message
+	case "error":
+		return "error: " + n.Message
+	}
+	return n.Message
+}
+
+// setExtensionStatus records one extension status entry, or clears it.
+//
+// Keyed, because pi keys them (setStatus statusKey): two extensions can each
+// own a slot, and one clearing its own must not clear the other's.
+func (m *Model) setExtensionStatus(s agent.UIStatus) {
+	if s.Key == "" {
+		return
+	}
+	text := strings.Join(strings.Fields(s.Text), " ") // one line, whatever it sent
+	if text == "" {
+		delete(m.extStatus, s.Key)
+		return
+	}
+	m.extStatus[s.Key] = text
+}
+
+// foldCompaction turns the context being rewritten into something the reader
+// can see. They are the things that explain why the model suddenly remembers
+// less, and before this they were silent: the window shrank and no line on
+// screen said so.
+func (m *Model) foldCompaction(c agent.Compaction) tea.Cmd {
+	if c.Started {
+		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{
+			"compacting the context (" + compactionReason(c.Reason) + ") — older turns are being summarised",
+		}})
+		return nil
+	}
+	switch {
+	case c.Aborted:
+		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{
+			"compaction aborted — the context is unchanged",
+		}})
+	case c.Err != "":
+		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{
+			"compaction failed: " + c.Err + " — the context is unchanged",
+		}})
+	default:
+		line := "context compacted"
+		if c.TokensBefore > 0 && c.TokensAfter > 0 {
+			line += " — " + short(c.TokensBefore) + " → " + short(c.TokensAfter) + " tokens"
+		}
+		if c.WillRetry {
+			line += " · the turn retries on the smaller context"
+		}
+		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{line}})
+	}
+	return nil
+}
+
+// compactionReason says WHY in the reader's words, because "threshold" is
+// pi's word for something the reader did not do.
+func compactionReason(r string) string {
+	switch r {
+	case "manual":
+		return "asked for"
+	case "threshold":
+		return "the context filled up"
+	case "overflow":
+		return "the provider's limit was hit"
+	case "":
+		return "automatic"
+	}
+	return r
+}
+
+// foldRetry makes a transient failure visible as a wait rather than a hang.
+//
+// The status line carries the live part — "retrying 1/3" next to the
+// spinner, so the turning spinner stops being the only sign of life — and the
+// transcript carries the outcome, which is the part that matters later.
+func (m *Model) foldRetry(r agent.Retry) tea.Cmd {
+	switch r.Phase {
+	case agent.RetryStart, agent.RetryScheduled:
+		m.extStatus["retry"] = retryState(r)
+		what := retryWhat(r.Kind)
+		line := "retrying " + what
+		if r.Attempt > 0 {
+			line += " (attempt " + itoa(r.Attempt)
+			if r.MaxAttempts > 0 {
+				line += " of " + itoa(r.MaxAttempts)
+			}
+			line += ")"
+		}
+		if r.Delay > 0 {
+			line += " in " + plural(int(r.Delay/time.Second), "second")
+		}
+		if r.Err != "" {
+			line += ": " + oneLine(r.Err)
+		}
+		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{line}})
+		return nil
+
+	case agent.RetryAttempt:
+		m.extStatus["retry"] = "retrying " + retryWhat(r.Kind)
+		return nil
+
+	case agent.RetryEnd, agent.RetryFinished:
+		delete(m.extStatus, "retry")
+		if r.Phase == agent.RetryFinished {
+			return nil // the scheduled/attempt lines already said it
+		}
+		line := "the retry succeeded on attempt " + itoa(r.Attempt)
+		if !r.OK {
+			line = "retries exhausted after " + itoa(r.Attempt) + " attempts"
+			if r.Final != "" {
+				line += ": " + oneLine(r.Final)
+			}
+		}
+		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{line}})
+		return nil
+	}
+	return nil
+}
+
+// retryState is the status line's half of a retry: the answer to "why is it
+// sitting there" while it sits there.
+func retryState(r agent.Retry) string {
+	s := "retrying " + retryWhat(r.Kind)
+	if r.Attempt > 0 {
+		s += " " + itoa(r.Attempt)
+		if r.MaxAttempts > 0 {
+			s += "/" + itoa(r.MaxAttempts)
+		}
+	}
+	return s
+}
+
+func retryWhat(kind string) string {
+	switch kind {
+	case agent.RetryTurn:
+		return "the turn"
+	case agent.RetryComp:
+		return "the compaction summary"
+	case agent.RetryBranch:
+		return "the branch summary"
+	}
+	return "the summarizer"
+}
+
+// foldSessionMoved says what the agent did with a switch_session or
+// new_session — including "nothing".
+//
+// The transcript and the model's context are two different things, and a
+// refused switch is exactly the case where they disagree: the reader is
+// looking at the session they picked while the agent still remembers the
+// previous one. Saying so is the whole point of this branch.
+func (m *Model) foldSessionMoved(s agent.SessionMoved) tea.Cmd {
+	if s.Command == "new_session" {
+		if s.Cancelled {
+			m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{
+				"an extension cancelled the new session — the agent still remembers the turns above",
+			}})
+			return m.notify("new session cancelled — the agent kept its context")
+		}
+		return m.notify("new session — the agent starts from nothing")
+	}
+	file := m.switchTo
+	m.switchTo = ""
+	if s.Cancelled {
+		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{
+			"the switch was refused — the agent is still in the session it had, not the one above",
+		}})
+		return m.notify("switch refused — the agent did not move")
+	}
+	line := "the agent is now in the session you picked — the next prompt continues it"
+	if file != "" {
+		line = "the agent switched to " + filepath.Base(file) + " — the next prompt continues it"
+	}
+	m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{line}})
+	return m.notify("resumed on the agent")
+}
+
+// oneLine bounds a provider error for a transcript line. The first line is
+// what says what happened; a 40-line HTML error body does not help.
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len([]rune(s)) > 160 {
+		return string([]rune(s)[:157]) + "…"
+	}
+	return s
 }
 
 // agentCommands maps the backend's records onto this list's shape.
@@ -274,6 +504,14 @@ func (m *Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.confirm != nil {
 		return m, m.confirmKey(msg)
 	}
+	// 1b. A dialog from an extension owns esc everywhere. Leaving it
+	// unanswered parks the extension that asked, and "esc goes up one level"
+	// must never mean "esc walks away from a question the agent is blocked
+	// on". Cancelling is an answer — pi reads cancelled:true — so this is
+	// the one key that resolves without choosing.
+	if m.dialogWaiting() && key.Matches(msg, m.keys.Back) {
+		return m, m.cancelDialog()
+	}
 	// 2. Global chords, always, in every other mode.
 	if cmd, handled := m.global(msg); handled {
 		return m, cmd
@@ -306,6 +544,16 @@ func (m *Model) global(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if m.editor != nil {
 		return nil, false
 	}
+	// A question the agent is blocked on owns the keyboard too, with one
+	// exception on each side: ^c still interrupts (pi resolves a waiting
+	// dialog when the turn aborts) and ^d still quits. Everything else is
+	// held back rather than swallowed — returning handled=false sends the
+	// key on to the dialog, which is where the answer keys live. A ^k that
+	// opened a palette over an unanswered dialog would take the question off
+	// the screen while the extension sits parked on it.
+	if m.dialogWaiting() && !key.Matches(msg, k.Quit) && !key.Matches(msg, k.Interrupt) {
+		return nil, false
+	}
 	switch {
 	case key.Matches(msg, k.Quit):
 		if m.ov == nil && m.prompt.Empty() {
@@ -319,7 +567,16 @@ func (m *Model) global(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			m.working = false
 			m.settle()
 			m.lastInterrupt = time.Now()
-			return tea.Batch(m.agent.Interrupt(), m.notify("interrupted")), true
+			notice := "interrupted"
+			if m.dialogWaiting() {
+				// pi resolves a waiting dialog with its default when the
+				// turn aborts. Leaving it on screen would keep asking a
+				// question whose asker has already moved on — and answering
+				// it would write a response to nothing.
+				m.abandonDialogs()
+				notice = "interrupted — the pending question was dropped"
+			}
+			return tea.Batch(m.agent.Interrupt(), m.notify(notice)), true
 		}
 		// First, the draft — pi's ctrl+c clears the editor before it quits
 		// anything. A wrong draft is the everyday case; quitting is the
@@ -510,6 +767,12 @@ func (m *Model) insertKey(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Batch(m.agent.Steer(text), m.notify("steering"))
 
 	case key.Matches(msg, k.Send):
+		// An extension's text question owns enter: while one is waiting,
+		// enter is the answer, not a message. The value goes back verbatim —
+		// an empty answer is a legitimate answer to "type something".
+		if m.answeringText() {
+			return m.answerInput()
+		}
 		text := m.prompt.Take()
 		if text == "" {
 			return nil
@@ -557,6 +820,13 @@ func (m *Model) insertKey(msg tea.KeyPressMsg) tea.Cmd {
 func (m *Model) suggest() {
 	v := m.prompt.Value()
 	m.mention = false
+	// A text answer is not a command line. A slash menu over an extension's
+	// question would turn enter into "run the highlighted command" for text
+	// the reader meant as an answer.
+	if m.answeringText() {
+		m.prompt.Suggest(nil)
+		return
+	}
 	if strings.HasPrefix(v, "/") {
 		if strings.ContainsAny(v, " \n") {
 			m.prompt.Suggest(nil)
@@ -730,6 +1000,12 @@ func (m *Model) slash(line string) tea.Cmd {
 	if i := strings.IndexAny(name, " \n"); i >= 0 {
 		name = name[:i]
 	}
+	// /new is the same operation under pi's own name for it (new_session).
+	// It is answered here rather than listed as a second builtin: two rows
+	// for one thing in the palette is how a list stops being a list.
+	if name == "new" {
+		return m.newSession()
+	}
 	if c, ok := command.Find(m.cmds, name); ok {
 		return m.runSlash(c, argsAfter(line))
 	}
@@ -800,10 +1076,12 @@ func (m *Model) runSlash(c command.Command, args string) tea.Cmd {
 	case "copy":
 		m.chat.ClearFocus()
 		return m.copy(m.chat.YankFocused(), "transcript")
-	case "clear":
-		m.chat.Clear()
-		m.welcome()
-		return m.notify("new session")
+	case "clear", "new":
+		// /new and /clear are the same thing — this interface's name for
+		// pi's new_session — and pi is told, not just the view: a transcript
+		// that clears while the model keeps remembering is a lie the next
+		// prompt exposes.
+		return m.newSession()
 	case "quit":
 		m.quitting = true
 		return tea.Quit
@@ -983,6 +1261,14 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.memEditorKey(msg)
 	}
 
+	// A dialog is the one overlay that is not a surface to browse: esc is an
+	// answer here (pi's cancelled:true), not a dismissal, so it is handled
+	// before the generic close below — and everything else falls through to
+	// the list, where enter answers.
+	if ov.Kind == overlay.Dialog && key.Matches(msg, k.Back) {
+		return m.cancelDialog()
+	}
+
 	if key.Matches(msg, k.Back) {
 		if m.ov.Kind == overlay.Models {
 			m.wizard = "" // skipping the wizard's model step is a choice, not a stuck flag
@@ -1078,6 +1364,11 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 
 func (m *Model) chooseOverlay() tea.Cmd {
 	ov := m.ov
+	// A dialog's enter is the answer. It goes before the other kinds
+	// because the row under the cursor is a reply, not an action.
+	if ov.Kind == overlay.Dialog {
+		return m.chooseDialog()
+	}
 	// The models list gets its enter BEFORE anything about a selection:
 	// enter on empty is a question — "write it anyway" — answered by
 	// whatever the filter query holds: a typed model name, or the build's
@@ -1134,11 +1425,18 @@ func (m *Model) chooseOverlay() tea.Cmd {
 	}
 }
 
-// resume replays a stored session into the transcript.
+// resume replays a stored session into the transcript AND tells the agent to
+// move to it.
 //
 // The whole conversation, rendered through the same blocks a live turn uses.
 // A summary card would be quicker and would make resuming feel like opening a
 // receipt rather than picking a conversation back up.
+//
+// The replay is only a view: without switch_session the next prompt would go
+// to the session this process was launched with, and the reader would be
+// looking at one conversation while the model answered from another. The
+// acknowledgement comes back as agent.SessionMoved and says which way it
+// went — including "refused".
 func (m *Model) resume(file string) tea.Cmd {
 	s, ok := session.Read(file)
 	if !ok {
@@ -1151,7 +1449,20 @@ func (m *Model) resume(file string) tea.Cmd {
 	for _, e := range session.Transcript(file, pi.SummariseArgs) {
 		m.chat.Append(entryBlock(e))
 	}
-	return m.notify("resumed " + itoa(s.Messages) + " messages from " + filepath.Base(file))
+	m.switchTo = file
+	return tea.Batch(
+		m.agent.SwitchSession(file),
+		m.notify("resumed "+itoa(s.Messages)+" messages from "+filepath.Base(file)),
+	)
+}
+
+// newSession starts a fresh conversation on both sides of the boundary: the
+// transcript clears here, and the agent is told to start one, so the two
+// cannot drift apart.
+func (m *Model) newSession() tea.Cmd {
+	m.chat.Clear()
+	m.welcome()
+	return tea.Batch(m.agent.NewSession(), m.notify("new session — the agent starts from nothing"))
 }
 
 func entryBlock(e session.Entry) *chat.Block {
@@ -1251,11 +1562,7 @@ func (m *Model) actions() []action {
 				return m.copy(m.chat.YankFocused(), "transcript")
 			}},
 		{"new", "start a new session", "",
-			func(m *Model) tea.Cmd {
-				m.chat.Clear()
-				m.welcome()
-				return m.notify("new session")
-			}},
+			func(m *Model) tea.Cmd { return m.newSession() }},
 	}
 }
 
@@ -2012,9 +2319,11 @@ func (m *Model) chooseModel(id, wizard string) tea.Cmd {
 }
 
 // chooseTypedModel is the catalogue-less fallback: enter with no row picked
-// uses what was typed as the model name. An empty typed name on the wizard
-// step keeps the canonical default of the build — deepseek-v4-flash under
-// opencode-go — so first run works even when the agent cannot be asked.
+// uses what was typed as the model name. An empty typed name asks the
+// provider's row in auth.DefaultModels — the table decides, not this branch,
+// so adding a provider never means editing the wizard. A provider with no
+// row gets the question back instead: "type a model name, or pick one from
+// the list".
 func (m *Model) chooseTypedModel(wizard, query string) tea.Cmd {
 	query = strings.TrimSpace(query)
 	provider := wizard
@@ -2025,11 +2334,11 @@ func (m *Model) chooseTypedModel(wizard, query string) tea.Cmd {
 		}
 	}
 	if query == "" {
-		if provider == "opencode-go" {
-			query = "deepseek-v4-flash"
-		} else {
+		def, ok := auth.DefaultModels[provider]
+		if !ok {
 			return m.notify("type a model name, or pick one from the list")
 		}
+		query = def
 	}
 	return m.applyModel(provider, query, wizard == "")
 }

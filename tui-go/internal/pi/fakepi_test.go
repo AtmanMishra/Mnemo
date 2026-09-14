@@ -25,6 +25,7 @@ const (
 	envFakePi   = "MNEMO_TEST_FAKE_PI"
 	envFakeLine = "MNEMO_TEST_FAKE_PI_RECEIVED" // where the fake records what it was sent
 	envFakeMute = "MNEMO_TEST_FAKE_PI_MUTE"     // set: read requests, never answer them
+	envFakeUI   = "MNEMO_TEST_FAKE_PI_UI"       // a line the fake emits at startup, e.g. a dialog
 )
 
 // TestMain is also the stand-in agent's entry point: when the environment says
@@ -42,6 +43,12 @@ func TestMain(m *testing.M) {
 func fakePiMain() int {
 	capture := os.Getenv(envFakeLine)
 	mute := os.Getenv(envFakeMute) == "1"
+	// One line said before anything is read: how a question from an extension
+	// arrives without a real pi. Printed first, so it is the first thing the
+	// client sees.
+	if ui := os.Getenv(envFakeUI); ui != "" {
+		fmt.Println(ui)
+	}
 	in := bufio.NewScanner(os.Stdin)
 	for in.Scan() {
 		line := strings.TrimSpace(in.Text())
@@ -163,15 +170,169 @@ func TestABackendThatNeverAnswersCostsNothing(t *testing.T) {
 // waitForRequest polls a capture file until it holds want, or fails.
 func waitForRequest(t *testing.T, path, want string) {
 	t.Helper()
+	waitForLine(t, path, want)
+}
+
+// waitForLine polls a capture file until one line contains want, and returns
+// that line.
+func waitForLine(t *testing.T, path, want string) string {
+	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		raw, err := os.ReadFile(path)
-		if err == nil && strings.Contains(string(raw), want) {
-			return
+		if err == nil {
+			for _, l := range strings.Split(string(raw), "\n") {
+				if strings.Contains(l, want) {
+					return l
+				}
+			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the request never arrived at the stand-in agent: %v (%q)", err, raw)
+			t.Fatalf("no line containing %q arrived at the stand-in agent: %v (%q)", want, err, raw)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// liveFakeUI starts a session whose stand-in agent asks one question at
+// startup. That is how a dialog reaches the client without a real pi: the
+// question is an ordinary line on stdout, printed before the fake reads
+// anything.
+func liveFakeUI(t *testing.T, request string) (*Session, string) {
+	t.Helper()
+	capture := filepath.Join(t.TempDir(), "received.jsonl")
+	t.Setenv(envFakePi, "1")
+	t.Setenv(envFakeLine, capture)
+	t.Setenv(envFakeUI, request)
+	s, err := Start(exec.Command(os.Args[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s, capture
+}
+
+// nextDialog reads until the question arrives, stepping over whatever else
+// the stand-in agent had queued (the get_commands reply).
+func nextDialog(t *testing.T, s *Session) agent.UIDialog {
+	t.Helper()
+	for i := 0; i < 5; i++ {
+		if d, ok := next(t, s).(agent.UIDialog); ok {
+			return d
+		}
+	}
+	t.Fatal("the stand-in agent asked a question; the client never surfaced it")
+	return agent.UIDialog{}
+}
+
+// TestAConfirmFromAnExtensionIsAnsweredOnTheWire: the whole loop. The fake
+// asks; the client's answer is a line on the child's stdin, keyed by the id
+// PI chose — not by this session's request counter, which would answer
+// nothing — and carrying `confirmed`, the one field pi reads for a confirm.
+func TestAConfirmFromAnExtensionIsAnsweredOnTheWire(t *testing.T) {
+	s, capture := liveFakeUI(t, `{"type":"extension_ui_request","id":"uuid-2","method":"confirm","title":"Clear session?","message":"All messages will be lost.","timeout":5000}`)
+
+	d := nextDialog(t, s)
+	if d.ID != "uuid-2" || d.Method != "confirm" || d.Title != "Clear session?" || d.Message != "All messages will be lost." {
+		t.Fatalf("the question must arrive intact — it is what the reader answers: %#v", d)
+	}
+	if msg := s.Answer(d, agent.UIAnswer{Confirmed: true})(); msg != nil {
+		t.Fatalf("answering must not fail: %#v", msg)
+	}
+
+	v := parseLine(t, waitForLine(t, capture, `"extension_ui_response"`))
+	if v["id"] != "uuid-2" {
+		t.Fatalf("the response must carry pi's id, got %v", v["id"])
+	}
+	if v["confirmed"] != true {
+		t.Fatalf("a confirm answer is `confirmed`, got %#v", v)
+	}
+	if _, has := v["value"]; has {
+		t.Fatalf("`value` answers a different question than `confirmed`: %#v", v)
+	}
+}
+
+// TestADismissalIsCancelledNotAnAnswer: cancelling is its own response
+// (`cancelled: true`), because to the extension a dismissed confirm is
+// `false` and a dismissed text ask is `undefined` — neither is "answered".
+func TestADismissalIsCancelledNotAnAnswer(t *testing.T) {
+	s, capture := liveFakeUI(t, `{"type":"extension_ui_request","id":"uuid-3","method":"input","title":"Enter a value"}`)
+
+	d := nextDialog(t, s)
+	if msg := s.Answer(d, agent.UIAnswer{Cancelled: true})(); msg != nil {
+		t.Fatalf("cancelling must not fail: %#v", msg)
+	}
+
+	v := parseLine(t, waitForLine(t, capture, `"extension_ui_response"`))
+	if v["id"] != "uuid-3" || v["cancelled"] != true {
+		t.Fatalf("got %#v", v)
+	}
+	if _, has := v["value"]; has {
+		t.Fatalf("a cancelled dialog resolves to undefined, not to a value: %#v", v)
+	}
+}
+
+// TestATextAnswerCarriesTheValue: select, input and editor all answer with
+// `value`, and an empty one is still an answer.
+func TestATextAnswerCarriesTheValue(t *testing.T) {
+	for _, c := range []struct{ method, value string }{
+		{"select", "Allow"},
+		{"input", "hello world"},
+		{"editor", "Line 1\nLine 2"},
+	} {
+		s, capture := liveFakeUI(t, `{"type":"extension_ui_request","id":"uuid-4","method":"`+c.method+`","title":"asking"}`)
+		d := nextDialog(t, s)
+		if msg := s.Answer(d, agent.UIAnswer{Value: c.value})(); msg != nil {
+			t.Fatalf("%s: answering must not fail: %#v", c.method, msg)
+		}
+		v := parseLine(t, waitForLine(t, capture, `"extension_ui_response"`))
+		if v["value"] != c.value {
+			t.Fatalf("%s: value = %#v, want %q", c.method, v["value"], c.value)
+		}
+		if _, has := v["confirmed"]; has {
+			t.Fatalf("%s: a text answer is `value`, got %#v", c.method, v)
+		}
+	}
+}
+
+// TestSwitchSessionGoesOverTheWire: the command name and the field name are
+// pi's (sessionPath, not sessionFile), and a switch is only real if pi is
+// told about it — the transcript above it is a replay either way.
+func TestSwitchSessionGoesOverTheWire(t *testing.T) {
+	s, capture := liveFake(t, false)
+	if msg := s.SwitchSession("/sessions/other.jsonl")(); msg != nil {
+		t.Fatalf("switching must not fail: %#v", msg)
+	}
+	v := parseLine(t, waitForLine(t, capture, `"switch_session"`))
+	if v["type"] != "switch_session" {
+		t.Fatalf("got %#v", v)
+	}
+	if v["sessionPath"] != "/sessions/other.jsonl" {
+		t.Fatalf("switch_session reads sessionPath in pi's own types; got %#v", v)
+	}
+	if v["id"] == nil {
+		t.Fatal("a command without an id is one pi's reply cannot be matched to")
+	}
+}
+
+// TestNewSessionGoesOverTheWire: /new and /clear clear the view, and this is
+// what makes the model's context agree with it.
+func TestNewSessionGoesOverTheWire(t *testing.T) {
+	s, capture := liveFake(t, false)
+	if msg := s.NewSession()(); msg != nil {
+		t.Fatalf("starting a session must not fail: %#v", msg)
+	}
+	v := parseLine(t, waitForLine(t, capture, `"new_session"`))
+	if v["type"] != "new_session" {
+		t.Fatalf("got %#v", v)
+	}
+}
+
+func parseLine(t *testing.T, line string) map[string]any {
+	t.Helper()
+	var v map[string]any
+	if err := json.Unmarshal([]byte(line), &v); err != nil {
+		t.Fatalf("the request must be one JSON line: %v (%q)", err, line)
+	}
+	return v
 }

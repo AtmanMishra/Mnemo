@@ -42,6 +42,21 @@ func (s *Script) Next() tea.Cmd {
 func (s *Script) Model() string { return "scripted" }
 func (s *Script) Close() error  { return nil }
 
+func (s *Script) SwitchSession(path string) tea.Cmd {
+	s.sent = append(s.sent, "switch_session "+path)
+	return nil
+}
+
+func (s *Script) NewSession() tea.Cmd {
+	s.sent = append(s.sent, "new_session")
+	return nil
+}
+
+func (s *Script) Answer(d UIDialog, a UIAnswer) tea.Cmd {
+	s.sent = append(s.sent, "answer "+d.ID)
+	return nil
+}
+
 // TestAWholeTurnStreamsInTheOrderTheTranscriptAssumes: the interface builds
 // its blocks on this exact order — a tool block opens on ToolStart and is
 // filled by ToolEnd, a delegation nests under the turn, stats land when the

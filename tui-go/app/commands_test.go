@@ -37,6 +37,35 @@ func (d *dial) Next() tea.Cmd             { return nil }
 func (d *dial) Model() string             { return "dial" }
 func (d *dial) Close() error              { return nil }
 
+func (d *dial) SwitchSession(path string) tea.Cmd {
+	d.keep("switch_session " + path)
+	return nil
+}
+
+func (d *dial) NewSession() tea.Cmd {
+	d.keep("new_session")
+	return nil
+}
+
+func (d *dial) Answer(dlg agent.UIDialog, a agent.UIAnswer) tea.Cmd {
+	switch {
+	case a.Cancelled:
+		d.keep("cancelled " + dlg.ID)
+	case dlg.Method == "confirm":
+		d.keep("confirm " + yesNo(a.Confirmed) + " " + dlg.ID)
+	default:
+		d.keep(dlg.Method + " " + a.Value + " " + dlg.ID)
+	}
+	return nil
+}
+
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
 func (d *dial) keep(text string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -337,6 +338,14 @@ func (m *Model) status() string {
 		return ui.Band(m.th, m.inner(), left, nil)
 	}
 
+	// A question from an extension owns it too — it is the other thing that
+	// is waiting on you. Its title has to be on screen while you type the
+	// answer, or the answer is a guess.
+	if m.answeringText() {
+		left = append(left, ui.Seg{Text: m.answerLine(), Style: m.th.Warn})
+		return ui.Band(m.th, m.inner(), left, nil)
+	}
+
 	// A live search owns the row. The query has to be visible to be
 	// correctable, and the count next to it is what tells you the word you
 	// half-remembered is in here at all.
@@ -376,6 +385,15 @@ func (m *Model) status() string {
 		hints := m.keys.Hints(m.hintMode(), m.working)
 		if m.ov != nil {
 			hints = m.keys.OverlayHints(m.ov.IsTree())
+			if m.ov.Kind == overlay.Dialog {
+				// A dialog advertises its own two keys and nothing else: the
+				// overlay's generic "j k open close" would describe a list
+				// you are not browsing.
+				hints = []keymap.Entry{
+					{Key: "enter", Desc: "answer"},
+					{Key: "esc", Desc: "cancel"},
+				}
+			}
 			if m.ov.Kind == overlay.Memory && !m.editing() {
 				// The memory list's writers belong on the row with the reader,
 				// like the forget key — but only where they can actually fire.
@@ -405,6 +423,12 @@ func (m *Model) status() string {
 	}
 
 	right := []ui.Seg{}
+	// What extensions wrote with setStatus, and any retry in progress. Both
+	// are the answer to "what is happening that the transcript does not
+	// say", and both stay until the writer that owns them clears them.
+	for _, k := range m.statusKeys() {
+		right = append(right, ui.Seg{Text: m.extStatus[k], Style: m.th.Muted})
+	}
 	if m.working {
 		right = append(right, ui.Seg{
 			Text:  theme.Spinner[m.tick%len(theme.Spinner)] + " working · ^c stops",
@@ -451,6 +475,20 @@ func (m *Model) modeName() string {
 		return "explorer"
 	}
 	return m.mode.String()
+}
+
+// statusKeys is the extension status entries in a stable order.
+//
+// Map iteration order in Go is randomised, and a status line whose segments
+// change places between frames reads as flicker. Sorted is the one order
+// that is the same on every frame.
+func (m *Model) statusKeys() []string {
+	keys := make([]string, 0, len(m.extStatus))
+	for k := range m.extStatus {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // short renders a token count in three characters or so. The exact number is
