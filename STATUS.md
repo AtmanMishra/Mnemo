@@ -131,6 +131,7 @@ Task tracking moved to plan.md (7 areas). This file records outcomes/verificatio
 | research/memory-design-spec.md / memory-layer-notes.md | memory core design + research |
 | research/pi-agent-report.md / deepseek-harness-and-scrapling-report.md | upstream studies |
 | research/programmatic-tool-calling.md | in-kernel tool dispatch to reduce round-trips (tasks 4.6-4.7) |
+| research/hermes-command-surface-review.md | command/tool/skill/extension surfaces: Hermes as the reference, Mnemo's three registries, eight proposals (P1-P8), and what was verified against a live agent |
 
 **Note:** AREA 8 consolidated the application into a single binary (`mnemo-agent`). The AREA sections below include historical records of previous binaries (seatui, memtui, mnemo-cockpit) that have been superseded. Refer to the final AREA 8 section for current state.
 
