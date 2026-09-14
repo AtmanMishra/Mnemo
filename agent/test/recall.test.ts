@@ -90,15 +90,14 @@ test("the directive no longer demands a search that already happened", () => {
 });
 
 /**
- * ML-2: the recall hook marks every node it pulled into context as useful —
- * one fire-and-forget mark_useful per picked hit. A vote must never slow or
- * break the turn: not awaited, errors swallowed.
+ * Retrieval is only exposure. The lifecycle hook can credit later use, but
+ * recall itself must not train the ranking on its own choices.
  */
 function hitNode(label: string, score: number, node: number): Recalled {
   return { kind: "Aspect", label, node, score, state: `[Aspect] ${label}\nfacts:\n  - k: v` };
 }
 
-test("recalled nodes earn one useful vote each, fire-and-forget", async () => {
+test("retrieval alone never earns usefulness votes", async () => {
   const votes: Array<[string, any]> = [];
   const c = {
     request: async (m: string, p?: any) => {
@@ -111,12 +110,7 @@ test("recalled nodes earn one useful vote each, fire-and-forget", async () => {
   };
   const out = await recallFor(c, "when is the deploy window");
   assert.match(out, /Recalled from memory/);
-  // the long tail (c, 0.2 < 0.6 * best) is not voted on: only what entered
-  // the prompt earns a vote
-  assert.deepEqual(votes, [
-    ["mark_useful", { node: 11 }],
-    ["mark_useful", { node: 22 }],
-  ]);
+  assert.deepEqual(votes, []);
 });
 
 test("a failing vote never breaks the recall path", async () => {

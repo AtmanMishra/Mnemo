@@ -4,8 +4,8 @@
 //!
 //! This is the no-LLM part of phase 3: it proves/disproves that the memory
 //! layer RETRIEVES the right knowledge. Task-success evals come later.
+//! --hash stays offline; --json emits the unrounded metrics for CI.
 use memory_layer::model::*;
-use memory_layer::persist::Journal;
 use memory_layer::remote::OpenRouterEmbedder;
 use memory_layer::search::{build_vectors, route_query, search, SearchOpts};
 use memory_layer::store::StoreData;
@@ -15,8 +15,9 @@ fn t() -> Millis { 1_700_000_000_000 }
 
 /// Three domains x aspects, facts, cross-links, one superseded fact.
 fn build_graph(s: &mut StoreData) {
-    let mut j = Journal::open("/dev/null").unwrap(); // ops only applied, not persisted
-    let mut apply = |s: &mut StoreData, op: Op| { s.apply(&op).unwrap(); };
+    // The fixture is entirely in memory; opening a journal adds no evidence
+    // and /dev/null is not a portable path on Windows.
+    let apply = |s: &mut StoreData, op: Op| { s.apply(&op).unwrap(); };
     let mut nid = 0u64;
 
     let domains: &[(&str, &[(&str, &str)])] = &[
@@ -105,22 +106,31 @@ fn build_graph(s: &mut StoreData) {
         value: "run helm history, pick the last good revision, roll back with wait".into(),
         at: t() + 111 });
 
-    // silence unused journal warning
-    let _ = &j;
 }
 
 fn main() {
     let force_hash = std::env::args().any(|a| a == "--hash");
+    let json = std::env::args().any(|a| a == "--json");
     let mut s = StoreData::new();
     build_graph(&mut s);
-    load_dotenv();
+    if !force_hash { load_dotenv(); }
+    let embedder_name;
     let emb: std::sync::Arc<dyn Embedder> = if force_hash {
-        println!("embedder: hashing (--hash)");
+        embedder_name = "hashing".to_string();
+        if !json { println!("embedder: hashing (--hash)"); }
         std::sync::Arc::new(HashingEmbedder)
     } else {
         match OpenRouterEmbedder::from_env(std::path::Path::new("data")) {
-            Some(e) => { println!("embedder: OpenRouter {}", e.model_name()); std::sync::Arc::new(e) }
-            None => { println!("embedder: hashing"); std::sync::Arc::new(HashingEmbedder) }
+            Some(e) => {
+                embedder_name = format!("OpenRouter {}", e.model_name());
+                if !json { println!("embedder: {embedder_name}"); }
+                std::sync::Arc::new(e)
+            }
+            None => {
+                embedder_name = "hashing".to_string();
+                if !json { println!("embedder: hashing"); }
+                std::sync::Arc::new(HashingEmbedder)
+            }
         }
     };
 
@@ -158,7 +168,7 @@ fn main() {
 
     let vectors = build_vectors(&s, emb.as_ref());
     let mut hits1 = 0; let mut hits3 = 0; let mut rr_sum = 0.0;
-    println!("{:<42} {:<22} {}", "query", "top hit", "rank");
+    if !json { println!("{:<42} {:<22} {}", "query", "top hit", "rank"); }
     for (q, wants) in cases {
         // same path memsrv takes: kind filter + routed area preference
         let opts = SearchOpts::kind(NodeKind::Aspect).prefer(route_query(q));
@@ -172,11 +182,21 @@ fn main() {
         if rank == 1 { hits1 += 1; }
         if rank <= 3 { hits3 += 1; }
         rr_sum += 1.0 / rank as f32;
-        println!("{:<42} {:<22} {}", q, labels.first().map(String::as_str).unwrap_or("-"), rank);
+        if !json { println!("{:<42} {:<22} {}", q, labels.first().map(String::as_str).unwrap_or("-"), rank); }
     }
     let n = cases.len() as f32;
-    println!("\nHit@1 {:.0}%  Hit@3 {:.0}%  MRR {:.3}  (n={})",
-        100.0 * hits1 as f32 / n, 100.0 * hits3 as f32 / n, rr_sum / n, cases.len());
+    if json {
+        println!("{}", serde_json::json!({
+            "embedder": embedder_name, "n": cases.len(),
+            "hits_at_1": hits1, "hits_at_3": hits3,
+            "hit_at_1_percent": 100.0 * hits1 as f32 / n,
+            "hit_at_3_percent": 100.0 * hits3 as f32 / n,
+            "mrr": rr_sum / n,
+        }));
+    } else {
+        println!("\nHit@1 {:.0}%  Hit@3 {:.0}%  MRR {:.3}  (n={})",
+            100.0 * hits1 as f32 / n, 100.0 * hits3 as f32 / n, rr_sum / n, cases.len());
+    }
 }
 
 fn load_dotenv() {

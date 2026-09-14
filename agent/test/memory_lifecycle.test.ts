@@ -10,7 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { MemClient, registerLifecycle, newLifecycleState, autoSteer,
-         consolidateIfDue, CONSOLIDATE_THRESHOLD } from "../extensions/memory-layer.ts";
+         consolidateIfDue, CONSOLIDATE_THRESHOLD, makeMemoryTools } from "../extensions/memory-layer.ts";
 
 interface FakePi {
   on(name: string, h: (...args: any[]) => any): void;
@@ -26,6 +26,190 @@ function fakePi(): FakePi {
     handlers,
   };
 }
+
+function capturedLifecycle() {
+  const calls: Array<{ method: string; params: any }> = [];
+  const client = new MemClient();
+  client.request = async (method, params = {}) => {
+    calls.push({ method, params });
+    return { ok: true, result: { episode: 7, episodes: 0 } };
+  };
+  const pi = fakePi();
+  const state = newLifecycleState();
+  registerLifecycle(pi, client, state);
+  return { calls, client, state, handlers: pi.handlers };
+}
+
+test("an unwritten session creates no episode, even on shutdown", async () => {
+  const { calls, handlers } = capturedLifecycle();
+  await handlers.session_start();
+  await handlers.before_agent_start({ systemPrompt: "system", prompt: "hello" });
+  await handlers.session_shutdown();
+  assert.deepEqual(calls.map((c) => c.method), ["stats", "stats"]);
+});
+
+test("first fact, log or steer creates one shared episode, never at session start", async () => {
+  for (const first of ["fact", "log", "steer"]) {
+    const { client, state, calls, handlers } = capturedLifecycle();
+    await handlers.session_start();
+    assert.equal(state.episodeId, null);
+    const tools = makeMemoryTools(client, state);
+    if (first === "fact") {
+      await tools.find((t) => t.name === "memory_write_fact").execute("1", { node: 42, key: "port", value: "8080" });
+    } else if (first === "steer") {
+      await tools.find((t) => t.name === "memory_steer").execute("1", { failure: "build failed" });
+    } else {
+      await handlers.tool_execution_end({ toolName: "read_file", isError: false });
+    }
+    await handlers.turn_end({ message: { stopReason: "stop" } });
+    await handlers.session_shutdown();
+    assert.equal(calls.filter((c) => c.method === "episode").length, 1, first);
+    assert.equal(state.episodeId, 7);
+    assert.ok(calls.some((c) => c.method === "commit_log" && c.params.node === 7));
+  }
+});
+
+test("concurrent first writes share episode creation and a failed creation can retry", async () => {
+  const { client, state, calls, handlers } = capturedLifecycle();
+  await handlers.session_start();
+  const request = client.request;
+  client.request = async () => ({ ok: false, error: "offline" });
+  await handlers.tool_execution_end({ toolName: "read_file", isError: false });
+  assert.equal(state.episodeId, null);
+  client.request = request;
+  await Promise.all([1, 2].map(() => handlers.tool_execution_end({ toolName: "read_file", isError: false })));
+  assert.equal(calls.filter((c) => c.method === "episode").length, 1);
+});
+
+test("a reused lifecycle starts the next session empty with fresh turn numbering", async () => {
+  const { calls, handlers, state } = capturedLifecycle();
+  await handlers.session_start();
+  await handlers.turn_end({ message: { stopReason: "stop" } });
+  await handlers.session_shutdown();
+  await handlers.session_start();
+  assert.equal(state.episodeId, null);
+  await handlers.turn_end({ message: { stopReason: "stop" } });
+  assert.equal(calls.filter((c) => c.method === "episode").length, 2);
+  assert.equal(calls.filter((c) => c.method === "fact" && c.params.key === "turn 1: quality").length, 2);
+});
+
+async function recalledLifecycle() {
+  const setup = capturedLifecycle();
+  const request = setup.client.request;
+  setup.client.request = async (method, params = {}) => {
+    if (method === "search") return { ok: true, result: { results: [
+      { node: 11, kind: "Aspect", score: 0.9, label: "deploy settings",
+        state: "[Aspect] deploy settings #11\nfacts:\n  - command: kubeseal encrypt" },
+      { node: 22, kind: "Aspect", score: 0.8, label: "deploy settings",
+        state: "[Aspect] deploy settings #22\nfacts:\n  - command: terraform workspace" },
+    ] } };
+    return request(method, params);
+  };
+  await setup.handlers.session_start();
+  await setup.handlers.before_agent_start({ systemPrompt: "system", prompt: "what are the deploy settings" });
+  return { ...setup, votes: () => setup.calls.filter((c) => c.method === "mark_useful") };
+}
+
+test("recall credits an echoed fact once and leaves an ignored node unvoted", async () => {
+  const { handlers, votes } = await recalledLifecycle();
+  assert.deepEqual(votes(), [], "retrieval is not use");
+  await handlers.turn_end({ message: { stopReason: "stop", content: [
+    { type: "text", text: "Use KUBESEAL to ENCRYPT the manifests." },
+  ] } });
+  assert.deepEqual(votes().map((c) => c.params), [{ node: 11 }]);
+});
+
+test("recall credits later tool arguments once, never the tool result or another turn", async () => {
+  const { handlers, votes } = await recalledLifecycle();
+  await handlers.tool_execution_start({ args: { command: "kubeseal encrypt" } });
+  await handlers.tool_execution_start({ args: { command: "kubeseal encrypt" } });
+  await handlers.tool_execution_end({ toolName: "bash_exec", isError: false, result: "terraform workspace" });
+  await handlers.turn_end({ message: { stopReason: "toolUse", content: [] } });
+  await handlers.tool_execution_start({ args: { command: "terraform workspace" } });
+  await handlers.turn_end({ message: { stopReason: "stop", content: [{ type: "text", text: "terraform workspace" }] } });
+  assert.deepEqual(votes().map((c) => c.params), [{ node: 11 }]);
+});
+
+test("shared recall words, hidden reasoning and substrings are not evidence of use", async () => {
+  const { handlers, votes } = await recalledLifecycle();
+  await handlers.turn_end({ message: { stopReason: "stop", content: [
+    { type: "thinking", thinking: "kubeseal encrypt" },
+    { type: "text", text: "deploy settings command kubesealed encryption" },
+  ] } });
+  assert.deepEqual(votes(), []);
+});
+
+test("usefulness feedback tolerates throwing, rejecting and stalled sidecars", async () => {
+  for (const mode of ["throw", "reject", "stall"]) {
+    const { client, handlers } = await recalledLifecycle();
+    const request = client.request;
+    client.request = (method, params) => {
+      if (method !== "mark_useful") return request(method, params);
+      if (mode === "throw") throw new Error("dead sidecar");
+      if (mode === "reject") return Promise.reject(new Error("dead sidecar"));
+      return new Promise(() => {});
+    };
+    await handlers.tool_execution_start({ args: { command: "kubeseal encrypt" } });
+    await handlers.turn_end({ message: { stopReason: "stop", content: [] } });
+  }
+});
+
+test("turn quality records ok, partial and failed with per-turn counts in facts and logs", async () => {
+  const { calls, handlers } = capturedLifecycle();
+  await handlers.session_start();
+  for (const [index, errors, stopReason, quality] of [
+    [0, [], "stop", "ok"],
+    [1, [false, true], "stop", "partial"],
+    [2, [true], "error", "failed"],
+    [3, [], "error", "failed"],
+    [4, [false], "toolUse", "ok"],
+  ] as const) {
+    // turn_end repeats tool results; they must not count twice.
+    for (const isError of errors) {
+      await handlers.tool_execution_end({ toolName: "read_file", isError });
+    }
+    await handlers.turn_end({ turnIndex: index, message: { stopReason },
+      toolResults: errors.map((isError) => ({ isError })) });
+    assert.ok(calls.some((c) => c.method === "fact" && c.params.node === 7
+      && c.params.key === `turn ${index + 1}: quality` && c.params.value === quality));
+    const notes = `tools=${errors.length}; errors=${errors.filter(Boolean).length}; stop=${stopReason}`;
+    assert.ok(calls.some((c) => c.method === "fact"
+      && c.params.key === `turn ${index + 1}: notes` && c.params.value === notes));
+    assert.ok(calls.some((c) => c.method === "commit_log" && c.params.kind === "turn_quality"
+      && c.params.detail === `turn ${index + 1}: ${quality}; ${notes}`));
+  }
+});
+
+test("turn quality uses turn_end results even when execution hooks did not run", async () => {
+  const { calls, handlers } = capturedLifecycle();
+  await handlers.session_start();
+  await handlers.turn_end({ message: { stopReason: "stop" }, toolResults: [{ isError: true }] });
+  assert.ok(calls.some((c) => c.method === "fact" && c.params.value === "partial"));
+  assert.ok(calls.some((c) => c.method === "fact" && c.params.value === "tools=1; errors=1; stop=stop"));
+});
+
+test("turn quality survives sidecar failure and clears counts before the next turn", async () => {
+  const { client, calls, handlers } = capturedLifecycle();
+  await handlers.session_start();
+  const request = client.request;
+  client.request = async () => { throw new Error("sidecar died"); };
+  await handlers.tool_execution_end({ toolName: "read_file", isError: true });
+  await handlers.turn_end({ message: { stopReason: "error" } });
+  client.request = request;
+  await handlers.turn_end({ message: { stopReason: "stop" } });
+  assert.ok(calls.some((c) => c.method === "fact" && c.params.key === "turn 2: quality"
+    && c.params.value === "ok"));
+});
+
+test("a quality write failure does not suppress existing turn failure steering", async () => {
+  const { client, calls, handlers } = capturedLifecycle();
+  await handlers.session_start();
+  const request = client.request;
+  client.request = (method, params) => method === "fact"
+    ? Promise.reject(new Error("fact write failed")) : request(method, params);
+  await handlers.turn_end({ message: { stopReason: "error", errorMessage: "provider failed" } });
+  assert.ok(calls.some((c) => c.method === "steer" && c.params.failure === "provider failed"));
+});
 
 let counter = 0;
 function freshClient(): { client: MemClient; dir: string; handlers: Record<string, (...args: any[]) => any> } {
@@ -114,7 +298,7 @@ test("a failed turn (provider error) steers; a clean turn does not", async () =>
 test("shutdown consolidates once a session adds a threshold of new episodes", async () => {
   const { client, dir, handlers } = freshClient();
   try {
-    await handlers.session_start(); // baseline: 1 episode (this session)
+    await handlers.session_start(); // baseline: no writes by this session
 
     // two child sessions on the SAME journal, both failing on a shared theme
     for (const svc of ["checkout", "cart"]) {
@@ -139,7 +323,7 @@ test("shutdown consolidates once a session adds a threshold of new episodes", as
 test("shutdown DOES consolidate once the session crosses the episode threshold", async () => {
   const { client, dir, handlers } = freshClient();
   try {
-    await handlers.session_start(); // baseline: 1 episode
+    await handlers.session_start(); // baseline: no writes by this session
 
     for (const svc of ["checkout", "cart", "wishlist"]) {
       const ep = await client.request("episode", { label: `deploy ${svc}` });

@@ -8,7 +8,7 @@
  *   memory_write_fact  {node?, label?, key, value}
  *   memory_steer       {failure, fix?}
  *
- * Session lifecycle: session start records a TaskEpisode node; every completed
+ * Session lifecycle: the first write records a TaskEpisode node; every completed
  * tool call appends a commit_log entry; session shutdown logs the outcome and
  * stops the sidecar. Journal path defaults to
  * memory-layer/data/sea-agent-journal.jsonl under the repo root and can be
@@ -229,12 +229,20 @@ function fmt(res: MemResult): string {
   return `error: ${res.error}`;
 }
 
-async function ensureEpisode(client: MemClient, state: { episodeId: number | null }): Promise<number> {
+async function ensureEpisode(client: Pick<MemClient, "request">, state: LifecycleState): Promise<number> {
   if (state.episodeId !== null) return state.episodeId;
-  const res = await client.request("episode", { label: `pi session ${new Date().toISOString()}` });
-  if (!res.ok) throw new Error(`memory episode failed: ${res.error}`);
-  state.episodeId = Number(res.result.episode);
-  return state.episodeId;
+  // Parallel tools can make the first write together. Share the in-flight
+  // creation so one session cannot leave duplicate, empty episodes behind.
+  if (!state.creatingEpisode) {
+    state.creatingEpisode = (async () => {
+      const res = await client.request("episode", { label: `pi session ${new Date().toISOString()}` });
+      if (!res.ok) throw new Error(`memory episode failed: ${res.error}`);
+      state.episodeId = Number(res.result.episode);
+      return state.episodeId;
+    })();
+  }
+  try { return await state.creatingEpisode; }
+  finally { state.creatingEpisode = null; }
 }
 
 const searchParams = Type.Object({
@@ -346,6 +354,7 @@ export async function recallFor(
   client: Pick<MemClient, "request">,
   prompt: string,
   k = 3,
+  onRecall: (hits: Recalled[]) => void = () => {},
 ): Promise<string> {
   if (!prompt || !worthSearching(prompt)) return "";
   let hits: Recalled[] = [];
@@ -358,14 +367,7 @@ export async function recallFor(
   }
   const picked = selectRecall(hits, k);
   if (picked.length === 0) return "";
-  // ML-2: every node pulled into context earns one useful vote. Fire-and-
-  // forget, never awaited, errors swallowed — a slow or dead sidecar must
-  // not slow the turn or break the loop ("memory must never break the
-  // agent"), and the vote is a counter on the node, not a round-trip the
-  // prompt depends on.
-  for (const h of picked) {
-    client.request("mark_useful", { node: h.node }).catch(() => {});
-  }
+  onRecall(picked);
   const body = picked
     .map((h) => `- ${h.label} (${h.kind} #${h.node})\n${summariseState(h.state ?? "")}`)
     .join("\n");
@@ -386,6 +388,26 @@ export const MEMORY_DIRECTIVE = [
   "- When you learn a durable fact (stack decisions, fixes that worked or failed, credentials locations), store it via memory_write_fact.",
 ].join("\n");
 
+function usageTokens(text: string): Set<string> {
+  const common = new Set(["this", "that", "with", "from", "have", "will", "then", "when",
+    "only", "always", "never", "should", "into", "your", "their", "they", "them",
+    "what", "which", "there", "these", "those", "were", "been", "also"]);
+  return new Set((text.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])
+    .filter((token) => token.length >= 4 && !common.has(token) && !/^\d+$/.test(token)));
+}
+
+function recallEvidence(hits: Recalled[], prompt: string): Map<number, Set<string>> {
+  // Only exposed label/fact values count, not state headings, log timestamps,
+  // hidden/truncated facts, query echoes or words shared by other candidates.
+  const query = usageTokens(prompt);
+  const candidates = hits.map((h) => ({ node: h.node, tokens: usageTokens(
+    h.label + " " + [...factsFromState(summariseState(h.state ?? "")).values()].join(" "),
+  ) }));
+  return new Map(candidates.map((c) => [c.node, new Set([...c.tokens].filter((token) =>
+    !query.has(token) && !candidates.some((other) => other.node !== c.node && other.tokens.has(token)),
+  ))]));
+}
+
 /** Shared across every registration site so all memory tools hit one episode. */
 const sessionState = newLifecycleState();
 
@@ -395,6 +417,7 @@ export const CONSOLIDATE_THRESHOLD = 3;
 /** Per-process memory lifecycle bookkeeping (episode, dedupe, baseline). */
 export interface LifecycleState {
   episodeId: number | null;
+  creatingEpisode: Promise<number> | null;
   /** Episode count when this process's session started; null = baseline unknown. */
   startEpisodes: number | null;
   /** Per-episode set of already-steered failure signatures (dedupe). */
@@ -402,7 +425,7 @@ export interface LifecycleState {
 }
 
 export function newLifecycleState(): LifecycleState {
-  return { episodeId: null, startEpisodes: null, steered: new Map() };
+  return { episodeId: null, creatingEpisode: null, startEpisodes: null, steered: new Map() };
 }
 
 /**
@@ -586,14 +609,14 @@ export async function autoSteer(
   kind: "tool" | "turn",
   detail: string,
 ): Promise<void> {
-  if (state.episodeId === null) return;
-  const sig = `${kind}:${detail.slice(0, 240)}`;
-  const per = state.steered.get(state.episodeId) ?? new Set<string>();
-  if (per.has(sig)) return;
-  per.add(sig);
-  state.steered.set(state.episodeId, per);
   try {
-    await client.request("steer", { episode: state.episodeId, failure: detail });
+    const episode = await ensureEpisode(client, state);
+    const sig = `${kind}:${detail.slice(0, 240)}`;
+    const per = state.steered.get(episode) ?? new Set<string>();
+    if (per.has(sig)) return;
+    per.add(sig);
+    state.steered.set(episode, per);
+    await client.request("steer", { episode, failure: detail });
   } catch {
     /* memory must never break the agent loop */
   }
@@ -624,8 +647,7 @@ export async function consolidateIfDue(
 
 
 /** The three memory tools as pi-compatible ToolDefinitions (shared instances). */
-export function makeMemoryTools(): any[] {
-  const client = sharedMem;
+export function makeMemoryTools(client: MemClient = sharedMem, state: LifecycleState = sessionState): any[] {
   return [
     {
       name: "memory_search",
@@ -645,6 +667,7 @@ export function makeMemoryTools(): any[] {
         "to the key) when no node id is given.",
       parameters: writeFactParams,
       async execute(_id: string, params: any) {
+        await ensureEpisode(client, state);
         let nodeId = params.node;
         if (nodeId === undefined) {
           const created = await client.request("create_node", {
@@ -670,7 +693,7 @@ export function makeMemoryTools(): any[] {
         "context that caused it.",
       parameters: steerParams,
       async execute(_id: string, params: any) {
-        const episode = await ensureEpisode(client, sessionState);
+        const episode = await ensureEpisode(client, state);
         const body: Record<string, unknown> = { episode, failure: params.failure };
         if (params.fix) {
           body.fix = {
@@ -703,19 +726,52 @@ export default function memoryLayerExtension(pi: any): void {
 }
 
 export function registerLifecycle(pi: any, client: MemClient = sharedMem, state: LifecycleState = sessionState): void {
+  let turn = 0;
+  let toolCalls = 0;
+  let toolErrors = 0;
+  let recalled = new Map<number, Set<string>>();
+  function creditUse(text: string): void {
+    // Retrieval cannot reward itself. Credit at most once in this pi turn
+    // when final assistant text or a later tool's arguments reuse two distinct
+    // distinguishing tokens (or the sole token of a one-token candidate).
+    // This conservative lexical proxy is evidence of use, not correctness;
+    // ignoring a candidate is not evidence that it deserves a negative vote.
+    const used = usageTokens(text);
+    for (const [node, tokens] of recalled) {
+      if (tokens.size === 0 || [...tokens].filter((t) => used.has(t)).length < Math.min(2, tokens.size)) continue;
+      recalled.delete(node);
+      try {
+        void client.request("mark_useful", { node }).catch(() => {});
+      } catch { /* even synchronous sidecar failures must not break a turn */ }
+    }
+  }
   pi.on("session_start", async () => {
-    await ensureEpisode(client, state);
+    state.episodeId = null;
+    state.creatingEpisode = null;
+    state.steered.clear();
+    turn = 0;
+    toolCalls = 0;
+    toolErrors = 0;
+    recalled.clear();
     state.startEpisodes = await countEpisodes(client);
   });
 
   // Appenditive system-prompt chaining: officially recomputed each turn, which
   // is what lets the recalled block be specific to THIS message.
-  pi.on("before_agent_start", async (event: any) => ({
-    systemPrompt: event.systemPrompt + MEMORY_DIRECTIVE
-      + await recallFor(client, String(event.prompt ?? "")),
-  }));
+  pi.on("before_agent_start", async (event: any) => {
+    recalled.clear();
+    const prompt = String(event.prompt ?? "");
+    return { systemPrompt: event.systemPrompt + MEMORY_DIRECTIVE
+      + await recallFor(client, prompt, 3, (hits) => { recalled = recallEvidence(hits, prompt); }) };
+  });
+
+  pi.on("tool_execution_start", async (event: any) => {
+    try { creditUse(JSON.stringify(event.args ?? {})); } catch { /* best-effort */ }
+  });
 
   pi.on("tool_execution_end", async (event: any) => {
+    toolCalls++;
+    if (event.isError) toolErrors++;
     try {
       const episode = await ensureEpisode(client, state);
       const detail = `${event.toolName}: ${event.isError ? "error" : "ok"}`;
@@ -736,19 +792,46 @@ export function registerLifecycle(pi: any, client: MemClient = sharedMem, state:
   // timeout). The assistant message records it as stopReason "error" with an
   // errorMessage; steer on exactly that, nothing else.
   pi.on("turn_end", async (event: any) => {
+    const msg = event?.message ?? {};
     try {
-      const msg = event?.message ?? {};
-      if (msg.stopReason !== "error") return;
-      await autoSteer(client, state, "turn", msg.errorMessage ?? "turn failed");
+      creditUse((msg.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n"));
+    } catch { /* feedback must never break the loop */ }
+    recalled.clear();
+    // pi repeats completed results at turn_end, including blocked calls that
+    // never reached execution. Prefer that complete list; do not double-count.
+    const results = event?.toolResults;
+    const calls = Array.isArray(results) ? results.length : toolCalls;
+    const errors = Array.isArray(results) ? results.filter((r: any) => r.isError).length : toolErrors;
+    turn++;
+    toolCalls = 0;
+    toolErrors = 0;
+    try {
+      const episode = await ensureEpisode(client, state);
+      // Deterministic evidence, not a claim of task success: clean -> ok;
+      // completed with tool errors -> partial; outright model failure -> failed.
+      const quality = msg.stopReason === "error" ? "failed" : errors > 0 ? "partial" : "ok";
+      const notes = `tools=${calls}; errors=${errors}; stop=${msg.stopReason ?? "unknown"}`;
+      await client.request("fact", { node: episode, key: `turn ${turn}: quality`, value: quality });
+      await client.request("fact", { node: episode, key: `turn ${turn}: notes`, value: notes });
+      await client.request("commit_log", {
+        node: episode, kind: "turn_quality", detail: `turn ${turn}: ${quality}; ${notes}`,
+      });
     } catch {
       /* ignore */
+    }
+    // Quality logging is supplementary; its failure must not disable the
+    // existing steering channel when the provider itself failed.
+    if (msg.stopReason === "error") {
+      await autoSteer(client, state, "turn", msg.errorMessage ?? "turn failed");
     }
   });
 
   pi.on("session_shutdown", async () => {
     try {
-      const episode = await ensureEpisode(client, state);
-      await client.request("commit_log", { node: episode, kind: "outcome", detail: "session ended" });
+      // Shutdown must not manufacture work for a session that wrote nothing.
+      if (state.episodeId !== null) {
+        await client.request("commit_log", { node: state.episodeId, kind: "outcome", detail: "session ended" });
+      }
     } catch { /* ignore */ }
     try {
       // new episodes this session (own + sub-agents on the same journal) have
