@@ -205,9 +205,179 @@ anywhere in the four codebases; URLs are limited to the search providers
 
 ## Part D — the pi feature-by-feature report
 
-The three parallel readers covering pi's remaining documentation — settings and
-environment variables, sessions/compaction/JSON mode/usage; extensions, TUI,
-skills, prompt templates, packages, models, custom providers, themes; and
-security, containerisation, providers, Windows, llama.cpp, keybindings — report
-separately. Their findings are appended below as they land, in the same
-evidence-plus-citation format.
+Three parallel readers covered pi's remaining eighteen documents (settings;
+environment variables; session format; sessions; compaction; JSON mode; usage;
+extensions; TUI; skills; prompt templates; packages; models; custom providers;
+themes; security; containerisation; providers; Windows; llama.cpp;
+keybindings). Each claim was checked in-repo, and the two decisive ones were
+re-run here: the trust probe below was reproduced against the installed pi with
+an isolated agent directory, and the resume path was read directly.
+
+### D1. The interface lies about which session you are in
+
+`resume()` (`tui-go/app/update.go:1142-1153`) reads a session file, clears the
+transcript and replays its blocks. It never tells the agent to switch, and
+`switch_session` is not implemented anywhere in `tui-go` (the only verbs we
+write are `prompt`, `steer`, `abort`, `get_commands`). So after picking a
+session in `^s`, **the next prompt goes to the session the process was launched
+with** — the transcript you are reading and the context the model has are
+different conversations, and nothing says so. `/new` is the mirror image: it
+clears the view (`app/update.go:803-806`) while pi's session file keeps growing.
+
+Both are cheap: `switch_session` and `new_session` are documented RPC commands
+(`docs/rpc.md:531-615`, `:137`) and the interface already holds the file path.
+Until then every other observation a user makes about their session is
+unreliable.
+
+### D2. Project-local configuration never loads, silently
+
+pi asks before trusting a project; in non-interactive modes a "trust-requiring"
+resource is simply **ignored** — `.pi/settings.json`, `.pi/{extensions,skills,
+prompts,themes}`, `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md` and project
+`.agents/skills` (`docs/security.md:5-29`, `docs/settings.md:14-22`). We spawn
+with `--mode rpc --no-builtin-tools` and nothing trust-related
+(`tui-go/internal/pi/pi.go:263-273`); `defaultProjectTrust`, `trust.json` and
+the `project_trust` event appear nowhere in either codebase.
+
+Reproduced here: `get_commands` returns **7 project-scoped commands with
+`--approve` and 0 without** — no prompt, no diagnostic, either way.
+
+The sharp edge is that a *project's own guardrail extension* is exactly the kind
+of thing that lives in `.pi/extensions` and will not run, while `AGENTS.md`
+still loads (it is trust-exempt), so a partial load looks total. The palette
+makes it worse by listing project skills read off disk.
+
+### D3. The extension UI protocol — beyond "no implementer"
+
+Part A3 covers the protocol. The readers found the two concrete failures, and
+both are reachable today:
+
+- **Hangs, not just silence.** `agent/src/hooks/commands.ts:163-168` (the
+  `/hook add` overwrite path) awaits `ctx.ui.confirm()` with no timeout, and
+  pi's RPC `editor()` has none either — `createDialogPromise` parks the promise
+  until a response arrives, so only process death recovers. A user extension
+  that asks a text question (`ctx.ui.editor`) hangs the same way.
+- **Two of our own extensions report through a channel nobody reads.**
+  `/hook`, `/schedule`, `/trigger` and `/now` answer with `ui.notify`
+  (`agent/extensions/hooks-inline.ts:49-70`,
+  `agent/extensions/schedules-inline.ts:101`), and stderr is not piped either
+  (`tui-go/internal/pi/pi.go:276-289`) — so they look like no-ops.
+
+### D4. Three skill catalogues that disagree
+
+| who | roots | what it knows |
+|---|---|---|
+| pi's resource loader | `.pi`, packages, `~/.pi/agent` | everything, but only trusted projects |
+| `agent/src/skills/discovery.ts:75-86` | `.pi`, `.agents` | strict flat-YAML frontmatter only |
+| the Go palette scan | `.claude`, `.pi`, `.agents` | no packages |
+
+One skill therefore yields two rows (`/name` from disk, `/skill:name` from pi),
+`.claude` skills exist only for the Go scan while package skills exist only for
+pi, and because `get_commands` is asked exactly once per process
+(`internal/pi/pi.go:293-301`) anything a pi package adds mid-session stays
+invisible until restart.
+
+### D5. There is no configuration channel into pi
+
+Nothing reads or writes `~/.pi/agent/settings.json` or `.pi/settings.json`, so
+`compaction.*`, `retry.*`, `shellPath`, `enabledModels`, `sessionDir`,
+`defaultTools` and `thinkingBudgets` are unreachable from any Mnemo surface,
+and a project's `.pi/settings.json` is inert (D2). Related: the browser
+hardcodes `~/.pi/agent/sessions` (`tui-go/internal/session/session.go:22`) with
+no `--session-dir` and no `PI_CODING_AGENT_SESSION_DIR` support, and a third
+notion of "sessions" survives at `~/.sea/sessions`
+(`agent/src/skills/store.ts:29-31`).
+
+### D6. The shell tools get none of pi's session environment
+
+pi injects `PI_SESSION_ID`, `PI_SESSION_FILE`, `PI_PROVIDER`, `PI_MODEL` and
+`PI_REASONING_LEVEL` into every bash command, resolved per call
+(`docs/environment-variables.md:26-45`); it also sets the process markers
+`AI_AGENT=pi` and `PI_CODING_AGENT=true` from its CLI entry points. We call the
+library `main()` and spawn our own `bash_exec` with `env: scrubChildEnv()`
+(`agent/src/tools/bash_exec.ts:44-47`), so a script written against the
+documented variables misbehaves quietly. We also never strip *stale* `PI_*`
+values, so a nested Mnemo inherits the parent's session metadata.
+
+### D7. Windows: the tool promises a shell it does not use
+
+`bash_exec` spawns with `shell: true` (`agent/src/tools/bash_exec.ts:42`) —
+`cmd.exe` on Windows — while the description the *model* reads promises
+`/bin/sh -c` (`:9`). pi's own Windows story (Git Bash default, `shellPath`
+override, an optional native PowerShell tool) is unavailable: `--no-builtin-tools`
+disables `bash` and `powershell` alike and we ship no replacement. The hooks
+engine's `sh -c` (`agent/src/hooks/executor.ts:205`) needs Git Bash on `PATH`,
+which *is* disclosed.
+
+### D8. Providers: five API keys, and nothing else
+
+`agent/src/auth/store.ts:19-25`, `agent/src/provider.ts:14-21` and
+`tui-go/internal/auth/auth.go:20` each hardcode the same five API-key
+providers; the wizard only ever writes `kind: "api_key"`
+(`agent/src/auth/wizard.ts:61`) and the `oauth` fields in the type are never
+populated. The shim exits rather than starting without one of the five
+(`agent/bin/mnemo.ts:318-323`). pi's subscription `/login` (Claude Pro/Max,
+ChatGPT, Copilot, xAI, OpenRouter OAuth) is implemented in its *interactive*
+mode only and is absent from `get_commands`, so it is unreachable from our TUI
+as well — meaning a tester whose only credential is a subscription cannot use
+Mnemo at all. Local models are in the same bucket: llama.cpp is not one of the
+five, yet `/llama` **is** offered by the palette (pi answers it over
+`get_commands`) and selecting it is a silent no-op.
+
+### D9. The extension API is barely touched
+
+Ten of pi's thirty-four extension events are used; the never-used set includes
+`session_before_compact`, `session_compact`, `session_compact_failed`,
+`session_before_tree`, `model_select`, `thinking_level_select`,
+`before_provider_request`, `resources_discover` and `project_trust`. Never-used
+`ctx` members include `compact`, `getContextUsage`, `signal`, `abort`,
+`sessionManager`, `model`, `thinkingLevel`, `hasUI`, `isProjectTrusted`,
+`setModel`, `getActiveTools`/`setActiveTools` and `pi.events`. Two consequences
+worth naming: no dynamic tool activation (all fourteen tools are in every
+prompt, which is a cache-prefix cost as well as a context cost), and the memory
+layer cannot see compaction — the single most context-altering thing a session
+does.
+
+One dead handler found: `pi.on('shutdown', …)`
+(`agent/extensions/tracing.ts:141`) is not a pi event (only `session_shutdown`
+is), so it never fires; the span is still closed by `process.once('exit')`.
+
+### D10. Claims in our own documents that were false
+
+Both fixed in this cycle, because a wrong claim is worse than a missing one:
+
+- `README.md:60` said `permissions.json` allow/ask/deny is "enforced even
+  without TTY". Only allow and deny are; `ask` needs a human the gate can
+  reach, which in the TUI it cannot (issue #15).
+- `tui-go/README.md:88-89` said "RPC mode does not emit approval events for
+  Mnemo to draw". RPC *does* emit them — verified live — and the missing half is
+  the client, not the event.
+
+### D11. What we do that pi does not
+
+Recorded so a later cleanup does not remove it: sub-agent credential scrubbing
+(`agent/src/childenv.ts:21-31`), fail-closed asks for delegated children
+(`MNEMO_SUBAGENT_CHILD=1`), deny rules honoured with or without a TTY, plan mode
+synthesised as prepended rules so a user `allow` cannot punch through, redaction
+before every trace write, and `0600` on `auth.json` from both writers. pi ships
+no built-in sandbox and says so; neither do we — the difference is that ours is
+stated as invariant 8 in `docs/MNEMO-INTERNALS.md`.
+
+---
+
+## Part E — the order to fix this in
+
+| # | fix | effort | why this position |
+|---|---|---|---|
+| 1 | Answer `extension_ui_request` (confirm/select/input/editor + notify/setStatus) and set `MNEMO_APPROVAL_MODE` when the TUI spawns the agent — issue #15 | medium | restores the gate, unblocks every extension, and stops `/hook`-class commands looking like no-ops |
+| 2 | `switch_session` on pick, `new_session` on `/new` — issue #16 | small | until this, the transcript and the model's context are different conversations |
+| 3 | Resolve project trust explicitly and say the outcome — issue #17 | small | a whole class of configuration is currently inert with no message |
+| 4 | Surface `compaction_*`, `auto_retry_*`, `summarization_retry_*`, `extension_error` as notices | small | four cases in one parser; three silent states become visible |
+| 5 | One command catalogue (`get_commands`, re-asked on new session/reload), disk scan as offline fallback only — issue #18 | medium | kills the duplicate rows and the restart-to-see-a-package trap |
+| 6 | `set_model` + `set_thinking_level` from the model picker | small | makes `/model` mean what it says |
+| 7 | A config file for the memory layer (`~/.mnemo/memory.json`) + the provider table collapsed to one source — issues #19, #20 | medium | the layer's own knobs stop being compile-time; the three-language provider edit stops existing |
+| 8 | Resolve sidecar/journal defaults against `$HOME`, honour `sessionDir` | small | installed binaries currently point at a checkout that is not there |
+| 9 | `PI_*` session env in `bash_exec`, strip stale ones; set the process markers | small | the documented contract for shell tools |
+| 10 | Windows: tell the truth in the tool description, or wire `shellPath`; ship a PowerShell tool | small–medium | the model currently acts on a false promise |
+| 11 | Sessions: `fork`, `set_session_name`, `export_html` in the overlay | medium | replaces file-format scraping with the supported API |
+| 12 | A containment story for invited testers (pi documents three; we document none) | medium | the one thing a stranger with an untrusted repo needs to read |

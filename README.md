@@ -57,7 +57,7 @@ Files under `~/.mnemo/`:
 | File | Purpose |
 |------|---------|
 | `auth.json` | Provider credentials (chmod 600); never committed |
-| `permissions.json` | Tool allow/ask/deny rules with glob patterns (enforced even without TTY) |
+| `permissions.json` | Tool allow/deny rules with glob patterns (enforced everywhere, with or without a TTY). The `ask` tier is enforced only when the approval gate can actually reach a human — interactive mode with a TTY; in the TUI it currently falls through to allow (see issue #15) |
 | `mcp.json` | MCP servers as registered tools (named `mcp__<server>__<tool>`) |
 | `logs/<date>.jsonl` | Structured trace spans; secrets redacted before write |
 

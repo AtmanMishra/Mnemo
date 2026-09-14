@@ -85,8 +85,11 @@ whole — the surfaces pi and Mnemo share (`/model` ↔ `^l`-adjacent `Ctrl+L`,
   (parentId branching) mirrors server-side work this build must not touch.
 - **`/compact`** — compaction lives in the agent's context engine. A
   client-side fake would only remove messages the model still stands on.
-- **Pending-approval indicator** — the approval gate is an interactive-mode
-  extension; RPC mode does not emit approval events for Mnemo to draw.
+- **Pending-approval indicator** — the gate asks through pi's extension-UI
+  protocol, and in RPC mode that is a request on stdout that this client does
+  not yet answer (`extension_ui_request`, see issue #15). Until it does, the
+  gate's `ask` tier falls through to allow in the TUI, and an extension cannot
+  ask a question here at all.
 - **Theme picker** — the palette is centralised in `internal/theme` (one
   struct, one colour source) but switching palettes at runtime is not wired.
   This build ships one theme, deliberately.
