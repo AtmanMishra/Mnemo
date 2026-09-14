@@ -170,7 +170,7 @@ commands. It is also the reason the palette cannot be a complete answer to
 is asked.
 
 A second finding is about how this surface is *assembled*, and it is the reason
-the first probe behind this review never got an answer: see §6.4. A conflict
+the first probe behind this review never got an answer: see §6.5. A conflict
 between two extensions the user installed in `~/.pi/agent/extensions/` aborts
 the agent at startup, and the interface never says so.
 
@@ -311,7 +311,13 @@ names: llama, hook, schedule, trigger, now, implement-and-review, implement,
    palette must reconcile the answer from the agent with what the TUI found on
    disk (or ask the agent and drop its own scan for agent-side skills) rather
    than assuming they are the same list.
-4. **Assembling this surface can fail in a way nobody can see.** The first
+4. **The documented reply shape is not the installed one.** `rpc.md` prints
+   `location` and `path` flat; pi 0.84 nests them in a `sourceInfo` object
+   (`scope`, `path`). Implementation reads both — flat first, `sourceInfo` as
+   the fallback — because the point of these rows is saying where a command
+   came from, and which shape carries it is pi's business, not the client's.
+   Worth reporting upstream.
+5. **Assembling this surface can fail in a way nobody can see.** The first
    probe — without `-ne` — never answered, because two extensions the *user*
    installed under `~/.pi/agent/extensions/` register the same tool name:
 
