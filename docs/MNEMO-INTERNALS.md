@@ -129,7 +129,8 @@ every live feeder.
 
 `consolidate()` replays `Episodic` + `Salience` nodes, tokenises labels and
 active facts (stopwords dropped), and treats a token as a recurring theme at
-`MIN_OCCURRENCES = 2` distinct sources. Groups survive only if their members
+`DEFAULT_MIN_SOURCES_FOR_THEME = 2` distinct sources (`MNEMO_MIN_OCCURRENCES`
+overrides it). Groups survive only if their members
 share `MIN_SHARED_TOKENS = 2` tokens — "two sources that share only 'checkout'
 are the same project, not the same lesson". Surviving groups become `Semantic`
 lesson nodes; re-running emits nothing unless the sources changed (idempotent by
@@ -198,20 +199,33 @@ identical in every mode):
 |---|---|
 | `sea-tools-inline` | registers every tool; wires the kernel dispatcher |
 | `sea-memory` (`memory-layer.ts`) | `session_start` (episode), `before_agent_start` (directive + recall), `tool_execution_end` (episode log), `turn_end`, `session_shutdown` (consolidate) |
-| `approval-gate` | `tool_call` — the only hook that can **block**; permission rules, plan mode, interactive y/n |
+| `approval-gate` | `tool_call` — the only hook that can **block**; permission rules, plan mode, and an approval dialog the interface answers over pi's extension-UI protocol |
 | `tracing` | `tool_call`/`tool_result`, `turn_start`/`turn_end`, session span |
 | (`hooks-inline`, `schedules-inline`) | the hooks engine and the scheduler, including `/hook`, `/schedule`, `/trigger`, `/now` commands |
 
 ### 3.2 Tools
 
-`allTools` (14) from `src/tools/index.ts` — `bash_exec`, `read_file`,
+`allTools` (16) from `src/tools/index.ts` — `bash_exec`, `read_file`,
 `write_file`, `apply_edit`, `glob_list`, `ipy_run`, `list_skills`, `load_skill`,
-`create_skill`, `spawn_subagent`, `create_harness`, `web_fetch`, `web_search`,
-`read_image` — plus three memory tools, MCP tools discovered before `main()`
-runs, and whatever a harness bundle adds at runtime. `web_search`/`web_fetch`
-are registered at `session_start` only if a globally-installed pi package has
-not already claimed those names, because two tools with one name make pi refuse
-the whole extension and kill the session at startup.
+`create_skill`, `patch_skill`, `retire_skill`, `spawn_subagent`, `create_harness`,
+`web_fetch`, `web_search`, `read_image` — plus three memory tools, MCP tools
+discovered before `main()` runs, and whatever a harness bundle adds at runtime.
+`web_search`/`web_fetch` are registered at `session_start` only if a
+globally-installed pi package has not already claimed those names, because two
+tools with one name make pi refuse the whole extension and kill the session at
+startup.
+
+`patch_skill` is the self-improvement seam and is deliberately hard to use
+wrong: it needs a stated reason and at least one piece of memory evidence, edits
+by anchored replacement (whole-file rewrites are not offered), refuses a stale
+`expectedHash`, refuses a path outside `~/.pi/agent/skills` and project
+`.agents/skills` (never `.claude/`, never a package directory), refuses an
+anchor that is not unique, refuses a result with broken frontmatter or one that
+stops the skill being discoverable — and writes a timestamped copy of the
+previous body under `~/.mnemo/skill-history/<name>/` first, so every patch is
+reversible without git. `retire_skill` marks a skill retired instead of deleting
+it. The loop that decides *when* to patch is J11 in
+`research/memory-runtime-design.md`.
 
 ### 3.3 The Python kernel — programmatic tool calling
 

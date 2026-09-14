@@ -57,7 +57,7 @@ Files under `~/.mnemo/`:
 | File | Purpose |
 |------|---------|
 | `auth.json` | Provider credentials (chmod 600); never committed |
-| `permissions.json` | Tool allow/deny rules with glob patterns (enforced everywhere, with or without a TTY). The `ask` tier is enforced only when the approval gate can actually reach a human — interactive mode with a TTY; in the TUI it currently falls through to allow (see issue #15) |
+| `permissions.json` | Tool allow/deny rules with glob patterns (enforced everywhere, with or without a TTY). The `ask` tier is asked in the interface: the TUI spawns the agent with `MNEMO_APPROVAL_MODE=interactive` and answers pi's dialog. A run with no UI at all fails open (automation keeps working) — except a delegated sub-agent child, which fails closed |
 | `mcp.json` | MCP servers as registered tools (named `mcp__<server>__<tool>`) |
 | `logs/<date>.jsonl` | Structured trace spans; secrets redacted before write |
 
