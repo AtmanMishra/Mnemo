@@ -168,3 +168,50 @@ func TestTheDecisionIsMadeForTheAbsolutePath(t *testing.T) {
 		t.Fatalf("a relative path must resolve to the same absolute key (from=%q)", got.From)
 	}
 }
+
+// TestASymlinkedPathStillMatches: the same directory reached by two spellings
+// is one project.
+//
+// Found by CI, not by us: on macOS /tmp is a symlink to /private/tmp, so
+// t.TempDir() hands back one spelling and os.Getwd() the other. Linux and
+// Windows agree with themselves and hid it, which is why the suite runs on all
+// three. The symlink is made here so the case is testable anywhere.
+func TestASymlinkedPathStillMatches(t *testing.T) {
+	home := t.TempDir()
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err) // Windows without the privilege
+	}
+
+	// Recorded through the link, resolved through the real path — and the
+	// other way round. Either order has to agree, because which one a user
+	// typed depends on how they got to the directory.
+	record(t, home, map[string]bool{link: true})
+	if got := ResolveTrust(home, real); !got.Approve {
+		t.Fatalf("a decision recorded through a symlink must apply to the real path (from=%q)", got.From)
+	}
+
+	record(t, home, map[string]bool{real: true})
+	if got := ResolveTrust(home, link); !got.Approve {
+		t.Fatalf("a decision recorded for the real path must apply through a symlink (from=%q)", got.From)
+	}
+}
+
+// TestAPathThatDoesNotExistYetStillResolves: a decision can be recorded before
+// the checkout exists, so canonicalisation must not depend on the leaf being
+// real — it resolves the longest existing prefix and keeps the rest.
+func TestAPathThatDoesNotExistYetStillResolves(t *testing.T) {
+	home := t.TempDir()
+	parent := t.TempDir()
+	missing := filepath.Join(parent, "not", "cloned", "yet")
+
+	record(t, home, map[string]bool{missing: true})
+	if got := ResolveTrust(home, missing); !got.Approve {
+		t.Fatalf("a key for a path that does not exist must still match itself (from=%q)", got.From)
+	}
+	// And its ancestor rule still holds for a child of that imaginary path.
+	if got := ResolveTrust(home, filepath.Join(missing, "deeper")); !got.Approve {
+		t.Fatalf("a child of a recorded path must inherit the decision (from=%q)", got.From)
+	}
+}

@@ -65,11 +65,7 @@ func ResolveTrust(home, project string) Trust {
 	if home == "" {
 		return t
 	}
-	abs, err := filepath.Abs(project)
-	if err != nil {
-		return t
-	}
-	abs = filepath.Clean(abs)
+	abs := canonical(project)
 
 	raw, err := os.ReadFile(t.File)
 	switch {
@@ -87,7 +83,7 @@ func ResolveTrust(home, project string) Trust {
 
 	for p := abs; ; {
 		for key, ok := range d {
-			if cleanKey(key) != p {
+			if canonical(key) != p {
 				continue
 			}
 			t.Approve, t.From = ok, key
@@ -101,13 +97,40 @@ func ResolveTrust(home, project string) Trust {
 	}
 }
 
-// cleanKey normalises a recorded path so a key written with a trailing slash
-// (or in mixed separators) still matches the project it names.
-func cleanKey(k string) string {
-	if abs, err := filepath.Abs(k); err == nil {
-		return filepath.Clean(abs)
+// canonical resolves a path the way the filesystem does: absolute, cleaned, and
+// with symlinks followed.
+//
+// This is not tidiness, it is the difference between a decision applying and
+// not. On macOS /tmp is a symlink to /private/tmp and t.TempDir() hands back the
+// unresolved spelling, while os.Getwd() — which is what a relative "." resolves
+// through — returns the resolved one: the same directory, two strings, and a
+// key recorded under one would miss a lookup under the other. Linux and Windows
+// hide it, which is exactly why the TUI is tested on all three.
+//
+// A path that does not exist yet (a decision recorded ahead of the checkout it
+// names) still resolves as far as it can: the longest existing prefix is made
+// canonical and the remainder is re-attached verbatim.
+func canonical(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = filepath.Clean(abs)
+	} else {
+		p = filepath.Clean(p)
 	}
-	return filepath.Clean(k)
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		return real
+	}
+	dir, rest := p, ""
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return p // reached the root without finding anything real
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = parent
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(real, rest)
+		}
+	}
 }
 
 // Flag is the pi CLI flag this decision asks for. One of the two always goes
