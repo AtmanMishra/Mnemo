@@ -1,0 +1,89 @@
+name: release
+
+# A tag is the trigger: v0.1.0-prealpha, v0.2.0, … The tag is cut from main,
+# which the ci workflow has already run all four suites against; this workflow
+# is about producing and publishing the artifact, not about re-testing it.
+#
+# It is also runnable by hand with a tag that already exists, which is how a
+# build gets dry-run before anyone commits to a release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "existing tag to release, e.g. v0.1.0-prealpha"
+        required: true
+
+# gh release create writes a release and its assets; nothing else here needs
+# to write anything.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
+    steps:
+      # actions/checkout v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # actions/setup-go v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: "1.27"
+
+      # One static binary per platform. CGO off so nothing depends on a libc
+      # the tester happens to have; -trimpath so the paths in a crash report
+      # are the same for everyone. The version is injected rather than
+      # committed, so the binary can always say which tag it came from.
+      - name: build every platform
+        working-directory: tui-go
+        run: |
+          set -euo pipefail
+          mkdir -p ../dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            os="${target%%/*}"
+            arch="${target##*/}"
+            ext=""
+            [ "$os" = "windows" ] && ext=".exe"
+            out="../dist/mnemo-${TAG}-${os}-${arch}${ext}"
+            echo "building $out"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.version=${TAG}" -o "$out" ./cmd/mnemo
+          done
+          ls -l ../dist
+
+      # The binary has to answer --version on a machine with no Go, no Node
+      # and no config — that is the whole point of the flag.
+      - name: the binaries answer for themselves
+        run: |
+          set -euo pipefail
+          chmod +x dist/mnemo-${TAG}-linux-amd64
+          got="$(dist/mnemo-${TAG}-linux-amd64 --version)"
+          echo "$got"
+          case "$got" in
+            *"${TAG}"*) ;;
+            *) echo "::error::--version does not name the tag (${TAG})"; exit 1 ;;
+          esac
+
+      - name: checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum mnemo-* > SHA256SUMS
+          cat SHA256SUMS
+
+      # No third-party release action: the runner already has gh, and a
+      # supply-chain hop is not worth the convenience of one fewer step.
+      - name: publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" dist/* \
+            --title "Mnemo $TAG" \
+            --notes-file .github/release-notes.md \
+            --verify-tag
+          gh release view "$TAG" --json tagName,isDraft,assets \
+            --jq '{tag: .tagName, draft: .isDraft, assets: [.assets[].name]}'
