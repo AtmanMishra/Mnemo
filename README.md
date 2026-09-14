@@ -4,7 +4,12 @@ A terminal-native agentic coding and harness assistant whose memory works like a
 
 ## Quickstart
 
-Requires Node >= 22.6 (native TypeScript stripping, no build step), Go (for the TUI) and Rust (for the memory sidecar).
+**Pre-alpha.** Grab the `mnemo` binary for your platform from
+[Releases](https://github.com/AtmanMishra/self-evolving-agent/releases) —
+linux/darwin/windows, amd64/arm64 — then build the two pieces it drives. Node
+>= 22.6 is required (native TypeScript stripping, no build step); Rust is
+needed only for the memory sidecar, and Go only if you would rather build the
+interface than download it.
 
 ```bash
 git clone https://github.com/AtmanMishra/self-evolving-agent
@@ -13,8 +18,12 @@ cd self-evolving-agent
 cd memory-layer && cargo build --bin memsrv   # the Memory pane talks to this
 cd ../agent && npm install                     # the agent the TUI drives
 
-cd ../tui-go && go build -o mnemo ./cmd/mnemo  # or: go run ./cmd/mnemo
+cd ../tui-go && go build -o mnemo ./cmd/mnemo  # or drop the release binary here
 ```
+
+`mnemo --version` says which build you are running. Bugs and rough edges belong
+in [the issue tracker](https://github.com/AtmanMishra/self-evolving-agent/issues)
+— the known gaps are filed there rather than described as future work.
 
 On first launch, `mnemo` runs a colourful pixel-themed onboarding wizard inside the TUI: pick a provider, paste an API key, and pick a default model. Credentials are saved to `~/.mnemo/auth.json` (chmod 600), never in the repo. That wizard lives in the Go TUI itself (tui-go/). One unified surface — the transcript IS the application; everything else (palette, sessions, memory, logs, explorer) floats as an overlay dismissed with esc.
 

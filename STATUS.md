@@ -449,3 +449,47 @@ seven NON-GOAL rows of research/memory-layer-improvements.md left unbuilt.
 - **Earned lesson**: audit's own hook race (partial-line JSONL append) was the
   same failure class as the memsrv journal amnesia — one fix pattern (tolerant
   load + quarantine + atomic write) applied to both.
+
+### PRE-ALPHA PACKAGING & PLATFORM PASS (2026-09-14)
+Goal: a build a stranger can install and test on any of the three platforms,
+published as a release, with the remaining work visible as issues instead of
+prose.
+
+- **Windows portability (tui-go)**: the suite went from 3 packages / 18 tests
+  failing to 20 packages green + `go vet` clean. The fixtures stood in for
+  memsrv with `#!/bin/sh` scripts; they are now this test binary re-executed
+  with a JSON spec (the protocol is JSON in, JSON out — nothing needed a
+  shell). filetree's unreadable-directory test used chmod semantics Windows
+  does not have; cmd/mnemo compared a derived path against a forward-slash
+  literal. (1c45ea4)
+- **The golden frames were the interesting one**: with `core.autocrlf` and no
+  `.gitattributes`, a Windows checkout hands the acceptance test CRLF while it
+  compares byte-for-byte against LF output — the file is unchanged as far as
+  git is concerned, and the test fails for every Windows contributor. Added
+  `.gitattributes` (`* text=auto eol=lf`, goldens pinned) and made the
+  comparison CRLF-insensitive so an old clone does not fail either. (1c45ea4)
+- **The sidecar's Windows name**: every derived path said `memsrv`; cargo
+  builds `memsrv.exe`. The agent's memory tools, the hooks memory sync and the
+  TUI Memory pane all reported a missing sidecar while it sat in target/debug.
+  Three production sites fixed. (93522d1) — this alone took the agent suite
+  from 83 to 62 failures on Windows.
+- **`mnemo --version`** (93522d1): answered before any config is read, injected
+  by the release workflow via ldflags, "dev" when built by hand.
+- **Release pipeline** (cbe8099): `.github/workflows/release.yml` builds one
+  static binary per platform on a tag, asserts the binary names that tag,
+  writes SHA256SUMS and publishes with `gh release create` (no third-party
+  release action; actions pinned as in ci.yml). Body is
+  `.github/release-notes.md`, written for a tester.
+- **Backlog filed as issues #1–#11** rather than carried in prose: the agent
+  suite's Windows failures, hooks' `sh -c` Unix-only execution, the tui-go
+  parity remainder, mouse hit-testing, `search_ann` unreachability + English-only
+  routing, kernel/subagent unbounded limits, harness sandboxing posture,
+  `/init` + `mnemo ci` + PR automation + cost auto-switch + lesson autowrite,
+  the flaky watcher test, the unbuilt eval tiers, and 12.15's remainder.
+
+**Not done, honestly**: the agent (62) and harness-engine (1, the known timing
+flake) suites still have Windows failures — they are issue #1 and #9, not
+fixed here. The onboarding wizard is the Go welcome + `/login` + `/model`
+overlays (verified by `--dump` with a clean home), not a pixel-art first-run
+splash. No CI job runs on Windows/macOS yet, so this portability pass is
+guarded only by the next person who runs the suites there.
