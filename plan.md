@@ -56,7 +56,7 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 ## AREA 6 — PACKAGING & DISTRIBUTION
 
 - [x] 6.1 package.json files/engines fields; npm publish (scoped) or npm link quickstart
-- [x] 6.2 node>=22.6 runtime check with friendly error
+- [x] 6.2 node>=22.18 runtime check with friendly error (22.18, not 22.6: 22.6 shipped type stripping behind a flag, so CI pinned to it and every .ts test failed for weeks — see the fix in the PRE-ALPHA STATUS entry)
 - [x] 6.3 README quickstart: install -> `mnemo` -> wizard -> done
 
 ## AREA 7 — QUALITY

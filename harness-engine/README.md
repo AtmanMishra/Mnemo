@@ -10,7 +10,7 @@ Inspired by DeepSeek Harness (`dsh`) composition patterns (per-scope registry
 layers, effect-based registration, watched skill roots with write-triggered
 invalidation) and by pi's loader-tool / lazy-activation pattern.
 
-Zero runtime dependencies. Requires Node >= 22.6 (runs `.ts` via native type
+Zero runtime dependencies. Requires Node >= 22.18 (runs `.ts` via native type
 stripping — no build step).
 
 ## Architecture

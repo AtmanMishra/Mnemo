@@ -7,7 +7,8 @@ A terminal-native agentic coding and harness assistant whose memory works like a
 **Pre-alpha.** Grab the `mnemo` binary for your platform from
 [Releases](https://github.com/AtmanMishra/self-evolving-agent/releases) —
 linux/darwin/windows, amd64/arm64 — then build the two pieces it drives. Node
->= 22.6 is required (native TypeScript stripping, no build step); Rust is
+>= 22.18 is required (the first version that runs `.ts` files with no flag —
+"no build step" is only true from there); Rust is
 needed only for the memory sidecar, and Go only if you would rather build the
 interface than download it.
 

@@ -42,7 +42,7 @@ separate language, a separate process at runtime, and a separate concern:
 
 | Codebase | Language | Role |
 |---|---|---|
-| `agent/` | TypeScript (Node ≥22.6, native TS stripping, no build step) | The agent process. Wraps the `pi` coding-agent framework, registers Mnemo's tools, and hosts the memory-layer and Python-kernel clients. |
+| `agent/` | TypeScript (Node ≥22.18, native TS stripping, no build step) | The agent process. Wraps the `pi` coding-agent framework, registers Mnemo's tools, and hosts the memory-layer and Python-kernel clients. |
 | `memory-layer/` | Rust | The brain. An in-process graph store plus `memsrv`, the JSON-RPC sidecar that is the memory system's single integration surface. |
 | `tui/` | Rust (ratatui) | `mnemo-agent`, the terminal UI. Drives the agent process over pi's RPC protocol and runs its own memsrv client for the Memory pane. |
 | `harness-engine/` | TypeScript, zero runtime deps | Loads and validates dynamically generated tool-plugin bundles ("harnesses") that the agent can create for itself via the `create_harness` tool. |

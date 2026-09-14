@@ -14,7 +14,7 @@
     "install:mnemo": "node ./bin/install.ts"
   },
   "engines": {
-    "node": ">=22.6"
+    "node": ">=22.18"
   },
   "license": "MIT",
   "keywords": [

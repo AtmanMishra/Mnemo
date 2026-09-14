@@ -7,15 +7,17 @@ import {
 
 test("versions parse from the shapes node actually reports", () => {
   assert.deepEqual(parseNodeVersion("v22.6.0"), { major: 22, minor: 6 });
+  assert.deepEqual(parseNodeVersion("v22.18.0"), { major: 22, minor: 18 });
   assert.deepEqual(parseNodeVersion("26.7.0"), { major: 26, minor: 7 });
   assert.deepEqual(parseNodeVersion("v23.0.0-nightly"), { major: 23, minor: 0 });
   assert.equal(parseNodeVersion("not a version"), null);
 });
 
-test("the boundary is 22.6, not 'anything 22'", () => {
-  assert.equal(isSupportedNode("v22.6.0"), true, "the minimum itself is supported");
-  assert.equal(isSupportedNode("v22.5.9"), false, "22.5 has no type stripping");
-  assert.equal(isSupportedNode("v22.11.0"), true);
+test("the boundary is 22.18, not 'anything 22'", () => {
+  assert.equal(isSupportedNode("v22.18.0"), true, "the minimum itself is supported");
+  assert.equal(isSupportedNode("v22.17.9"), false, "22.17 has type stripping behind a flag only");
+  assert.equal(isSupportedNode("v22.6.0"), false, "22.6 shipped it experimental, off by default");
+  assert.equal(isSupportedNode("v22.11.0"), false);
   assert.equal(isSupportedNode("v23.0.0"), true);
   assert.equal(isSupportedNode("v20.19.0"), false);
   assert.equal(isSupportedNode("v18.0.0"), false);

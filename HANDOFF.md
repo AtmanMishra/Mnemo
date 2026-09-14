@@ -35,7 +35,7 @@ harness-engine/ TypeScript, zero deps. Dynamic tool-plugin system: createHarness
                 build for themselves at runtime; scoped registry; fs.watch
                 hot-reload; safety gate (import scanning). 19 tests (npm test) —
                 ONE test (watcher latency) is flaky/timing-based, passes on rerun.
-agent/          TypeScript, runs on Node >=22.6 native TS stripping (no build step).
+agent/          TypeScript, runs on Node >=22.18 native TS stripping (no build step).
                 THE Mnemo CLI. bin/mnemo.ts is a thin shim over pi's main().
                 src/auth/       credential store + wizard (~/.mnemo/auth.json)
                 src/tools/      all Mnemo tools (bash/fs/skills/harness/subagent/

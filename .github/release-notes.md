@@ -25,9 +25,9 @@ The binary tells you what it is:
 
 ## Install
 
-You need **git** and **Node 22.6 or newer** (the agent runtime runs `.ts` files
-directly — that is the version floor, not a preference). **Rust** is optional
-and only needed for the memory sidecar.
+You need **git** and **Node 22.18 or newer** (the first Node that runs `.ts`
+files with no flag — the agent runtime has no build step from there on).
+**Rust** is optional and only needed for the memory sidecar.
 
 **macOS / Linux**
 

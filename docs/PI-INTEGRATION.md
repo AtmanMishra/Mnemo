@@ -22,7 +22,7 @@ look like from the outside.
 `run()` (`agent/bin/mnemo.ts`) does, in order:
 
 1. **Node version check** — fails fast with a readable message rather than
-   a `SyntaxError` from the next import, on a pre-22.6 Node
+   a `SyntaxError` from the next import, on a pre-22.18 Node
    (`agent/bin/mnemo.ts`).
 2. **Local subcommands that need no provider**: `--list-sessions`, `auth
    status|logout`, `traces`, `consolidate` are all handled directly and
