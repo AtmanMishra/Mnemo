@@ -1,5 +1,5 @@
 /**
- * AREA 9 — hook contract (research/all-in-one-agent-design.md Part A).
+ * AREA 9 — hook contract (docs/archive/research/all-in-one-agent-design.md Part A).
  *
  * A hook = one small rule file (JSON) + one runnable command (any language).
  * The manifest declares the pi event it fires on, an optional matcher, and

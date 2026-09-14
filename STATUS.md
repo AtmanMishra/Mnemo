@@ -120,20 +120,24 @@ Task tracking moved to plan.md (7 areas). This file records outcomes/verificatio
 
 | Doc | Purpose |
 |-----|---------|
+| docs/MNEMO.md | high level — what Mnemo is, one turn end to end, the interface, how to run it, what works and what is rough |
+| docs/MNEMO-INTERNALS.md | detailed — memory model and algorithms, agent runtime, kernel, protocols, invariants, testing, extension points, failure modes |
+| DESIGN.md | the design system: palette, glyphs, mascot, keys, motion |
+| AGENTS.md | conventions and binding platform invariants for agents working in this repo |
 | README.md | quickstart, command table, config files, how to run all suites |
-| plan.md | master task tracker, 7 areas, live checkboxes |
+| plan.md | master task tracker, live checkboxes |
 | STATUS.md | outcomes, verification evidence, decisions log (this file) |
-| research/audit-report.md | competitor gap audit + single-CLI blockers |
-| research/brain-areas-design.md | brain-region memory architecture (Area 3) |
-| research/mnemo-ui-identity.md | pixel design system, Silkscreen+VT323, animations |
-| research/tui-adoption-report.md | why pi InteractiveMode; cockpit integration path |
-| research/agent-tui-design.md | cockpit layout + feature parity table |
-| research/memory-design-spec.md / memory-layer-notes.md | memory core design + research |
-| research/pi-agent-report.md / deepseek-harness-and-scrapling-report.md | upstream studies |
-| research/programmatic-tool-calling.md | in-kernel tool dispatch to reduce round-trips (tasks 4.6-4.7) |
 | research/hermes-command-surface-review.md | command/tool/skill/extension surfaces: Hermes as the reference, Mnemo's three registries, eight proposals (P1-P8), and what was verified against a live agent |
 | research/agentic-capability-review.md | capability review across the five levers (recall, kernel, delegation, verification, context economy): findings M1-M17, K1-K9, C1-C7 with measurements, plus the honest ceiling |
 | research/memory-runtime-design.md | the memory layer's own runtime: a bounded job runner (J0-J10) with its own model config, five safety rules, phasing P0-P4 |
+| docs/archive/ | superseded material — architecture, dataflow, kernel, pi-integration, memory, the original specs, adoption reports, diagrams |
+
+**Note (2026-09-14):** the Documents are now two, not fifteen. This file is a
+log, and its entries below cite documents by the paths they had when written;
+everything since superseded lives under `docs/archive/` (`research/x.md` →
+`docs/archive/research/x.md`, `docs/x.md` → `docs/archive/x.md`, `HANDOFF.md` →
+`docs/archive/HANDOFF.md`). The current truth is `docs/MNEMO.md` +
+`docs/MNEMO-INTERNALS.md`.
 
 **Note:** AREA 8 consolidated the application into a single binary (`mnemo-agent`). The AREA sections below include historical records of previous binaries (seatui, memtui, mnemo-cockpit) that have been superseded. Refer to the final AREA 8 section for current state.
 

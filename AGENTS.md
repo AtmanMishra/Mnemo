@@ -218,6 +218,8 @@ invisible on the machine it was written on.
 
 ## Contact & references
 
+- **Start here**: `docs/MNEMO.md` — what Mnemo is, one turn end to end, the interface, how to run it
+- **When changing it**: `docs/MNEMO-INTERNALS.md` — memory model and algorithms, runtime, kernel, protocols, invariants, tests, extension points
 - **Design spec**: DESIGN.md (root)
 - **Code graph**: graft/ (auto-indexed)
 - **Test suite**: `go test ./...` runs all, `go test ./app/` for a package

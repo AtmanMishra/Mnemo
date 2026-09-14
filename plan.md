@@ -21,10 +21,10 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 - [x] 2.5 Agents pane: subagent tree from journal episodes (status/model/spend), drill-in transcript, kill
 - [x] 2.6 Skills pane: discovered skills+harnesses, load/create actions
 - [x] 2.7 Logs pane: journal ops stream w/ filters
-- [x] 2.8 Pixel identity pass per research/mnemo-ui-identity.md (+ANIMATIONS allowed: spinner, pane transitions, meter fills, typing pulse)
+- [x] 2.8 Pixel identity pass per docs/archive/research/mnemo-ui-identity.md (+ANIMATIONS allowed: spinner, pane transitions, meter fills, typing pulse)
 - [x] 2.9 Deprecate seatui + memtui standalone binaries after panes reach parity
 
-## AREA 3 — BRAIN-AREA MEMORY (research/brain-areas-design.md)
+## AREA 3 — BRAIN-AREA MEMORY (docs/archive/research/brain-areas-design.md)
 
 - [x] 3.1 model.rs: add `area` column to Node (default derived from kind); memsrv persists
 - [x] 3.2 memsrv search: `areas` filter + query router heuristic v0 (keyword->area mapping)
@@ -40,7 +40,7 @@ Legend: [ ] todo · [~] in progress · [x] done · [-] blocked
 - [x] 4.3 Permission rule engine: ~/.mnemo/permissions.json allow/ask/deny patterns (extends approval gate)
 - [x] 4.4 Plan mode: read-only phase + tool allowlist switch
 - [x] 4.5 Image/screenshot input surfacing through tools
-- [x] 4.6 Programmatic tool calling (research/programmatic-tool-calling.md): `tools` proxy inside the ipy kernel + `tool_call` op on the existing stdio bridge, so the model writes ONE program instead of N tool_use round trips
+- [x] 4.6 Programmatic tool calling (docs/archive/research/programmatic-tool-calling.md): `tools` proxy inside the ipy kernel + `tool_call` op on the existing stdio bridge, so the model writes ONE program instead of N tool_use round trips
 - [x] 4.7 Route in-kernel tool calls through the approval gate + permission rules — without this, generated code bypasses the y/n gate on bash_exec/write_file/apply_edit (pairs with 4.3)
 
 ## AREA 5 — LOGGING & TRACES
@@ -79,7 +79,7 @@ the `mnemo` CLI survives only for scripting (traces/consolidate/one-shot).
 - [x] 8.7 Multi-model: spawn_subagent takes an optional model; child inherits the parent's unless told otherwise; only logged-in providers offered
 - [x] 8.8 Retire `mnemo auth`, seatui and memtui now that auth and both dashboards live in the one app
 
-## AREA 9 — HOOKS ENGINE (research/all-in-one-agent-design.md Part A)
+## AREA 9 — HOOKS ENGINE (docs/archive/research/all-in-one-agent-design.md Part A)
 
 User-facing pre/post-tool + lifecycle hooks, scoped project→user→global, audited,
 self-buildable by the agent (harness synergy). Built on pi's tool_call (block) and
@@ -93,7 +93,7 @@ tool_result (modify) interception — NOT a replacement of pi's events.
 - [x] 9.6 Memory indexing: hooks recorded as Procedural nodes (reuse harness indexing path) so sessions recall which hooks exist and why
 - [x] 9.7 Tests: matcher unit, scope precedence, exit-code semantics, arg-rewrite/modify, audit lines, /hook flows; all deterministic, temp dirs, fake pi events (memory_lifecycle.test.ts pattern)
 
-## AREA 10 — SCHEDULES & TRIGGERS (research/all-in-one-agent-design.md Part B; design done, implementation pending)
+## AREA 10 — SCHEDULES & TRIGGERS (docs/archive/research/all-in-one-agent-design.md Part B; design done, implementation pending)
 
 - [x] 10.1 Cron/interval parser + ~/.mnemo/schedules.json job store (prompt, model override, scope, enabled, last/next run)
 - [x] 10.2 `mnemo schedule` daemon + in-session ticker; double-fire prevented via an agent-side lockfile lease (O_EXCL + pid + stale detection) — memsrv left untouched per the parallel-agent guard
@@ -101,7 +101,7 @@ tool_result (modify) interception — NOT a replacement of pi's events.
 - [x] 10.4 /trigger: on_failure (turn_end), on_uncommitted (git dirty poll), on_cost_over (trace-cost budget); /now fires any job (on_push deferred — webhook listener needs a real HTTP surface, noted)
 - [x] 10.5 Notifications (TUI status chip + opt-in OS notify) + Schedules overlay in tui-go — DONE 2026-09-01: one-press-from-every-mode schedules overlay floats the shared store (^o); enter pauses/resumes in place, n fires /now <id>, finished jobs chip once on the status line; corrupt stores say so; palette/help list it (6ec29a5).
 
-## AREA 11 — MEMORY-LAYER IMPROVEMENTS (research/memory-layer-improvements.md; curated — do NOT bloat the graph model)
+## AREA 11 — MEMORY-LAYER IMPROVEMENTS (docs/archive/research/memory-layer-improvements.md; curated — do NOT bloat the graph model)
 
 Guardrail: the memory layer's job = store facts with history, retrieve the right
 context, reshape via steering/consolidation. Every change serves one of those or is

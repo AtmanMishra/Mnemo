@@ -86,7 +86,7 @@ cd ../tui-go && go test ./... && go vet ./...
 cd ../harness-engine && npm test
 ```
 
-Brand, design system and keybindings: **DESIGN.md**. Architecture with diagrams: **docs/**. Live task tracker: **plan.md** (8 areas with checkboxes). See **STATUS.md** for outcomes and verification. **HANDOFF.md** for picking up cold. **research/** for design docs and architecture.
+Start with **`docs/MNEMO.md`** — what Mnemo is and how to run it — and go to **`docs/MNEMO-INTERNALS.md`** when you are changing it: memory model, kernel, protocols, extension points. **`DESIGN.md`** owns how it looks (palette, glyphs, mascot, keys). **`AGENTS.md`** is the contract for agents working in this repo. **`plan.md`** tracks the work, **`STATUS.md`** records outcomes with evidence, and **`research/`** holds the current design papers. Superseded architecture docs, reports and diagrams are in **`docs/archive/`**.
 
 ## License
 
