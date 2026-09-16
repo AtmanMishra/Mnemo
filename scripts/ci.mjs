@@ -72,13 +72,6 @@ function why(out) {
   return lines.slice(0, 3).map((l) => l.trim());
 }
 
-const selected = SUITES.filter((s) => {
-  if (only && GROUP[only] !== s.cwd && !(only === "go" && s.cwd === "tui-go")) return false;
-  if (fast && s.cwd === "memory-layer") return false;
-  if (s.needs && !have(s.needs)) return false;
-  return true;
-});
-
 if (selected.length === 0) {
   console.error(only ? `nothing to run for --only ${only}` : "nothing to run");
   process.exit(2);
