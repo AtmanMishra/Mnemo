@@ -169,6 +169,7 @@ export function describe(job: ScheduleJob): string {
     const p = job.trigger.params ?? {};
     const extras: string[] = [];
     if (typeof p.budget === "number") extras.push(`budget $${p.budget}`);
+    if (typeof p.fallbackModel === "string" && p.fallbackModel) extras.push(`→ ${p.fallbackModel} when over`);
     if (typeof p.cooldownMs === "number") extras.push(`cooldown ${Math.round(p.cooldownMs / 1000)}s`);
     return "on " + job.trigger.type + (extras.length > 0 ? " · " + extras.join(" · ") : "");
   }

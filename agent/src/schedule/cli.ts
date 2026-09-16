@@ -271,6 +271,16 @@ function cmdTriggerAdd(args: string[], o: CliOptions): number {
     if (!(n > 0)) throw new UsageError("--cooldown-ms must be a positive number");
     job.trigger!.params = { ...(job.trigger!.params ?? {}), cooldownMs: n };
   }
+  // on_cost_over with a fallback model is the one trigger that does something
+  // with what it measured: crossing the budget switches this job to the cheap
+  // model for its later runs instead of firing the expensive one again to
+  // complain about the spend.
+  const fallback = flag(args, "--fallback-model");
+  if (fallback !== null) {
+    if (type !== "on_cost_over") throw new UsageError("--fallback-model applies to on_cost_over triggers only");
+    if (!fallback.trim()) throw new UsageError("--fallback-model must name a model");
+    job.trigger!.params = { ...(job.trigger!.params ?? {}), fallbackModel: fallback.trim() };
+  }
   const scope = flag(args, "--scope");
   if (scope) job.scope = scope;
   const model = flag(args, "--model");

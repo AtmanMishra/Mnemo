@@ -111,6 +111,26 @@ export async function tick(job: ScheduleJob, ctx: FireContext): Promise<TickOutc
       const readCost = ctx.costToday ?? ((home: string) => costToday(home, ctx.costReader));
       const spent = await readCost(ctx.home);
       if (!(spent >= budget)) return "not-due";
+      // The budget being crossed is itself an instruction, not only an event:
+      // if the job names a cheaper model, switch to it BEFORE the run this
+      // trigger is about to start, and persist that so every later firing of
+      // this job is cheap too. Firing the expensive job once more to announce
+      // that it is too expensive is the version of this feature that helps
+      // nobody. No fallback configured → the job runs as it always did.
+      const fallback = typeof job.trigger.params?.fallbackModel === "string"
+        ? (job.trigger.params.fallbackModel as string).trim()
+        : "";
+      if (fallback && fallback !== job.model) {
+        const jobs = (ctx.load ?? (() => loadJobs(ctx.home)))();
+        const idx = jobs.findIndex((j) => j.id === job.id);
+        if (idx >= 0) {
+          const was = jobs[idx]!.model ?? "(session default)";
+          jobs[idx]!.model = fallback;
+          (ctx.save ?? ((list) => saveJobs(ctx.home, list)))(jobs);
+          job.model = fallback; // this tick's run uses it too
+          log(`[schedule] ${job.name} — spend $${spent.toFixed(2)} over budget $${budget.toFixed(2)}: model ${was} → ${fallback} for later runs`);
+        }
+      }
     } else {
       return "not-due"; // on_failure/on_push: fired by their own listeners
     }
