@@ -66,7 +66,35 @@ Environment variables:
 - `MNEMO_APPROVAL_MODE=interactive` — prompt before mutating tools
 - `MNEMO_PLAN_MODE=1` — read-only phase
 - `MNEMO_LOG_LEVEL` — debug, info, warn, error, or off
+- `MNEMO_SUBAGENT_MAX_DEPTH` — how deep `spawn_subagent` may nest (default 3; 0 forbids delegation). Children inherit it, so set it on the top-level agent
 - `BRAVE_API_KEY` or `TAVILY_API_KEY` — optional; enables web_search tool
+- `PI_CODING_AGENT_SESSION_DIR` — where pi stores sessions; the sessions browser reads it, and `sessionDir` in pi's `settings.json` otherwise (see below)
+
+### Credentials: what actually works today
+
+Mnemo runs on a credential of its own **or** on one pi already holds; it no
+longer refuses to start without a key of its own. `mnemo auth status` says
+which of these your machine has.
+
+| Credential | Where it lives | Set it up with |
+|---|---|---|
+| API key for `anthropic`, `openai`, `openrouter`, `opencode`, `opencode-go` | `~/.mnemo/auth.json` (chmod 600), or the matching environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`) | the wizard on `mnemo`'s first launch, `/login` in the TUI, or export the variable |
+| A pi subscription — Claude Pro/Max, ChatGPT Plus/Pro, GitHub Copilot, xAI, OpenRouter, Radius | pi's own `~/.pi/agent/auth.json` | pi's CLI, which ships as a dependency: `./agent/node_modules/.bin/pi` (`agent\node_modules\.bin\pi.cmd` on Windows), then `/login` inside it. Then `MNEMO_PROVIDER=<id>` — e.g. `anthropic`, `openai-codex`, `github-copilot`, `xai` |
+| A local model server — a llama.cpp router | `LLAMA_BASE_URL` (+ optional `LLAMA_API_KEY`), or pi's `auth.json` | start the router, then `MNEMO_PROVIDER=llama.cpp`; `MNEMO_MODEL` picks which loaded model |
+
+Mnemo passes `MNEMO_PROVIDER` straight through to pi, so any provider id pi
+knows works — including ones Mnemo cannot key itself. `MNEMO_MODEL` names the
+model; without it, Mnemo's stored default wins, then pi's own `defaultModel`
+from `~/.pi/agent/settings.json`. Anthropic's own rules for Claude Pro/Max in a
+third-party harness are in [pi's provider docs](https://github.com/earendil-works/pi-mono).
+
+### Where sessions live
+
+The sessions browser (`^s`) reads the same directory pi writes to, resolved in
+pi's order: `PI_CODING_AGENT_SESSION_DIR`, then `sessionDir` in pi's global
+`settings.json` (under `PI_CODING_AGENT_DIR` or `~/.pi/agent`), then
+`~/.pi/agent/sessions`. When one is configured, the agent Mnemo spawns is given
+the same `--session-dir`, so what you browse is what the agent writes.
 
 ## What's in here
 

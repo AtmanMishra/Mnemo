@@ -15,6 +15,11 @@
 // Everything else is forwarded to @earendil-works/pi-coding-agent's main():
 // provider/model come from pickProvider() unless the user passed explicit
 // flags, and --no-builtin-tools keeps only OUR tools active.
+//
+// Provider credentials: Mnemo runs on a key of its own (~/.mnemo/auth.json, or
+// the environment) OR on one pi already holds — a subscription from pi's own
+// /login, or a local model server. Only a run with no credential anywhere is
+// refused, and that message names both routes (see ensureAuthenticated).
 // Our extensions run identically in every mode via extensionFactories:
 //   sea-tools-inline (all 14 tools), memory-layer (memory tools + lifecycle
 //   hooks + persistent-memory directive), approval-gate (y/n gate on
@@ -25,7 +30,8 @@ import * as path from "node:path";
 import { main } from "@earendil-works/pi-coding-agent";
 import { discoverSkills } from "../src/skills/discovery.ts";
 import { listSessions, defaultSessionDir } from "../src/skills/store.ts";
-import { pickProvider, missingKeyMessage } from "../src/provider.ts";
+import { canStart, pickProvider, missingKeyMessage, piDefaultModel } from "../src/provider.ts";
+import { credentials } from "../src/auth/pi_store.ts";
 import * as readline from "node:readline/promises";
 import {
   PROVIDERS, ENV_KEY_BY_PROVIDER, loadAuth, resolveApiKey, clearProviderAuth,
@@ -99,6 +105,13 @@ async function handleAuth(args: string[]): Promise<void> {
       const def = auth.defaultProvider === p ? "  <- default" : "";
       console.log(`${p.padEnd(14)} ${state.padEnd(9)} ${def}`);
     }
+    // pi's own credentials are just as usable as ours — a subscription, or a
+    // local router with no key at all — so a status that hid them would tell
+    // someone who can run that they cannot (#23).
+    const viaPi = credentials(process.env);
+    console.log(viaPi.length > 0
+      ? `\npi:  ${viaPi.join(", ")}  (stored by pi; Mnemo needs no key of its own for these)`
+      : "\npi:  none stored — `pi` then /login for a subscription, or configure a local model");
     return;
   }
   // login = full wizard
@@ -111,57 +124,78 @@ async function handleAuth(args: string[]): Promise<void> {
   }
 }
 
-/** Returns provider/model resolved from env or store; runs wizard on first run. */
-async function ensureAuthenticated(): Promise<void> {
-  // explicit provider via env/flags?
-  let selection = pickProvider();
-  if (selection && process.env[selection.apiKeyEnv]) return;
+/**
+ * Arranges the credentials a run needs, and refuses only when there are none
+ * anywhere.
+ *
+ * Two halves, in that order. Mnemo's own: an environment variable, or a key in
+ * ~/.mnemo/auth.json (exported into the environment pi reads). Then pi's:
+ * a subscription token or a local router in ~/.pi/agent/auth.json needs no
+ * help from us — and refusing a run on a credential pi holds is exactly the
+ * bug that locked subscription and local-model testers out (#23).
+ *
+ * Returns whether anything at all can run a model.
+ */
+async function ensureAuthenticated(): Promise<boolean> {
+  const forced = (process.env.MNEMO_PROVIDER ?? process.env.SEA_PROVIDER)?.trim();
+  const selection = pickProvider();
+  // Normalised the way pickProvider normalises it, so `MNEMO_PROVIDER=OpenAI`
+  // looks up OPENAI_API_KEY and not the variable named "OpenAI".
+  const asked = forced ? forced.toLowerCase() : undefined;
 
-  // stored default?
+  // A key already in the environment is the whole job.
+  if (selection && selection.apiKeyEnv && process.env[selection.apiKeyEnv]) return true;
+  // A provider Mnemo has no key for is pi's: nothing of ours to find, and
+  // nothing of ours to export (a foreign key in the environment would be
+  // worse than none).
+  if (selection && !selection.apiKeyEnv) return true;
+
+  // Mnemo's store: the provider asked for — the ONLY one, when one was asked
+  // for, or a stored model id from another provider would be handed to it —
+  // else the stored default first, then the rest.
   const auth = loadAuth();
-  const storedDefault = auth.defaultProvider;
-  const candidates: ProviderId[] = storedDefault
-    ? [storedDefault, ...(PROVIDERS as readonly ProviderId[]).filter((p) => p !== storedDefault)]
-    : [...(PROVIDERS as readonly ProviderId[])];
+  const candidates: ProviderId[] = asked
+    ? [asked as ProviderId]
+    : auth.defaultProvider
+      ? [auth.defaultProvider, ...(PROVIDERS as readonly ProviderId[]).filter((p) => p !== auth.defaultProvider)]
+      : [...(PROVIDERS as readonly ProviderId[])];
   for (const p of candidates) {
     const r = resolveApiKey(p);
-    if (r?.key) {
-      const envName = ENV_KEY_BY_PROVIDER[p];
-      process.env[envName] = r.key;
-      if (!process.env.SEA_PROVIDER && !process.env.MNEMO_PROVIDER) {
-        process.env.MNEMO_PROVIDER = p;
-      }
-      if (!process.env.MNEMO_MODEL && !process.env.SEA_MODEL) {
-        const model = auth.providers[p]?.defaultModel;
-        if (model) process.env.MNEMO_MODEL = model;
-      }
-      return;
+    if (!r?.key) continue;
+    process.env[ENV_KEY_BY_PROVIDER[p]] = r.key;
+    if (!process.env.SEA_PROVIDER && !process.env.MNEMO_PROVIDER) {
+      process.env.MNEMO_PROVIDER = p;
     }
+    if (!process.env.MNEMO_MODEL && !process.env.SEA_MODEL) {
+      const model = auth.providers[p]?.defaultModel;
+      if (model) process.env.MNEMO_MODEL = model;
+    }
+    return true;
   }
 
-  // nothing anywhere -> first-run wizard (interactive only)
-  if (!process.stdout.isTTY || !process.stdin.isTTY) {
-    console.error(missingKeyMessage(selection));
-    console.error("or run: mnemo-agent   (log in from inside the app)");
-    process.exit(1);
-  }
+  // Nothing of Mnemo's. pi may still have a credential of its own — a
+  // subscription from pi's /login, or a local llama.cpp router — and then
+  // there is nothing to arrange: run pi and let it use what it has.
+  if (canStart(selection)) return true;
+
+  // Nothing anywhere. The wizard when there is someone to ask...
+  if (!process.stdout.isTTY || !process.stdin.isTTY) return false;
   console.error("No provider configured. Starting setup...\n");
   const io = realIO();
   try {
     const res = await runWizard(io, process.env.HOME ?? "");
     const r = resolveApiKey(res.provider);
     if (r) {
-      const envName =
-        res.provider === "anthropic" ? "ANTHROPIC_API_KEY" :
-        res.provider === "openai" ? "OPENAI_API_KEY" :
-        res.provider === "openrouter" ? "OPENROUTER_API_KEY" : "OPENCODE_API_KEY";
+      const envName = ENV_KEY_BY_PROVIDER[res.provider];
       process.env[envName] = r.key;
       process.env.MNEMO_PROVIDER ??= res.provider;
       if (res.defaultModel) process.env.MNEMO_MODEL ??= res.defaultModel;
+      return true;
     }
   } finally {
     io.close();
   }
+  return false;
 }
 
 /** mnemo traces [session-id] [--json] [--date YYYY-MM-DD] */
@@ -255,11 +289,11 @@ async function run(): Promise<void> {
   }
   // Help/version/pi subcommands must reach pi without a provider check.
   if (argv[0] === "auth") {
-    // 8.8: the interactive wizard now lives inside mnemo-agent. `status` and
-    // `logout` stay because they are useful from a script; `login` would be a
-    // second, divergent onboarding flow.
+    // 8.8: the interactive wizard now lives inside the TUI (`mnemo`, then
+    // /login). `status` and `logout` stay because they are useful from a
+    // script; `login` would be a second, divergent onboarding flow.
     if ((argv[1] ?? "login") === "login") {
-      console.error("mnemo: run `mnemo-agent` and log in there (or /login inside a session).");
+      console.error("mnemo: run `mnemo` and log in there (/login inside the interface).");
       process.exit(1);
     }
     await handleAuth(argv);
@@ -308,25 +342,26 @@ async function run(): Promise<void> {
     );
   }
 
-  await ensureAuthenticated();
-
-  let selection;
-  try {
-    selection = pickProvider();
-  } catch (err: any) {
-    console.error(`mnemo: ${err?.message ?? err}`);
-    process.exit(2);
-  }
-  if (!selection || !process.env[selection.apiKeyEnv]) {
-    console.error(missingKeyMessage(selection));
+  // The one gate, and it now asks the whole question: Mnemo's key, or pi's
+  // own credential. A provider pi can drive is passed through with no key of
+  // ours at all, and a name pi does not know is pi's error to give — which
+  // reaches the transcript, since the interface carries pi's stderr now.
+  if (!(await ensureAuthenticated())) {
+    console.error(missingKeyMessage(pickProvider()));
+    console.error("or run `mnemo` and log in from inside the interface (/login)");
     process.exit(1);
   }
 
+  const selection = pickProvider();
   const args = [...argv];
   const hasProviderFlag = args.some((a) => a === "--provider" || a.startsWith("--provider="));
   const hasModelFlag = args.some((a) => a === "--model" || a.startsWith("--model="));
-  if (!hasProviderFlag) args.push("--provider", selection.provider);
-  if (!hasModelFlag && selection.modelId) args.push("--model", selection.modelId);
+  if (!hasProviderFlag && selection) args.push("--provider", selection.provider);
+  // Mnemo's model first; pi's stored default when Mnemo's is unset and it
+  // describes the same provider. Passing nothing is not a gap: pi then uses
+  // its own defaultModel, which is the answer we would have copied.
+  const model = selection?.modelId || (selection ? piDefaultModel(selection.provider) : undefined);
+  if (!hasModelFlag && model) args.push("--model", model);
   if (!args.includes("--no-builtin-tools")) args.push("--no-builtin-tools");
 
   await loadMcpTools();

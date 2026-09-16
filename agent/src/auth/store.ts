@@ -22,6 +22,15 @@ import * as os from "node:os";
  * env-var map from here, and `bin/mnemo.ts` resolves env names through
  * `ENV_KEY_BY_PROVIDER`; `src/auth/wizard.ts` lists these ids.
  *
+ * What the list MEANS: the providers Mnemo can mint a key for — the ones the
+ * wizard can configure, and the ones an apiKeyEnv exists for. It is NOT the
+ * set of providers Mnemo can run on: pi supports dozens more (subscriptions
+ * behind its own /login, a local llama.cpp router, custom providers from
+ * models.json), and a MNEMO_PROVIDER outside this list is passed straight
+ * through to pi with no key of ours. Adding one here because "pi knows it"
+ * would be wrong — it would promise a wizard step that cannot work. See the
+ * header of src/provider.ts and src/auth/pi_store.ts.
+ *
  * The Go interface cannot import TypeScript, so `tui-go/internal/auth/auth.go`
  * keeps its own copy. The two are pinned together by a test on each side that
  * PARSES the other side's file: `test/provider_ids.test.ts` reads auth.go, and
