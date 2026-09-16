@@ -91,6 +91,65 @@ pub struct SearchOpts {
 /// finds the right node — the router is a keyword heuristic, it WILL be wrong.
 pub const CROSS_AREA_DISCOUNT: f32 = 0.85;
 
+/// Live-node count below which even an explicitly enabled ANN path must not
+/// engage: `plan_search` falls back to brute force with that reason in the
+/// response (`memsrv` reports it).
+///
+/// Why 2048: the raw seed search crosses over at ~1000 nodes on the 256-dim
+/// hashing embedder — measured release-build per query, k=5: 287µs brute vs
+/// 282µs HNSW at 1k, 639µs vs 431µs at 2k, 1.4ms vs 536µs at 4k. But the
+/// sidecar pays more for ANN than the raw query: the index is rebuilt after
+/// every write (the rebuild-on-update strategy in `ann.rs`), a build costs
+/// 54ms at 1k and 141ms at 2k nodes, versus ~8ms for brute's re-embed +
+/// scan — so a build only amortises in read-mostly sessions. 2048 is a
+/// deliberately conservative round number above the raw crossover: below it
+/// ANN would trade exactness (and a rebuild) for nothing. `search`'s "fine to
+/// ~100k nodes" note is about when brute stops being usable at all; this
+/// constant is about when it stops being the cheaper choice here.
+pub const ANN_MIN_NODES: usize = 2048;
+
+/// Which seed path a caller should use, and — always — why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeedPath {
+    /// Exact brute-force cosine over every live node's vector.
+    Brute,
+    /// HNSW approximate seeds + the same graph expansion.
+    Ann,
+}
+
+/// The search-path decision plus a non-empty reason, in one place so that
+/// `memsrv` and its tests agree and so no caller has to guess. The ANN switch
+/// is opt-in (`MNEMO_SEARCH_ANN=1`), so a silent fallback to brute force
+/// would be indistinguishable from ANN returning a different ranking — the
+/// reason travels in the search response for exactly that case.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchPlan {
+    pub path: SeedPath,
+    pub why: String,
+}
+
+/// Decide brute vs ANN for a search: brute is the default and the fallback,
+/// ANN only when explicitly enabled AND the graph is large enough to justify
+/// its build/rebuild cost (`ANN_MIN_NODES`).
+pub fn plan_search(ann_enabled: bool, live_nodes: usize) -> SearchPlan {
+    if !ann_enabled {
+        return SearchPlan {
+            path: SeedPath::Brute,
+            why: format!("brute-force is the default (exact); set MNEMO_SEARCH_ANN=1 to opt into ANN above {ANN_MIN_NODES} live nodes"),
+        };
+    }
+    if live_nodes < ANN_MIN_NODES {
+        return SearchPlan {
+            path: SeedPath::Brute,
+            why: format!("MNEMO_SEARCH_ANN is set but only {live_nodes} live node(s) < {ANN_MIN_NODES}: an ANN build would not amortise at this size, so the exact brute-force path ran"),
+        };
+    }
+    SearchPlan {
+        path: SeedPath::Ann,
+        why: format!("MNEMO_SEARCH_ANN is set and {live_nodes} live nodes >= {ANN_MIN_NODES}: HNSW seed search (approximate; graph expansion unchanged)"),
+    }
+}
+
 /// ML-2: retrieval-score bias per net usefulness vote (`useful - unhelpful`).
 /// Small on purpose: it breaks near-ties toward nodes the agent/user actually
 /// found useful, but never outranks a genuinely better match. With zero votes
@@ -190,7 +249,9 @@ fn passes_filter(store: &StoreData, id: NodeId, opts: &SearchOpts) -> bool {
         .unwrap_or(false)
 }
 
-/// Search v1: brute-force cosine seeds + graph expansion (exact; fine to ~100k nodes).
+/// Search v1: brute-force cosine seeds + graph expansion (exact; fine to ~100k
+/// nodes). This is the default and the fallback; `memsrv` routes through
+/// `search_ann` only behind `MNEMO_SEARCH_ANN=1` + `ANN_MIN_NODES` (`plan_search`).
 #[allow(dead_code)]
 pub fn search(
     store: &StoreData,
@@ -218,6 +279,12 @@ pub fn search(
 }
 
 /// Search v2: HNSW ANN seeds + same graph expansion. Same contract as `search`.
+///
+/// Reachable from `memsrv` only behind `MNEMO_SEARCH_ANN=1` and only above
+/// `ANN_MIN_NODES` live nodes (`plan_search` says which path and why). The
+/// result is APPROXIMATE: hnsw_rs seeds layer assignment from OS entropy and
+/// inserts in parallel, so a rebuilt index can reorder near-ties run to run —
+/// tests assert the documented quality bound, never top-1 equality.
 pub fn search_ann(
     store: &StoreData,
     index: &crate::ann::AnnIndex,

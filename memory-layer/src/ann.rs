@@ -1,4 +1,12 @@
 //! ANN index over node vectors using hnsw_rs.
+//!
+//! Construction is NONDETERMINISTIC by design: `hnsw_rs` seeds layer
+//! assignment from OS entropy (`LayerGenerator` uses `StdRng::from_os_rng`)
+//! and `parallel_insert` interleaves Rayon threads, so two builds of the same
+//! vectors can produce different graphs and swap near-ties. Callers must
+//! treat results as approximate — assert a quality bound against brute force
+//! (see `search_tests::p1::hnsw_ann_agrees_with_brute_within_documented_bound`),
+//! never exact top-1 equality.
 use hnsw_rs::prelude::*;
 use std::collections::HashMap;
 
