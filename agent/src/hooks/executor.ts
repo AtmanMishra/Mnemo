@@ -11,10 +11,18 @@
  *   timeout            SIGKILL, allow + error (a stuck hook must not break
  *                      the loop)
  *
- * Commands run through `sh -c` (hooks are trusted user scripts; the shell
- * gives natural arg splitting and PATH lookup). A relative command resolves
- * against the manifest's own directory, so project hooks stay portable.
- * Duration uses an injected clock — tests never wait on real time.
+ * Commands run through a real shell on every platform (issue #2): `sh -c` on
+ * POSIX, `cmd.exe /d /s /c` on Windows by default, or whatever MNEMO_SHELL /
+ * pi's shellPath / the manifest's own `shell` field names (see shell.ts). The
+ * shell gives natural arg splitting and PATH lookup; hooks are trusted user
+ * scripts. A relative command resolves against the manifest's own directory,
+ * so project hooks stay portable, and a command may name its interpreter
+ * (`node bin/audit.js`) — the shell line, not just a bare executable path,
+ * which is the only shape that runs on a machine with no POSIX shell. A shell
+ * that cannot be resolved is an audited error outcome — the same shape as any
+ * other failed invocation.
+ * Duration uses an injected clock, and the timeout is armed through an
+ * injected scheduler — tests never wait on real time.
  *
  * 12.10 (audit 41ab8d40) adds two bounds:
  *   - scope: a RELATIVE command may not escape the manifest's directory via
@@ -25,8 +33,11 @@
  */
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { Hook, HookManifest } from "./types.ts";
+import { resolveHookShell, type ShellChoice } from "./shell.ts";
+import { IS_WINDOWS } from "../tools/shell.ts";
 
 /** What a hook invocation is allowed to return on stdout (parsed JSON). */
 export interface HookResponse {
@@ -44,6 +55,13 @@ export interface ExecRequest {
   now?: () => number;
   /** Test override: force a timeout in ms (default: hook.timeout seconds). */
   timeoutMsOverride?: number;
+  /**
+   * Test override: arm the timeout without real time. Handed the kill callback
+   * and the TTL, it returns a cancel. Defaults to setTimeout — the same spirit
+   * as `now`, so a test that must not race a wall clock under load fires the
+   * callback itself instead of sleeping and hoping.
+   */
+  scheduleTimeout?: (fire: () => void, ms: number) => { cancel(): void };
 }
 
 export type ExecOutcome =
@@ -100,14 +118,53 @@ export function parseResponse(stdout: string): HookResponse | null {
   }
 }
 
-/** Resolve the command to an absolute path: relative -> manifest dir. */
-export function resolveCommand(hook: Hook | HookManifest, home?: string): string {
-  if (hook.command.startsWith("~/")) {
-    return path.join(home ?? "", hook.command.slice(2));
+/**
+ * Split a command line into its program token and the verbatim tail. One layer
+ * of quotes is removed from the program (`"C:/Program Files/node.exe" x.js`);
+ * the tail is kept exactly as written, because the shell re-splits it with its
+ * own quoting rules and we must not paraphrase them.
+ */
+export function splitCommandLine(command: string): { program: string; rest: string } {
+  const s = command.trim();
+  if (!s) return { program: "", rest: "" };
+  const q = s[0];
+  if (q === '"' || q === "'") {
+    const end = s.indexOf(q, 1);
+    return end < 0
+      ? { program: s.slice(1), rest: "" }
+      : { program: s.slice(1, end), rest: s.slice(end + 1).trim() };
   }
-  if (path.isAbsolute(hook.command)) return hook.command;
+  const m = /\s/.exec(s);
+  return m ? { program: s.slice(0, m.index), rest: s.slice(m.index).trim() } : { program: s, rest: "" };
+}
+
+/** Put a program path back on a shell line, quoting it only if it needs it. */
+function programLine(program: string, rest: string): string {
+  const p = /\s/.test(program) ? `"${program}"` : program;
+  return rest ? `${p} ${rest}` : p;
+}
+
+/**
+ * Resolve the command's PROGRAM. `~/x` expands against home, an absolute path
+ * stands, a relative path joins the manifest directory — that is the
+ * long-standing contract for a single word like `bin/audit.sh` — and a bare
+ * name is left alone for the shell to find on PATH.
+ *
+ * A command WITH arguments (`node bin/audit.js`) is a program line, not a
+ * path: only the program token is resolved and the tail goes to the shell
+ * untouched. That is what makes a hook runnable on a machine with no POSIX
+ * shell — `node script.js` works everywhere (issue #2).
+ */
+export function resolveCommand(hook: Hook | HookManifest, home?: string): string {
+  const { program, rest } = splitCommandLine(hook.command);
+  if (!program) return hook.command;
   const base = hook.file ? path.dirname(hook.file) : process.cwd();
-  return path.join(base, hook.command);
+  if (program.startsWith("~/")) return programLine(path.join(home ?? "", program.slice(2)), rest);
+  if (path.isAbsolute(program)) return programLine(program, rest);
+  // One word: a path beside the manifest, as always. Inside a program line the
+  // token `node` is a name to look up, not a file in the hooks directory.
+  if (rest === "" || /[\\/]/.test(program)) return programLine(path.join(base, program), rest);
+  return programLine(program, rest);
 }
 
 /** Timeout in ms for a hook; unset (or nonsense) -> a finite default (12.10). */
@@ -135,22 +192,63 @@ function canonicalize(p: string): string {
 }
 
 /**
+ * Whitespace-split a command's argument tail, removing one layer of quotes.
+ * Only used for the containment check below — the shell does the real parsing.
+ */
+function splitArguments(rest: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quote: string | null = null;
+  for (const c of rest) {
+    if (quote) {
+      if (c === quote) quote = null;
+      else cur += c;
+      continue;
+    }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if (/\s/.test(c)) { if (cur) { out.push(cur); cur = ""; } continue; }
+    cur += c;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+/**
  * 12.10 scope: the resolved command, with sneaky escapes refused.
- * A RELATIVE command must stay inside the manifest's own directory after
- * canonicalization (`..` walks and symlinked subdirs can otherwise smuggle
- * a hook out of the repo it ships in). An explicit absolute path is treated
- * as operator intent — the operator wrote it in their own manifest.
+ * A RELATIVE path — the program itself when it is one, and any relative path
+ * argument, which the shell resolves against the same working directory — must
+ * stay inside the manifest's own directory after canonicalization (`..` walks
+ * and symlinked subdirs can otherwise smuggle a hook out of the repo it ships
+ * in). An explicit absolute path is treated as operator intent — the operator
+ * wrote it in their own manifest.
  */
 export function scopeCommand(hook: Hook | HookManifest, home?: string): string {
   const command = resolveCommand(hook, home);
-  if (path.isAbsolute(hook.command)) return command;
-  const root = canonicalize(hook.file ? path.dirname(hook.file) : process.cwd());
-  const dir = canonicalize(path.dirname(command));
-  if (dir !== root && !dir.startsWith(root + path.sep)) {
-    throw new Error(
-      `hook ${hook.id}: command "${hook.command}" resolves to ${dir}, outside the ` +
-      `hook's directory (${root}). Hooks may only run commands inside their own manifest directory.`,
-    );
+  const { program, rest } = splitCommandLine(hook.command);
+  const base = hook.file ? path.dirname(hook.file) : process.cwd();
+  const root = canonicalize(base);
+
+  const assertInside = (resolved: string): void => {
+    const dir = canonicalize(path.dirname(resolved));
+    if (dir !== root && !dir.startsWith(root + path.sep)) {
+      throw new Error(
+        `hook ${hook.id}: command "${hook.command}" resolves to ${dir}, outside the ` +
+        `hook's directory (${root}). Hooks may only run commands inside their own manifest directory.`,
+      );
+    }
+  };
+  /** A relative path token, or null for a flag, a bare name or an absolute path. */
+  const relative = (token: string): string | null => {
+    if (!token || token.startsWith("-") || token.startsWith("~/")) return null;
+    if (path.isAbsolute(token) || !/[\\/]/.test(token)) return null;
+    return path.join(base, token);
+  };
+
+  const programPath = relative(program);
+  if (programPath) assertInside(programPath);
+  for (const arg of splitArguments(rest)) {
+    const argPath = relative(arg);
+    if (argPath) assertInside(argPath);
   }
   return command;
 }
@@ -159,6 +257,33 @@ export function scopeCommand(hook: Hook | HookManifest, home?: string): string {
 export function timeoutMs(hook: Hook | HookManifest): number {
   const secs = hook.timeout ?? 0;
   return secs > 0 ? secs * 1000 : DEFAULT_HOOK_TIMEOUT_MS;
+}
+
+/**
+ * How one resolved shell takes a command line: `cmd.exe /d /s /c "<line>"` or
+ * `<shell> -c <line>`. This mirrors what Node's own `shell:` option does, but
+ * explicitly, because shell and platform no longer have to agree — a Windows
+ * machine whose hooks declare `shell: "bash"` runs `bash -c`, not `/d /s /c`.
+ *
+ * The extra pair of quotes around a cmd line is not decoration: with /s,
+ * cmd.exe strips the first and last quote of the whole tail, so wrapping once
+ * leaves an inner quoted path (`"C:/Program Files/node.exe" x.js`) intact.
+ * Node wraps its own shell commands for exactly the same reason.
+ */
+export function shellArgv(
+  choice: ShellChoice,
+  command: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { file: string; args: string[]; verbatim: boolean } {
+  if (choice.kind === "cmd") {
+    const file =
+      typeof choice.shell === "string"
+        ? choice.shell
+        : env.ComSpec?.trim() || env.COMSPEC?.trim() || "cmd.exe";
+    return { file, args: ["/d", "/s", "/c", `"${command}"`], verbatim: true };
+  }
+  const file = typeof choice.shell === "string" ? choice.shell : IS_WINDOWS ? "sh" : "/bin/sh";
+  return { file, args: ["-c", command], verbatim: false };
 }
 
 /**
@@ -187,25 +312,57 @@ export function executeHook(req: ExecRequest): Promise<ExecOutcome> {
   const env = { ...(req.env ?? process.env) };
   const payload = JSON.stringify(req.payload ?? {});
 
+  // Arm the timeout through an injectable scheduler: the same discipline as
+  // the injected clock, so the timeout path can be exercised without racing a
+  // wall clock (a loaded CI box otherwise decides when the hook "started").
+  const schedule =
+    req.scheduleTimeout ??
+    ((fire: () => void, ms: number) => {
+      const t = setTimeout(fire, ms);
+      t.unref?.();
+      return { cancel: () => clearTimeout(t) };
+    });
+
   return new Promise<ExecOutcome>((resolve) => {
     let settled = false;
     let stdout = "";
     let stderr = "";
-    let timer: NodeJS.Timeout | null = null;
+    let timer: { cancel(): void } | null = null;
 
     const finish = (outcome: ExecOutcome) => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimeout(timer);
+      timer?.cancel();
       resolve(outcome);
     };
 
+    let line: ReturnType<typeof shellArgv>;
+    try {
+      // The shell is resolved per invocation (issue #2): the manifest's own
+      // `shell`, then MNEMO_SHELL, then pi's shellPath, then the platform
+      // default. A choice that cannot be resolved is an audited error, never a
+      // crash — and never a silent fall back to a shell that is not there.
+      line = shellArgv(resolveHookShell(req.hook, env, req.env?.HOME ?? os.homedir()), command, env);
+    } catch (err: any) {
+      finish({
+        status: "error",
+        message: `hook ${req.hook.id} could not resolve a shell: ${err?.message ?? err}`,
+        exit: null,
+        timedOut: false,
+        stdout: "",
+        stderr: "",
+        durationMs: (req.now ?? Date.now)() - start,
+      });
+      return;
+    }
+
     let child;
     try {
-      child = spawn("sh", ["-c", command], {
+      child = spawn(line.file, line.args, {
         cwd,
         env,
         stdio: ["pipe", "pipe", "pipe"],
+        windowsVerbatimArguments: line.verbatim,
       });
     } catch (err) {
       finish({
@@ -221,7 +378,7 @@ export function executeHook(req: ExecRequest): Promise<ExecOutcome> {
     }
 
     if (ttl !== null) {
-      timer = setTimeout(() => {
+      timer = schedule(() => {
         try {
           child.kill("SIGKILL");
         } catch { /* already gone */ }
@@ -235,7 +392,6 @@ export function executeHook(req: ExecRequest): Promise<ExecOutcome> {
           durationMs: (req.now ?? Date.now)() - start,
         });
       }, ttl);
-      timer.unref?.();
     }
 
     child.stdout?.on("data", (d: Buffer) => { stdout += d.toString("utf8"); });

@@ -3,9 +3,10 @@
  *
  * Pure command logic: returns the report string (the extension notifies with
  * it) so tests drive it without a TUI. `add` scaffolds a manifest into the
- * chosen scope, and when the command path points inside the hooks root it
- * scaffolds a stub script too (chmod 0755) — the plain-script path; harness
- * bundles are a later increment.
+ * chosen scope, and when the command names an in-root script it scaffolds a
+ * stub too — a node stub for a `.js` hook (the shape that runs on every
+ * platform), an `sh` stub for a path that asks for one. Harness bundles are a
+ * later increment.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -149,6 +150,33 @@ function parseAddFlags(tokens: string[], env: NodeJS.ProcessEnv): { flags: AddFl
   return { flags };
 }
 
+/**
+ * The in-root script a `/hook add` should scaffold, if the command names one.
+ * `bin/gate.js` is run by node — the one interpreter every platform has — so
+ * the manifest records `node bin/gate.js` (and the stub is a node script). A
+ * POSIX-shaped path like `bin/gate.sh` is kept verbatim: the operator asked
+ * for a shell script by name. Either way the path must sit in the hooks root's
+ * own `bin/`, which is what makes a relative command safe to run.
+ */
+export function stubTarget(command: string): { rel: string; node: boolean; line: string } | null {
+  const trimmed = command.trim();
+  const m = /^(?:node\s+)?(bin\/[^\s]+)$/i.exec(trimmed);
+  if (!m) return null;
+  const rel = m[1]!;
+  const node = /^node\s/i.test(trimmed) || /\.(js|mjs|cjs)$/i.test(rel);
+  return { rel, node, line: node ? `node ${rel}` : rel };
+}
+
+/** The starting point a scaffolded hook gets: drained stdin, then exit 0. */
+export function stubBody(id: string, node: boolean): string {
+  const what = "stdin: JSON event; exit 0 = allow, 2 = block (reason on stderr)";
+  return node
+    ? `#!/usr/bin/env node\n// ${id} hook — ${what}\n` +
+        `process.stdin.resume();\nprocess.stdin.on("end", () => process.exit(0));\n` +
+        `process.stdin.on("error", () => process.exit(0));\n`
+    : `#!/bin/sh\n# ${id} hook\n# ${what}\ncat >/dev/null\nexit 0\n`;
+}
+
 /** /hook add <id> ... — scaffold manifest (+ stub script when in-root). */
 export async function hookAdd(tokens: string[], ctx: HookCommandCtx): Promise<string> {
   const { flags, error } = parseAddFlags(tokens, ctx.env);
@@ -167,6 +195,7 @@ export async function hookAdd(tokens: string[], ctx: HookCommandCtx): Promise<st
     if (!ok) return `not overwriting existing hook ${flags.id} (use -y to force)`;
   }
 
+  const target = typeof flags.command === "string" ? stubTarget(flags.command) : null;
   const manifest: Record<string, unknown> = {
     id: flags.id,
     trigger: flags.trigger,
@@ -177,7 +206,7 @@ export async function hookAdd(tokens: string[], ctx: HookCommandCtx): Promise<st
       ...(flags.pathGlob ? { path: flags.pathGlob } : {}),
     };
   }
-  manifest.command = flags.command;
+  manifest.command = target ? target.line : flags.command;
   if (flags.timeout !== undefined) manifest.timeout = flags.timeout;
   const on: Record<string, boolean> = {};
   if (flags.block) on.block = true;
@@ -192,23 +221,20 @@ export async function hookAdd(tokens: string[], ctx: HookCommandCtx): Promise<st
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n", { mode: 0o600 });
 
-  // If the command lives inside the hooks root, scaffold a runnable stub.
+  // If the command names a script inside the hooks root, scaffold a runnable
+  // stub for it (see stubTarget for which language it gets).
   let stub: string | null = null;
-  if (typeof flags.command === "string" && flags.command.startsWith("bin/")) {
-    const binPath = path.join(root, flags.command);
+  if (target) {
+    const binPath = path.join(root, target.rel);
     if (!fs.existsSync(binPath)) {
       fs.mkdirSync(path.dirname(binPath), { recursive: true });
-      fs.writeFileSync(
-        binPath,
-        `#!/bin/sh\n# ${flags.id} hook\n# stdin: JSON event; exit 0 = allow, 2 = block (reason on stderr)\ncat >/dev/null\nexit 0\n`,
-        { mode: 0o755 },
-      );
-      stub = flags.command;
+      fs.writeFileSync(binPath, stubBody(flags.id!, target.node), { mode: 0o755 });
+      stub = target.rel;
     }
   }
 
   return `hook ${flags.id} written to ${file} (${fmtScope(flags.scope)}, ${flags.trigger})` +
-    (stub ? `\nstub script: ${path.join(root, flags.command!)}` : "");
+    (stub ? `\nstub script: ${path.join(root, stub)}` : "");
 }
 
 /** /hook test <id> [tool] [jsonArgs] — dry-run without touching the session. */

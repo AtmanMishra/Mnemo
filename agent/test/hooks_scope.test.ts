@@ -221,14 +221,20 @@ test("disable with a bare id that exists in two scopes targets the effective one
   }
 });
 
-test("saveDisabled round-trips and writes mode 0600", () => {
+test("saveDisabled round-trips, and writes mode 0600 where the platform has one", () => {
   const w = world();
   try {
     const set = new Set(["user:a", "project:b"]);
     saveDisabled(w.home, set);
     assert.deepEqual(loadDisabled(w.home), set);
-    const mode = fs.statSync(statePath(w.home)).mode & 0o777;
-    assert.equal(mode, 0o600, "state file carries user-only permissions");
+    const stat = fs.statSync(statePath(w.home));
+    // Windows models no permission bits at all — Node reports every file as
+    // 0o666 there — so the POSIX promise is only assertable on POSIX.
+    if (process.platform === "win32") {
+      assert.ok(stat.isFile(), "state file written");
+    } else {
+      assert.equal(stat.mode & 0o777, 0o600, "state file carries user-only permissions");
+    }
   } finally {
     cleanup(w);
   }

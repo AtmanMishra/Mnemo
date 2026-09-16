@@ -84,6 +84,17 @@ export interface HookManifest {
   matcher?: HookMatcher;
   /** Command to run; relative paths resolve against the manifest's directory. */
   command: string;
+  /**
+   * Shell for THIS hook, overriding MNEMO_SHELL / pi's shellPath:
+   *   "bash"  — a real POSIX shell (bash/sh, found via the configured shell or
+   *             PATH), run as `bash -c`;
+   *   "cmd"   — cmd.exe /d /s /c (Windows' own shell);
+   *   <path>  — an explicit interpreter, run as `<path> -c`.
+   * Absent = the same resolution every other tool uses (platform default:
+   * `sh -c` on POSIX, `cmd.exe /d /s /c` on Windows). An unresolvable shell
+   * is an audited error, never a crash and never a silent fallback.
+   */
+  shell?: string;
   /** Kill the command after this many seconds; a timeout allows + logs. */
   timeout?: number;
   on?: HookOn;
@@ -128,6 +139,7 @@ export function parseManifest(raw: unknown, file?: string): HookManifest | null 
     if (m.tool === undefined && m.path === undefined) return null;
   }
   if (!isHookOn(o.on)) return null;
+  if (o.shell !== undefined && (typeof o.shell !== "string" || o.shell.trim() === "")) return null;
   if (o.enabled !== undefined && typeof o.enabled !== "boolean") return null;
   if (o.description !== undefined && typeof o.description !== "string") return null;
   if (o.network !== undefined && typeof o.network !== "boolean") return null;
@@ -145,6 +157,7 @@ export function parseManifest(raw: unknown, file?: string): HookManifest | null 
     };
   }
   if (typeof o.timeout === "number") hook.timeout = o.timeout;
+  if (typeof o.shell === "string") hook.shell = o.shell;
   if (o.on !== undefined) hook.on = { ...(o.on as HookOn) };
   if (o.enabled !== undefined) hook.enabled = o.enabled;
   if (typeof o.description === "string") hook.description = o.description;

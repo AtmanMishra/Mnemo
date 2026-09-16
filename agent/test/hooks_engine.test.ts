@@ -27,13 +27,35 @@ function world(): World {
   return { base, home, project };
 }
 
-const sh = (body: string) => `#!/bin/sh\n${body}\n`;
+/** The interpreter every platform has, quoted for either shell's syntax. */
+const NODE = `"${process.execPath.replace(/\\/g, "/")}"`;
 
+/** The hook command line that runs one node fixture (a program line, not a path). */
+function nodeCmd(fixture: string): string {
+  return `${NODE} "${fixture.replace(/\\/g, "/")}"`;
+}
+
+/**
+ * Fixtures are plain node scripts run as `node <script>`, never `#!/bin/sh`
+ * stand-ins: a fixture that needs a POSIX shell takes the whole package down on
+ * a machine that has none (AGENTS.md, "Test fixtures never spawn a shell").
+ */
+/** Write a fixture script; returns its absolute path. */
 function script(dir: string, name: string, body: string): string {
   fs.mkdirSync(dir, { recursive: true });
   const p = path.join(dir, name);
-  fs.writeFileSync(p, body, { mode: 0o755 });
+  fs.writeFileSync(p, `// fixture: ${name}\n${body}\n`);
   return p;
+}
+
+/** A hook body that writes one stderr line (optional) and exits with `code`. */
+function exitWith(code: number, stderr = ""): string {
+  return (stderr ? `process.stderr.write(${JSON.stringify(`${stderr}\n`)}); ` : "") + `process.exit(${code});`;
+}
+
+/** A hook body that answers with an exit-0 JSON response. */
+function response(obj: unknown): string {
+  return `process.stdout.write(${JSON.stringify(JSON.stringify(obj))});`;
 }
 
 function writeManifest(dir: string, name: string, body: Record<string, unknown>): void {
@@ -73,9 +95,9 @@ test("a blocking PreToolUse hook vetoes the call with its stderr reason", async 
   const w = world();
   try {
     const { pi } = setup(w);
-    const cmd = script(w.base, "deny.sh", sh('echo "no writes to src" >&2\nexit 2'));
+    const cmd = script(w.base, "deny.js", exitWith(2, "no writes to src"));
     writeManifest(projectHookRoot(w.project), "guard.json",
-      { id: "guard", trigger: "PreToolUse", matcher: { tool: "write_file|apply_edit" }, command: cmd });
+      { id: "guard", trigger: "PreToolUse", matcher: { tool: "write_file|apply_edit" }, command: nodeCmd(cmd) });
     const ev = { toolName: "write_file", toolCallId: "c1", input: { path: "src/a.ts", content: "x" } };
     const [res] = await pi.emit("tool_call", ev, { cwd: w.project });
     assert.deepEqual(res, { block: true, reason: "blocked by hook guard: no writes to src" });
@@ -88,9 +110,9 @@ test("a non-matching tool sails past a matcher-having hook", async () => {
   try {
     const { pi } = setup(w);
     const marker = path.join(w.base, "ran.txt");
-    const cmd = script(w.base, "mark.sh", sh(`touch ${marker}\nexit 0`));
+    const cmd = script(w.base, "mark.js", `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "1");`);
     writeManifest(projectHookRoot(w.project), "readonly.json",
-      { id: "ro", trigger: "PreToolUse", matcher: { tool: "write_file", path: "src/**" }, command: cmd });
+      { id: "ro", trigger: "PreToolUse", matcher: { tool: "write_file", path: "src/**" }, command: nodeCmd(cmd) });
     const [res] = await pi.emit("tool_call",
       { toolName: "bash_exec", toolCallId: "c", input: { command: "ls" } }, { cwd: w.project });
     assert.equal(res, undefined, "path-scoped hook does not run for a command");
@@ -102,9 +124,9 @@ test("PreToolUse args rewrite mutates the call in place, but only with on.modify
   const w = world();
   try {
     const { pi, engine } = setup(w);
-    const rewriter = script(w.base, "rewrite.sh", sh(`echo '{"args":{"command":"echo patched","force":true}}'`));
+    const rewriter = script(w.base, "rewrite.js", response({ args: { command: "echo patched", force: true } }));
     writeManifest(projectHookRoot(w.project), "wrap.json",
-      { id: "wrap", trigger: "PreToolUse", matcher: { tool: "bash_exec" }, command: rewriter, on: { modify: true } });
+      { id: "wrap", trigger: "PreToolUse", matcher: { tool: "bash_exec" }, command: nodeCmd(rewriter), on: { modify: true } });
     const ev = { toolName: "bash_exec", toolCallId: "c", input: { command: "echo hi" } };
     const [res] = await pi.emit("tool_call", ev, { cwd: w.project });
     assert.equal(res, undefined, "no block");
@@ -112,7 +134,7 @@ test("PreToolUse args rewrite mutates the call in place, but only with on.modify
     // without modify the response is ignored: new hook, no modify flag
     engine.registry(w.project).disable("wrap");
     writeManifest(projectHookRoot(w.project), "nowrap.json",
-      { id: "nowrap", trigger: "PreToolUse", matcher: { tool: "bash_exec" }, command: rewriter, on: { audit: false } });
+      { id: "nowrap", trigger: "PreToolUse", matcher: { tool: "bash_exec" }, command: nodeCmd(rewriter), on: { audit: false } });
     const ev2 = { toolName: "bash_exec", toolCallId: "c2", input: { command: "echo hi" } };
     await pi.emit("tool_call", ev2, { cwd: w.project });
     assert.deepEqual(ev2.input, { command: "echo hi" }, "without modify the response is ignored");
@@ -123,12 +145,12 @@ test("any block veto wins; the first blocking hook in precedence order speaks", 
   const w = world();
   try {
     const { engine } = setup(w);
-    const projectDeny = script(w.base, "p.sh", sh("exit 2"));
-    const userDeny = script(w.base, "u.sh", sh('echo "user level says no" >&2\nexit 2'));
+    const projectDeny = script(w.base, "p.js", exitWith(2));
+    const userDeny = script(w.base, "u.js", exitWith(2, "user level says no"));
     writeManifest(projectHookRoot(w.project), "aa.json",
-      { id: "aa", trigger: "PreToolUse", command: projectDeny });
+      { id: "aa", trigger: "PreToolUse", command: nodeCmd(projectDeny) });
     writeManifest(userHookRoot(w.home), "bb.json",
-      { id: "bb", trigger: "PreToolUse", command: userDeny });
+      { id: "bb", trigger: "PreToolUse", command: nodeCmd(userDeny) });
     const dec = await engine.preToolUse({ toolName: "read_file", input: {} }, { cwd: w.project });
     assert.deepEqual(dec, { block: true, reason: "blocked by hook aa" }, "project hook speaks first");
     // disable aa, now bb is the effective blocker
@@ -145,10 +167,9 @@ test("PostToolUse can decorate the result when on.modify is set", async () => {
   const w = world();
   try {
     const { pi } = setup(w);
-    const decorator = script(w.base, "deco.sh",
-      sh(`echo '{"details":{"audited":true},"isError":false}'`));
+    const decorator = script(w.base, "deco.js", response({ details: { audited: true }, isError: false }));
     writeManifest(projectHookRoot(w.project), "audit.json",
-      { id: "audit", trigger: "PostToolUse", matcher: { tool: "read_file" }, command: decorator, on: { modify: true } });
+      { id: "audit", trigger: "PostToolUse", matcher: { tool: "read_file" }, command: nodeCmd(decorator), on: { modify: true } });
     const ev = {
       toolName: "read_file", toolCallId: "c", input: { path: "x" },
       content: [{ type: "text", text: "body" }], details: {}, isError: false,
@@ -162,9 +183,9 @@ test("PostToolUse without on.modify is observational only", async () => {
   const w = world();
   try {
     const { pi } = setup(w);
-    const decorator = script(w.base, "deco.sh", sh(`echo '{"content":[{"type":"text","text":"HACKED"}]}'`));
+    const decorator = script(w.base, "deco.js", response({ content: [{ type: "text", text: "HACKED" }] }));
     writeManifest(projectHookRoot(w.project), "obs.json",
-      { id: "obs", trigger: "PostToolUse", command: decorator });
+      { id: "obs", trigger: "PostToolUse", command: nodeCmd(decorator) });
     const [patch] = await pi.emit("tool_result",
       { toolName: "read_file", toolCallId: "c", input: {}, content: [], details: {}, isError: false },
       { cwd: w.project });
@@ -178,9 +199,9 @@ test("a UserPromptSubmit veto handles the prompt and notifies", async () => {
   const w = world();
   try {
     const { pi } = setup(w);
-    const veto = script(w.base, "veto.sh", sh('echo "that topic is off-limits" >&2\nexit 2'));
+    const veto = script(w.base, "veto.js", exitWith(2, "that topic is off-limits"));
     writeManifest(projectHookRoot(w.project), "policy.json",
-      { id: "policy", trigger: "UserPromptSubmit", command: veto });
+      { id: "policy", trigger: "UserPromptSubmit", command: nodeCmd(veto) });
     const notified: string[] = [];
     const [res] = await pi.emit("input", { text: "tell me about X" },
       { cwd: w.project, ui: { notify: (m: string, t?: string) => notified.push(`${t}:${m}`) } });
@@ -194,9 +215,9 @@ test("a UserPromptSubmit transformer rewrites the prompt text", async () => {
   const w = world();
   try {
     const { pi } = setup(w);
-    const xform = script(w.base, "xform.sh", sh(`echo '{"prompt":"[guard] summarise exactly"}'`));
+    const xform = script(w.base, "xform.js", response({ prompt: "[guard] summarise exactly" }));
     writeManifest(projectHookRoot(w.project), "redact.json",
-      { id: "redact", trigger: "UserPromptSubmit", command: xform });
+      { id: "redact", trigger: "UserPromptSubmit", command: nodeCmd(xform) });
     const [res] = await pi.emit("input", { text: "summarise exactly" }, { cwd: w.project });
     assert.deepEqual(res, { action: "transform", text: "[guard] summarise exactly" });
   } finally { fs.rmSync(w.base, { recursive: true, force: true }); }
@@ -225,9 +246,10 @@ test("SessionStart runs its hooks and the 9.6 memory sync hook fires", async () 
     const pi = fakePi();
     attachHooks(pi, engine);
     const marker = path.join(w.base, "started.txt");
-    const cmd = script(w.base, "start.sh", sh(`echo "$1" >> ${marker}; exit 0`));
+    const cmd = script(w.base, "start.js",
+      `require("node:fs").appendFileSync(${JSON.stringify(marker)}, "started\\n");`);
     writeManifest(projectHookRoot(w.project), "begin.json",
-      { id: "begin", trigger: "SessionStart", command: cmd });
+      { id: "begin", trigger: "SessionStart", command: nodeCmd(cmd) });
     await pi.emit("session_start", { reason: "startup" }, { cwd: w.project });
     assert.equal(synced, w.project, "memory sync hook called with the cwd");
     assert.ok(fs.existsSync(marker), "the lifecycle hook ran");
@@ -240,9 +262,9 @@ test("every invocation writes one redacted audit row; disabled hooks never run",
     const engine = new HookEngine({ home: w.home, audit: new HookAudit({ home: w.home }) });
     const pi = fakePi();
     attachHooks(pi, engine);
-    const cmd = script(w.base, "r.sh", sh("exit 0"));
-    writeManifest(projectHookRoot(w.project), "a.json", { id: "a", trigger: "PreToolUse", command: cmd });
-    writeManifest(projectHookRoot(w.project), "b.json", { id: "b", trigger: "PreToolUse", command: cmd });
+    const cmd = script(w.base, "r.js", exitWith(0));
+    writeManifest(projectHookRoot(w.project), "a.json", { id: "a", trigger: "PreToolUse", command: nodeCmd(cmd) });
+    writeManifest(projectHookRoot(w.project), "b.json", { id: "b", trigger: "PreToolUse", command: nodeCmd(cmd) });
     await pi.emit("tool_call", { toolName: "read_file", toolCallId: "c", input: {} }, { cwd: w.project });
     const spans = readSpans(w.home);
     assert.equal(spans.filter((s) => s.name === "hook").length, 2, "two hooks -> two audit rows");
@@ -261,9 +283,9 @@ test("hooks added mid-session take effect on the next event (live reload)", asyn
   try {
     const { pi } = setup(w);
     await pi.emit("tool_call", { toolName: "bash_exec", toolCallId: "c", input: { command: "ls" } }, { cwd: w.project });
-    const gate = script(w.base, "gate.sh", sh('echo live >&2\nexit 2'));
+    const gate = script(w.base, "gate.js", exitWith(2, "live"));
     writeManifest(userHookRoot(w.home), "late.json",
-      { id: "late", trigger: "PreToolUse", matcher: { tool: "bash_exec" }, command: gate });
+      { id: "late", trigger: "PreToolUse", matcher: { tool: "bash_exec" }, command: nodeCmd(gate) });
     const [res] = await pi.emit("tool_call",
       { toolName: "bash_exec", toolCallId: "c2", input: { command: "ls" } }, { cwd: w.project });
     assert.deepEqual(res, { block: true, reason: "blocked by hook late: live" });
@@ -289,7 +311,7 @@ test("/hook add scaffolds a manifest + stub script into the chosen scope", async
     const engine = new HookEngine({ home: w.home, audit: new HookAudit({ home: w.home }) });
     const ctx = commandCtx(w, engine);
     const report = await runHookCommand(
-      "add audit.store-writes --trigger PreToolUse --tool 'write_file|apply_edit' --path 'src/**' --command bin/audit.sh --scope project --timeout 5 --block --description 'audit writes'",
+      "add audit.store-writes --trigger PreToolUse --tool 'write_file|apply_edit' --path 'src/**' --command bin/audit.js --scope project --timeout 5 --block --description 'audit writes'",
       ctx,
     );
     assert.ok(report.includes("audit.store-writes"), report);
@@ -301,9 +323,14 @@ test("/hook add scaffolds a manifest + stub script into the chosen scope", async
     assert.deepEqual(manifest.matcher, { tool: "write_file|apply_edit", path: "src/**" });
     assert.equal(manifest.timeout, 5);
     assert.deepEqual(manifest.on, { block: true });
-    const stub = path.join(projectHookRoot(w.project), "bin", "audit.sh");
+    assert.equal(manifest.command, "node bin/audit.js",
+      "a .js hook records its interpreter, so it runs without a POSIX shell");
+    const stub = path.join(projectHookRoot(w.project), "bin", "audit.js");
     assert.ok(fs.existsSync(stub));
-    assert.ok((fs.statSync(stub).mode & 0o111) !== 0, "stub is executable");
+    assert.match(fs.readFileSync(stub, "utf8"), /process\.exit\(0\)/, "the stub is a runnable node hook");
+    if (process.platform !== "win32") {
+      assert.ok((fs.statSync(stub).mode & 0o111) !== 0, "stub is executable");
+    }
     // listed
     const list = await runHookCommand("list", ctx);
     assert.ok(list.includes("audit.store-writes") && list.includes("PreToolUse"));
@@ -333,14 +360,14 @@ test("/hook test dry-runs a hook without touching the session", async () => {
   try {
     const engine = new HookEngine({ home: w.home, audit: new HookAudit({ home: w.home }) });
     const ctx = commandCtx(w, engine);
-    await runHookCommand("add gate --trigger PreToolUse --command bin/gate.sh --scope user -y", ctx);
+    await runHookCommand("add gate --trigger PreToolUse --command bin/gate.js --scope user -y", ctx);
     // stub exits 0 -> allow
     const allow = await runHookCommand("test gate", ctx);
     assert.ok(allow.includes("-> allow"), allow);
     // a blocking variant
-    const blocky = script(w.base, "blocky.sh", sh('echo frozen >&2\nexit 2'));
+    const blocky = script(w.base, "blocky.js", exitWith(2, "frozen"));
     writeManifest(userHookRoot(w.home), "deny.json",
-      { id: "deny", trigger: "PreToolUse", command: blocky });
+      { id: "deny", trigger: "PreToolUse", command: nodeCmd(blocky) });
     const deny = await runHookCommand("test deny bash_exec '{\"command\":\"ls\"}'", ctx);
     assert.ok(deny.includes("-> block"), deny);
     assert.ok(deny.includes("frozen"), deny);
@@ -369,9 +396,9 @@ test("a hook echoed secret in its block reason never reaches the audit record ra
   const w = world();
   try {
     const SECRET = "sk-or-v1-hookechoedlongtokenthatmustneverpersist123456789";
-    const cmd = script(w.base, "leak.sh", sh(`echo "DENIED leaked=${SECRET}" >&2\nexit 2`));
+    const cmd = script(w.base, "leak.js", exitWith(2, `DENIED leaked=${SECRET}`));
     writeManifest(projectHookRoot(w.project), "leaker.json",
-      { id: "leaker", trigger: "PreToolUse", command: cmd });
+      { id: "leaker", trigger: "PreToolUse", command: nodeCmd(cmd) });
 
     // narrow recording sink instead of the real tracer, so we assert on the
     // exact attrs the engine hands the audit layer
