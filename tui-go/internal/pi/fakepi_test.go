@@ -22,10 +22,11 @@ import (
 // here is a protocol — one JSON line in, one JSON line out — and nothing about
 // that needs a shell.
 const (
-	envFakePi   = "MNEMO_TEST_FAKE_PI"
-	envFakeLine = "MNEMO_TEST_FAKE_PI_RECEIVED" // where the fake records what it was sent
-	envFakeMute = "MNEMO_TEST_FAKE_PI_MUTE"     // set: read requests, never answer them
-	envFakeUI   = "MNEMO_TEST_FAKE_PI_UI"       // a line the fake emits at startup, e.g. a dialog
+	envFakePi     = "MNEMO_TEST_FAKE_PI"
+	envFakeLine   = "MNEMO_TEST_FAKE_PI_RECEIVED" // where the fake records what it was sent
+	envFakeMute   = "MNEMO_TEST_FAKE_PI_MUTE"     // set: read requests, never answer them
+	envFakeUI     = "MNEMO_TEST_FAKE_PI_UI"       // a line the fake emits at startup, e.g. a dialog
+	envFakeStderr = "MNEMO_TEST_FAKE_PI_STDERR"   // a line the fake writes to stderr and exits with
 )
 
 // TestMain is also the stand-in agent's entry point: when the environment says
@@ -37,12 +38,20 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// fakePiMain records every request line and answers get_commands with the
-// shape pi's docs print. It answers nothing else: a prompt arriving here is
+// fakePiMain records every request line and answers the four questions that
+// carry data back — get_commands, get_fork_messages, fork and compact — in the
+// shapes pi's docs print. It answers nothing else: a prompt arriving here is
 // recorded and ignored, because what a client sends is the client's business.
 func fakePiMain() int {
 	capture := os.Getenv(envFakeLine)
 	mute := os.Getenv(envFakeMute) == "1"
+	// A backend that dies at startup: the reason goes to stderr and the exit
+	// code is non-zero, which is what pi does when an extension will not load.
+	// Nothing is said on stdout — there is no protocol left to say it on.
+	if fail := os.Getenv(envFakeStderr); fail != "" {
+		fmt.Fprintln(os.Stderr, fail)
+		return 1
+	}
 	// One line said before anything is read: how a question from an extension
 	// arrives without a real pi. Printed first, so it is the first thing the
 	// client sees.
@@ -68,7 +77,8 @@ func fakePiMain() int {
 		if json.Unmarshal([]byte(line), &v) != nil {
 			continue
 		}
-		if v["type"] == "get_commands" {
+		switch v["type"] {
+		case "get_commands":
 			fmt.Println(`{"id":1,"type":"response","command":"get_commands","success":true,"data":{"commands":[` +
 				// The extension is spelled the way the installed pi spells
 				// it (sourceInfo, not flat location/path); the other two the
@@ -76,6 +86,16 @@ func fakePiMain() int {
 				`{"name":"hook","description":"list and fire hooks","source":"extension","sourceInfo":{"path":"<inline:sea-hooks>","source":"inline","scope":"temporary"}},` +
 				`{"name":"implement","description":"implement a plan","source":"prompt","location":"project","path":"/p/.pi/agent/prompts/implement.md"},` +
 				`{"name":"skill:pdf-reader","description":"read pdfs","source":"skill","location":"user","path":"/u/.pi/agent/skills/pdf-reader/SKILL.md"}]}}`)
+		case "get_fork_messages":
+			// The docs' own example, twice over: entry ids in pi's order,
+			// oldest first, which is what a fork at "the last one" needs.
+			fmt.Println(`{"id":1,"type":"response","command":"get_fork_messages","success":true,"data":{"messages":[` +
+				`{"entryId":"abc123","text":"First prompt..."},` +
+				`{"entryId":"def456","text":"Second prompt..."}]}}`)
+		case "fork":
+			fmt.Println(`{"id":1,"type":"response","command":"fork","success":true,"data":{"text":"Second prompt...","cancelled":false}}`)
+		case "compact":
+			fmt.Println(`{"id":1,"type":"response","command":"compact","success":true,"data":{"summary":"Summary of conversation...","firstKeptEntryId":"abc123","tokensBefore":150000,"estimatedTokensAfter":32000}}`)
 		}
 	}
 	return 0
@@ -328,6 +348,80 @@ func TestNewSessionGoesOverTheWire(t *testing.T) {
 	}
 }
 
+// liveFakeStderr starts a session against a stand-in agent that writes each
+// line to stderr and exits without ever answering anything — pi refusing to
+// start, which is the shape #13 is about.
+func liveFakeStderr(t *testing.T, lines ...string) *Session {
+	t.Helper()
+	t.Setenv(envFakePi, "1")
+	t.Setenv(envFakeStderr, strings.Join(lines, "\n"))
+	s, err := Start(exec.Command(os.Args[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+// TestAnExtensionConflictReachesTheTranscript: the whole of #13, end to end.
+// pi aborts at startup, says why on stderr, and the interface must carry that
+// sentence — with the way out of it — instead of the old "the agent process
+// exited", which told the reader nothing they could act on.
+//
+// The fixture is pi's own output, captured from a real run: the diagnostics
+// prefix, the reason in pi's words, and the Hint line it prints underneath.
+func TestAnExtensionConflictReachesTheTranscript(t *testing.T) {
+	s := liveFakeStderr(t,
+		`Error: Failed to load extension "/home/me/.pi/extensions/grep.ts": Tool "grep" conflicts with /repo/agent/extensions/sea-tools-inline.ts`,
+		`Hint: Start without extensions using "pi -ne".`)
+
+	got, ok := next(t, s).(agent.Failed)
+	if !ok {
+		t.Fatalf("the failure must arrive as a failure, got %#v", got)
+	}
+	text := got.Err.Error()
+	for _, want := range []string{
+		"/home/me/.pi/extensions/grep.ts",
+		`Tool "grep" conflicts with /repo/agent/extensions/sea-tools-inline.ts`,
+		"remove or rename one of them",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the transcript line lost %q: %q", want, text)
+		}
+	}
+	if strings.HasPrefix(text, "Error: ") {
+		t.Fatalf("pi's diagnostics prefix is not part of the sentence: %q", text)
+	}
+
+	// And once: pi follows the failure with a hint, and a second notice would
+	// be the old bug in a new place — a reader who sees two failures stops at
+	// the first, and the first is the one that explains itself.
+	done := make(chan tea.Msg, 1)
+	go func() { done <- s.Next()() }()
+	select {
+	case extra := <-done:
+		t.Fatalf("the failure was already said; a second notice is noise: %#v", extra)
+	case <-time.After(250 * time.Millisecond):
+	}
+}
+
+// TestAnUnrecognisedStartupFailureStillSaysWhatStderrSaid: not every exit is a
+// sentence this client knows how to parse. The exit is still reported, and the
+// last thing pi said rides along — labelled as what it is, since a line of
+// startup output is not a diagnosis.
+func TestAnUnrecognisedStartupFailureStillSaysWhatStderrSaid(t *testing.T) {
+	s := liveFakeStderr(t, "Error: unknown provider 'zzz'")
+
+	got, ok := next(t, s).(agent.Failed)
+	if !ok {
+		t.Fatalf("a dead backend must say so, got %#v", got)
+	}
+	text := got.Err.Error()
+	if !strings.Contains(text, "exited") || !strings.Contains(text, "unknown provider 'zzz'") {
+		t.Fatalf("the exit must be reported with pi's own last words, got %q", text)
+	}
+}
+
 func parseLine(t *testing.T, line string) map[string]any {
 	t.Helper()
 	var v map[string]any
@@ -335,4 +429,92 @@ func parseLine(t *testing.T, line string) map[string]any {
 		t.Fatalf("the request must be one JSON line: %v (%q)", err, line)
 	}
 	return v
+}
+
+// TestListCommandsAsksAgain: the catalogue is re-asked rather than remembered,
+// because a package installed mid-session only shows up in a fresh answer.
+// Two asks, two replies — the count is the evidence.
+func TestListCommandsAsksAgain(t *testing.T) {
+	s, capture := liveFake(t, false)
+	if got, ok := next(t, s).(agent.Commands); !ok || len(got.List) != 3 {
+		t.Fatalf("the ask at startup, got %#v", got)
+	}
+	if msg := s.ListCommands()(); msg != nil {
+		t.Fatalf("asking again must not fail: %#v", msg)
+	}
+	if got, ok := next(t, s).(agent.Commands); !ok || len(got.List) != 3 {
+		t.Fatalf("the re-ask must produce a second answer, got %#v", got)
+	}
+	_ = s.Close()
+	raw, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(raw), `"get_commands"`); n != 2 {
+		t.Fatalf("the request went out %d times, want 2:\n%s", n, raw)
+	}
+}
+
+// TestCompactGoesOverTheWire: pi's command name, and its field name for the
+// reader's instructions (customInstructions). An empty string is NOT sent as an
+// empty instruction — "summarise the context" and "summarise it, and here is
+// nothing to focus on" are different requests.
+func TestCompactGoesOverTheWire(t *testing.T) {
+	s, capture := liveFake(t, false)
+	if msg := s.Compact("")(); msg != nil {
+		t.Fatalf("compact must not fail: %#v", msg)
+	}
+	v := parseLine(t, waitForLine(t, capture, `"compact"`))
+	if v["type"] != "compact" {
+		t.Fatalf("got %#v", v)
+	}
+	if _, has := v["customInstructions"]; has {
+		t.Fatalf("an empty instruction must not be sent as one: %#v", v)
+	}
+	if v["id"] == nil {
+		t.Fatal("a command without an id is one pi's reply cannot be matched to")
+	}
+
+	if msg := s.Compact(" keep the parser ")(); msg != nil {
+		t.Fatalf("compact must not fail: %#v", msg)
+	}
+	v = parseLine(t, waitForLine(t, capture, `"customInstructions"`))
+	if v["customInstructions"] != "keep the parser" {
+		t.Fatalf("pi reads customInstructions verbatim; got %#v", v)
+	}
+}
+
+// TestForkAsksForItsPointsAndThenForksOne: the two-step the smallest branch
+// needs — which messages can a branch start from, then branch at one. The id is
+// pi's, so it has to survive the trip intact.
+func TestForkAsksForItsPointsAndThenForksOne(t *testing.T) {
+	s, capture := liveFake(t, false)
+	// The startup answer first: it is queued before anything this test sends.
+	if _, ok := next(t, s).(agent.Commands); !ok {
+		t.Fatal("the startup get_commands reply comes first")
+	}
+
+	if msg := s.ForkPoints()(); msg != nil {
+		t.Fatalf("asking for the fork points must not fail: %#v", msg)
+	}
+	pts, ok := next(t, s).(agent.ForkPoints)
+	if !ok {
+		t.Fatalf("get_fork_messages must become ForkPoints, got %#v", pts)
+	}
+	if len(pts.List) != 2 || pts.List[0].EntryID != "abc123" || pts.List[1].Text != "Second prompt..." {
+		t.Fatalf("the points must arrive in pi's order, intact: %#v", pts.List)
+	}
+
+	if msg := s.Fork(pts.List[1].EntryID)(); msg != nil {
+		t.Fatalf("forking must not fail: %#v", msg)
+	}
+	v := parseLine(t, waitForLine(t, capture, `"fork"`))
+	if v["type"] != "fork" || v["entryId"] != "def456" {
+		t.Fatalf("fork carries entryId, pi's own field: %#v", v)
+	}
+
+	done, ok := next(t, s).(agent.Forked)
+	if !ok || done.Text != "Second prompt..." || done.Cancelled {
+		t.Fatalf("the branch's message must come back for the editor: %#v", done)
+	}
 }

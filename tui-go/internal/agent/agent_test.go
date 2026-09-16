@@ -52,6 +52,26 @@ func (s *Script) NewSession() tea.Cmd {
 	return nil
 }
 
+func (s *Script) ListCommands() tea.Cmd {
+	s.sent = append(s.sent, "get_commands")
+	return nil
+}
+
+func (s *Script) Compact(instructions string) tea.Cmd {
+	s.sent = append(s.sent, "compact "+instructions)
+	return nil
+}
+
+func (s *Script) ForkPoints() tea.Cmd {
+	s.sent = append(s.sent, "get_fork_messages")
+	return nil
+}
+
+func (s *Script) Fork(entryID string) tea.Cmd {
+	s.sent = append(s.sent, "fork "+entryID)
+	return nil
+}
+
 func (s *Script) Answer(d UIDialog, a UIAnswer) tea.Cmd {
 	s.sent = append(s.sent, "answer "+d.ID)
 	return nil
@@ -213,6 +233,20 @@ func TestOfflineIsInertEverywhereElse(t *testing.T) {
 	}
 	if o.Model() != "offline" {
 		t.Fatalf("Model() = %q; the header must say which backend is absent", o.Model())
+	}
+	// The catalogue and the session-tree commands are no-ops too, and this is
+	// load-bearing rather than tidy: with nothing to ask, the disk scan is the
+	// command list, and a Failed here would report a failure for the one
+	// backend where the fallback is the whole answer.
+	for name, cmd := range map[string]tea.Cmd{
+		"ListCommands": o.ListCommands(),
+		"Compact":      o.Compact("tidy up"),
+		"ForkPoints":   o.ForkPoints(),
+		"Fork":         o.Fork("entry-1"),
+	} {
+		if cmd != nil {
+			t.Fatalf("%s offline must be a no-op, got a command that would emit something", name)
+		}
 	}
 }
 

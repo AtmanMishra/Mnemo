@@ -54,6 +54,7 @@ go test ./...
 go run ./cmd/mnemo                                  # the interface
 go run ./cmd/mnemo --dump --cols 110 --rows 24      # one frame, to stdout
 go run ./cmd/mnemo --dump --keys "ctrl+t,down,l"    # …after pressing keys
+MNEMO_MOUSE=1 go run ./cmd/mnemo                    # mouse on: wheel scrolls, click folds, ^g gives it back
 ```
 
 `--dump` exists because a TUI cannot be screenshotted from a script, and "it
@@ -75,29 +76,33 @@ whole — the surfaces pi and Mnemo share (`/model` ↔ `^l`-adjacent `Ctrl+L`,
 | queue: `Alt+Up` retrieves queued messages to edit | `alt+up` pulls the last queued message back into the editor, `alt+down` re-queues a draft first |
 | `Ctrl+C` clears the editor, twice quits | first `^c` clears a draft, `^c` while working interrupts, twice quits; the busy line says "^c stops" |
 | — | `u` in read mode undoes the last exchange from the transcript (view-level; the agent keeps the turn) |
+| `/compact` | `/compact [instructions]` sends pi's own `compact` and reports the outcome through the compaction events the transcript already draws |
+| `/fork` | `/fork` asks which messages a branch can start from, forks at the newest one, cuts the transcript back to it and puts it in the editor (see the gap list for what that is not) |
+| mouse reporting off (`Ctrl+G`) | mouse reporting is opt-in (`MNEMO_MOUSE=1`): the wheel scrolls the transcript, a click folds the block under the pointer, and `^g` hands selection back to the terminal mid-session |
+| `/theme`, `/settings` | `/theme` picks among the four dark-ground presets from DESIGN.md §18, applies on `enter`, and remembers the choice in `~/.mnemo/theme.json` |
 
 **Still gaps**
 
-- **Session branching** — pi's `/tree` (jump to any point, continue, switch
-  branches in place) and `/fork`/`/clone` (new session from a previous user
-  message / copy the active branch). Mnemo's session overlay resumes whole
-  sessions only. Needs a writer for the JSONL session tree; the format
-  (parentId branching) mirrors server-side work this build must not touch.
-- **`/compact`** — compaction lives in the agent's context engine. A
-  client-side fake would only remove messages the model still stands on.
+- **Session branching is one slice deep** — pi's `/tree` (jump to any point,
+  continue, switch branches in place) and `/clone` are not built, and neither is
+  choosing WHICH message to fork from: `/fork` branches at the newest one. The
+  list it already asks for (`get_fork_messages`) is exactly what a picker would
+  need; the tree needs a reader for the JSONL session tree, which is
+  server-side work this build must not touch.
 - **Approval dialogs** — the gate asks through pi's extension-UI protocol and
   this client answers it: `confirm`/`select`/`input`/`editor` become a dialog,
   `notify`/`setStatus` land on the status line, and the answer goes back with
   the matching id. The TUI spawns the agent with `MNEMO_APPROVAL_MODE=interactive`
   so the gate takes its asking path.
-- **Theme picker** — the palette is centralised in `internal/theme` (one
-  struct, one colour source) but switching palettes at runtime is not wired.
-  This build ships one theme, deliberately.
-- **`!command` / `!!command`** boxes, **external editor** (`Ctrl+G`),
-  **`/export` `/import` `/share`**, **`/name`**, **`/session` info row**,
-  **path completion on tab**, **`/thinking` level control** — none wired; all
-  need either agent protocol surface or terminal features this build does not
-  reach for yet.
+- **The palette picker offers dark-ground presets only** — "marble & wine" is
+  left out because nothing here paints the terminal's own background, so a light
+  palette would only work in a terminal that is already light. Who paints the
+  ground is a design decision, not a missing flag.
+- **`!command` / `!!command`** boxes, **external editor** (`Ctrl+G` — the chord
+  is taken by mouse reporting now), **`/export` `/import` `/share`**, **`/name`**,
+  **`/session` info row**, **path completion on tab**, **`/thinking` level
+  control** — none wired; all need either agent protocol surface or terminal
+  features this build does not reach for yet.
 - **Startup header** — Mnemo's header shows cwd + model as pi's does, but not
   the loaded-skills/extensions census.
 
@@ -121,5 +126,5 @@ go test ./app/ -run TestAcceptanceGoldenFrames -update
 Then review the diff before committing. A golden that "just changed a bit" is
 a regression wearing a fresh coat of paint.
 
-181 tests. The other suites stay green alongside it: `tui` 213, `agent` 212,
+508 tests. The other suites stay green alongside it: `tui` 213, `agent` 212,
 `memory-layer` 44, `harness-engine` 19.

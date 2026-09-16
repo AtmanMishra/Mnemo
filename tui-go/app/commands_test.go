@@ -47,6 +47,26 @@ func (d *dial) NewSession() tea.Cmd {
 	return nil
 }
 
+func (d *dial) ListCommands() tea.Cmd {
+	d.keep("get_commands")
+	return nil
+}
+
+func (d *dial) Compact(instructions string) tea.Cmd {
+	d.keep(strings.TrimSpace("compact " + instructions))
+	return nil
+}
+
+func (d *dial) ForkPoints() tea.Cmd {
+	d.keep("get_fork_messages")
+	return nil
+}
+
+func (d *dial) Fork(entryID string) tea.Cmd {
+	d.keep("fork " + entryID)
+	return nil
+}
+
 func (d *dial) Answer(dlg agent.UIDialog, a agent.UIAnswer) tea.Cmd {
 	switch {
 	case a.Cancelled:
@@ -273,5 +293,185 @@ func TestAnEmptyAnswerChangesNothing(t *testing.T) {
 	}
 	if _, ok := command.Find(m.Commands(), "help"); !ok {
 		t.Fatal("the interface's own commands must survive an empty answer")
+	}
+}
+
+// --- compaction and branching -------------------------------------------
+
+// TestCompactAsksTheAgentAndSaysSo: /compact is a request, not a summary. pi
+// owns the conversation and the window it has to fit in, so the interface sends
+// the command and says it did — the outcome arrives as the compaction events
+// the transcript already draws.
+func TestCompactAsksTheAgentAndSaysSo(t *testing.T) {
+	m, d := liveFixture(t, 100, 30)
+	m.Update(answer())
+
+	typeIn(t, m, "/compact focus on the parser")
+	press(t, m, "enter")
+	if got := d.Sent(); len(got) != 1 || got[0] != "compact focus on the parser" {
+		t.Fatalf("the instructions are the argument of /compact; got %q", got)
+	}
+	if !strings.Contains(lastLine(screen(m)), "asked the agent to compact") {
+		t.Fatalf("the status line must say what happened:\n%s", lastLine(screen(m)))
+	}
+}
+
+// TestCompactWithNoInstructionsSendsNoInstructions: "summarise the context" and
+// "summarise it, and here is nothing to focus on" are different requests.
+func TestCompactWithNoInstructionsSendsNoInstructions(t *testing.T) {
+	m, d := liveFixture(t, 100, 30)
+	typeIn(t, m, "/compact")
+	press(t, m, "enter")
+	if got := d.Sent(); len(got) != 1 || got[0] != "compact" {
+		t.Fatalf("got %q, want a bare compact", got)
+	}
+}
+
+// TestCompactingWaitsForTheTurnAndSaysWhy: pi compacts the message list the
+// turn in flight is using, and a second writer on that list is a race. Saying
+// why is what stops the refusal reading as a broken key.
+func TestCompactingWaitsForTheTurnAndSaysWhy(t *testing.T) {
+	m, d := liveFixture(t, 100, 30)
+	m.working = true
+	typeIn(t, m, "/compact")
+	press(t, m, "enter")
+	if got := d.Sent(); len(got) != 0 {
+		t.Fatalf("nothing goes out mid-turn, got %q", got)
+	}
+	if !strings.Contains(screen(m), "compact when the turn ends") {
+		t.Fatalf("the refusal must say when:\n%s", lastLine(screen(m)))
+	}
+}
+
+// TestCompactingOfflineSaysWhoDoesIt: with no agent there is nothing to compact
+// and nothing to send. The refusal names the reason rather than failing.
+func TestCompactingOfflineSaysWhoDoesIt(t *testing.T) {
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "/compact")
+	press(t, m, "enter")
+	if !strings.Contains(screen(m), "compacting is the agent's to do") {
+		t.Fatalf("got %q", lastLine(screen(m)))
+	}
+	if m.Chat().Len() != 1 {
+		t.Fatal("an offline /compact sends nothing and writes nothing")
+	}
+}
+
+// TestForkBranchesAtTheLastMessageAndHandsItBack is the whole slice: ask which
+// messages a branch can start from, branch at the newest one, and put that
+// message back in the editor — which is what a branch is for. The transcript is
+// cut back with it, because the branch does not contain the turns that came
+// after it, and leaving them on screen would show a conversation the model no
+// longer has.
+func TestForkBranchesAtTheLastMessageAndHandsItBack(t *testing.T) {
+	m, d := liveFixture(t, 100, 30)
+	typeIn(t, m, "make the parser stricter")
+	press(t, m, "enter")
+	m.Update(agent.Text{Text: "the parser is stricter now"})
+	m.Update(agent.Done{})
+	before := m.Chat().Len()
+
+	typeIn(t, m, "/fork")
+	press(t, m, "enter")
+	if got := d.Sent(); got[len(got)-1] != "get_fork_messages" {
+		t.Fatalf("a fork needs pi's entry ids first, got %q", got)
+	}
+
+	m.Update(agent.ForkPoints{List: []agent.ForkPoint{
+		{EntryID: "abc123", Text: "an earlier prompt"},
+		{EntryID: "def456", Text: "make the parser stricter"},
+	}})
+	if got := d.Sent(); got[len(got)-1] != "fork def456" {
+		t.Fatalf("the fork must be at the newest message, got %q", got)
+	}
+
+	m.Update(agent.Forked{Text: "make the parser stricter"})
+	if m.Chat().Len() >= before {
+		t.Fatalf("the transcript must be cut back to the branch (%d blocks, was %d)", m.Chat().Len(), before)
+	}
+	if m.prompt.Value() != "make the parser stricter" {
+		t.Fatalf("the branch's message belongs back in the editor, got %q", m.prompt.Value())
+	}
+	last := m.Chat().Blocks()[m.Chat().Len()-1]
+	if last.Kind != chat.Notice || !strings.Contains(strings.Join(last.Body, " "), "branched at") {
+		t.Fatalf("the branch must be said out loud, got %#v", last)
+	}
+	if !strings.Contains(screen(m), "the message is back in the editor") {
+		t.Fatalf("the status line must say so:\n%s", lastLine(screen(m)))
+	}
+}
+
+// TestForkWithNothingToBranchFromSaysSo: a session with no messages has no fork
+// point, and pi's answer is an empty list. Asking it to fork at nothing would
+// be an error on the other side; saying so here is the end of it.
+func TestForkWithNothingToBranchFromSaysSo(t *testing.T) {
+	m, d := liveFixture(t, 100, 30)
+	typeIn(t, m, "/fork")
+	press(t, m, "enter")
+	m.Update(agent.ForkPoints{})
+	if got := d.Sent(); len(got) != 1 || got[0] != "get_fork_messages" {
+		t.Fatalf("no fork may be sent with nothing to branch from, got %q", got)
+	}
+	if !strings.Contains(screen(m), "nothing to branch from") {
+		t.Fatalf("got %q", lastLine(screen(m)))
+	}
+}
+
+// TestARefusedForkLeavesTheSessionAlone: an extension can veto a fork, and pi
+// answers success with cancelled — the branch did NOT happen. Reading that as
+// success would leave the reader looking at one conversation while the model is
+// in another.
+func TestARefusedForkLeavesTheSessionAlone(t *testing.T) {
+	m, _ := liveFixture(t, 100, 30)
+	typeIn(t, m, "make the parser stricter")
+	press(t, m, "enter")
+	m.Update(agent.Text{Text: "done"})
+	m.Update(agent.Done{})
+	blocks, prompt := m.Chat().Len(), m.prompt.Value()
+
+	typeIn(t, m, "/fork")
+	press(t, m, "enter")
+	m.Update(agent.ForkPoints{List: []agent.ForkPoint{{EntryID: "def456", Text: "make the parser stricter"}}})
+	m.Update(agent.Forked{Text: "make the parser stricter", Cancelled: true})
+
+	// The only thing a refused branch may add is the line that says so: the
+	// exchange stays, nothing is cut, and the editor is not touched — the
+	// message was never forked, so handing it back would be a lie.
+	if got := m.Chat().Len(); got != blocks+1 {
+		t.Fatalf("a refused fork changed the transcript: %d blocks, was %d", got, blocks)
+	}
+	if last := m.Chat().Blocks()[m.Chat().Len()-1]; last.Kind != chat.Notice {
+		t.Fatalf("the last block must be the notice, got %#v", last)
+	}
+	if lastUserIndex(m.Chat().Blocks()) < 0 {
+		t.Fatal("the message that was not forked must still be in the transcript")
+	}
+	if m.prompt.Value() != prompt {
+		t.Fatalf("the editor is for the branch's message, and there was no branch: %q", m.prompt.Value())
+	}
+	if !strings.Contains(screen(m), "refused the branch") {
+		t.Fatalf("the refusal must be visible:\n%s", screen(m))
+	}
+}
+
+// TestBranchingWaitsForTheTurnAndNeedsAnAgent: two halves of one refusal —
+// nothing to branch while a turn is running, and nobody to branch with offline.
+func TestBranchingWaitsForTheTurnAndNeedsAnAgent(t *testing.T) {
+	m, d := liveFixture(t, 100, 30)
+	m.working = true
+	typeIn(t, m, "/fork")
+	press(t, m, "enter")
+	if got := d.Sent(); len(got) != 0 {
+		t.Fatalf("mid-turn, nothing goes out, got %q", got)
+	}
+	if !strings.Contains(screen(m), "branch when the turn ends") {
+		t.Fatalf("got %q", lastLine(screen(m)))
+	}
+
+	off := fixture(t, 100, 30)
+	typeIn(t, off, "/fork")
+	press(t, off, "enter")
+	if !strings.Contains(screen(off), "branching is the agent's to do") {
+		t.Fatalf("got %q", lastLine(screen(off)))
 	}
 }

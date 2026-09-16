@@ -38,6 +38,12 @@ type Config struct {
 	Agent agent.Agent
 	Dark  bool
 
+	// Mouse turns mouse reporting on. It is a field for the same reason Home
+	// is: the decision belongs to whoever started the process (cmd/mnemo
+	// reads MNEMO_MOUSE), and a test has to be able to say yes or no without
+	// touching the environment.
+	Mouse bool
+
 	// MemsrvBin and MemJournal point at the memory sidecar and its journal.
 	// Both are configuration: a client that finds its own journal is a client
 	// that, in a test, finds the real one.
@@ -156,6 +162,34 @@ type Model struct {
 	// switchTo is the session file we asked the agent to move to, kept
 	// until its acknowledgement arrives so the acknowledgement can name it.
 	switchTo string
+
+	// mouse is whether mouse reporting is on. Off unless it was asked for:
+	// see View() for the trade.
+	mouse bool
+
+	// themeName is the palette in force, from ~/.mnemo/theme.json. Never
+	// empty once New has run: an unset or unusable name normalises to the
+	// shipping palette, so the picker always has a row to mark as in use.
+	themeName string
+
+	// disk is the disk scan: the whole command catalogue when no agent is
+	// attached, and the fallback row set while one is. live is the agent's own
+	// answer to get_commands, empty until it arrives. cmds is the two of them
+	// folded into the one list everything reads.
+	disk, live []command.Command
+
+	// answered is true once the agent has answered get_commands at least
+	// once. It is not len(live) > 0: an agent that answers "I implement
+	// nothing" has answered, and the palette must say the list came from it.
+	answered bool
+
+	// awaiting is true while a get_commands we asked for on demand is in
+	// flight, so its arrival can be reported. The ask at startup is not a
+	// reader's action and is not announced.
+	awaiting bool
+
+	// awaitingFork is true while get_fork_messages is in flight.
+	awaitingFork bool
 }
 
 // New builds the application.
@@ -169,7 +203,7 @@ func New(cfg Config) *Model {
 	if cfg.Agent == nil {
 		cfg.Agent = agent.Offline{Reason: "no agent backend configured — run with --agent, or see mnemo --help"}
 	}
-	th := theme.New(theme.PICO8, theme.Heavy, cfg.Dark)
+	th := theme.Default()
 	m := &Model{
 		cfg:       cfg,
 		th:        th,
@@ -181,12 +215,19 @@ func New(cfg Config) *Model {
 		prompt:    prompt.New(cfg.Dark),
 		explorer:  tree.New(filetree.Root(cfg.CWD)),
 		agent:     cfg.Agent,
+		mouse:     cfg.Mouse,
+		themeName: savedTheme(cfg.Home),
 		openTool:  map[string]*chat.Block{},
 		schedSeen: map[string]string{},
 		extStatus: map[string]string{},
 	}
-	m.chat.SetMarkdown(markdown.New(th))
-	m.cmds = command.Load(cfg.CWD, cfg.Home, cfg.HarnessDir)
+	// The palette is applied through the same path a picker uses, so a saved
+	// theme and a chosen one cannot diverge.
+	m.applyTheme()
+	// The disk scan is the catalogue offline and the fallback online. Scanned
+	// once, here: the agent is what is re-asked mid-session, not the disk.
+	m.disk = command.Load(cfg.CWD, cfg.Home, cfg.HarnessDir)
+	m.rebuildCommands()
 	// First run, with a real backend: the accounts list takes the screen,
 	// the way the Rust wizard's provider step did. Nothing works until one
 	// provider is logged in, and a list that says which are set up is the
@@ -209,6 +250,35 @@ func New(cfg Config) *Model {
 
 // Commands is every slash command, for tests.
 func (m *Model) Commands() []command.Command { return m.cmds }
+
+// ThemeName is the palette in force, for tests and the picker.
+func (m *Model) ThemeName() string { return m.themeName }
+
+// Mouse reports whether mouse reporting is on, for tests and the status line.
+func (m *Model) Mouse() bool { return m.mouse }
+
+// applyTheme builds the live theme from the chosen palette and drops every
+// cached render.
+//
+// The palette moved, so every glamour render, every cached markdown block and
+// every style in the transcript is stale. That is the same reason the
+// terminal's own background-colour message exists, which is why both go
+// through here: one place where "the theme changed" means something.
+func (m *Model) applyTheme() {
+	name := m.themeName
+	p, ok := theme.ByName(name)
+	if !ok {
+		// Nothing chosen, or a theme.json edited into nonsense: the shipping
+		// palette, and the model records it so the picker marks the right row.
+		name, p = theme.Shipping, theme.PICO8
+	}
+	m.themeName = name
+	m.th = theme.New(p, theme.Heavy, m.cfg.Dark)
+	m.chat.SetMarkdown(markdown.New(m.th))
+	for _, b := range m.chat.Blocks() {
+		b.Invalidate()
+	}
+}
 
 // welcome is what an empty transcript says.
 //

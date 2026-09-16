@@ -25,12 +25,26 @@ func (m *Model) View() tea.View {
 	v := tea.NewView(m.compose())
 	v.AltScreen = true
 	v.WindowTitle = "mnemo · " + m.relCWD()
-	// Mouse reporting stays OFF, deliberately. Requesting it captures every
-	// click and drag inside the program, which takes drag-select away from
-	// the terminal — and drag-select is the copy gesture every terminal user
-	// already has. Nothing here is worth that trade, so selection stays the
-	// terminal's and `y` copies a block from the keyboard.
-	v.MouseMode = tea.MouseModeNone
+	// Mouse reporting is declared here, and stays OFF unless it was asked for
+	// (MNEMO_MOUSE=1).
+	//
+	// The trade, stated where the mode is set: requesting mouse reporting
+	// captures every click and drag inside the program, which takes
+	// drag-select away from the terminal — and drag-select is the copy
+	// gesture every terminal user already has. What it buys is a wheel that
+	// scrolls the transcript and a click that folds the block under the
+	// pointer, both of which the keyboard already does (j/k, J/K, enter). So
+	// it is opt-in, and ^g hands selection back mid-session: copying is the
+	// one thing a reader must never be locked out of.
+	//
+	// Cell motion, not all motion: clicks and the wheel are what this acts on,
+	// and reporting every pointer move would spend a redraw per pixel of
+	// travel on a program that ignores it.
+	if m.mouse {
+		v.MouseMode = tea.MouseModeCellMotion
+	} else {
+		v.MouseMode = tea.MouseModeNone
+	}
 	if m.mode == keymap.Insert && m.ov == nil && !m.explorerFocus {
 		v.Cursor = m.promptCursor()
 	}
@@ -428,6 +442,12 @@ func (m *Model) status() string {
 	// say", and both stay until the writer that owns them clears them.
 	for _, k := range m.statusKeys() {
 		right = append(right, ui.Seg{Text: m.extStatus[k], Style: m.th.Muted})
+	}
+	// Mouse reporting is a mode the reader cannot see the effect of until
+	// they try it — and cannot stop wondering about once the terminal stops
+	// selecting text. Say it is on, and say the key that ends it.
+	if m.mouse {
+		right = append(right, ui.Seg{Text: "mouse · ^g", Style: m.th.Muted})
 	}
 	if m.working {
 		right = append(right, ui.Seg{

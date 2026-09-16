@@ -551,3 +551,75 @@ func inner(line string) string {
 	}
 	return t
 }
+
+// TestTheDocumentedForkReplies: fork and get_fork_messages, the two answers
+// session branching is built on. The docs print both, including the cancelled
+// shape — a fork an extension vetoed — which is the one a client must not read
+// as success, or the reader is looking at a branch the model is not on.
+func TestTheDocumentedForkReplies(t *testing.T) {
+	pts, ok := doc(t, `{
+  "type": "response",
+  "command": "get_fork_messages",
+  "success": true,
+  "data": {
+    "messages": [
+      {"entryId": "abc123", "text": "First prompt..."},
+      {"entryId": "def456", "text": "Second prompt..."}
+    ]
+  }
+}`).(agent.ForkPoints)
+	if !ok {
+		t.Fatal("doc: get_fork_messages must become ForkPoints")
+	}
+	if len(pts.List) != 2 || pts.List[0].EntryID != "abc123" || pts.List[1].Text != "Second prompt..." {
+		t.Fatalf("doc: the entry ids and texts must survive, got %#v", pts.List)
+	}
+
+	done, ok := doc(t, `{"type": "response", "command": "fork", "success": true, "data": {"text": "The original prompt text...", "cancelled": false}}`).(agent.Forked)
+	if !ok {
+		t.Fatal("doc: fork must become Forked")
+	}
+	if done.Text != "The original prompt text..." || done.Cancelled {
+		t.Fatalf("doc: got %#v", done)
+	}
+	vetoed, ok := doc(t, `{"type": "response", "command": "fork", "success": true, "data": {"text": "The original prompt text...", "cancelled": true}}`).(agent.Forked)
+	if !ok || !vetoed.Cancelled {
+		t.Fatalf("doc: a success that did nothing is the one reply that must not read as success, got %#v", vetoed)
+	}
+
+	// An entry with no id cannot be forked at, so it is not a row: pi answers
+	// `fork` with an error for an entryId it does not know.
+	nameless, _ := doc(t, `{"type": "response", "command": "get_fork_messages", "success": true, "data": {"messages": [{"text": "no id"}]}}`).(agent.ForkPoints)
+	if len(nameless.List) != 0 {
+		t.Fatalf("doc: an entry with no entryId is not forkable, got %#v", nameless.List)
+	}
+}
+
+// TestTheDocumentedCompactReplies: compact's reply carries the same numbers the
+// compaction events do (tokensBefore, estimatedTokensAfter), so a SUCCESSFUL
+// reply needs no message of its own — the transcript is already drawing the
+// start and the end of that compaction. A FAILED one is the interesting case:
+// it must arrive as a failure with pi's reason, not vanish.
+func TestTheDocumentedCompactReplies(t *testing.T) {
+	if got := doc(t, `{
+  "type": "response",
+  "command": "compact",
+  "success": true,
+  "data": {
+    "summary": "Summary of conversation...",
+    "firstKeptEntryId": "abc123",
+    "tokensBefore": 150000,
+    "estimatedTokensAfter": 32000
+  }
+}`); got != nil {
+		t.Fatalf("doc: the compaction events already say this; the reply adds nothing, got %#v", got)
+	}
+
+	fail, ok := doc(t, `{"type": "response", "command": "compact", "success": false, "error": "quota exceeded"}`).(agent.Failed)
+	if !ok {
+		t.Fatal("doc: a compact that failed must be visible, not silent")
+	}
+	if !strings.Contains(fail.Err.Error(), "quota exceeded") {
+		t.Fatalf("doc: the reason must come through, got %v", fail.Err)
+	}
+}

@@ -79,6 +79,10 @@ func Builtins() []Command {
 		{Name: "collapse", Desc: "close everything", Kind: Builtin, Chord: "^a"},
 		{Name: "copy", Desc: "copy the whole transcript", Kind: Builtin, Chord: "Y"},
 		{Name: "clear", Desc: "start a new session", Kind: Builtin},
+		{Name: "compact", Desc: "summarise the older turns to shrink the context", Kind: Builtin},
+		{Name: "fork", Desc: "branch the session at the message you last sent", Kind: Builtin},
+		{Name: "commands", Desc: "ask the agent for its command list again", Kind: Builtin},
+		{Name: "theme", Desc: "pick the palette — saved to ~/.mnemo/theme.json", Kind: Builtin},
 		{Name: "login", Desc: "log in a provider — /login <provider> <key>, or /login alone to list them", Kind: Builtin},
 		{Name: "model", Desc: "pick the default model from what your providers offer", Kind: Builtin},
 		{Name: "logout", Desc: "forget a provider's key — /logout <provider>", Kind: Builtin},
@@ -340,7 +344,7 @@ func Match(cs []Command, q string) []Command {
 	return append(exact, contains...)
 }
 
-// Merge folds commands the agent implements into the list the interface built
+// Merge folds commands the agent implements into a list the interface built
 // for itself.
 //
 // The interface's copy wins a name collision. Its commands are client
@@ -348,13 +352,17 @@ func Match(cs []Command, q string) []Command {
 // around — and nothing sent to the agent can do any of that, so a shadowed
 // name is dropped rather than renamed: two rows that read the same and behave
 // differently is worse than one row missing.
+//
+// Names are compared after canon(), not literally, because the same command
+// arrives under two spellings: pi registers a skill as `skill:review` and the
+// disk scan calls the same skill `review`.
 func Merge(base, extra []Command) []Command {
 	out := make([]Command, 0, len(base)+len(extra))
 	seen := make(map[string]bool, len(base)+len(extra))
 	take := func(cs []Command) {
 		for _, c := range cs {
-			name := strings.ToLower(c.Name)
-			if c.Name == "" || seen[name] {
+			name := canon(c.Name)
+			if name == "" || seen[name] {
 				continue
 			}
 			seen[name] = true
@@ -364,6 +372,46 @@ func Merge(base, extra []Command) []Command {
 	take(base)
 	take(extra)
 	return out
+}
+
+// Catalogue is the one list: the interface's own commands, then whatever the
+// agent answers with, then the disk scan.
+//
+// The agent's answer is the catalogue for the commands the agent implements —
+// asked at start, re-asked on a new session and on demand, because a package
+// installed mid-session is otherwise invisible until the process restarts.
+//
+// The disk scan is the fallback: with no agent attached it IS the list, and
+// while one is attached it still contributes the rows pi does not answer for.
+// Both can be in play at once, which is why names are folded (see canon): a
+// name the agent already answers must not appear a second time under the
+// spelling only the disk knows.
+func Catalogue(live, disk []Command) []Command {
+	return Merge(Merge(Builtins(), live), disk)
+}
+
+// canon is a command name's identity, for the one-row-per-command rule.
+//
+// It folds the three ways the same name gets spelled on the way here: case
+// (pi is free to capitalise), separators (a SKILL.md may say "Code Review"
+// where the folder says code-review), and the `skill:` prefix pi puts in front
+// of a skill it registers. Only the LEADING skill: is dropped: a plugin's
+// `alpha:review` is a different command from a bare `review`, and that colon is
+// not a prefix marker.
+func canon(name string) string {
+	s := strings.ToLower(strings.TrimSpace(name))
+	s = strings.TrimPrefix(s, "skill:")
+	s = strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '_', '.':
+			return '-'
+		}
+		return r
+	}, s)
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	return strings.Trim(s, "-")
 }
 
 // Find returns the command with exactly this name.

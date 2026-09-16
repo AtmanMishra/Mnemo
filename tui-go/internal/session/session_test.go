@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -306,5 +307,149 @@ func TestAResultWithNoCallIsStillVisible(t *testing.T) {
 func TestTranscriptOfAMissingFileIsEmptyNotAPanic(t *testing.T) {
 	if got := Transcript(filepath.Join(t.TempDir(), "nope.jsonl"), nil); got != nil {
 		t.Fatalf("got %#v", got)
+	}
+}
+
+// --- where pi keeps its sessions (#19) ------------------------------------
+
+// writeFlat puts a session directly in dir, the layout pi uses when a session
+// directory is configured explicitly: the configured path IS the session
+// directory, and the project a session belongs to is the cwd in its own header.
+func writeFlat(t *testing.T, dir, name, id, cwd string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, name)
+	body := header(id, cwd, "2026-08-20T10:00:00Z") + "\n" + userMsg("flat one") + "\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// writeSettings writes pi's global settings.json under an agent directory.
+func writeSettings(t *testing.T, agentDir, sessionDir string) {
+	t.Helper()
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(map[string]string{"sessionDir": sessionDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "settings.json"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTheSessionDirectoryComesFromTheEnvironmentFirst: pi documents
+// PI_CODING_AGENT_SESSION_DIR as the first word on where sessions live. A
+// browser that ignores it shows an empty list — which reads as "you have no
+// sessions" rather than "we looked in the wrong place".
+func TestTheSessionDirectoryComesFromTheEnvironmentFirst(t *testing.T) {
+	h := home(t)
+	over := t.TempDir()
+	writeFlat(t, over, "a.jsonl", "env-1", "/tmp/from-env")
+	// And a perfectly good session where the hardcoded default used to be, to
+	// prove the environment is what decided.
+	write(t, h, "-tmp-default", "b.jsonl", header("def-1", "/tmp/default", "2026-08-20T10:00:00Z"), userMsg("default"))
+
+	t.Setenv(envSessionDir, over)
+
+	if got := Root(h); got != over {
+		t.Fatalf("Root = %q, want the configured %q", got, over)
+	}
+	ps := Projects(h)
+	if len(ps) != 1 {
+		t.Fatalf("got %d projects; the default directory must not be read when one is configured", len(ps))
+	}
+	if ps[0].Path != "/tmp/from-env" {
+		t.Fatalf("path = %q; a flat session's project is the cwd in its own header", ps[0].Path)
+	}
+	if got := ps[0].Sessions[0].Title; got != "flat one" {
+		t.Fatalf("title = %q", got)
+	}
+}
+
+// TestTheSessionDirectoryCanComeFromPisSettingsFile: the second source, in
+// pi's GLOBAL settings.json — and the file is found through
+// PI_CODING_AGENT_DIR, which is what moves pi's whole agent directory.
+func TestTheSessionDirectoryCanComeFromPisSettingsFile(t *testing.T) {
+	h := home(t)
+	agentDir := filepath.Join(h, "custom-agent-dir")
+	over := t.TempDir()
+	writeFlat(t, over, "a.jsonl", "set-1", "/tmp/from-settings")
+	writeSettings(t, agentDir, over)
+
+	t.Setenv(envAgentDir, agentDir)
+
+	if got := Root(h); got != over {
+		t.Fatalf("Root = %q, want %q from settings.json", got, over)
+	}
+	if ps := Projects(h); len(ps) != 1 || ps[0].Sessions[0].ID != "set-1" {
+		t.Fatalf("the browser must read the directory the setting names: %+v", ps)
+	}
+}
+
+// TestAgentDirMovesTheDefaultToo: with no sessionDir anywhere, the agent
+// directory is still the one PI_CODING_AGENT_DIR names — the default is
+// relative to it, not to the home.
+func TestAgentDirMovesTheDefaultToo(t *testing.T) {
+	h := home(t)
+	agentDir := filepath.Join(h, "elsewhere", "agent")
+	t.Setenv(envAgentDir, agentDir)
+
+	if got, want := Root(h), filepath.Join(agentDir, "sessions"); got != want {
+		t.Fatalf("Root = %q, want %q", got, want)
+	}
+}
+
+// TestPrecedenceIsPisPrecedence: environment, then settings.json, then the
+// default — the order pi documents, in the order it checks them.
+func TestPrecedenceIsPisPrecedence(t *testing.T) {
+	h := home(t)
+	agentDir := filepath.Join(h, ".pi", "agent")
+	fromSettings := filepath.Join(h, "from-settings")
+	fromEnv := filepath.Join(h, "from-env")
+	writeSettings(t, agentDir, fromSettings)
+
+	if got := Root(h); got != fromSettings {
+		t.Fatalf("with only a setting, Root = %q, want %q", got, fromSettings)
+	}
+	t.Setenv(envSessionDir, fromEnv)
+	if got := Root(h); got != fromEnv {
+		t.Fatalf("the environment must beat settings.json: Root = %q", got)
+	}
+}
+
+// TestASessionDirWithATildeIsResolved: pi expands `~`, and it expands against
+// the home this package was handed — not os.UserHomeDir, which in a test is
+// somebody's real home.
+func TestASessionDirWithATildeIsResolved(t *testing.T) {
+	h := home(t)
+	t.Setenv(envSessionDir, "~/pi-sessions")
+
+	if got, want := Root(h), filepath.Join(h, "pi-sessions"); got != want {
+		t.Fatalf("Root = %q, want %q", got, want)
+	}
+}
+
+// TestSpawnDirSpeaksOnlyWhenPisDefaultIsNotTheAnswer: the spawned agent has to
+// write where this browser looks, and `--session-dir` is how it is told.
+//
+// Except when the answer IS pi's default, where being told would change it:
+// --session-dir names the session directory itself, so passing the default
+// path back would stop pi nesting sessions under the project directory.
+func TestSpawnDirSpeaksOnlyWhenPisDefaultIsNotTheAnswer(t *testing.T) {
+	h := home(t)
+	if got := SpawnDir(h); got != "" {
+		t.Fatalf("SpawnDir = %q with nothing configured; pi's own default is already the answer", got)
+	}
+
+	over := t.TempDir()
+	t.Setenv(envSessionDir, over)
+	if got := SpawnDir(h); got != over {
+		t.Fatalf("SpawnDir = %q, want the configured %q — otherwise the agent writes where we do not look", got, over)
 	}
 }

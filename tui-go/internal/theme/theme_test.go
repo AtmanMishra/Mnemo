@@ -1,6 +1,7 @@
 package theme
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 )
@@ -118,5 +119,65 @@ func TestSpinnerIsBraille(t *testing.T) {
 		if !strings.ContainsFunc(f, func(r rune) bool { return r >= 0x2800 && r <= 0x28FF }) {
 			t.Fatalf("spinner frame %q is not braille", f)
 		}
+	}
+}
+
+// --- the presets a reader can choose -------------------------------------
+
+// TestEveryPresetIsAWholePalette: fourteen roles, no zeroes. A preset missing
+// one draws that role as the terminal's default in a palette that was chosen
+// for its colours, and the failure only appears on the screen of whoever picks
+// it — which is exactly the bug a picker full of half-filled values ships.
+func TestEveryPresetIsAWholePalette(t *testing.T) {
+	seen := map[string]bool{}
+	for _, p := range Presets() {
+		if p.Name == "" || p.Desc == "" {
+			t.Fatalf("a preset with no name or no description is a blank picker row: %#v", p)
+		}
+		if p.Name != strings.ToLower(p.Name) {
+			t.Fatalf("preset names are what theme.json holds; %q is not canonical", p.Name)
+		}
+		if seen[p.Name] {
+			t.Fatalf("%q appears twice; the picker would list one name two ways", p.Name)
+		}
+		seen[p.Name] = true
+		for role, c := range map[string]color.Color{
+			"ground": p.P.Ground, "ink": p.P.Ink, "muted": p.P.Muted,
+			"faint": p.P.Faint, "accent": p.P.Accent, "thinking": p.P.Thinking,
+			"coat": p.P.Coat, "rosette": p.P.Rosette, "peach": p.P.Peach,
+			"ok": p.P.OK, "fail": p.P.Fail, "warn": p.P.Warn,
+			"link": p.P.Link, "deep": p.P.Deep,
+		} {
+			if c == nil {
+				t.Fatalf("%s leaves %s unset", p.Name, role)
+			}
+		}
+	}
+}
+
+// TestTheShippingPaletteIsTheFirstRow: the picker marks the one in force, and
+// a reader who has never chosen anything is looking at the shipping palette.
+// If the first row is not that, the first thing the picker says is wrong.
+func TestTheShippingPaletteIsTheFirstRow(t *testing.T) {
+	if got := Presets()[0].Name; got != Shipping {
+		t.Fatalf("the first row is %q, but a fresh install draws %q", got, Shipping)
+	}
+	if p, ok := ByName(Shipping); !ok || p != PICO8 {
+		t.Fatalf("ByName(%q) = %v, %v; the default name must resolve to the shipping palette", Shipping, p, ok)
+	}
+}
+
+// TestByNameSaysNoRatherThanGuessing: the name comes out of a file, so the
+// answers that matter are the lenient ones (case, stray spaces) and the honest
+// one for a name that is not a palette.
+func TestByNameSaysNoRatherThanGuessing(t *testing.T) {
+	if _, ok := ByName("  POTTERY "); !ok {
+		t.Fatal("a name from a file may carry case and spaces; folding them is not guessing")
+	}
+	if _, ok := ByName("marble"); ok {
+		t.Fatal("a palette that is not offered must not resolve — the picker's list and this map cannot disagree")
+	}
+	if _, ok := ByName(""); ok {
+		t.Fatal("no name is not a palette")
 	}
 }

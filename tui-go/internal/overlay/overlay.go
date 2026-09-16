@@ -30,6 +30,10 @@ const (
 	Models
 	Login
 	Schedules
+	// Themes is the palette picker: a flat list of values, where picking one
+	// applies it and leaves the list up so the choice can be tried rather
+	// than guessed at.
+	Themes
 	// Dialog is a question the agent is blocked on — an extension's
 	// select/confirm, routed here because a list of choices is exactly what
 	// this package already draws. It is the one overlay whose rows are an
@@ -55,6 +59,8 @@ func (k Kind) String() string {
 		return "login"
 	case Schedules:
 		return "schedules"
+	case Themes:
+		return "theme"
 	case Dialog:
 		return "dialog"
 	}

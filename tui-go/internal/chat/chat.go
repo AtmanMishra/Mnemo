@@ -274,6 +274,42 @@ func (m *Model) ToggleFocused() bool {
 	return true
 }
 
+// SetFocus puts block focus on i without moving the viewport.
+//
+// The mouse is the caller, and it is the reason this exists next to
+// FocusNext: a click lands on a row already on screen, so scrolling the
+// transcript to the block under the pointer would move the text out from under
+// the click that asked for it. Pinning is left alone for the same reason —
+// clicking a block is not a movement, and it must not silently stop the view
+// following new output.
+func (m *Model) SetFocus(i int) {
+	if i < 0 || i >= len(m.blocks) {
+		return
+	}
+	m.focus = i
+}
+
+// ToggleAt folds or unfolds the block at index i, for a caller that has one
+// (a click). False when there is nothing on screen to fold: prose is not a
+// fold, and a click on a paragraph must not look like a fold that failed.
+//
+// The test is Foldable() AND a title, which is what the renderer draws a
+// marker for: Foldable() alone is true of any block with a body, prose
+// included, and folding one of those flips a flag with nothing to show for it.
+func (m *Model) ToggleAt(i int) bool {
+	if i < 0 || i >= len(m.blocks) {
+		return false
+	}
+	b := m.blocks[i]
+	if !b.Foldable() || b.Title == "" {
+		return false
+	}
+	b.Open = !b.Open
+	m.focus = i
+	m.clamp()
+	return true
+}
+
 // YankFocused returns the focused block as plain text, for the clipboard.
 // Falls back to the whole transcript when nothing is focused.
 func (m *Model) YankFocused() string {
@@ -381,13 +417,7 @@ func (m *Model) View(t *theme.Theme) string {
 	if len(rows) == 0 {
 		return ""
 	}
-	start := m.scroll
-	if m.follow || start > len(rows)-m.height {
-		start = len(rows) - m.height
-	}
-	if start < 0 {
-		start = 0
-	}
+	start := m.Offset()
 	end := start + m.height
 	if end > len(rows) {
 		end = len(rows)
@@ -397,6 +427,24 @@ func (m *Model) View(t *theme.Theme) string {
 		out = append(out, r.text)
 	}
 	return strings.Join(out, "\n")
+}
+
+// Offset is the index of the first rendered row on screen.
+//
+// ONE owner, and it is this one: the viewport and the mouse hit test have to
+// agree about which row is where, and two functions computing "where does the
+// transcript start" is exactly how a click lands on the block above the one
+// under the pointer. Same failure as the layout maths in app/view.go.
+func (m *Model) Offset() int {
+	rows := len(m.render(nil))
+	start := m.scroll
+	if m.follow || start > rows-m.height {
+		start = rows - m.height
+	}
+	if start < 0 {
+		start = 0
+	}
+	return start
 }
 
 // render is the single place a block becomes lines. A nil theme renders

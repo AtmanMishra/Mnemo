@@ -258,6 +258,15 @@ writes the *same graph* and its spans nest under the call that spawned it. An
 optional `model` parameter must resolve against a logged-in provider's catalogue
 or the call **fails loudly** — a silent fallback would look like it worked.
 
+Delegation is **depth-capped** (issue #6/C4): a child is spawned with
+`MNEMO_SUBAGENT_DEPTH` = the parent's depth + 1, and `spawn_subagent` returns an
+ordinary tool error — naming the limit and the way to raise it — once the
+process is at `MNEMO_SUBAGENT_MAX_DEPTH` (default 3, inherited by children, so it
+is set once on the top-level agent; 0 forbids delegation, and an unusable value
+falls back to the default rather than to "unlimited"). The counter rides in the
+environment because a child shares nothing else with its parent, and it is
+stamped by the parent, so a child cannot reset the chain by omission.
+
 ### 3.5 Skills, hooks, schedules
 
 **Skills**: `SKILL.md` with frontmatter, discovered from the same roots the TUI
@@ -267,11 +276,16 @@ walks (`.claude`/`.pi`/`.agents`, project-first), creatable by the agent
 **Hooks** (`agent/src/hooks/`): manifests with `{id, trigger, matcher{tool,
 path}, command, timeout, on{block,audit,modify}}`, scoped project → user →
 global, at most one per id with the nearest winning, and disabled state in
-`~/.mnemo/hook-state.json`. Execution: `sh -c`, JSON event on stdin, exit 0 =
-allow (stdout JSON is the response), exit 2 = block with the stderr reason shown
-to the model, anything else or a timeout = allow + an audited error — "a stuck
-hook never breaks the loop". Every invocation writes a redacted `hook` span into
-the same trace file as everything else. Currently Unix-only (issue #2).
+`~/.mnemo/hook-state.json`. Execution: a real shell on every platform —
+`sh -c` on POSIX, `cmd.exe /d /s /c` on Windows, or whatever `MNEMO_SHELL`,
+pi's `shellPath` or the manifest's own `shell` field names (`agent/src/hooks/shell.ts`
+resolves it; one that cannot be resolved is an audited error, never a crash and
+never a silent allow). A command with arguments is treated as a program line:
+the program token is resolved, the rest goes to the shell verbatim. JSON event
+on stdin, exit 0 = allow (stdout JSON is the response), exit 2 = block with the
+stderr reason shown to the model, anything else or a timeout = allow + an
+audited error — "a stuck hook never breaks the loop". Every invocation writes a
+redacted `hook` span into the same trace file as everything else.
 
 **Schedules** (`agent/src/schedule/`): `~/.mnemo/schedules.json`, cron/interval
 parsing, a daemon with an `O_EXCL` pid lease so two daemons cannot double-fire,
@@ -295,7 +309,13 @@ prepended so a user's allow cannot punch through).
 
 **MCP**: `~/.mnemo/mcp.json`, spoken directly (initialize → tools/list →
 tools/call) rather than through the SDK, because the transport is the same shape
-as the other three. A server that fails to start is reported, never fatal.
+as the other three. A server that fails to start is reported, never fatal. A
+server is a **tree**, not a process (`uvx graft-mcp` is a launcher), so teardown
+signals the whole group — SIGTERM then SIGKILL after a 2s grace on POSIX
+(servers are spawned `detached` for this), `taskkill /T` escalating to `/T /F`
+on Windows — settles in-flight requests immediately instead of leaving the agent
+on a pipe that will not close, and reports on stderr when a server had to be
+forced rather than dying quietly (issue #11a).
 
 ---
 

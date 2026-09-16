@@ -137,6 +137,21 @@ func (m *Model) blockAt(i int) int {
 	return rows[i].block
 }
 
+// BlockAtRow maps a VISIBLE row to the block that drew it, or -1 for the blank
+// line between two blocks and for a row that is not on screen at all.
+//
+// Row 0 is the top of the viewport, not the top of the transcript: the caller
+// is the mouse, whose coordinates are screen coordinates, and this plus
+// Offset() is the whole conversion between those and the transcript's own
+// indices. Kept here rather than in the caller because the transcript is the
+// only thing that knows what it drew.
+func (m *Model) BlockAtRow(row int) int {
+	if row < 0 {
+		return -1
+	}
+	return m.blockAt(m.Offset() + row)
+}
+
 // highlight marks every occurrence of the query in a rendered row.
 //
 // The row is already styled — markdown, gutters, tool state — so the match is

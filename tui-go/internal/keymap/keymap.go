@@ -53,6 +53,15 @@ type Map struct {
 	Quit      key.Binding
 	Back      key.Binding
 
+	// Mouse. ^g is a real chord and appears in help like one. The click and
+	// the wheel are gestures, not keystrokes: WithKeys() is empty on purpose
+	// (nothing can match them), and they are listed separately, only where
+	// mouse reporting is actually on — advertising a wheel to a reader whose
+	// terminal never sends one is the same lie as advertising a dead key.
+	Mouse      key.Binding
+	MouseClick key.Binding
+	MouseWheel key.Binding
+
 	// Insert.
 	Send     key.Binding
 	Steer    key.Binding
@@ -106,6 +115,13 @@ func New() Map {
 	b := func(help, desc string, keys ...string) key.Binding {
 		return key.NewBinding(key.WithKeys(keys...), key.WithHelp(help, desc))
 	}
+	// gesture is a documented input that is not a keystroke. WithHelp alone:
+	// no keys means nothing can ever match it, so it can never be dispatched
+	// by accident, and help can print it beside the keys it shares a surface
+	// with.
+	gesture := func(help, desc string) key.Binding {
+		return key.NewBinding(key.WithHelp(help, desc))
+	}
 	return Map{
 		Palette:   b("^k", "command palette", "ctrl+k"),
 		Explorer:  b("^t", "folder explorer", "ctrl+t"),
@@ -123,6 +139,10 @@ func New() Map {
 		Interrupt: b("^c", "interrupt, twice to quit", "ctrl+c"),
 		Quit:      b("^d", "quit", "ctrl+d"),
 		Back:      b("esc", "up one level", "esc"),
+
+		Mouse:      b("^g", "mouse reporting off — selection is the terminal's", "ctrl+g"),
+		MouseClick: gesture("click", "fold the block under the pointer"),
+		MouseWheel: gesture("wheel", "scroll the transcript"),
 
 		Send:     b("enter", "send, or queue while busy", "enter"),
 		Steer:    b("alt+enter", "steer: interrupt with this now", "alt+enter"),
@@ -189,7 +209,7 @@ func (m Map) Help() []Entry {
 	// Global first: these are the ones that remove the most keystrokes.
 	out = append(out, group(Insert, m.Palette, m.Explorer, m.Sessions, m.Memory, m.Logs, m.Schedules,
 		m.AllThink, m.AllTools, m.AllBlocks, m.Find, m.Cycle, m.CycleBack,
-		m.KeysHelp, m.Interrupt, m.Quit, m.Back)...)
+		m.KeysHelp, m.Mouse, m.Interrupt, m.Quit, m.Back)...)
 	out = append(out, group(Insert, m.Send, m.Steer, m.Newline, m.Complete, m.HistPrev, m.HistNext)...)
 	out = append(out, group(Read, m.Down, m.Up, m.HalfDown, m.HalfUp, m.Top, m.Bottom,
 		m.NextBlk, m.PrevBlk, m.Toggle, m.Yank, m.YankAll, m.NextHit, m.PrevHit, m.Insert)...)
@@ -209,6 +229,18 @@ func (m Map) OverlayHints(isTree bool) []Entry {
 		return []Entry{e(m.Next), e(m.Open), e(m.Choose), e(m.Back)}
 	}
 	return []Entry{{Mode: Browse, Key: "type", Desc: "filter"}, e(m.Choose), e(m.Back)}
+}
+
+// MouseHelp are the two gestures, for the help list to add when mouse
+// reporting is on. Separate from Help() because they are only live when
+// something is sending them: help that lists a wheel on a terminal that never
+// reports one is help that teaches a key that does nothing.
+func (m Map) MouseHelp() []Entry {
+	e := func(b key.Binding) Entry {
+		h := b.Help()
+		return Entry{Mode: Browse, Key: h.Key, Desc: h.Desc}
+	}
+	return []Entry{e(m.MouseClick), e(m.MouseWheel)}
 }
 
 // Hints are the few keys worth naming in the status line for a mode. Four is

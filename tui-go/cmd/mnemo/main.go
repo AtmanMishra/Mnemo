@@ -13,6 +13,7 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/app"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/pi"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/session"
 )
 
 // options is everything the flags say. Parsed apart from running so the run
@@ -86,6 +87,25 @@ func main() {
 	}
 }
 
+// mouseEnv is the switch that turns mouse reporting on. An environment
+// variable rather than a flag because it is a preference about this terminal
+// rather than an argument about this run — the same reason `TERM` is not a flag.
+const mouseEnv = "MNEMO_MOUSE"
+
+// mouseEnabled reads that switch.
+//
+// Mouse reporting is off unless it is asked for, in so many words: 1, true, yes
+// or on, in any case. Everything else — unset, empty, "0", a typo — leaves it
+// off, and the failure mode of a typo is the feature a reader already knows
+// (the terminal's own selection) rather than one they did not ask for.
+func mouseEnabled(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
 // home is the user's home directory: the flag when given, the OS answer
 // otherwise. Shared, because the trust decision and the memory journal both
 // look things up under it — two spellings of "home" is how a decision
@@ -114,10 +134,13 @@ func defaultMemorySidecar(o *options) {
 }
 
 // spawnPlan is everything a live spawn needs decided before pi starts: the
-// working directory (absolute, because the agent forks its session by it) and
-// the project-trust decision that goes on the command line. Split from run so
-// the decision is testable without starting a node process.
-func spawnPlan(o options) (string, pi.Trust) {
+// working directory (absolute, because the agent forks its session by it), the
+// session directory the browser will read back (session.SpawnDir — "" when
+// pi's own default is already the answer, because passing the default back
+// would change how pi lays sessions out), and the project-trust decision that
+// goes on the command line. Split from run so the decision is testable without
+// starting a node process.
+func spawnPlan(o options) (string, string, pi.Trust) {
 	cwd := firstNonEmpty(o.cwd, ".")
 	// Absolute, because project trust is recorded by directory: a relative
 	// "." would look up a different key from the one a decision was written
@@ -126,23 +149,22 @@ func spawnPlan(o options) (string, pi.Trust) {
 	if abs, err := filepath.Abs(cwd); err == nil {
 		cwd = abs
 	}
-	// Resolved here, once, and said out loud in the transcript: in RPC mode
-	// pi does not ask, and an unstated decision means the project's own
-	// settings, extensions and skills silently do not load.
-	return cwd, pi.ResolveTrust(home(o.home), cwd)
+	// Both resolved against the SAME home, so the sessions the browser lists
+	// and the sessions the agent writes are the same directory.
+	return cwd, session.SpawnDir(home(o.home)), pi.ResolveTrust(home(o.home), cwd)
 }
 
 func run(o options) error {
 	defaultMemorySidecar(&o)
-	cfg := app.Config{Home: o.home, CWD: o.cwd, Dark: true,
+	cfg := app.Config{Home: o.home, CWD: o.cwd, Dark: true, Mouse: mouseEnabled(os.Getenv(mouseEnv)),
 		MemsrvBin: o.memsrv, MemJournal: o.journal, HarnessDir: o.bundles, Repo: o.repo}
 
 	// The live backend is opt-in by path rather than discovered, so running
 	// the interface never silently spawns a node process somebody did not ask
 	// for. Without it, sending fails loudly instead of pretending to think.
 	if o.repo != "" && !o.dump {
-		cwd, trust := spawnPlan(o)
-		s, err := pi.Spawn(o.repo, cwd, o.session, trust)
+		cwd, sessionDir, trust := spawnPlan(o)
+		s, err := pi.Spawn(o.repo, cwd, o.session, sessionDir, trust)
 		if err != nil {
 			return fmt.Errorf("could not start the agent: %w", err)
 		}

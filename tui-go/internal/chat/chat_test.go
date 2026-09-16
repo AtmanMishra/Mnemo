@@ -433,3 +433,100 @@ func TestTruncateAtDropsFromTheIndexOn(t *testing.T) {
 	m.TruncateAt(-1)
 	m.TruncateAt(5)
 }
+
+// --- the row under the pointer -------------------------------------------
+
+// TestARowMapsToTheBlockUnderIt: the mouse sends a screen row, the transcript
+// has block indices, and this is the whole conversion. The blank line between
+// two blocks belongs to neither, and a row off the end is not a block either —
+// saying so is what stops a click on empty space folding something.
+func TestARowMapsToTheBlockUnderIt(t *testing.T) {
+	m := New()
+	m.SetSize(40, 5)
+	m.Append(&Block{Kind: Agent, Body: []string{"one"}})
+	m.Append(&Block{Kind: Tool, Title: "read", Body: []string{"a", "b"}, Open: true})
+	// Rows, top to bottom: 0 the paragraph, 1 the blank between blocks, 2 the
+	// tool's summary, 3 and 4 its output.
+	for row, want := range map[int]int{0: 0, 1: -1, 2: 1, 3: 1, 4: 1, 5: -1, -1: -1} {
+		if got := m.BlockAtRow(row); got != want {
+			t.Fatalf("row %d maps to block %d, want %d", row, got, want)
+		}
+	}
+}
+
+// TestTheRowIsAViewportRowNotATranscriptRow: the same screen row is a different
+// block after the view scrolls. Getting this wrong is a click that folds the
+// block above the one under the pointer, which is why Offset() has one owner.
+func TestTheRowIsAViewportRowNotATranscriptRow(t *testing.T) {
+	m := New()
+	m.SetSize(40, 2)
+	for _, s := range []string{"one", "two", "three"} {
+		m.Append(&Block{Kind: Agent, Body: []string{s}})
+	}
+	// Rows: 0 one, 1 blank, 2 two, 3 blank, 4 three — a two-row viewport shows
+	// the last two, so row 0 is the blank line above the newest block.
+	if got := m.BlockAtRow(0); got != -1 {
+		t.Fatalf("row 0 is the blank line above the newest block, got block %d", got)
+	}
+	if got := m.BlockAtRow(1); got != 2 {
+		t.Fatalf("row 1 is the newest block, got %d", got)
+	}
+	m.Scroll(-1)
+	if got := m.BlockAtRow(0); got != 1 {
+		t.Fatalf("after scrolling one row, row 0 is the middle block, got %d", got)
+	}
+}
+
+// TestAClickTogglesTheBlockAndFocusesIt: what a click does. Focus comes either
+// way — a click on prose has nothing to fold, and a click that does nothing at
+// all reads as a click the program did not hear.
+func TestAClickTogglesTheBlockAndFocusesIt(t *testing.T) {
+	m := New()
+	m.SetSize(40, 10)
+	m.Append(&Block{Kind: Tool, Title: "read", Body: []string{"a"}, Open: false})
+	if !m.ToggleAt(0) {
+		t.Fatal("a tool block with output folds on a click")
+	}
+	if !m.blocks[0].Open || m.Focus() != 0 {
+		t.Fatalf("after the click: open=%v focus=%d", m.blocks[0].Open, m.Focus())
+	}
+	if !m.ToggleAt(0) || m.blocks[0].Open {
+		t.Fatal("a second click on the same block unfolds it")
+	}
+
+	m.Append(&Block{Kind: Agent, Body: []string{"just prose"}})
+	m.SetFocus(1)
+	if m.ToggleAt(1) {
+		t.Fatal("prose is not a fold — a click must not claim it folded something")
+	}
+	if m.Focus() != 1 {
+		t.Fatalf("the click must still show where it landed, focus=%d", m.Focus())
+	}
+	if m.ToggleAt(9) {
+		t.Fatal("a block index that does not exist is not a fold")
+	}
+}
+
+// TestFocusingByClickDoesNotMoveTheViewport: a click lands on a row it could
+// already see, so scrolling to that block would move the text out from under
+// the click — and it must not unpin the transcript either, because clicking a
+// block is not a movement.
+func TestFocusingByClickDoesNotMoveTheViewport(t *testing.T) {
+	m := New()
+	m.SetSize(40, 3)
+	for _, s := range []string{"one", "two", "three", "four", "five", "six"} {
+		m.Append(&Block{Kind: Agent, Body: []string{s}})
+	}
+	before := m.Offset()
+	m.SetFocus(0)
+	if got := m.Offset(); got != before {
+		t.Fatalf("the viewport moved from row %d to %d", before, got)
+	}
+	if !m.Following() {
+		t.Fatal("a click is not a movement: the transcript must stay pinned")
+	}
+	m.SetFocus(99)
+	if m.Focus() != 0 {
+		t.Fatalf("a focus index off the end must be ignored, got %d", m.Focus())
+	}
+}

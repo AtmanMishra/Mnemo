@@ -667,15 +667,25 @@ paste never fires `enter` — a real bug class in hand-rolled prompts.
 ## 12. Mouse, selection, copy
 
 Mouse mode is declared in the view (`v.MouseMode`) rather than commanded, and
-would be hit-tested in `v.OnMouse` natively — no zone-marker library. The
-row-to-block mapping exists and is tested (`chat.BlockAtRow`); nothing calls it
-yet. Click-to-fold and wheel scrolling are in section 16.
+the hit test is `chat.BlockAtRow` + `chat.Offset()` — the transcript's own
+mapping from a visible row to the block that drew it, with no zone-marker
+library. The wheel scrolls the transcript three lines a notch and a click folds
+the block under the pointer (and focuses it either way, so a click on prose is
+not a click the program failed to hear). Nothing moves behind a modal: the rule
+is the keyboard's, that a surface with focus takes the input.
 
-**The terminal's own selection must keep working.** A TUI in alt-screen with
-mouse tracking on steals drag-select, which is the gesture every terminal user
-already has. So: **`^g` toggles mouse reporting off**, the status line says so,
-and the terminal's native select-and-copy comes back untouched. Copying is the
-one thing a user must never be locked out of.
+**It is off unless it was asked for** (`MNEMO_MOUSE=1`). Reporting captures
+every click and drag inside the program, which takes drag-select away from the
+terminal — and drag-select is the copy gesture every terminal user already has.
+What it buys is a wheel and a click, both of which the keyboard already does
+(`j`/`k`, `J`/`K`, `enter`), so the trade is only worth making on request.
+
+**The terminal's own selection must keep working, and `^g` is how.** Reporting
+is toggled off with one press, the status line says so while it is on (`mouse ·
+^g`) and says what came back when it goes off, and the terminal's native
+select-and-copy returns untouched. Copying is the one thing a user must never
+be locked out of. Cell motion, not all motion: clicks and the wheel are what
+this acts on, and reporting every pointer move would buy a redraw per pixel.
 
 Inside the app, `y` yanks the focused block via `tea.SetClipboard` — OSC 52,
 which crosses SSH, unlike a `pbcopy` subprocess.
@@ -722,7 +732,7 @@ and "equivalent" means the same *properties*, not the same count.
 
 ## 15. What is built
 
-`tui-go/`, twenty packages, 406 passing tests, `go vet` clean.
+`tui-go/`, twenty packages, 508 passing tests, `go vet` clean.
 
 | package | owns |
 |---|---|
@@ -765,19 +775,28 @@ compositor, transcript search, memory forget with confirmation, the onboarding
 and auth flow, and the golden-frame tests — is built, and the ledger is
 corrected rather than preserved.)
 
-- **Mouse works only as a way out.** `^g` hands selection back to the terminal;
-  wheel and click do not fold blocks or move focus. `chat.BlockAtRow` exists and
-  is tested; nothing calls it. The open question is whether in-app clicks are
-  worth losing the terminal's own drag-select.
-- **One palette, no picker.** The theme is a value and every pane follows it, but
-  nothing lets you choose a second one at runtime — see §18 for where that would
-  go.
-- **No dockable panes.** Sessions, memory and logs are overlays. Columns are a
+- **Mouse picks up the transcript and nothing else.** The wheel scrolls it and a
+  click folds the block under the pointer (`MNEMO_MOUSE=1`); clicking the
+  explorer or the prompt to move focus there is not wired, and text selected
+  inside the app is still the terminal's to select. `^g` hands the whole
+  gesture back mid-session.
+- **A light-ground palette needs a light terminal.** The picker lists the four
+  dark-ground presets from §18 (PICO-8, Greek pottery, Bronze age, wine-dark
+  sea) and deliberately not "marble & wine": nothing here paints the terminal's
+  own background, so a light palette would be legible only in a terminal that is
+  already light, and a picker row that can make the interface unreadable is
+  worse than a shorter list. Picking one is saved to `~/.mnemo/theme.json`; the
+  glyph set is not part of the choice.
+- **Session branching is one slice deep.** `/fork` branches at the message you
+  last sent and hands it back to the editor (`get_fork_messages` → `fork`).
+  Choosing WHICH message to fork from, `/clone`, the session tree, and naming a
+  branch are not built — the list `/fork` already asks for is what the picker
+  would need, and the tree needs a reader for the JSONL session tree this build
+  does not have.
+- **Dockable panes.** Sessions, memory and logs are overlays. Columns are a
   design option, not an implementation gap.
 - **Golden frames pin text, not colour.** The four frames catch overflow,
   wrapping and layout; a palette regression is not caught by them.
-- **Session branching, fork and compaction are not surfaced in the Go UI**, even
-  though pi supports them and the sessions browser reads their records.
 - **Charm v2 is young.** Versions are pinned; do not track `latest`.
 - **The mascot cannot be posed.** One sitting cat, one four-frame walk, and the
   walk only runs during install and onboarding. §18 and `docs/mascots.md`
@@ -833,6 +852,10 @@ formal role rather than a hue, so a second palette stays a value and not a
 rewrite.
 
 **A theme picker is the natural home for this** (§16): `theme.New(p, g, isDark)`
-already takes the palette as an argument, so a picker is a list of `Palette`
-values and one key binding — the missing piece is a place to persist the choice
-(`~/.mnemo/theme.json`), not any machinery.
+already takes the palette as an argument, so a picker is a list of `Preset`
+values and one key binding — the missing piece was a place to persist the choice
+(`~/.mnemo/theme.json`), not any machinery. **Built:** `/theme` (or `^k →
+/theme`) lists the four dark-ground presets, applies on `enter`, keeps the list
+open so the choice can be tried rather than guessed at, and remembers it. The
+glyph set as a second axis, and whether a light-ground preset is worth painting
+the ground for, stay open.

@@ -341,3 +341,89 @@ func TestMergeOfAnEmptyAnswerChangesNothing(t *testing.T) {
 		}
 	}
 }
+
+// --- one name, one row ---------------------------------------------------
+
+// TestOneCommandIsOneRowWhicheverWayItIsSpelled: pi registers a skill as
+// `skill:review`, the disk scan calls the same skill `review`; a SKILL.md whose
+// frontmatter says "Code Review" and a folder called code-review are the same
+// command too. Two rows for one command means the reader types one spelling and
+// gets a different thing from the other.
+func TestOneCommandIsOneRowWhicheverWayItIsSpelled(t *testing.T) {
+	live := []Command{
+		{Name: "skill:review", Desc: "review the diff", Kind: Agent, Scope: "skill"},
+		{Name: "skill:Code Review", Desc: "the same skill, capitalised", Kind: Agent, Scope: "skill"},
+		{Name: "impl", Desc: "implement a plan", Kind: Agent, Scope: "prompt"},
+	}
+	disk := []Command{
+		{Name: "help", Desc: "every key and command", Kind: Builtin, Chord: "^h"},
+		{Name: "review", Desc: "the same skill, off disk", Kind: Skill, Path: "/p/review/SKILL.md"},
+		{Name: "code-review", Desc: "and again from the frontmatter", Kind: Skill},
+		{Name: "tidy", Desc: "clean up", Kind: Skill},
+	}
+	got := Catalogue(live, disk)
+
+	// The agent's two rows are kept — they are what pi will run — and the two
+	// disk spellings of the same commands are not listed beside them.
+	for _, want := range []string{"skill:review", "skill:Code Review"} {
+		c, ok := Find(got, want)
+		if !ok || c.Kind != Agent {
+			t.Fatalf("the surviving row for %s must be the agent's own: %#v", want, c)
+		}
+	}
+	for _, dup := range []string{"review", "code-review"} {
+		if has(got, dup) {
+			t.Fatalf("/%s is a second spelling of a command the agent already answers: %v", dup, names(got))
+		}
+	}
+	// And the rows that are nobody else's are still there: folding names must
+	// not quietly shorten the catalogue.
+	for _, want := range []string{"help", "impl", "tidy"} {
+		if !has(got, want) {
+			t.Fatalf("/%s went missing: %v", want, names(got))
+		}
+	}
+}
+
+// TestTheCatalogueIsTheDiskScanWhenTheAgentSaysNothing: offline (and before a
+// live answer arrives) the disk scan IS the list — the built-ins, which the
+// interface always has, plus everything found on disk. This is the fallback the
+// whole design rests on.
+func TestTheCatalogueIsTheDiskScanWhenTheAgentSaysNothing(t *testing.T) {
+	disk := []Command{
+		{Name: "help", Desc: "every key and command", Kind: Builtin},
+		{Name: "tidy", Desc: "clean up", Kind: Skill, Path: "/p/tidy/SKILL.md"},
+	}
+	got := Catalogue(nil, disk)
+	want := Merge(Builtins(), disk)
+	if strings.Join(names(got), ",") != strings.Join(names(want), ",") {
+		t.Fatalf("Catalogue(nil, disk) = %v, want every disk row under the built-ins", names(got))
+	}
+	if !has(got, "tidy") {
+		t.Fatalf("with nothing to ask, the disk is the catalogue: %v", names(got))
+	}
+	if got[0].Kind != Builtin {
+		t.Fatalf("the interface's own commands come first: %#v", got[0])
+	}
+}
+
+// TestTheAgentsRowsComeBeforeTheDisks: the list is read top to bottom in the
+// palette, and the rows that will actually run belong above the ones that are
+// only installed.
+func TestTheAgentsRowsComeBeforeTheDisks(t *testing.T) {
+	live := []Command{{Name: "hook", Desc: "list and fire hooks", Kind: Agent}}
+	disk := []Command{{Name: "tidy", Desc: "clean up", Kind: Skill}}
+	got := Catalogue(live, disk)
+	at := func(name string) int {
+		for i, c := range got {
+			if c.Name == name {
+				return i
+			}
+		}
+		t.Fatalf("%s is missing from %v", name, names(got))
+		return -1
+	}
+	if !(at("help") < at("hook") && at("hook") < at("tidy")) {
+		t.Fatalf("order should be built-ins, then the agent's rows, then disk: %v", names(got))
+	}
+}

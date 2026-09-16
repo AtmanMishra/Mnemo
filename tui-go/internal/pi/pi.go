@@ -19,6 +19,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
 )
 
@@ -56,6 +57,18 @@ func ParseEvent(v map[string]any) tea.Msg {
 		case "switch_session", "new_session":
 			data, _ := v["data"].(map[string]any)
 			return agent.SessionMoved{Command: str(v, "command"), Cancelled: boolean(data, "cancelled")}
+		case "get_fork_messages":
+			return agent.ForkPoints{List: forkList(v)}
+		case "fork":
+			data, _ := v["data"].(map[string]any)
+			return agent.Forked{Text: str(data, "text"), Cancelled: boolean(data, "cancelled")}
+		case "compact":
+			// A successful compact needs no message of its own: pi emits
+			// compaction_start and compaction_end around it, and those carry
+			// the same token counts — a second line saying the same thing is
+			// noise. A FAILED one is the interesting case, and it is answered
+			// above as a failure, so the reader sees the reason.
+			return nil
 		}
 		return nil
 
@@ -197,6 +210,27 @@ func commandList(v map[string]any) []agent.CommandInfo {
 			Location:    first(str(m, "location"), nested(m, "sourceInfo", "scope")),
 			Path:        first(str(m, "path"), nested(m, "sourceInfo", "path")),
 		})
+	}
+	return out
+}
+
+// forkList reads the get_fork_messages answer.
+//
+// One entry per user message on the active branch, oldest first, in pi's own
+// order — the client must not reorder it, because "the newest one" is what a
+// fork at the last message depends on. An entry with no id is dropped: a fork
+// without an entryId is a request pi answers with an error, and a row that
+// cannot be acted on is worse than no row.
+func forkList(v map[string]any) []agent.ForkPoint {
+	data, _ := v["data"].(map[string]any)
+	raw, _ := data["messages"].([]any)
+	out := make([]agent.ForkPoint, 0, len(raw))
+	for _, r := range raw {
+		m, _ := r.(map[string]any)
+		if str(m, "entryId") == "" {
+			continue
+		}
+		out = append(out, agent.ForkPoint{EntryID: str(m, "entryId"), Text: str(m, "text")})
 	}
 	return out
 }
@@ -364,6 +398,14 @@ type Session struct {
 	nextID int
 	model  string
 	closed bool
+
+	// failure is the startup failure already surfaced from stderr, and tail is
+	// the last line stderr carried. Both are read when the process ends: a
+	// failure that has been explained must not be repeated underneath itself
+	// as "the agent process exited", and an exit with no explanation is a
+	// little easier to read with pi's own last words beside it.
+	failure string
+	tail    string
 }
 
 // Spawn starts `node <repo>/agent/bin/mnemo.ts --mode rpc` in cwd.
@@ -372,13 +414,17 @@ type Session struct {
 // one you launched in: pi derives its session directory from the working
 // directory, so resuming without it forks the session into the wrong project.
 //
+// sessionDir is the --session-dir the child is given, so that it writes where
+// the sessions browser reads (see session.SpawnDir, which returns "" when pi's
+// own default is already the answer — and only then may the flag be left off).
+//
 // The trust decision always goes on the command line, either way, because
 // the default in RPC mode is to say nothing to anyone: an unstated decision
 // is a project whose .pi/settings.json, .pi/extensions and .agents/skills
 // silently do not load, and the failure mode of that is a project's own
 // guardrail extension not running while AGENTS.md still loads, so a partial
 // load looks total.
-func Spawn(repoRoot, cwd, sessionFile string, trust Trust) (*Session, error) {
+func Spawn(repoRoot, cwd, sessionFile, sessionDir string, trust Trust) (*Session, error) {
 	entry := filepath.Join(repoRoot, "agent", "bin", "mnemo.ts")
 	if _, err := os.Stat(entry); err != nil {
 		return nil, fmt.Errorf("no agent script at %s (--repo must point at the repository root, not a subdirectory)", entry)
@@ -387,7 +433,7 @@ func Spawn(repoRoot, cwd, sessionFile string, trust Trust) (*Session, error) {
 	// resolved under the operator-provided --repo root; exec.Command passes
 	// argv verbatim with no shell interpretation, so a hostile repo path
 	// cannot execute extra commands.
-	cmd := exec.Command("node", spawnArgs(repoRoot, sessionFile, trust)...)
+	cmd := exec.Command("node", spawnArgs(repoRoot, sessionFile, sessionDir, trust)...)
 	cmd.Dir = cwd
 	cmd.Env = spawnEnv()
 	return Start(cmd)
@@ -395,13 +441,17 @@ func Spawn(repoRoot, cwd, sessionFile string, trust Trust) (*Session, error) {
 
 // spawnArgs is the agent's argv, split out from Spawn so the flags — in
 // particular --approve/--no-approve, which decide whether a project's own
-// settings, extensions and skills load — are assertable without starting a
-// node process.
-func spawnArgs(repoRoot, sessionFile string, trust Trust) []string {
+// settings, extensions and skills load, and --session-dir, which decides where
+// the sessions this browser lists are found — are assertable without starting
+// a node process.
+func spawnArgs(repoRoot, sessionFile, sessionDir string, trust Trust) []string {
 	args := []string{
 		filepath.Join(repoRoot, "agent", "bin", "mnemo.ts"),
 		"--mode", "rpc", "--no-builtin-tools",
 		trust.Flag(),
+	}
+	if sessionDir != "" {
+		args = append(args, "--session-dir", sessionDir)
 	}
 	if sessionFile != "" {
 		args = append(args, "--session", sessionFile)
@@ -445,11 +495,30 @@ func Start(cmd *exec.Cmd) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	// stderr is a pipe of our own rather than the null device Go would give it
+	// (or the operator's terminal, which would write under the TUI). It is the
+	// only channel a startup failure arrives on: pi discovers an extension
+	// conflict before it serves one protocol line, says so on stderr and
+	// exits, so a client that discards stderr can only report "it exited".
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
 	s := &Session{cmd: cmd, stdin: stdin, msgs: make(chan tea.Msg, 256), nextID: 1, model: "pi"}
-	go s.read(stdout)
+	// The stderr drain is waited for before the exit is reported. A child that
+	// fails at startup writes its reason and is gone, so both pipes reach EOF
+	// within microseconds of each other; reporting the exit first would put
+	// "the agent process exited" above the sentence that explains it, and the
+	// reader stops at the first line.
+	stderrDone := make(chan struct{})
+	go func() {
+		defer close(stderrDone)
+		s.drainStderr(stderr)
+	}()
+	go s.read(stdout, stderrDone)
 	// One question, asked once, at the start: which commands do you implement?
 	// pi is the authority on that — extension commands like /hook, prompt
 	// templates, /skill:name — and asking is the only way a client can know
@@ -463,7 +532,112 @@ func Start(cmd *exec.Cmd) (*Session, error) {
 	return s, nil
 }
 
-func (s *Session) read(r io.Reader) {
+// drainStderr reads the child's stderr as it arrives.
+//
+// This is where a startup failure explains itself. When two extensions
+// register the same tool — a user's own against another's, or against ours —
+// pi refuses to start, and what it says about it goes to stderr:
+//
+//	Failed to load extension "/home/me/.pi/extensions/a.ts": Tool "grep" conflicts with /repo/agent/extensions/sea-tools-inline.ts
+//
+// Nothing on the protocol carries that. With stderr thrown away the reader got
+// "the agent process exited" and nothing else: the one sentence that says what
+// is wrong, and the fact that it is a one-line fix, both went missing.
+//
+// The pipe is drained for the whole life of the process, in its own goroutine,
+// because a pipe nobody reads fills up and blocks the writer — and a child
+// blocked inside its own error message is a worse bug than the one it was
+// reporting.
+func (s *Session) drainStderr(r io.Reader) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 4*1024), 256*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		s.stderrLine(line)
+	}
+}
+
+// stderrLine files one line of the child's stderr.
+//
+// A recognised extension-load failure is surfaced as it arrives, and once:
+// once, because pi reports the conflict and then a hint about it, and a
+// transcript that shows the same failure twice is a transcript people stop
+// reading. Everything else is kept as the last thing stderr said, for the
+// exit message — not shown on its own, because pi uses stderr for progress
+// chatter too and a notice per line would bury the turn.
+func (s *Session) stderrLine(line string) {
+	if explained, ok := extensionLoadFailure(line); ok {
+		s.mu.Lock()
+		first := s.failure == ""
+		if first {
+			s.failure = explained
+		}
+		s.mu.Unlock()
+		if first {
+			s.emit(agent.Failed{Err: errors.New(explained)})
+		}
+		return
+	}
+	s.mu.Lock()
+	s.tail = line
+	s.mu.Unlock()
+}
+
+// extensionLoadFailure recognises pi's report that an extension would not load
+// and returns the line to show for it.
+//
+// pi writes `Failed to load extension "<path>": <reason>` — main.js folds the
+// resource loader's error list into its diagnostics with exactly that shape,
+// and the reason is the loader's own words. They are passed through verbatim,
+// because they name both sides of the argument; the way out is added here,
+// because "an extension failed to load" without "and here is the fix" is the
+// message a reader bounces off. Two extensions registering the same tool name
+// is the common case, and its fix is to remove or rename one of them; anything
+// else is that extension's own problem to fix or to stand down.
+func extensionLoadFailure(line string) (string, bool) {
+	const marker = `Failed to load extension "`
+	line = ansi.Strip(line)
+	i := strings.Index(line, marker)
+	if i < 0 {
+		return "", false
+	}
+	// From the marker on, so a "Error: " prefix and any indentation pi may
+	// have added stay out of the transcript line.
+	rest := strings.TrimSpace(line[i:])
+	reason := ""
+	if _, after, ok := strings.Cut(strings.TrimPrefix(rest, marker), `": `); ok {
+		reason = strings.TrimSpace(after)
+	}
+	if strings.Contains(reason, "conflicts with") {
+		return rest + " — remove or rename one of them, then start again", true
+	}
+	return rest + " — fix or remove that extension, then start again", true
+}
+
+// exitFailure is what the interface is told when the process ends, and whether
+// there is anything left to tell.
+//
+// A failure already surfaced from stderr is not repeated: the reader has the
+// real message, and "the agent process exited" underneath it says nothing new.
+// Otherwise the last thing stderr carried rides along — labelled as exactly
+// that, since a line of startup chatter is not a diagnosis.
+func (s *Session) exitFailure() (agent.Failed, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failure != "" {
+		return agent.Failed{}, false
+	}
+	msg := "the agent process exited"
+	if s.tail != "" {
+		msg += " · last line of its error output: " + s.tail
+	}
+	return agent.Failed{Err: errors.New(msg)}, true
+}
+
+func (s *Session) read(r io.Reader, stderrDone <-chan struct{}) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	for sc.Scan() {
@@ -487,7 +661,12 @@ func (s *Session) read(r io.Reader) {
 		}
 		s.emit(msg)
 	}
-	s.emit(agent.Failed{Err: errors.New("the agent process exited")})
+	// stdout is done; the child's last words may still be draining. Waiting is
+	// what lets the failure stderr carried decide what this line says.
+	<-stderrDone
+	if f, ok := s.exitFailure(); ok {
+		s.emit(f)
+	}
 }
 
 func (s *Session) emit(msg tea.Msg) {
@@ -566,6 +745,53 @@ func (s *Session) SwitchSession(path string) tea.Cmd {
 
 // NewSession starts a fresh conversation on the backend.
 func (s *Session) NewSession() tea.Cmd { return s.command("new_session", "") }
+
+// ListCommands asks which commands the agent implements, again.
+//
+// Identical to the question Start asks, and asked for the same reason: pi is
+// the authority on which extension commands, prompt templates and skills it
+// will run, and a package installed mid-session changes the answer. The reply
+// arrives as agent.Commands.
+func (s *Session) ListCommands() tea.Cmd { return s.command("get_commands", "") }
+
+// Compact asks pi to rewrite its context. customInstructions is pi's own field
+// name for the reader's "keep this bit" — the first argument of /compact.
+//
+// The outcome does not need a reply of its own: pi emits compaction_start and
+// compaction_end around it (reason "manual"), and a failed compact comes back
+// as a failure like every other command. Nothing here summarises anything.
+func (s *Session) Compact(instructions string) tea.Cmd {
+	return func() tea.Msg {
+		c := map[string]any{"type": "compact"}
+		if i := strings.TrimSpace(instructions); i != "" {
+			c["customInstructions"] = i
+		}
+		if err := s.write(c); err != nil {
+			return agent.Failed{Err: err}
+		}
+		return nil
+	}
+}
+
+// ForkPoints asks which messages a branch can start from. pi answers with the
+// user messages on the active branch, oldest first, each with the entry id a
+// fork needs — an id only pi can mint, which is why this is a round trip and
+// not something the client can derive from the session file.
+func (s *Session) ForkPoints() tea.Cmd { return s.command("get_fork_messages", "") }
+
+// Fork branches the session at entryID.
+//
+// pi moves the session to the new branch itself — it rebinds on the reply, the
+// same way switch_session does — so there is no second command to send. The
+// branch's message comes back as agent.Forked.Text.
+func (s *Session) Fork(entryID string) tea.Cmd {
+	return func() tea.Msg {
+		if err := s.write(map[string]any{"type": "fork", "entryId": entryID}); err != nil {
+			return agent.Failed{Err: err}
+		}
+		return nil
+	}
+}
 
 // Answer responds to a dialog from the extension UI protocol.
 //

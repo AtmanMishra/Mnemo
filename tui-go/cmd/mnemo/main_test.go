@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/session"
 )
 
 // captureStdout swaps os.Stdout for a pipe for the duration of fn. --dump is
@@ -152,9 +154,12 @@ func TestDefaultMemorySidecarNoRepoMeansNoDerivation(t *testing.T) {
 func TestSpawnPlanResolvesTrustForTheProject(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 
-	cwd, trust := spawnPlan(options{home: home, cwd: project})
+	cwd, sessionDir, trust := spawnPlan(options{home: home, cwd: project})
 	if !filepath.IsAbs(cwd) {
 		t.Fatalf("the child's working directory must be absolute (the session forks by it): %q", cwd)
+	}
+	if sessionDir != "" {
+		t.Fatalf("with nothing configured, the session directory is pi's own default and there is nothing to pass: %q", sessionDir)
 	}
 	if trust.Approve || trust.From != "" {
 		t.Fatalf("an unrecorded project must be refused, explicitly: %+v", trust)
@@ -171,15 +176,32 @@ func TestSpawnPlanResolvesTrustForTheProject(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"`+strings.ReplaceAll(project, `\`, `\\`)+`": true}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, trust = spawnPlan(options{home: home, cwd: project})
+	_, _, trust = spawnPlan(options{home: home, cwd: project})
 	if !trust.Approve || trust.From != project {
 		t.Fatalf("a recorded yes must be used: %+v", trust)
 	}
 
 	// And an empty --cwd means the process's own directory, made absolute.
-	cwd, _ = spawnPlan(options{home: home})
+	cwd, _, _ = spawnPlan(options{home: home})
 	if !filepath.IsAbs(cwd) || filepath.Base(cwd) != filepath.Base(wd(t)) {
 		t.Fatalf("an empty --cwd must resolve to the process directory, got %q", cwd)
+	}
+}
+
+// TestSpawnPlanHandsOverTheSessionDirectoryTheBrowserReads: the browser and the
+// spawned agent must mean one directory (#19). The resolution is shared, and
+// what reaches the spawn is session.SpawnDir — the resolved path when the user
+// configured one, and "" when pi's own default is already the answer.
+func TestSpawnPlanHandsOverTheSessionDirectoryTheBrowserReads(t *testing.T) {
+	home, project, sessions := t.TempDir(), t.TempDir(), t.TempDir()
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", sessions)
+
+	_, sessionDir, _ := spawnPlan(options{home: home, cwd: project})
+	if sessionDir != sessions {
+		t.Fatalf("spawnPlan handed over %q, want the directory the browser reads (%q)", sessionDir, sessions)
+	}
+	if got := session.Root(home); got != sessionDir {
+		t.Fatalf("the browser reads %q while the agent is told %q", got, sessionDir)
 	}
 }
 
@@ -192,4 +214,24 @@ func wd(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return d
+}
+
+// TestTheMouseSwitchIsOptIn: MNEMO_MOUSE=1 turns mouse reporting on, and
+// anything else — unset, empty, "0", a typo — leaves it off. The failure mode
+// of a typo is then the terminal's own selection, which is a feature the reader
+// already has, rather than a mode they did not ask for and cannot see.
+func TestTheMouseSwitchIsOptIn(t *testing.T) {
+	for _, on := range []string{"1", "true", "TRUE", " yes ", "on"} {
+		if !mouseEnabled(on) {
+			t.Fatalf("%q must turn mouse reporting on", on)
+		}
+	}
+	for _, off := range []string{"", " ", "0", "false", "no", "off", "ture", "2", "yes please"} {
+		if mouseEnabled(off) {
+			t.Fatalf("%q must leave mouse reporting off", off)
+		}
+	}
+	if mouseEnv != "MNEMO_MOUSE" {
+		t.Fatalf("the switch is %q; it is documented as MNEMO_MOUSE", mouseEnv)
+	}
 }

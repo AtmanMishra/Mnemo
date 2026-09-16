@@ -30,6 +30,7 @@ func TestGlobalChordsAreUnique(t *testing.T) {
 		{"Logs", m.Logs.Keys()}, {"AllThink", m.AllThink.Keys()},
 		{"AllTools", m.AllTools.Keys()}, {"AllBlocks", m.AllBlocks.Keys()},
 		{"Find", m.Find.Keys()},
+		{"Mouse", m.Mouse.Keys()},
 		{"Interrupt", m.Interrupt.Keys()}, {"Quit", m.Quit.Keys()},
 	} {
 		for _, k := range b.keys {
@@ -129,5 +130,38 @@ func TestAFlatOverlayIsNotAdvertisedTreeKeys(t *testing.T) {
 	}
 	if len(tree) != 4 || tree[0] != "↓" {
 		t.Fatalf("a tree overlay should advertise movement, got %v", tree)
+	}
+}
+
+// TestTheMouseGesturesAreDocumentedAndUndispatchable: the wheel and the click
+// belong in the same table as every other input — that is the point of this
+// package — but they are gestures, not keys. A gesture with keys would be
+// matched by a keystroke that means something else.
+func TestTheMouseGesturesAreDocumentedAndUndispatchable(t *testing.T) {
+	m := New()
+	rows := m.MouseHelp()
+	if len(rows) != 2 {
+		t.Fatalf("the mouse contributes two rows, got %d", len(rows))
+	}
+	for _, e := range rows {
+		if e.Key == "" || e.Desc == "" {
+			t.Fatalf("a row with no key or no description is a blank help line: %+v", e)
+		}
+	}
+	if len(m.MouseClick.Keys()) != 0 || len(m.MouseWheel.Keys()) != 0 {
+		t.Fatal("a gesture must not be matchable as a keystroke")
+	}
+	// ^g is a real chord: it is the way back to the terminal's own selection.
+	if got := m.Mouse.Keys(); len(got) != 1 || got[0] != "ctrl+g" {
+		t.Fatalf("the way out of mouse reporting is %v", got)
+	}
+	var documented bool
+	for _, e := range m.Help() {
+		if e.Key == "^g" {
+			documented = true
+		}
+	}
+	if !documented {
+		t.Fatal("^g is a key like any other; it belongs in help, not only in the notice it prints")
 	}
 }

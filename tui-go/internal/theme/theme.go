@@ -60,6 +60,112 @@ var PICO8 = Palette{
 	Deep:     lipgloss.Color("#1D2B53"),
 }
 
+// The other three are §18's register, lifted from docs/design-preview.html
+// rather than invented here: the preview carries the presets as fourteen roles
+// each, and a picker full of made-up hex codes would be a second design
+// document to keep in step. Only the values travel; the reasoning for each
+// colour is in DESIGN.md §18.
+var (
+	// Pottery is the register the name is from: black gloss ground,
+	// terracotta slip, ochre for warning, oxblood for failure.
+	Pottery = Palette{
+		Ground:   lipgloss.Color("#14100E"),
+		Ink:      lipgloss.Color("#E8D5B7"),
+		Muted:    lipgloss.Color("#7A6A57"),
+		Faint:    lipgloss.Color("#2A221C"),
+		Accent:   lipgloss.Color("#C1440E"),
+		Thinking: lipgloss.Color("#8C6A4A"),
+		Coat:     lipgloss.Color("#D97B29"),
+		Rosette:  lipgloss.Color("#7A3B18"),
+		Peach:    lipgloss.Color("#E8C39E"),
+		OK:       lipgloss.Color("#6A8F3C"),
+		Fail:     lipgloss.Color("#A62B1F"),
+		Warn:     lipgloss.Color("#D9A441"),
+		Link:     lipgloss.Color("#4E7A8A"),
+		Deep:     lipgloss.Color("#241A14"),
+	}
+
+	// Bronze is the same geometry twenty centuries later: olive and gold.
+	Bronze = Palette{
+		Ground:   lipgloss.Color("#0E0D0B"),
+		Ink:      lipgloss.Color("#F0E6D2"),
+		Muted:    lipgloss.Color("#6E6355"),
+		Faint:    lipgloss.Color("#26221C"),
+		Accent:   lipgloss.Color("#B08D57"),
+		Thinking: lipgloss.Color("#7C6E88"),
+		Coat:     lipgloss.Color("#C9A227"),
+		Rosette:  lipgloss.Color("#8C6239"),
+		Peach:    lipgloss.Color("#E3C9A6"),
+		OK:       lipgloss.Color("#7BA05B"),
+		Fail:     lipgloss.Color("#B33A2B"),
+		Warn:     lipgloss.Color("#E0B84C"),
+		Link:     lipgloss.Color("#5B8FA8"),
+		Deep:     lipgloss.Color("#1B1815"),
+	}
+
+	// WineDark is the sea, on a navy ground.
+	WineDark = Palette{
+		Ground:   lipgloss.Color("#0B1018"),
+		Ink:      lipgloss.Color("#E6E9EE"),
+		Muted:    lipgloss.Color("#5B6472"),
+		Faint:    lipgloss.Color("#1B2330"),
+		Accent:   lipgloss.Color("#8C6BC8"),
+		Thinking: lipgloss.Color("#6E7A99"),
+		Coat:     lipgloss.Color("#C9A227"),
+		Rosette:  lipgloss.Color("#7A4A2A"),
+		Peach:    lipgloss.Color("#D8BFA1"),
+		OK:       lipgloss.Color("#4F9E7A"),
+		Fail:     lipgloss.Color("#C0392B"),
+		Warn:     lipgloss.Color("#D9A441"),
+		Link:     lipgloss.Color("#5FA8D3"),
+		Deep:     lipgloss.Color("#12203A"),
+	}
+)
+
+// Shipping is the palette used when nothing has been chosen — a fresh install,
+// or a theme.json someone edited into nonsense. It is the name the picker
+// marks as in use, and it stays the default on purpose: a choice is opt-in.
+const Shipping = "pico8"
+
+// Preset is one named palette: the picker's row, and what a name in
+// theme.json resolves to.
+type Preset struct {
+	Name string
+	Desc string
+	P    Palette
+}
+
+// listed is every named palette, shipping first. The order is the order the picker
+// lists them, so the shipping one is always the first thing under the cursor.
+//
+// A light-ground palette (docs/design-preview.html's "marble & wine") is
+// deliberately NOT here yet: nothing in this program paints the terminal's own
+// background, so a light palette is only legible in a terminal that is already
+// light, and a picker row that can make the interface unreadable is worse than
+// a shorter list.
+var listed = []Preset{
+	{Shipping, "the shipping register — black, pink, orange", PICO8},
+	{"pottery", "black gloss, terracotta, ochre", Pottery},
+	{"bronze", "olive, gold and bronze", Bronze},
+	{"winedark", "navy ground, wine and grain", WineDark},
+}
+
+// Presets is every palette a reader can choose, shipping first.
+func Presets() []Preset { return listed }
+
+// ByName resolves a palette name, case-insensitively. False means no such
+// palette — the caller decides what to do about it, because a name read back
+// from a file is not a name a person typed.
+func ByName(name string) (Palette, bool) {
+	want := strings.ToLower(strings.TrimSpace(name))
+	for _, p := range listed {
+		if p.Name == want {
+			return p.P, true
+		}
+	}
+	return Palette{}, false
+}
+
 // Glyphs is every non-alphabetic character the interface is allowed to draw.
 //
 // All of them live in the standard block and box-drawing ranges, so the whole
@@ -218,8 +324,11 @@ func New(p Palette, g Glyphs, isDark bool) *Theme {
 	t := &Theme{P: p, G: g}
 	if !isDark {
 		// On a light terminal the two darkest greys vanish into the page.
-		// Nothing else moves: the accent, the states and the coat are chosen
-		// to hold on either ground.
+		// Nothing else moves: the accent, the states and the coat hold on
+		// either ground. Whichever preset is chosen, the three text roles are
+		// corrected the same way: every palette offered here is a DARK-ground
+		// one, so on a light terminal it is the ink that is wrong, not the
+		// accent.
 		t.P.Ink = lipgloss.Color("#1D2B53")
 		t.P.Muted = lipgloss.Color("#7E6C63")
 		t.P.Faint = lipgloss.Color("#C8BEB6")

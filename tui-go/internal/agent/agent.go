@@ -211,6 +211,27 @@ type SessionMoved struct {
 	Cancelled bool
 }
 
+// ForkPoint is one message a branch can start from: pi's get_fork_messages
+// entry. The id is pi's — the session is an append-only tree and only pi can
+// mint the id a fork needs — and Text is the message as the reader wrote it,
+// which is what a fork hands back for editing.
+type ForkPoint struct {
+	EntryID string
+	Text    string
+}
+
+// ForkPoints is the answer to get_fork_messages: the user messages on the
+// active branch, oldest first, that a fork could start from.
+type ForkPoints struct{ List []ForkPoint }
+
+// Forked acknowledges a fork. Text is the message the new branch starts from
+// (pi returns it so the reader can edit and resend it), and Cancelled means an
+// extension refused the fork — the session did not move.
+type Forked struct {
+	Text      string
+	Cancelled bool
+}
+
 // Agent runs turns.
 type Agent interface {
 	// Send starts a turn. The returned command must emit Started first and
@@ -230,6 +251,25 @@ type Agent interface {
 
 	// NewSession starts a fresh conversation on the backend.
 	NewSession() tea.Cmd
+
+	// ListCommands asks the backend which commands it implements. The answer
+	// arrives as Commands. Asking is the only way a client learns this — the
+	// files are on disk but which of them the agent will run, and under what
+	// name, is the agent's answer to give — so it is asked at start, on every
+	// new session, and whenever the reader asks for it again.
+	ListCommands() tea.Cmd
+
+	// Compact asks the backend to rewrite its own context, optionally with
+	// instructions. The outcome arrives as Compaction messages: the interface
+	// does not summarise anything and must not pretend it did.
+	Compact(instructions string) tea.Cmd
+
+	// ForkPoints asks which of the session's messages a branch can start from.
+	ForkPoints() tea.Cmd
+
+	// Fork branches the session at entryID, moving the backend to the new
+	// branch. Text comes back with the acknowledgement as Forked.Text.
+	Fork(entryID string) tea.Cmd
 
 	// Answer responds to a dialog the backend is waiting on, keyed by the
 	// dialog's ID. A late answer is harmless — pi has already resolved it.

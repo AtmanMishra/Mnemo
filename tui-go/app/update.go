@@ -15,7 +15,6 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/command"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/filetree"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/keymap"
-	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/markdown"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/memory"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/pi"
@@ -42,12 +41,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.BackgroundColorMsg:
 		m.cfg.Dark = msg.IsDark()
-		m.th = theme.New(theme.PICO8, theme.Heavy, m.cfg.Dark)
-		m.chat.SetMarkdown(markdown.New(m.th))
-		for _, b := range m.chat.Blocks() {
-			b.Invalidate() // the palette moved; every cached render is stale
-		}
+		// The palette stays whatever was chosen; only the light/dark
+		// correction moves, and applyTheme is the one place that happens.
+		m.applyTheme()
 		return m, nil
+
+	case tea.MouseWheelMsg:
+		return m, m.mouseWheel(msg)
+
+	case tea.MouseClickMsg:
+		return m, m.mouseClick(msg)
 
 	case tickMsg:
 		m.tick++
@@ -100,7 +103,8 @@ func isAgentMsg(msg tea.Msg) bool {
 	case agent.Started, agent.Think, agent.Text, agent.ToolStart, agent.ToolEnd,
 		agent.Delegated, agent.Done, agent.Failed, agent.Stats, agent.Commands,
 		agent.UIDialog, agent.UINotify, agent.UIStatus,
-		agent.Compaction, agent.Retry, agent.ExtensionError, agent.SessionMoved:
+		agent.Compaction, agent.Retry, agent.ExtensionError, agent.SessionMoved,
+		agent.ForkPoints, agent.Forked:
 		return true
 	}
 	return false
@@ -186,11 +190,13 @@ func (m *Model) fold(msg tea.Msg) tea.Cmd {
 		return nil
 
 	case agent.Commands:
-		// The agent's own list, folded into the one the palette, the slash
-		// menu and ^h read. Nothing else has to learn about it: there is
-		// still exactly one list.
-		m.cmds = command.Merge(m.cmds, agentCommands(msg.List))
-		return nil
+		return m.foldCommands(msg)
+
+	case agent.ForkPoints:
+		return m.foldForkPoints(msg)
+
+	case agent.Forked:
+		return m.foldForked(msg)
 
 	case agent.UIDialog:
 		return m.askDialog(msg)
@@ -423,6 +429,70 @@ func oneLine(s string) string {
 	return s
 }
 
+// lastUserIndex is the index of the newest block the reader sent, or -1.
+//
+// Two callers need it and they need the same answer: undo cuts the transcript
+// at it, and a fork cuts at it because the branch starts from that message.
+func lastUserIndex(blocks []*chat.Block) int {
+	last := -1
+	for i, b := range blocks {
+		if b.Kind == chat.User {
+			last = i
+		}
+	}
+	return last
+}
+
+// foldForkPoints forks at the newest branchable message.
+//
+// pi's list is ordered oldest first, so the last entry is the message just
+// sent — the one a reader would edit and resend, which is what a branch is for.
+// Picking among the older ones is the obvious next step and is deliberately not
+// built yet: this slice is "branch here, now", and a picker can be added on top
+// of the same answer without changing anything below it.
+func (m *Model) foldForkPoints(p agent.ForkPoints) tea.Cmd {
+	m.awaitingFork = false
+	if len(p.List) == 0 {
+		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{
+			"nothing to branch from — a fork starts at a message you sent",
+		}})
+		return m.notify("no message to branch from")
+	}
+	return m.agent.Fork(p.List[len(p.List)-1].EntryID)
+}
+
+// foldForked reports the branch, and puts its message back in the editor.
+//
+// The transcript is cut back to the fork point because the branch does not
+// contain what came after it: leaving those turns on screen would show a
+// conversation the model no longer has, which is the drift the resume path
+// works to avoid. What is cut is not lost — it is in the session file the
+// branch was forked from.
+func (m *Model) foldForked(f agent.Forked) tea.Cmd {
+	if f.Cancelled {
+		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{
+			"an extension refused the branch — the session is unchanged",
+		}})
+		return m.notify("the branch was refused")
+	}
+	line := "branched at “" + oneLine(f.Text) + "” — it is back in the editor; the turns after it belong to the session you left"
+	if !m.prompt.Empty() {
+		// Saying so is the whole of it: the branch's message is what the
+		// editor is for now, and a draft that disappeared without a word
+		// looks like a bug.
+		line += " (the draft that was there is gone)"
+	}
+	// Cut first — TruncateAt drops from the fork point on, so a notice
+	// appended before it would be cut with the branch it is describing.
+	if i := lastUserIndex(m.chat.Blocks()); i >= 0 {
+		m.chat.TruncateAt(i)
+	}
+	m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{line}})
+	m.prompt.SetValue(f.Text)
+	m.layout()
+	return m.notify("branched — the message is back in the editor")
+}
+
 // agentCommands maps the backend's records onto this list's shape.
 //
 // The two vocabularies differ on purpose — the backend says where a command
@@ -448,6 +518,69 @@ func agentCommands(list []agent.CommandInfo) []command.Command {
 		})
 	}
 	return out
+}
+
+// foldCommands takes the agent's answer as the catalogue for the commands it
+// implements.
+//
+// Replacing rather than appending is the point: the answer is pi's whole list,
+// so a package removed mid-session disappears here too, and a skill appears
+// without a restart. Nothing is lost by the replacement — the disk scan is
+// still underneath (see rebuildCommands), so this is a re-answer, not a reset.
+func (m *Model) foldCommands(c agent.Commands) tea.Cmd {
+	m.live = agentCommands(c.List)
+	m.answered = true
+	m.rebuildCommands()
+	if !m.awaiting {
+		// The ask at startup: the list it produced is already on screen and
+		// announcing it would put a line over the welcome for no reason.
+		return nil
+	}
+	m.awaiting = false
+	return m.notify(plural(len(m.live), "command") + " from the agent")
+}
+
+// rebuildCommands is the one place the list is assembled.
+//
+// Two sources, one list: the interface's own commands, the agent's answer, and
+// the disk scan behind it — the whole catalogue when no agent is attached, and
+// the rows pi does not answer for otherwise. One name, one row: the folding
+// that makes `skill:review` and `review` the same command lives in
+// command.Catalogue, because that is where a name is defined.
+func (m *Model) rebuildCommands() {
+	m.cmds = command.Catalogue(m.live, m.disk)
+}
+
+// catalogueSource says where the list came from, for the palette's purpose
+// line. A reader looking for a skill is owed the difference between pi's own
+// answer and a scan of the disk: one is what will run, the other is what is
+// installed.
+func (m *Model) catalogueSource() string {
+	if m.answered {
+		return "the agent's list, live"
+	}
+	return "the list on disk"
+}
+
+// refreshCatalogue re-asks which commands the agent implements, and returns nil
+// when there is nothing to ask: the disk list is the whole catalogue offline,
+// and a question with nobody to answer it costs nothing but looks busy.
+func (m *Model) refreshCatalogue() tea.Cmd {
+	if !m.liveAgent() {
+		return nil
+	}
+	m.awaiting = true
+	return m.agent.ListCommands()
+}
+
+// askCommands is /commands: the on-demand half of the rule that the catalogue
+// is live. A pi package installed while this process was running shows up here
+// rather than at the next restart.
+func (m *Model) askCommands() tea.Cmd {
+	if !m.liveAgent() {
+		return m.notify("no agent attached — the list on disk is the catalogue")
+	}
+	return tea.Batch(m.refreshCatalogue(), m.notify("asking the agent which commands it implements"))
 }
 
 // settle clears every Running marker. A turn that ended must not leave a
@@ -617,6 +750,17 @@ func (m *Model) global(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 
 	case key.Matches(msg, k.Explorer):
 		return m.toggleExplorer(), true
+
+	case key.Matches(msg, k.Mouse):
+		// The way out, and the way back in. Mouse reporting captures every
+		// click and drag inside the program; the terminal's own select-and-
+		// copy is the gesture every reader already has, so getting it back
+		// has to be one press and it has to say so.
+		m.mouse = !m.mouse
+		if m.mouse {
+			return m.notify("mouse on — the wheel scrolls, a click folds a block · ^g gives it back"), true
+		}
+		return m.notify("mouse off — drag-select and copy are the terminal's again"), true
 
 	case key.Matches(msg, k.AllThink):
 		return m.toggleAll(chat.Think, "thinking"), true
@@ -1082,6 +1226,14 @@ func (m *Model) runSlash(c command.Command, args string) tea.Cmd {
 		// that clears while the model keeps remembering is a lie the next
 		// prompt exposes.
 		return m.newSession()
+	case "compact":
+		return m.compact(args)
+	case "fork":
+		return m.fork()
+	case "commands":
+		return m.askCommands()
+	case "theme":
+		return m.openThemes()
 	case "quit":
 		m.quitting = true
 		return tea.Quit
@@ -1171,6 +1323,72 @@ func (m *Model) copy(text, what string) tea.Cmd {
 	return tea.Batch(tea.SetClipboard(text), m.notify("copied the "+what))
 }
 
+// wheelLines is how far one notch of the wheel moves the transcript. Three,
+// not one: a notch that moves a single line is a wheel you have to spin, and a
+// whole screenful loses the line you were reading.
+const wheelLines = 3
+
+// mouseWheel scrolls the transcript.
+//
+// Nothing else in the interface is scrollable, so there is nothing to route
+// this to — and a modal on screen means the transcript is behind it, where
+// scrolling something you cannot see is worse than doing nothing. Silence is
+// the right answer there rather than a notice: the wheel is not a command, and
+// a status line that answers one is a status line that talks over itself.
+func (m *Model) mouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
+	if !m.mouse || m.modalUp() {
+		return nil
+	}
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		m.chat.Scroll(-wheelLines)
+	case tea.MouseWheelDown:
+		m.chat.Scroll(wheelLines)
+	}
+	return nil
+}
+
+// mouseClick folds the block under the pointer, and focuses it either way.
+//
+// Focus is the fallback for prose: a click on a paragraph has nothing to fold,
+// and a click that does nothing at all reads as a click the program did not
+// hear. The keyboard is left where it was — clicking a block is not a request
+// to stop typing — so this only ever touches the transcript's own cursor.
+//
+// The coordinates are screen coordinates. Row 0 is the top of the terminal, so
+// the body's own rows start at bodyTop, and chat.BlockAtRow takes it from
+// there; anything outside the body (header, rule, prompt, status) is not a
+// click on a block and is ignored.
+func (m *Model) mouseClick(msg tea.MouseClickMsg) tea.Cmd {
+	if !m.mouse || msg.Button != tea.MouseLeft || m.modalUp() {
+		return nil
+	}
+	row := msg.Y - m.rows().bodyTop
+	if row < 0 || row >= m.bodyHeight() {
+		return nil
+	}
+	// With the explorer open the transcript is the left column; a click in the
+	// explorer is not a click on a block. (Selecting an explorer row with the
+	// mouse is a feature this does not have — the keyboard owns that surface.)
+	if m.explorerWidth() > 0 && msg.X >= m.margin()+m.leftWidth() {
+		return nil
+	}
+	i := m.chat.BlockAtRow(row)
+	if i < 0 {
+		return nil // the blank row between two blocks
+	}
+	m.chat.SetFocus(i)
+	m.chat.ToggleAt(i) // false for prose: focused, nothing to fold
+	return nil
+}
+
+// modalUp reports whether something other than the transcript owns the screen.
+// The mouse asks this the way the keyboard asks it: a surface with focus takes
+// the input, and the thing behind it does not move.
+func (m *Model) modalUp() bool {
+	return m.ov != nil || m.confirm != nil || m.dialogWaiting() || m.searching
+}
+
 // undoLastExchange removes the last finished exchange from the transcript:
 // the most recent user message and everything the agent did in answer.
 //
@@ -1183,12 +1401,7 @@ func (m *Model) undoLastExchange() tea.Cmd {
 		return m.notify("wait for the turn to end before undoing it")
 	}
 	blocks := m.chat.Blocks()
-	last := -1
-	for i, b := range blocks {
-		if b.Kind == chat.User {
-			last = i
-		}
-	}
+	last := lastUserIndex(blocks)
 	if last < 0 {
 		return m.notify("nothing to undo yet — no exchange has finished")
 	}
@@ -1418,6 +1631,10 @@ func (m *Model) chooseOverlay() tea.Cmd {
 		// still there, already re-rendered, so a sweep of the list never
 		// means opening and closing it job by job.
 		return m.scheduleToggle(id)
+	case overlay.Themes:
+		// Applying stays in the surface too, for the same reason: the rows
+		// are already re-rendered, so trying the whole list is one visit.
+		return m.pickTheme(strings.TrimPrefix(id, "theme:"))
 	default:
 		m.ov = nil
 		m.mode = keymap.Insert
@@ -1459,10 +1676,52 @@ func (m *Model) resume(file string) tea.Cmd {
 // newSession starts a fresh conversation on both sides of the boundary: the
 // transcript clears here, and the agent is told to start one, so the two
 // cannot drift apart.
+//
+// The catalogue is asked again on the way: pi binds its commands per session,
+// and a package installed since the process started is invisible until either
+// a new session or /commands asks the question a second time.
 func (m *Model) newSession() tea.Cmd {
 	m.chat.Clear()
 	m.welcome()
-	return tea.Batch(m.agent.NewSession(), m.notify("new session — the agent starts from nothing"))
+	refresh := m.refreshCatalogue()
+	return tea.Batch(m.agent.NewSession(), refresh, m.notify("new session — the agent starts from nothing"))
+}
+
+// compact asks the agent to rewrite its own context.
+//
+// The interface summarises nothing: pi owns the conversation and the window it
+// has to fit in, so this is the trigger and the refusal, nothing more. The
+// outcome arrives as the compaction events the transcript already draws —
+// including the token counts — so a second report from the reply would be the
+// same sentence twice.
+func (m *Model) compact(instructions string) tea.Cmd {
+	if !m.liveAgent() {
+		return m.notify("compacting is the agent's to do — no agent is attached")
+	}
+	if m.working {
+		// pi compacts the message list the turn in flight is using. Asking
+		// mid-turn is asking for a race with the turn it is compacting.
+		return m.notify("the agent is working — compact when the turn ends")
+	}
+	return tea.Batch(m.agent.Compact(instructions), m.notify("asked the agent to compact the context"))
+}
+
+// fork branches the session at the message you last sent.
+//
+// The smallest honest slice of session branching: pi is asked which of its
+// messages a branch can start from, the newest one is forked, and the message
+// comes back into the editor to be edited and sent — which is what a branch is
+// for. Which message to fork from, the session tree, and naming a branch are
+// not built; the answer this uses is the same list a picker would need.
+func (m *Model) fork() tea.Cmd {
+	if !m.liveAgent() {
+		return m.notify("branching is the agent's to do — no agent is attached")
+	}
+	if m.working {
+		return m.notify("the agent is working — branch when the turn ends")
+	}
+	m.awaitingFork = true
+	return tea.Batch(m.agent.ForkPoints(), m.notify("finding the message to branch from"))
 }
 
 func entryBlock(e session.Entry) *chat.Block {
@@ -1510,10 +1769,67 @@ func (m *Model) toggleExplorer() tea.Cmd {
 	return m.notify("explorer · enter puts a path in the prompt · esc back")
 }
 
+// openThemes lists the palettes.
+//
+// A picker and nothing more: the theme is already a value and every pane reads
+// it, so this is a list of Presets, one key to apply, and a file to remember it
+// in. The row under the cursor says which one is in force, because a picker
+// that does not say what you are looking at is a picker you re-open to check.
+func (m *Model) openThemes() tea.Cmd {
+	m.ov = overlay.NewList(overlay.Themes,
+		"the palette every pane follows — enter applies it, and it is remembered",
+		m.themeItems())
+	m.armOverlay()
+	return nil
+}
+
+// themeItems builds the picker's rows, marking the one in force.
+func (m *Model) themeItems() []overlay.Item {
+	items := make([]overlay.Item, 0, len(theme.Presets()))
+	for _, p := range theme.Presets() {
+		detail := p.Desc
+		if p.Name == m.themeName {
+			detail = "in use · " + p.Desc
+		}
+		items = append(items, overlay.Item{Label: p.Name, Detail: detail, ID: "theme:" + p.Name})
+	}
+	return items
+}
+
+// pickTheme applies a palette, remembers it, and leaves the list open.
+//
+// Staying open is the point: trying three palettes should be three presses in
+// one surface, not three trips through ^k. The rows are rebuilt in place, so
+// the "in use" marker moves with the choice.
+func (m *Model) pickTheme(name string) tea.Cmd {
+	if _, ok := theme.ByName(name); !ok {
+		return m.notify("no theme called " + name)
+	}
+	m.themeName = name
+	m.applyTheme()
+	if m.ov != nil && m.ov.Kind == overlay.Themes {
+		m.ov.SetItems(m.themeItems())
+	}
+	if err := saveTheme(m.cfg.Home, name); err != nil {
+		// Applied, not saved: saying so is the difference between a
+		// preference and a setting that silently does not survive.
+		return m.notify("theme " + name + " — could not save it: " + err.Error())
+	}
+	return m.notify("theme " + name + " · saved to " + filepath.Base(themeFile(m.cfg.Home)))
+}
+
 func (m *Model) openHelp() tea.Cmd {
 	items := make([]overlay.Item, 0, 40+len(m.cmds))
 	for _, e := range m.keys.Help() {
 		items = append(items, overlay.Item{Label: e.Desc, Detail: e.Key, Group: e.Mode.String(), ID: ""})
+	}
+	// The mouse's two gestures are listed only while something is sending
+	// them: help that teaches a wheel on a terminal that never reports one is
+	// help that teaches a key that does nothing.
+	if m.mouse {
+		for _, e := range m.keys.MouseHelp() {
+			items = append(items, overlay.Item{Label: e.Desc, Detail: e.Key, Group: "MOUSE", ID: ""})
+		}
 	}
 	// The commands follow the keys, because the built-in promises "every key
 	// and command" and an agent's own commands are exactly the ones no other
@@ -1584,13 +1900,18 @@ func commandItem(c command.Command) overlay.Item {
 // openPalette lists everything: the built-in actions and every skill, plugin
 // and bundle on disk, plus whatever the agent says it implements. One surface,
 // so there is nowhere a command can hide.
+//
+// The purpose line says which of the two lists this is. The agent's answer and
+// a scan of the disk are different promises — what will run, and what is
+// installed — and a reader looking for a skill they just installed needs to
+// know which one they are looking at.
 func (m *Model) openPalette() tea.Cmd {
 	items := make([]overlay.Item, 0, len(m.cmds))
 	for _, c := range m.cmds {
 		items = append(items, commandItem(c))
 	}
 	m.ov = overlay.NewList(overlay.Palette,
-		"every command, skill and plugin — type to filter, enter to run", items)
+		"every command, skill and plugin — "+m.catalogueSource(), items)
 	m.armOverlay()
 	return nil
 }

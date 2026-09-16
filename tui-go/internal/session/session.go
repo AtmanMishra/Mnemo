@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -18,8 +19,106 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/tree"
 )
 
-// Root is pi's session directory under a given home.
-func Root(home string) string { return filepath.Join(home, ".pi", "agent", "sessions") }
+// Pi resolves its session directory from the environment and from its global
+// settings before falling back to a default (pi's docs/settings.md §Sessions
+// and docs/environment-variables.md):
+//
+//  1. PI_CODING_AGENT_SESSION_DIR
+//  2. `sessionDir` in the global settings.json
+//  3. <agentDir>/sessions, agentDir being PI_CODING_AGENT_DIR or ~/.pi/agent
+//
+// Only the third was implemented here, and the failure mode of guessing wrong
+// is silent: a browser pointed at a directory pi never writes shows an empty
+// list, which reads as "you have no sessions" rather than "look somewhere
+// else".
+const (
+	envAgentDir   = "PI_CODING_AGENT_DIR"
+	envSessionDir = "PI_CODING_AGENT_SESSION_DIR"
+)
+
+// AgentDir is pi's configuration directory: PI_CODING_AGENT_DIR when set,
+// else <home>/.pi/agent.
+func AgentDir(home string) string {
+	if dir := strings.TrimSpace(os.Getenv(envAgentDir)); dir != "" {
+		return expandTilde(dir, home)
+	}
+	return filepath.Join(home, ".pi", "agent")
+}
+
+// Root is the directory pi stores sessions in under `home`, resolved the way
+// pi resolves it — see the constants above.
+//
+// Two layouts live under this answer and both are read here. pi's default
+// directory is a PARENT: one subdirectory per project, named after the
+// project's path. A directory configured explicitly is the session directory
+// ITSELF, and pi fills it flat — SessionManager.create uses the configured
+// path as-is and filters its listing by each session's own recorded cwd.
+func Root(home string) string {
+	if dir := strings.TrimSpace(os.Getenv(envSessionDir)); dir != "" {
+		return expandTilde(dir, home)
+	}
+	agentDir := AgentDir(home)
+	if dir := settingsSessionDir(agentDir); dir != "" {
+		return expandTilde(dir, home)
+	}
+	return filepath.Join(agentDir, "sessions")
+}
+
+// SpawnDir is the --session-dir a spawned pi must be handed so it writes where
+// this browser looks, or "" when it must be handed none.
+//
+// The empty answer is not a shrug: `--session-dir` names the session directory
+// itself, so passing pi its own default back would stop it nesting new
+// sessions under the project directory — and pi's own /resume lists one
+// directory, without recursing, so the sessions already nested there would
+// vanish from pi's picker. With nothing configured, this browser and pi
+// already agree on the default; the flag exists for the case where they would
+// not.
+func SpawnDir(home string) string {
+	root := Root(home)
+	if root == filepath.Join(AgentDir(home), "sessions") {
+		return ""
+	}
+	return root
+}
+
+// settingsSessionDir reads `sessionDir` from pi's global settings.json.
+//
+// The GLOBAL file, which sits in the agent directory: that is where pi looks
+// for the setting that decides where sessions go, and it is what
+// PI_CODING_AGENT_DIR moves. A missing file, unreadable JSON or a non-string
+// value all read as "not configured" — pi runs with its default in every one
+// of those cases, and a browser that refused to open would show nothing at
+// all.
+func settingsSessionDir(agentDir string) string {
+	raw, err := os.ReadFile(filepath.Join(agentDir, "settings.json"))
+	if err != nil {
+		return ""
+	}
+	var settings struct {
+		SessionDir string `json:"sessionDir"`
+	}
+	if json.Unmarshal(raw, &settings) != nil {
+		return ""
+	}
+	return strings.TrimSpace(settings.SessionDir)
+}
+
+// expandTilde resolves the one path shorthand pi resolves: `~`, `~/…` and, on
+// Windows, `~\…`. It expands against the home this package was handed, never
+// os.UserHomeDir — the rule the rest of this file follows, and the reason a
+// test can exercise it. A relative path is left alone, as pi leaves it.
+func expandTilde(p, home string) string {
+	switch {
+	case p == "~":
+		return home
+	case strings.HasPrefix(p, "~/"):
+		return filepath.Join(home, p[2:])
+	case runtime.GOOS == "windows" && strings.HasPrefix(p, `~\`):
+		return filepath.Join(home, p[2:])
+	}
+	return p
+}
 
 // TraceDir is where Mnemo's own traces live; it is the only place a
 // sub-agent's parent link is recorded.
@@ -70,8 +169,14 @@ func DecodeDir(dir string) string {
 
 // Projects lists every project pi has sessions for, most recently active
 // first.
+//
+// Both layouts under Root are read. pi's default directory holds one
+// subdirectory per project; a directory it was configured with is filled flat,
+// with the session files sitting beside any subdirectories. Reading only the
+// first layout is how a configured session directory shows up as empty.
 func Projects(home string) []Project {
-	entries, err := os.ReadDir(Root(home))
+	root := Root(home)
+	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil
 	}
@@ -80,7 +185,7 @@ func Projects(home string) []Project {
 		if !e.IsDir() {
 			continue
 		}
-		ss := Sessions(home, e.Name())
+		ss := sessionsIn(filepath.Join(root, e.Name()))
 		if len(ss) == 0 {
 			continue
 		}
@@ -90,15 +195,74 @@ func Projects(home string) []Project {
 		}
 		out = append(out, Project{Path: path, Dir: e.Name(), Sessions: ss})
 	}
+	// A flat session belongs to the project its own header names, so it joins
+	// that project's row rather than opening a second one for the same
+	// directory.
+	for _, flat := range flatProjects(root, entries) {
+		if i := indexOfPath(out, flat.Path); i >= 0 {
+			out[i].Sessions = append(out[i].Sessions, flat.Sessions...)
+			sortSessions(out[i].Sessions)
+			continue
+		}
+		out = append(out, flat)
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].Sessions[0].Started.After(out[j].Sessions[0].Started)
 	})
 	return out
 }
 
+// flatProjects groups the session files lying directly in the session
+// directory by the cwd each one recorded.
+//
+// pi writes them there when a session directory is configured explicitly: the
+// configured path IS the session directory, and pi tells the projects apart by
+// reading each file's own header (SessionManager.create, and the cwd filter in
+// its listing). The label falls back to the directory's name for a header with
+// no cwd at all, because a row still has to say something.
+func flatProjects(root string, entries []os.DirEntry) []Project {
+	var out []Project
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		s, ok := Read(filepath.Join(root, e.Name()))
+		if !ok {
+			continue
+		}
+		i := indexOfPath(out, s.CWD)
+		if i < 0 {
+			out = append(out, Project{Path: s.CWD, Dir: filepath.Base(root)})
+			i = len(out) - 1
+		}
+		out[i].Sessions = append(out[i].Sessions, s)
+	}
+	for i := range out {
+		sortSessions(out[i].Sessions)
+	}
+	return out
+}
+
+// indexOfPath finds a project by its path, ignoring the empty path — two
+// sessions whose headers name no cwd are not evidence of one project.
+func indexOfPath(ps []Project, path string) int {
+	if path == "" {
+		return -1
+	}
+	for i := range ps {
+		if ps[i].Path == path {
+			return i
+		}
+	}
+	return -1
+}
+
 // Sessions reads every session in one encoded project directory, newest first.
-func Sessions(home, dir string) []Session {
-	entries, err := os.ReadDir(filepath.Join(Root(home), dir))
+func Sessions(home, dir string) []Session { return sessionsIn(filepath.Join(Root(home), dir)) }
+
+// sessionsIn reads every session file in one directory, newest first.
+func sessionsIn(dir string) []Session {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
@@ -107,12 +271,16 @@ func Sessions(home, dir string) []Session {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
 			continue
 		}
-		if s, ok := Read(filepath.Join(Root(home), dir, e.Name())); ok {
+		if s, ok := Read(filepath.Join(dir, e.Name())); ok {
 			out = append(out, s)
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Started.After(out[j].Started) })
+	sortSessions(out)
 	return out
+}
+
+func sortSessions(ss []Session) {
+	sort.SliceStable(ss, func(i, j int) bool { return ss[i].Started.After(ss[j].Started) })
 }
 
 // Read parses one session file.

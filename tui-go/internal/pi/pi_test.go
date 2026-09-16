@@ -255,7 +255,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 
 func TestSpawnRejectsARepoWithoutTheAgentScript(t *testing.T) {
 	dir := t.TempDir() // empty: no agent/bin/mnemo.ts anywhere in it
-	s, err := Spawn(dir, dir, "", Trust{})
+	s, err := Spawn(dir, dir, "", "", Trust{})
 	if s != nil {
 		t.Fatalf("Spawn must not return a session for a bad repo root; got %+v", s)
 	}
@@ -272,8 +272,8 @@ func TestSpawnRejectsARepoWithoutTheAgentScript(t *testing.T) {
 // extensions, prompts and skills without saying so, so "no flag" is not a
 // neutral choice — it is the silent one.
 func TestTheSpawnArgsSayWhichWayTrustWent(t *testing.T) {
-	yes := spawnArgs("/repo", "/s/session.jsonl", Trust{Approve: true})
-	no := spawnArgs("/repo", "/s/session.jsonl", Trust{})
+	yes := spawnArgs("/repo", "/s/session.jsonl", "", Trust{Approve: true})
+	no := spawnArgs("/repo", "/s/session.jsonl", "", Trust{})
 
 	if !hasArg(yes, "--approve") {
 		t.Fatalf("an approved project must be passed --approve: %q", yes)
@@ -295,8 +295,87 @@ func TestTheSpawnArgsSayWhichWayTrustWent(t *testing.T) {
 	if !hasArg(yes, "/s/session.jsonl") {
 		t.Fatalf("a resume must carry its session file: %q", yes)
 	}
-	if hasArg(spawnArgs("/repo", "", Trust{}), "--session") {
+	if hasArg(spawnArgs("/repo", "", "", Trust{}), "--session") {
 		t.Fatal("a fresh spawn must not carry an empty --session")
+	}
+}
+
+// TestTheSpawnIsToldWhereTheSessionsAre: the browser and the agent must mean
+// the same directory, and --session-dir is the only way the child can be told.
+//
+// The flag is left off when there is nothing to tell — session.SpawnDir
+// returns "" for pi's own default — because passing the default path back
+// would change it: --session-dir names the session directory itself, so pi
+// would stop nesting new sessions under the project directory.
+func TestTheSpawnIsToldWhereTheSessionsAre(t *testing.T) {
+	over := filepath.Join(t.TempDir(), "elsewhere")
+	with := spawnArgs("/repo", "", over, Trust{})
+	if !hasArg(with, "--session-dir") {
+		t.Fatalf("a configured session directory must reach the child: %q", with)
+	}
+	if val(with, "--session-dir") != over {
+		t.Fatalf("--session-dir = %q, want %q", val(with, "--session-dir"), over)
+	}
+	if hasArg(spawnArgs("/repo", "", "", Trust{}), "--session-dir") {
+		t.Fatal("with nothing configured there is nothing to pass: pi's own default is already the answer")
+	}
+}
+
+// val is the argument after a flag, or "".
+func val(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// TestAnExtensionLoadFailureExplainsItself: the shape pi prints at startup, the
+// "Error: " prefix its diagnostics carry, a colourised line, and a load failure
+// that is not a conflict — which must not be given the conflict's advice.
+func TestAnExtensionLoadFailureExplainsItself(t *testing.T) {
+	conflict := `Failed to load extension "/home/me/.pi/extensions/a.ts": Tool "grep" conflicts with /repo/agent/extensions/sea-tools-inline.ts`
+	got, ok := extensionLoadFailure(conflict)
+	if !ok {
+		t.Fatal("the shape pi prints must be recognised")
+	}
+	for _, want := range []string{
+		"/home/me/.pi/extensions/a.ts",
+		`Tool "grep" conflicts with /repo/agent/extensions/sea-tools-inline.ts`,
+		"remove or rename one of them",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the transcript line lost %q: %q", want, got)
+		}
+	}
+	if !strings.Contains(got, conflict) {
+		t.Fatalf("pi's own words must arrive verbatim, got %q", got)
+	}
+	if strings.Contains(got, "\x1b") {
+		t.Fatalf("a stray escape sequence looks like a rendering bug in us: %q", got)
+	}
+
+	if prefixed, ok := extensionLoadFailure("Error: " + conflict); !ok || !strings.HasPrefix(prefixed, `Failed to load`) {
+		t.Fatalf("a diagnostics prefix must not become part of the message: %q (%v)", prefixed, ok)
+	}
+	if coloured, ok := extensionLoadFailure("\x1b[31m" + conflict + "\x1b[39m"); !ok || strings.Contains(coloured, "\x1b") {
+		t.Fatalf("colour must be stripped, not shown: %q", coloured)
+	}
+
+	broken, ok := extensionLoadFailure(`Failed to load extension "/x/b.ts": Cannot find module "zod"`)
+	if !ok {
+		t.Fatal("a load failure that is not a conflict is still a load failure")
+	}
+	if strings.Contains(broken, "remove or rename one of them") {
+		t.Fatalf("two extensions do not conflict here; that advice is about a different failure: %q", broken)
+	}
+	if !strings.Contains(broken, `Cannot find module "zod"`) {
+		t.Fatalf("the reason must survive: %q", broken)
+	}
+
+	if _, ok := extensionLoadFailure("Error: model not found"); ok {
+		t.Fatal("unrelated stderr is not an extension failure")
 	}
 }
 
