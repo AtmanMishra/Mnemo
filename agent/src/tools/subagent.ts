@@ -13,6 +13,10 @@
  * The child is spawned with MNEMO_SUBAGENT_CHILD=1 so the approval gate can
  * tell a delegated child (no TTY, no operator) from an automated parent run:
  * in a child, an "ask" on a mutating tool fails CLOSED (audit b6afa93e).
+ *
+ * 6(b): each child is also stamped with MNEMO_SUBAGENT_DEPTH (its depth in the
+ * delegation tree), and spawn_subagent refuses once this process has reached
+ * MNEMO_SUBAGENT_MAX_DEPTH (default 3). See the budget block below.
  */
 import { spawn } from "node:child_process";
 import { activeTracing, childTraceEnv as traceEnvFor } from "../../extensions/tracing.ts";
@@ -36,6 +40,70 @@ const parameters = Type.Object({
       "Must belong to a logged-in provider. Omit to inherit the parent's model.",
   })),
 });
+
+// --- 6(b): cap how deep sub-agents may nest ---------------------------------
+//
+// Delegation was an unbounded resource path: every child is a full agent that
+// can itself call spawn_subagent, so one prompt could fork a tree of agents,
+// each with its own model spend and memory client, with nothing to stop it
+// (research/agentic-capability-review.md, C4/"issue #6").
+//
+// The budget rides in the ENVIRONMENT, not in memory, because a child is a
+// fresh `mnemo.ts` process that shares nothing with its parent but the env it
+// was handed: the parent is the only side that knows whether this process is a
+// child, so it brands its own child with MNEMO_SUBAGENT_DEPTH = its depth + 1
+// (see runSubagent). Depth 0 is the agent the user started.
+//
+// Default 3, because "one agent per subsystem, each asking for its own
+// helpers" is three levels deep (root → child → grandchild → great-grandchild)
+// and four agents deep is already more than a person can follow; the point is
+// that it is a number, not infinity. MNEMO_SUBAGENT_MAX_DEPTH moves it and is
+// inherited by children, so it only has to be set once, on the top-level
+// process; 0 forbids delegation entirely, and a bad value (garbage, negative)
+// falls back to the default rather than to "unlimited".
+
+/** How deep THIS process is: set by the parent on the child it spawns. */
+export const SUBAGENT_DEPTH_ENV = "MNEMO_SUBAGENT_DEPTH";
+
+/** The user's knob for the cap. Inherited by children, so set it once. */
+export const SUBAGENT_MAX_DEPTH_ENV = "MNEMO_SUBAGENT_MAX_DEPTH";
+
+/** Default delegation depth budget: the root plus three levels of children. */
+export const DEFAULT_SUBAGENT_MAX_DEPTH = 3;
+
+/** Env value -> a non-negative whole number, or undefined when absent/unusable. */
+function depthFromEnv(raw: string | undefined): number | undefined {
+  const text = raw?.trim() ?? "";
+  if (!text) return undefined;
+  const n = Number(text);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
+
+/** This process's delegation depth: 0 for the agent the user started. */
+export function subagentDepth(env: NodeJS.ProcessEnv = process.env): number {
+  return depthFromEnv(env[SUBAGENT_DEPTH_ENV]) ?? 0;
+}
+
+/** The effective cap. Unset or unusable means the documented default. */
+export function subagentMaxDepth(env: NodeJS.ProcessEnv = process.env): number {
+  return depthFromEnv(env[SUBAGENT_MAX_DEPTH_ENV]) ?? DEFAULT_SUBAGENT_MAX_DEPTH;
+}
+
+/**
+ * Why this process may not spawn a sub-agent, or null when it may. Pure, so the
+ * wording — which names the limit and how to raise it — is pinned by tests.
+ * Deciding on `depth < max` means the cap counts LEVELS of delegation: with
+ * max=1 the root may spawn a child, and that child may not spawn anything.
+ */
+export function subagentDepthRefusal(depth: number, max: number): string | null {
+  if (depth < max) return null;
+  return (
+    `spawn_subagent refused: sub-agent depth limit reached — this agent is at depth ${depth} ` +
+    `(${SUBAGENT_DEPTH_ENV}=${depth}) of a maximum ${max}. Do this task here instead of delegating it. ` +
+    `To allow deeper nesting, set ${SUBAGENT_MAX_DEPTH_ENV}=${max + 1} (or higher) in the environment ` +
+    `of the top-level mnemo process and restart it.`
+  );
+}
 
 /** Every model a logged-in provider offers, as "provider/model". */
 export function availableModels(home?: string): Array<{ provider: string; model: string }> {
@@ -106,6 +174,10 @@ export function runSubagent(
   // default CLI path relative to this module: agent/bin/mnemo.ts
   const cli = process.env.MNEMO_AGENT_BIN ?? process.env.SEA_AGENT_BIN
     ?? path.join(import.meta.dirname ?? ".", "..", "..", "agent", "bin", "mnemo.ts");
+  // 6(b): the child is one level deeper than this process. Counted here, from
+  // the env the parent handed US, so the chain cannot be reset by a child
+  // that simply forgets to pass it on.
+  const childDepth = subagentDepth() + 1;
   const started = Date.now();
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, composeChildPrompt(opts.task, opts.context)], {
@@ -126,6 +198,9 @@ export function runSubagent(
         ...childTraceEnv(),
         [SUBAGENT_CHILD_ENV]: "1",
         ...(opts.env ?? {}),
+        // 6(b): the depth budget is OURS to set, last so a caller-supplied env
+        // cannot make a child look shallower than it is.
+        [SUBAGENT_DEPTH_ENV]: String(childDepth),
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -203,9 +278,17 @@ export const subagentSpawnTool: SeaTool = {
   description:
     "Spawn a hierarchical sub-agent (full mnemo agent with all tools + shared memory) to complete one self-contained task. " +
     "Pass ONLY the relevant context in 'context' -- the child does not see this conversation. " +
-    "The child writes its findings into shared memory automatically.",
+    "The child writes its findings into shared memory automatically. " +
+    "Delegation is depth-limited (MNEMO_SUBAGENT_MAX_DEPTH, default 3): a sub-agent may spawn its own " +
+    "children until the budget is spent, and the call is refused past it.",
   parameters,
   async execute(_id, params: any, _signal?: AbortSignal, _onUpdate?: unknown, ctx?: any) {
+    // 6(b): refuse past the depth budget with an ordinary tool result -- the
+    // model gets a message it can act on, never a crash and never a silenced
+    // guard. Checked here (not in runSubagent) because this is the call pi
+    // exposes; runSubagent still stamps the child's depth either way.
+    const refused = subagentDepthRefusal(subagentDepth(), subagentMaxDepth());
+    if (refused) return textResult(refused);
     try {
       const r = await runSubagent({
         task: params.task,
