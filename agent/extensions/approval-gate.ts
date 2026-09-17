@@ -152,6 +152,7 @@ export async function readConsent(
   ui: ConfirmUI,
   toolName: string,
   subject: string,
+  input: Record<string, unknown> = {},
 ): Promise<ConsentOutcome> {
   const options = consentOptions(toolName, subject);
   const pattern = similarPattern(toolName, subject);
@@ -159,7 +160,11 @@ export async function readConsent(
     // A UI with only confirm() (older contexts, and the in-tool readline gate
     // when it is driving): yes is "once", no is "do not allow". Never a grant —
     // a y/n cannot express a scope, so it must not silently pick one.
-    return (await ui.confirm(`Approve ${toolName}?`, summarizeToolCall(toolName, { }))) ? { kind: "once" } : { kind: "deny" };
+    // The summary is the call itself: a prompt that asks about a tool without
+    // showing what it would do is a prompt that cannot be answered.
+    return (await ui.confirm(`Approve ${toolName}?`, summarizeToolCall(toolName, input)))
+      ? { kind: "once" }
+      : { kind: "deny" };
   }
   const choice = await ui.select(`Approve ${toolName}?`, options);
   if (choice === undefined) return { kind: "deny" }; // dismissed: unanswered is not consent
@@ -267,7 +272,7 @@ export async function decideApproval(
   }
 
   const summary = summarizeToolCall(ev.toolName, ev.input);
-  const outcome = await readConsent(ui, ev.toolName, subjectOf(ev.toolName, ev.input));
+  const outcome = await readConsent(ui, ev.toolName, subjectOf(ev.toolName, ev.input), ev.input);
   if (outcome.kind === "once") return {};
   if (outcome.kind === "grant") {
     const file = writeGrant({ scope: outcome.scope, tool: ev.toolName, pattern: outcome.pattern, cwd, home });

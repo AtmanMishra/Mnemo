@@ -188,8 +188,14 @@ export function watchGrants(
           timers.delete(file);
           onChange(file);
         }, debounceMs));
+        timers.get(file)?.unref?.();
       });
       w.on("error", () => { /* best-effort: see the header */ });
+      // A watcher that holds the event loop open is a watcher that stops the
+      // agent from ever exiting: pi finishes its turn, the extension's handle
+      // is still live, and the process sits there. unref() keeps the watch
+      // working while letting the process end when the work does.
+      w.unref?.();
       watchers.push(w);
     } catch {
       // An unwatchable directory is not a reason to refuse to run.

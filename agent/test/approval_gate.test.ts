@@ -64,7 +64,13 @@ function withApprovalMode(mode: string | undefined): () => void {
 }
 
 test("only mutating tools are gated", () => {
-  assert.deepEqual([...GATED_TOOLS].sort(), ["apply_edit", "bash_exec", "ipy_run", "write_file"]);
+  // "harness" joined the set with #7: a bundle is third-party tool code loaded
+  // into this process, so which bundles run is a question for the operator,
+  // not a default. Everything else stays ungated — a read is not a mutation.
+  assert.deepEqual(
+    [...GATED_TOOLS].sort(),
+    ["apply_edit", "bash_exec", "harness", "ipy_run", "write_file"],
+  );
 });
 
 // --- 15: a dialog UI is what makes the gate able to ask -------------------
