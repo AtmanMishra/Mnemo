@@ -1,6 +1,6 @@
   ▚ MNEMO ───────────────────────────────────────────────────────────────────── ~/tui-go ▌ offline
   
-  ━━╾ TRANSCRIPT ╼━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ▀▀▐ TRANSCRIPT ▌▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
                                                                                                   
     · nothing is set up yet — /login logs in a provider, /model picks the default                 
     · / — commands, skills and plugins. Start typing; pick with ↑ ↓                               
@@ -15,16 +15,16 @@
                                                                                                   
   ▌ how does the flag parser work?                                                                
                                                                                                   
-  · ▾ thinking                                                                                    
+  ░▄▾ thinking                                                                                    
     The parser lives in internal/pi. Let me confirm how it splits flags.                          
                                                                                                   
-  │ It reads flags from the process table, not from the keyboard.                                 
+  █▌It reads flags from the process table, not from the keyboard.                                 
                                                                                                   
-  ● ▾ read  limit=40 path=main.go                                                            40 ln
+  ▐▌▾ read  limit=40 path=main.go                                                            40 ln
     package main                                                                                  
                                                                                                   
     func main() {}                                                                                
   
-  ▊ ask, or press ^k                                                                              
+  █▄ask, or press ^k                                                                              
   
    FIND  ▌ /parser▏ ▌ 1 of 3                                                                      

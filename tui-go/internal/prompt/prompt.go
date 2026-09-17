@@ -277,6 +277,11 @@ func (m *Model) HistoryNext() bool {
 // future, not part of the conversation: it must be visible enough to notice
 // and quiet enough not to be mistaken for something already said.
 func (m *Model) View(t *theme.Theme, focused bool) string {
+	// The bar is the same two-cell figure the transcript's user gutter uses —
+	// it is the same speaker — and it costs the same column, so a wrapped
+	// prompt lines up under the first line instead of stepping left. No space
+	// is added after it: the figure's own last pixel is half-empty, which is
+	// where the air before the words comes from.
 	bar := t.Faint.Render(t.G.User)
 	if focused {
 		bar = t.Accent.Render(t.G.User)
@@ -285,9 +290,9 @@ func (m *Model) View(t *theme.Theme, focused bool) string {
 	lines := strings.Split(body, "\n")
 	for i, l := range lines {
 		if i == 0 {
-			lines[i] = bar + " " + l
+			lines[i] = bar + l
 		} else {
-			lines[i] = "  " + l
+			lines[i] = strings.Repeat(" ", theme.GutterCells) + l
 		}
 	}
 	out := strings.Join(lines, "\n")

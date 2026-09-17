@@ -24,12 +24,32 @@ const HTML = path.join(root, "docs", "interface-assets.html");
 
 const go = fs.readFileSync(GO, "utf8");
 
+/** The vocabulary constants: `name = "glyph"` lines in the file's const block.
+ *  theme.go composes each glyph from these (`User: pxFull + pxLow`), so a
+ *  reader that only understood string literals would see an empty set. */
+function glyphConsts() {
+  const out = {};
+  for (const m of go.matchAll(/^\s*(\w+)\s*=\s*"([^"]*)"\s*(?:\/\/.*)?$/gm)) out[m[1]] = m[2];
+  return out;
+}
+
+/** Resolve one field: a literal, or constants joined with +. */
+function glyphValue(expr, consts) {
+  return expr
+    .replace(/\/\/.*$/, "")
+    .split("+")
+    .map((part) => part.trim())
+    .map((part) => (/^".*"$/.test(part) ? part.slice(1, -1) : (consts[part] ?? part)))
+    .join("");
+}
+
 /** Read a `var Name = Glyphs{ ... }` block into key → string. */
 function glyphSet(name) {
   const block = go.match(new RegExp(`var ${name} = Glyphs\\{([\\s\\S]*?)\\n\\}`));
   if (!block) return null;
+  const consts = glyphConsts();
   const out = {};
-  for (const m of block[1].matchAll(/^\s*(\w+):\s*"(.*?)",/gm)) out[m[1]] = m[2];
+  for (const m of block[1].matchAll(/^\s*(\w+):\s*([^,]+),/gm)) out[m[1]] = glyphValue(m[2], consts);
   return out;
 }
 
@@ -48,6 +68,27 @@ const DITHER = runeRamp("Dither");
 if (!HEAVY) {
   console.error("could not find the Heavy glyph set in theme.go — has it been renamed?");
   process.exit(1);
+}
+
+// Fail loudly on a glyph this reader could not resolve. Left to itself it would
+// drop the value and write a page that shows an empty set, which is the exact
+// failure this generator exists to prevent: a page that says "this is what
+// ships" and is wrong.
+const SPEAKER_KEYS = ["User", "Agent", "Think", "Tool"];
+for (const [key, value] of Object.entries(HEAVY)) {
+  if (!value || /[A-Za-z_]/.test(value)) {
+    console.error(
+      `could not read Heavy.${key} out of theme.go (got ${JSON.stringify(value)}) — ` +
+        "the literal has changed shape, or a vocabulary constant is missing",
+    );
+    process.exit(1);
+  }
+}
+for (const key of SPEAKER_KEYS) {
+  if (!HEAVY[key]) {
+    console.error(`theme.go's Heavy has no ${key} glyph — the gutters are the point of this page`);
+    process.exit(1);
+  }
 }
 
 const SPEAKERS = [

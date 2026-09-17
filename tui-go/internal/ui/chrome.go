@@ -21,20 +21,26 @@ type Seg struct {
 
 // Rule draws a horizontal rule with a label notched into it:
 //
-//	━━╾ TRANSCRIPT ╼━━━━━━━━━━━━━━━━━━━━━━━━
+//	▀▀▐ TRANSCRIPT ▌▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
 //
 // A label inside the rule costs no extra row, which is the whole reason the
 // interface can afford to name every region. An unlabelled region is a region
 // the reader has to guess at, and guessing is what the six-pane rail was.
+//
+// The rule is the top pixel of every cell (▀), so it is a bar of ink with
+// weight rather than a hairline, and the notch is the two halves of one cell
+// turned inward: the bar steps down around the label and holds it.
 func Rule(t *theme.Theme, width int, label string) string {
+	// Too narrow for a label: a rule that cannot say anything is a hairline
+	// rather than a bar, so a cramped pane stays quiet instead of shouting.
 	if width < 4 {
-		return t.Rule.Render(strings.Repeat(t.G.H, max(width, 0)))
+		return t.Rule.Render(strings.Repeat(t.G.Hair, max(width, 0)))
 	}
 	if label == "" {
 		return t.Rule.Render(strings.Repeat(t.G.H, width))
 	}
 	label = strings.ToUpper(label)
-	// ━━╾ LABEL ╼ + filler
+	// ▀▀▐ LABEL ▌ + filler
 	head := t.Rule.Render(strings.Repeat(t.G.H, 2)+t.G.Nub+" ") +
 		t.Label.Render(label) +
 		t.Rule.Render(" "+reverse(t.G.Nub))
@@ -45,15 +51,18 @@ func Rule(t *theme.Theme, width int, label string) string {
 	return head + t.Rule.Render(strings.Repeat(t.G.H, width-used))
 }
 
-// reverse turns ╾ into ╼ so the notch closes the other way. Kept as a lookup
-// rather than arithmetic because the box-drawing block is not laid out in
-// mirrored pairs.
+// reverse turns the notch round so the label's slot closes the other way.
+//
+// Kept as a lookup rather than arithmetic: the two halves of a cell are two
+// separate code points (▌ is U+258C, ▐ is U+2590) and the box-drawing range
+// has no mirrored pairs at all, so there is nothing to compute — only a thing
+// to look up.
 func reverse(s string) string {
 	switch s {
-	case "╾":
-		return "╼"
-	case "╼":
-		return "╾"
+	case "▐":
+		return "▌"
+	case "▌":
+		return "▐"
 	}
 	return s
 }
@@ -126,8 +135,10 @@ func Header(t *theme.Theme, width, phase int, working bool, facts []Seg) string 
 	} else {
 		// Idle: a hairline, not a band. A full-width block of texture at rest
 		// reads as an alert bar — the eye takes a solid stripe of colour as
-		// something to attend to, and nothing is happening.
-		tex = t.Rule.Render(strings.Repeat("─", fill))
+		// something to attend to, and nothing is happening. Drawn from the
+		// glyph set's own quiet rule rather than a literal, so "nothing else
+		// names a box-drawing character" stays true.
+		tex = t.Rule.Render(strings.Repeat(t.G.Hair, fill))
 	}
 	return mark + " " + tex + " " + right
 }
@@ -273,6 +284,12 @@ const PanelChrome = 4
 // Panel frames an overlay so it reads as sitting ON the screen rather than
 // cut into it: a border in the accent, and an opaque interior, because
 // anything showing through the gaps looks like a rendering fault.
+//
+// The frame is lipgloss's rounded border and not a glyph from the set, which is
+// the one place the interface draws chrome it does not own: the corners ╭ ╮ ╰ ╯
+// are box drawing — the same family — but the app's own overlay test looks for
+// them by name, so the frame is deliberately left where it is. Everything the
+// interface draws ITSELF comes from theme.Glyphs.
 //
 // `content` is the width the BODY was rendered at. lipgloss's Width is the
 // TOTAL, border and padding included, so the body width has to be grown by

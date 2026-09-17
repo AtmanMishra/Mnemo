@@ -1,7 +1,14 @@
   ▚ MNEMO ───────────────────────────────────────────────────────────────────── ~/tui-go ▌ offline
   
-  ━━╾ TRANSCRIPT ╼━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  │ ready.                                                                                        
+  ▀▀▐ TRANSCRIPT ▌▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+    ▄▄      ▄▄                                                                                    
+    ██████████                                                                                    
+    ██  ██  ██                                                                                    
+    ████▄▄████                                                                                    
+    ▄▄  ▄▄  ▄▄                                                                                    
+    memory that works like a brain                                                                
+                                                                                                  
+  █▌ready.                                                                                        
                                                                                                   
     · nothing is set up yet — /login logs in a provider, /model picks the default                 
     · / — commands, skills and plugins. Start typing; pick with ↑ ↓                               
@@ -17,14 +24,7 @@
                                                                                                   
                                                                                                   
                                                                                                   
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
   
-  ▊ ask, or press ^k                                                                              
+  █▄ask, or press ^k                                                                              
   
    INSERT  ▌ enter send, or queue while busy ▌ tab prompt · transcript · e… 0/0 thinking ▌ 1 block

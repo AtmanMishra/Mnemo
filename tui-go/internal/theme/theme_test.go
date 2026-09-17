@@ -2,8 +2,15 @@ package theme
 
 import (
 	"image/color"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestWaveTravels(t *testing.T) {
@@ -47,34 +54,192 @@ func TestWaveNeverZeroWidth(t *testing.T) {
 	}
 }
 
-func TestGlyphsAreSingleWidthAndPortable(t *testing.T) {
-	// Everything must live in the block or box-drawing ranges. A glyph that
-	// needs a patched icon font is a blank cell for somebody.
-	for name, g := range map[string]string{
-		"User": Heavy.User, "Agent": Heavy.Agent, "Think": Heavy.Think,
-		"Tool": Heavy.Tool, "Closed": Heavy.Closed, "Open": Heavy.Open,
-		"H": Heavy.H, "V": Heavy.V, "Seg": Heavy.Seg, "Tick": Heavy.Tick,
-	} {
-		for _, r := range g {
-			// U+00B7 MIDDLE DOT is Latin-1 and present in every monospace
-			// font ever shipped; everything else must be box-drawing or block.
-			if r < 0x2000 && r != 0x00B7 {
-				t.Fatalf("%s = %q contains %q below U+2000; use a block or box-drawing glyph", name, g, r)
+// --- the glyph family ----------------------------------------------------
+
+// TestEveryGlyphIsTheWidthItsContractDeclares: the contract (roles) is the
+// declaration; this is the check. Width is measured in CELLS with
+// ansi.StringWidth, never in bytes or runes — a rune count says 2 for "▀▀" and
+// also says 2 for "é" followed by anything, and only one of those is two cells.
+//
+// Width drift has already bitten this interface once: a one-cell marker in a
+// two-cell column, and every line under it landed a column out. The test walks
+// the STRUCT, so a field added to the set without a line in roles fails here
+// rather than on somebody's screen.
+func TestEveryGlyphIsTheWidthItsContractDeclares(t *testing.T) {
+	v := reflect.ValueOf(Heavy)
+	declared := map[string]int{}
+	for _, r := range roles {
+		if _, dup := declared[r.Field]; dup {
+			t.Fatalf("%s is declared twice in roles", r.Field)
+		}
+		declared[r.Field] = r.Cells
+	}
+	for i := 0; i < v.NumField(); i++ {
+		name := v.Type().Field(i).Name
+		if v.Field(i).Kind() != reflect.String {
+			t.Fatalf("Glyphs.%s is not a string; every field of the set is a glyph", name)
+		}
+		cells, ok := declared[name]
+		if !ok {
+			t.Fatalf("Glyphs.%s has no width in roles — declare what it must occupy, "+
+				"or the next reader will discover it on a misaligned screen", name)
+		}
+		g := v.Field(i).String()
+		if g == "" {
+			t.Fatalf("Glyphs.%s is empty; an empty glyph is a missing element nobody noticed", name)
+		}
+		if got := ansi.StringWidth(g); got != cells {
+			t.Fatalf("Glyphs.%s = %q renders %d cells, the contract says %d", name, g, got, cells)
+		}
+	}
+}
+
+// TestTheGutterIsTheFigure: the gutter is the one place the layout and the art
+// have to agree on a number, and the number is the one the design page fixed
+// before the figures were drawn — a two-cell figure, because the transcript
+// already spends two columns on its gutter and none of these may widen it.
+func TestTheGutterIsTheFigure(t *testing.T) {
+	if GutterCells != 2 {
+		t.Fatalf("GutterCells = %d; the gutter is the two-cell figure and nothing else", GutterCells)
+	}
+	for _, f := range []string{"User", "Agent", "Think", "Tool"} {
+		g := reflect.ValueOf(Heavy).FieldByName(f).String()
+		if got := ansi.StringWidth(g); got != GutterCells {
+			t.Fatalf("%s is %d cells; the gutter is %d and may not widen", f, got, GutterCells)
+		}
+		// The air the prose needs is the figure's own last pixel: a figure that
+		// ends in a full-height solid puts the words against a wall.
+		last := []rune(g)[len([]rune(g))-1]
+		if last == '█' || last == '▐' {
+			t.Fatalf("%s ends in %q, which leaves no air before the prose", f, last)
+		}
+	}
+	// The four figures must be distinguishable without colour: a reader who
+	// has not learned the palette still has to see who is speaking.
+	seen := map[string]string{}
+	for _, f := range []string{"User", "Agent", "Think", "Tool"} {
+		g := reflect.ValueOf(Heavy).FieldByName(f).String()
+		if prev, dup := seen[g]; dup {
+			t.Fatalf("%s and %s are the same figure (%q); colour alone must not be the difference", f, prev, g)
+		}
+		seen[g] = f
+	}
+}
+
+// TestNoGlyphIsOrphaned: every glyph in the set is drawn by something.
+//
+// A character kept "for later" is the start of a second vocabulary: it is in
+// the set, nothing renders it, and the next person redesigns the family around
+// a glyph that is not on screen — which is how the six box-drawing corners and
+// tees this family replaced survived so long. The check walks the fields and
+// requires each name to appear in non-test source as a G.<Field> reference.
+func TestNoGlyphIsOrphaned(t *testing.T) {
+	root := moduleRoot(t)
+	// One matcher per role, compiled once: `G.H` must not be satisfied by
+	// `G.Hair`, and word boundaries are the cheap way to say that.
+	type want struct {
+		field string
+		re    *regexp.Regexp
+	}
+	wants := make([]want, 0, len(roles))
+	for _, r := range roles {
+		wants = append(wants, want{r.Field, regexp.MustCompile(`\bG\.` + regexp.QuoteMeta(r.Field) + `\b`)})
+	}
+	used := map[string]int{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // an unreadable corner of the tree is not a glyph problem
+		}
+		if d.IsDir() {
+			if name := d.Name(); name == ".git" || name == "testdata" || name == "node_modules" {
+				return fs.SkipDir
 			}
-			if r > 0x2600 {
-				t.Fatalf("%s = %q contains %q above U+2600 — that is emoji or icon-font territory", name, g, r)
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		if filepath.Base(path) == "theme.go" {
+			return nil // the set itself does not count as a reader of itself
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		for _, w := range wants {
+			if w.re.Match(src) {
+				used[w.field]++
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the module: %v", err)
+	}
+	for _, r := range roles {
+		if used[r.Field] == 0 {
+			t.Errorf("Glyphs.%s is in the set and nothing draws it — either draw it or delete it", r.Field)
+		}
+	}
+}
+
+// moduleRoot walks up from the test's working directory to the go.mod.
+func moduleRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("no go.mod above the test's directory")
+		}
+		dir = parent
+	}
+}
+
+// TestTheFamilyIsBlockAndBoxDrawing: nothing outside the two ranges this
+// language is made of, because those are the two a plain monospace font always
+// has — and a glyph that needs a patched icon font is a blank cell for
+// somebody. The ranges are named rather than derived from "looks like a box
+// drawing character", so a stray em dash in a future glyph fails here.
+func TestTheFamilyIsBlockAndBoxDrawing(t *testing.T) {
+	inRange := func(r rune) (string, bool) {
+		switch {
+		case r == ' ':
+			return "", true
+		case r >= 0x2500 && r <= 0x257F:
+			return "", true // box drawing: ─ │ ├ └
+		case r >= 0x2580 && r <= 0x259F:
+			return "", true // block elements: ▀ ▄ █ ▌ ▐ ▚
+		case r >= 0x25A0 && r <= 0x25FF:
+			return "", true // geometric shapes: the two fold triangles ▸ ▾
+		}
+		return "outside the block, box-drawing and geometric-shapes ranges", false
+	}
+	v := reflect.ValueOf(Heavy)
+	for i := 0; i < v.NumField(); i++ {
+		name := v.Type().Field(i).Name
+		for _, r := range v.Field(i).String() {
+			if why, ok := inRange(r); !ok {
+				t.Fatalf("Glyphs.%s = %q contains %q (U+%04X): %s", name, v.Field(i).String(), r, r, why)
 			}
 		}
 	}
 }
 
+// TestTreeGlyphsAlign: Branch, Last, Pipe and Gap are stacked vertically in a
+// tree; if they are not all the same width the trunk bends. Declared in roles
+// and checked again here, because this is the failure the declaration prevents.
 func TestTreeGlyphsAlign(t *testing.T) {
-	// Branch, Last, Pipe and Gap are stacked vertically in a tree; if they are
-	// not all the same width the trunk bends.
-	w := len([]rune(Heavy.Branch))
+	w := ansi.StringWidth(Heavy.Branch)
 	for name, g := range map[string]string{"Last": Heavy.Last, "Pipe": Heavy.Pipe, "Gap": Heavy.Gap} {
-		if len([]rune(g)) != w {
-			t.Fatalf("%s is %d cells, Branch is %d — the trunk would bend", name, len([]rune(g)), w)
+		if ansi.StringWidth(g) != w {
+			t.Fatalf("%s is %d cells, Branch is %d — the trunk would bend", name, ansi.StringWidth(g), w)
 		}
 	}
 }

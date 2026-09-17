@@ -1,265 +1,204 @@
+<!-- GENERATED FILE — do not edit by hand.
+     Rendered from tui-go/internal/brand/brand.go by MascotsMarkdown().
+     Regenerate: cd tui-go && go test ./internal/brand/ -run Docs -update-docs
+     The same test fails when this file and the source disagree. -->
 
-# Mascots — five candidates, and the rules they have to keep
+# The creatures
 
-Nyx is a Bengal cat: 20 rows × 28 markers (56 cells), four tones, rosette clusters
-drawn from the dither ramp, a spotted belly, a ringed tail, mascara lines, and a
-walk cycle in four frames — three of which differ only in the legs. Every change
-means redrawing all four frames, re-pinning the installer's private copy of the
-art, and re-passing the drift test. It is beautiful and it is heavy, and a mascot
-whose job is to say *"hello, I am not a hang"* on an empty screen should be
-something you can redraw in a minute.
+Three figures, 5 marks by 5 rows each, drawn at 2 cells to a mark — a 10-cell-wide, 10-pixel-tall sprite, because a terminal cell is two pixels tall.
 
-Below: five lighter candidates, all in the same marker language as the cat (so
-they render with the same `Ink()` function and re-theme with the same palette),
-all 40 cells wide, none taller than 13 rows. Pick one, mix two, or ask for
-variations — the art is data, so a change is a few strings.
+They replaced a Bengal cat: 20 rows × 28 marks, four tones, a spotted belly, a ringed tail and a walk cycle in four frames — three of which differ only in the legs. Beautiful, and nobody could change it. A figure here is twenty-five marks, so it is redrawable by reading the source for half a minute.
 
-The rules they all keep, because these are what make the art *work* rather than
-merely exist:
+The one that ships on the welcome screen is **Karkinos**. `brand.Frame(tick)` animates it; `brand.ByName(name)` gets any of them.
 
-| rule | why |
-|---|---|
-| Eyes are negative space | drawn eyes plus a mouth read as a glare with teeth at this scale — shipped once, rejected |
-| Exactly one accent-coloured run | more than one and the brand colour stops being a detail and becomes decoration |
-| Markers, never colours | shape and palette stay one thing each; one function turns a marker into a glyph plus a colour |
-| Plain monospace only | no Nerd Font requirement — every glyph lives in the block and box-drawing ranges |
-| Tone from the 14-value palette | a mascot with private colours cannot be re-themed with the rest of the interface |
-| ≤ 13 rows, symmetric | redrawable by hand, poseable without a walk cycle |
+## The markers
 
-For a non-cat mascot the marker vocabulary generalises cleanly: `#` is the body,
-`r`/`R` are two depths of detail (scale, plate, band), `p` is a highlight (inner
-ear, wing, membrane), `n` is the single accent (beak, nose, stinger, stamp), `O`
-is an eye and therefore a *hole*, and `-` `/` `\\` are hairlines.
+Art is stored as markers, never as coloured spans: the shape and the palette stay one thing each, and one table turns a marker into a glyph, a colour and a role — which is also what the docs page reads, so the two cannot disagree.
 
-### owl — *“the one that was already watching”*
+| marker | role | drawn at 2 cells | at 1 cell | meaning |
+|---|---|---|---|---|
+| `#` | coat | `██` | `█` | the body |
+| `u` | coat | `▀▀` | `▀` | the body's upper pixel — a raised limb, a wing up |
+| `v` | coat | `▄▄` | `▄` | the body's lower pixel — a thin leg, a claw held low |
+| `r` | detail | `▒▒` | `▒` | detail, light |
+| `R` | detail | `▓▓` | `▓` | detail, heavy — a stripe |
+| `e` | detail | `▒▒` | `▒` | the wordmark's lip |
+| `p` | highlight | `▒▒` | `▒` | the one highlight: inner ear, wing, a thought forming |
+| `n` | accent | `▄▄` | `▄` | THE accent — exactly one run per frame |
+| `O` | — | `  ` | ` ` | an eye: a hole in the body, never a drawn shape |
+| `_` | coat | `██` | `█` | what a blink fills the hole with |
+| `.` | — | `  ` | ` ` | nothing here — the art's own blank |
 
-12 rows · 40 cells · one accent run · markers only
+## Karkinos — memory is the thing that holds on
 
-Athena’s bird: the oldest western emblem of knowledge that just looks at you. Two ear tufts, two big eye-holes, a beak, folded wings.
+*this is the one that ships*
+
+the crab — memory is the thing that holds on. His claws are held one pixel low, about to close.
 
 ```
-    ████                    ████
-  ████████                ████████
-    ████████████████████████████████
-  ████████████████████████████████████
-  ████········████████········████
-  ████········████████········████
-  ██████████████▄▄▄▄██████████████
-    ████████████████████████████████
-    ████▒▒▒▒████████████████▒▒▒▒████
-    ████▓▓▓▓████████████████▓▓▓▓████
-    ████████████████████████████████
-      ████  ████        ████  ████
+idle   blink  bob    thinking
+-----  -----  -----  -----
+▄   ▄  ▄   ▄  █   █  ▄   ▄
+█████  █████  █████  █████
+█ █ █  █████  █ █ █  █ █ █
+██▄██  ██▄██  ██▄██  ██▄██
+▄ ▄ ▄  ▄ ▄ ▄  █ █ █  █████
 ```
 
-<details><summary>markers (paste into Go)</summary>
+- **idle** — At rest. The one frame that must be legible on its own, because it is the one the welcome screen shows.
+- **blink** — The eye holes filled with body: derived, never drawn. A blink cannot drift out of step with the body it blinks on.
+- **bob** — The other foot: the limbs move, the body does not. Two rows differ from idle and that is the whole walk.
+- **thinking** — Attending: pulled in, with the work showing. A creature that looks the same while it thinks is a logo.
 
-```go
-var Art = []string{
-	"..##..........##....",
-	".####........####...",
-	"..################..",
-	".##################.",
-	".##OOOO####OOOO##...",
-	".##OOOO####OOOO##...",
-	".#######nn#######...",
-	"..################..",
-	"..##rr########rr##..",
-	"..##RR########RR##..",
-	"..################..",
-	"...##.##....##.##...",
-}
-```
-
-</details>
-
-### tortoise — *“slow, and it shells what it learns”*
-
-9 rows · 40 cells · one accent run · markers only
-
-Hermes strung the first lyre across a tortoise shell — the same gesture as building a tool out of something you happened to be carrying. It is also the calmest possible body: it cannot look alarmed.
+Source (this is the editable form; the drawing above is what it compiles to):
 
 ```
-            ████████████
-            ██··████··██
-            ████▄▄▄▄████
-      ████▒▒▒▒████▒▒▒▒████▒▒▒▒████
-    ██▓▓▓▓████▒▒▒▒████▒▒▒▒████▓▓▓▓██
-  ████▓▓▓▓████▒▒▒▒████▒▒▒▒████▓▓▓▓████
-████████████████████████████████████████
-  ████████████████████████████████████
-    ████      ████    ████      ████
+# idle
+v...v
+#####
+#O#O#
+##n##
+v.v.v
 ```
 
-<details><summary>markers (paste into Go)</summary>
-
-```go
-var Art = []string{
-	"......######........",
-	"......#O##O#........",
-	"......##nn##........",
-	"...##rr##rr##rr##...",
-	"..#RR##rr##rr##RR#..",
-	".##RR##rr##rr##RR##.",
-	"####################",
-	".##################.",
-	"..##...##..##...##..",
-}
+```
+# blink (derived — Blink(idle) fills the eye holes; edit the body, not this)
+v...v
+#####
+#_#_#
+##n##
+v.v.v
 ```
 
-</details>
-
-### serpent — *“keeper of the spring”*
-
-13 rows · 40 cells · one accent run · markers only
-
-Coiled, one eye-band, an accent snout. The snake guards the spring and the oracle at Delphi spoke through one. Reads best at small sizes because the coil is a single motif.
-
 ```
-              ████
-            ████████
-            ██····██
-              ▄▄▄▄
-        ████████████████████
-      ████▒▒▒▒████████▒▒▒▒████
-    ████▒▒▒▒████████████▒▒▒▒████
-  ████▒▒▒▒████        ████▒▒▒▒████
-  ████▒▒▒▒████        ████▒▒▒▒████
-    ████▒▒▒▒████████████▒▒▒▒████
-      ████▒▒▒▒████████▒▒▒▒████
-    ████████████████████████████████
-    ████████████████████████████████
+# bob
+#...#
+#####
+#O#O#
+##n##
+#.#.#
 ```
 
-<details><summary>markers (paste into Go)</summary>
-
-```go
-var Art = []string{
-	".......##...........",
-	"......####..........",
-	"......#OO#..........",
-	".......nn...........",
-	"....##########......",
-	"...##rr####rr##.....",
-	"..##rr######rr##....",
-	".##rr##....##rr##...",
-	".##rr##....##rr##...",
-	"..##rr######rr##....",
-	"...##rr####rr##.....",
-	"..################..",
-	"..################..",
-}
+```
+# thinking
+v...v
+#####
+#O#O#
+##n##
+#####
 ```
 
-</details>
+## Glaux — Athena's bird
 
-### bee — *“the one that carries it home”*
-
-12 rows · 40 cells · one accent run · markers only
-
-Ephesus struck the bee on its coins and Delphi’s priestesses were the melissae. It carries, it returns to the same place, and it tells the others where it found something.
+the owl — Athena's bird, the one that was already watching. Eyes are holes; the beak between them is the accent.
 
 ```
-      ████                    ████
-          ████            ████
-                ████████
-              ██··████··██
-                ████████
-      ▒▒▒▒▒▒████████████▒▒▒▒▒▒
-  ████████████████████████████████████
-  ████▓▓▓▓████▓▓▓▓████▓▓▓▓████▓▓▓▓████
-  ████████████████████████████████████
-  ████▓▓▓▓████▓▓▓▓████▓▓▓▓████▓▓▓▓████
-    ████████████████████████████████
-                ▄▄▄▄
+idle   blink  bob    thinking
+-----  -----  -----  -----
+█   █  █   █  █   █  █ ▒ █
+█████  █████  █████  █████
+█ ▄ █  ██▄██  █ ▄ █  █ ▄ █
+█████  █████  █████  █████
+▄ ▄ ▄  ▄ ▄ ▄  █ █ █  █████
 ```
 
-<details><summary>markers (paste into Go)</summary>
+- **idle** — At rest. The one frame that must be legible on its own, because it is the one the welcome screen shows.
+- **blink** — The eye holes filled with body: derived, never drawn. A blink cannot drift out of step with the body it blinks on.
+- **bob** — The other foot: the limbs move, the body does not. Two rows differ from idle and that is the whole walk.
+- **thinking** — Attending: pulled in, with the work showing. A creature that looks the same while it thinks is a logo.
 
-```go
-var Art = []string{
-	"...##..........##...",
-	".....##......##.....",
-	"........####........",
-	".......#O##O#.......",
-	"........####........",
-	"...ppp######ppp.....",
-	".##################.",
-	".##RR##RR##RR##RR##.",
-	".##################.",
-	".##RR##RR##RR##RR##.",
-	"..################..",
-	"........nn..........",
-}
-```
-
-</details>
-
-### amphora — *“memory has to be carried in something”*
-
-13 rows · 40 cells · one accent run · markers only
-
-The only non-animal: a vessel with a potter’s stamp for the accent. It cannot be posed, which is the point — some things should just be a good object.
+Source (this is the editable form; the drawing above is what it compiles to):
 
 ```
-        ████████████████████
-        ██▓▓▓▓████████▓▓▓▓██
-            ████████████████
-          ████▓▓▓▓████▓▓▓▓████
-      ████████████▄▄▄▄████████████
-    ████████████████████████████████
-    ████████████████████████████████
-    ████▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒████
-    ████████████████████████████████
-    ████████████████████████████████
-      ████████████████████████████
-        ████████████████████████
-          ████████████████████
+# idle
+#...#
+#####
+#OnO#
+#####
+v.v.v
 ```
 
-<details><summary>markers (paste into Go)</summary>
-
-```go
-var Art = []string{
-	"....##########......",
-	"....#RR####RR#......",
-	"......########......",
-	".....##RR##RR##.....",
-	"...######nn######...",
-	"..################..",
-	"..################..",
-	"..##rrrrrrrrrrrr##..",
-	"..################..",
-	"..################..",
-	"...##############...",
-	"....############....",
-	".....##########.....",
-}
+```
+# blink (derived — Blink(idle) fills the eye holes; edit the body, not this)
+#...#
+#####
+#_n_#
+#####
+v.v.v
 ```
 
-</details>
+```
+# bob
+#...#
+#####
+#OnO#
+#####
+#.#.#
+```
 
-## Adopting one
+```
+# thinking
+#.p.#
+#####
+#OnO#
+#####
+#####
+```
 
-1. **Art** — add it to `tui-go/internal/brand/brand.go` next to `CatSit`, as
-   marker strings, and a fit function beside `CatFor` (`MascotFor(cols)`) so a
-   narrow terminal gets a smaller cut instead of a cropped one.
-2. **Installer** — `scripts/install.sh` and `install.ps1` carry their own copy of
-   the art because they run before the binary exists. The drift test parses the
-   installer and diffs art, wordmark, tagline and palette against `brand`, so the
-   copy is safe *because* the guard exists. Extend the guard to the new art.
-3. **Tests** — the tests that already exist for the cat are the contract:
-   rectangular art, exactly one accent run, eyes are holes, and the walk-cycle
-   rules if the mascot animates. Copy `brand_test.go`'s shape.
-4. **Splash and onboarding** — `CatFor` is called by the welcome screen and the
-   installer's walk; a new mascot needs a two-frame idle (a blink is enough) if
-   you want motion, or none at all: stillness is allowed.
+## Melissa — Ephesus's mark
 
-## Still open
+the bee — Ephesus's mark, and the melissae were Delphi's priestesses: the one that carries it home.
 
-- No mascot has a **walk or idle animation** except the cat. A blink is two
-  frames and reuses `Blink()`; a pose is a second art array. Deliberately not
-  designed here — decide the character first, then the motion.
-- **Where it appears** is a separate decision from what it is: the candidates are
-  sized for the empty transcript, the installer, and the `--version` banner. The
-  header band currently carries no mascot at all.
+```
+idle   blink  bob    thinking
+-----  -----  -----  -----
+ ▒ ▒    ▒ ▒    ▀ ▀   ▒ ▒ ▒
+█ █ █  █████  █ █ █  █ █ █
+█████  █████  █████  █████
+▓▓▓▓▓  ▓▓▓▓▓  ▓▓▓▓▓  ▓▓▓▓▓
+  ▄      ▄      ▄      ▄
+```
+
+- **idle** — At rest. The one frame that must be legible on its own, because it is the one the welcome screen shows.
+- **blink** — The eye holes filled with body: derived, never drawn. A blink cannot drift out of step with the body it blinks on.
+- **bob** — The other foot: the limbs move, the body does not. Two rows differ from idle and that is the whole walk.
+- **thinking** — Attending: pulled in, with the work showing. A creature that looks the same while it thinks is a logo.
+
+Source (this is the editable form; the drawing above is what it compiles to):
+
+```
+# idle
+.p.p.
+#O#O#
+#####
+RRRRR
+..n..
+```
+
+```
+# blink (derived — Blink(idle) fills the eye holes; edit the body, not this)
+.p.p.
+#_#_#
+#####
+RRRRR
+..n..
+```
+
+```
+# bob
+.u.u.
+#O#O#
+#####
+RRRRR
+..n..
+```
+
+```
+# thinking
+p.p.p
+#O#O#
+#####
+RRRRR
+..n..
+```
+

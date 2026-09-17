@@ -154,7 +154,8 @@ func (m *Model) TruncateAt(i int) {
 func (m *Model) Len() int { return len(m.blocks) }
 
 // Clear empties the transcript, for a session switch.
-func (m *Model) Clear() {	m.blocks = nil
+func (m *Model) Clear() {
+	m.blocks = nil
 	m.focus, m.scroll = -1, 0
 	m.follow = true
 }
@@ -475,10 +476,18 @@ func (m *Model) render(t *theme.Theme) []row {
 	return out
 }
 
-// gutterWidth is two cells: a marker and a space. Continuation lines keep it
-// as blank space — a wrapped line that starts at column 0 reads as a new
-// speaker.
-const gutterWidth = 2
+// gutterWidth is the column the speaker figure occupies.
+//
+// It comes from the theme because it follows from a glyph: the figures are two
+// cells wide (a person is a head and a shoulder-line, not a bar), and every line
+// of a block — the first one and every wrapped one after it — has to start its
+// prose in the same column. Continuation lines keep the column blank; a wrapped
+// line that starts at column 0 reads as a new speaker.
+//
+// No space is added after a figure: the figures leave their own air (their last
+// pixel is half-empty on the right), which is what keeps the gutter at the two
+// columns the transcript already spent rather than widening it.
+const gutterWidth = theme.GutterCells
 
 func (m *Model) renderBlock(t *theme.Theme, b *Block, idx, depth int) []row {
 	indent := strings.Repeat("  ", depth)
@@ -500,7 +509,16 @@ func (m *Model) renderBlock(t *theme.Theme, b *Block, idx, depth int) []row {
 		mark = t.G.Seg
 		markStyle = t.Accent
 	}
-	lead := indent + markStyle.Render(mark) + " "
+	// The mark is the two-cell speaker figure — except while a block is
+	// running, when it is the one-cell spinner — so the gutter is padded to
+	// its full width HERE, from the mark's own measured width. Letting each
+	// mark carry its own trailing space instead is exactly how the
+	// continuation lines ended up a column out from the line they belonged to.
+	air := gutterWidth - ansi.StringWidth(mark)
+	if air < 0 {
+		air = 0
+	}
+	lead := indent + markStyle.Render(mark) + strings.Repeat(" ", air)
 	cont := indent + strings.Repeat(" ", gutterWidth)
 
 	var out []row

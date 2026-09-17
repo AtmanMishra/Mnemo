@@ -1,9 +1,9 @@
   ▚ MNEMO ───────────────────────────────────────────────────────────────────── ~/tui-go ▌ offline
   
-  ━━╾ TRANSCRIPT · 1 THINKING HIDDEN · ^E ╼━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ▀▀▐ TRANSCRIPT · 1 THINKING HIDDEN · ^E ▌▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
                                                                                                   
     · nothing is s╭──────────────────────────────────────────────────────────────╮                
-    · / — commands│ ━━╾ PALETTE ╼━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │                
+    · / — commands│ ▀▀▐ PALETTE ▌▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ │                
     · ^k — the sam│ every command, skill and plugin — the list on disk           │                
     · ^e — open ev│ BUILT-IN                                                     │                
     · ^t — the fol│ ▌ /help                           ^h  every key and command  │                
@@ -13,18 +13,18 @@
     esc goes up on│   /logs                       ^l  every run as a call graph  │                
     In the transcr│   /schedules                     ^o  schedules and triggers  │                
                   │   /thinking                   ^e  open every thinking block  │                
-  ▊ how does the f│   /tools                          ^r  open every tool block  │                
+  █▄how does the f│   /tools                          ^r  open every tool block  │                
                   │   /expand                               ^a  open everything  │                
-  · ▸ thinking    │   /collapse                            ^a  close everything  │                
+  ░▄▸ thinking    │   /collapse                            ^a  close everything  │                
                   │   /copy                        Y  copy the whole transcript  │                
-  │ It reads flags│   /clear                                start a new session  │                
+  █▌It reads flags│   /clear                                start a new session  │                
                   │   /compact  summarise the older turns to shrink the context  │                
-  ● ▸ read  limit=│   /fork        branch the session at the message you choose  │           40 ln
+  ▐▌▸ read  limit=│   /fork        branch the session at the message you choose  │           40 ln
                   │   /commands        ask the agent for its command list again  │                
-  ● ▸ bash  go tes│   /theme    pick the palette — saved to ~/.mnemo/theme.json  │          exit 1
+  ▐▌▸ bash  go tes│   /theme    pick the palette — saved to ~/.mnemo/theme.json  │          exit 1
                   ╰──────────────────────────────────────────────────────────────╯                
-  ● ▸ 1 sub-agent                                                                                 
+  ▐▌▸ 1 sub-agent                                                                                 
   
-  ▊ ask, or press ^k                                                                              
+  █▄ask, or press ^k                                                                              
   
    PALETTE  ▌ type filter ▌ enter use this ▌ esc up one level              0/1 thinking ▌ 7 blocks

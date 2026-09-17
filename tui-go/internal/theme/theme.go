@@ -166,69 +166,149 @@ func ByName(name string) (Palette, bool) {
 	return Palette{}, false
 }
 
+// The vocabulary. Every character the interface may draw is one of these, or
+// two of them side by side.
+//
+// The idea is the one a terminal forces on you: a cell is not a pixel. It is
+// TWO pixels tall (a half block inks one of them) and — for the figures that
+// need it — two wide (▌ ▐ ink half a cell each). That is the whole pixel grid
+// the interface has, and both the chrome and the mascot are drawn on it, which
+// is what makes the screen read as one thing rather than as text with
+// ornaments. The names say which pixel is inked, not which character is used:
+// a rule is "the top pixel, repeated", not "the ▀ character".
+const (
+	pxFull = "█" // both pixels of the cell
+	pxTop  = "▀" // the upper pixel of the cell — a rule
+	pxLow  = "▄" // the lower pixel of the cell — a baseline
+	pxQuad = "▚" // a quadrant block: the one mark below half-cell grain
+	pxSha  = "░" // the ramp's lightest step: mist, and the thinking figure
+	halfL  = "▌" // the left pixel, full height
+	halfR  = "▐" // the right pixel, full height
+	hairH  = "─" // a hairline, one cell wide
+	hairV  = "│" // a hairline, one cell tall
+	elbow  = "├" // the tree's branch point: children hang under it
+	corner = "└" // the last child: the one elbow that closes the trunk
+)
+
 // Glyphs is every non-alphabetic character the interface is allowed to draw.
 //
-// All of them live in the standard block and box-drawing ranges, so the whole
-// interface renders on a plain monospace font with no patched icon font. A
-// glyph that needs Nerd Fonts is a glyph that is blank for somebody.
+// Everything lives in the block and box-drawing ranges — the same
+// compatibility tier, both of them in CP437 — so the interface renders on a
+// plain monospace font and no glyph needs a patched icon font, which is
+// another way of saying no glyph is blank for somebody.
+//
+// There is deliberately ONE set and no wide/narrow pair. brand.Ink already
+// pairs a wide and a narrow rendering for every pixel of the art, and a second
+// mechanism in the theme would be a second thing to keep in step; the theme
+// does not need one, because every glyph here is in the tier the interface
+// already required (a terminal with ─ has ▀).
+//
+// Weight is expressed as PIXEL COVERAGE rather than as a heavier stroke: a
+// half-block rule (▀) is the loud one and a hairline (─) is the quiet one. That
+// is the difference the eye actually reads at this size, and it is drawn from
+// the same material as the mascot.
 type Glyphs struct {
-	// Speaker gutters. Two cells, at the left of every line.
-	User  string
-	Agent string
-	Think string
-	Tool  string
+	// The speaker gutters. Two cells each, and that is the interesting part:
+	// a figure built from half blocks is a 2x2-pixel sprite, so it can carry a
+	// shape rather than only a colour. One cell can say "a bar"; it cannot say
+	// WHO is speaking, and colour only says it to a reader who has already
+	// learned the palette. Every other row of the interface is prose.
+	//
+	// Two cells and not three: the gutter TODAY is a one-cell mark plus a space,
+	// so two is the width the transcript already spends, and a replacement that
+	// widens it would re-wrap every transcript in every session to buy a
+	// picture. The space is inside the figure instead — each of these leaves
+	// its last pixel half-empty on the right, which is the air the prose needs.
+	User  string // a person: a head, and a shoulder-line under it
+	Agent string // a machine: the same mass, no head — a solid slab, walled on the left
+	Think string // a thought: the ramp's lightest step over a low pixel — the one gutter that is not solid
+	Tool  string // a tool: an upright held in air, narrow, and the row that carries state (ok / fail / running)
 
-	// Folding.
+	// Folding. The block range has no arrowhead, and a fold marker has to be
+	// directional — direction is the one thing half blocks cannot say. These
+	// are the smallest triangles in the geometric-shapes range, the same
+	// compatibility tier as everything above.
 	Closed string
 	Open   string
 
-	// Trees.
+	// Trees. The elbow IS the drawing: a hierarchy is a picture of a box, and
+	// the last child is the only one that turns the corner. All four are two
+	// cells wide so the trunk cannot bend.
 	Branch string
 	Last   string
 	Pipe   string
 	Gap    string
 
 	// Chrome.
-	H    string
-	V    string
-	TopL string
-	TopR string
-	BotL string
-	BotR string
-	TeeL string
-	TeeR string
-	Nub  string
-	Seg  string
-	Tick string
+	H    string // the loud rule: a region's full width, at the top pixel
+	Hair string // the quiet rule: hairlines, and rules too short to carry a label
+	V    string // a column divider or a panel's side: a hairline, never a half block
+	Nub  string // the label notch: the rule turns down, so the label sits in a slot
+	Seg  string // a band's divider, and the marker on the focused row
+	Tick string // the header's stamp: the one quadrant block, at a finer grain
 }
 
-// Heavy is the shipping glyph set: thick rules, so the chrome reads as
-// structure at a glance rather than as faint noise between panes.
+// roles is every field of Glyphs that holds a glyph, with the width in cells
+// that glyph must occupy.
+//
+// It exists so that a glyph's width is a DECLARATION and not a discovery. This
+// interface has already been bitten by width drift — one state carried a
+// one-cell marker in a two-cell column, and every continuation line under it
+// landed a column out — so the contract is written down next to the glyph and
+// a test walks the struct against it. A field added to Glyphs without a line
+// here fails that test, which is the whole point of writing it down.
+var roles = []struct {
+	Field string
+	Cells int
+}{
+	{"User", 2}, {"Agent", 2}, {"Think", 2}, {"Tool", 2}, // gutter figures
+	{"Closed", 1}, {"Open", 1}, // folding
+	{"Branch", 2}, {"Last", 2}, {"Pipe", 2}, {"Gap", 2}, // tree elbows
+	{"H", 1}, {"Hair", 1}, {"V", 1}, {"Nub", 1}, {"Seg", 1}, {"Tick", 1}, // chrome
+}
+
+// GutterCells is the column the speaker figure costs: two cells, and no more.
+//
+// It is here, in the theme, because it is a layout number that follows from a
+// glyph: the transcript, the prompt bar and the wrapped continuation lines all
+// have to agree on it, and when they disagreed the continuation of a sentence
+// started a column left of the sentence and read as a new speaker. It is also
+// the number the design page fixed before the figures were drawn — the gutter
+// may not widen the transcript — which is why the air the prose needs is inside
+// the figure rather than beside it.
+const GutterCells = 2
+
+// Heavy is the shipping glyph set.
+//
+// The name is the caller's — app/model.go names it, and this file's tests and
+// every other package's do too — and it still means "the loud chrome". The
+// loudness is coverage now: a half-block rule instead of a heavier stroke, so
+// the rules, the band, the tree and the mascot are all drawn from the same
+// handful of pixels.
 var Heavy = Glyphs{
-	User:  "▊",
-	Agent: "│",
-	Think: "·",
-	Tool:  "●",
+	User:  pxFull + pxLow, // █▄ — head, then shoulders
+	Agent: pxFull + halfL, // █▌ — a slab: the same mass as the person, walled, with no head on it
+	Think: pxSha + pxLow,  // ░▄ — mist over a low pixel: the ramp is the thinking vocabulary, so the thinking figure is made of it
+	Tool:  halfR + halfL,  // ▐▌ — an upright held in air: the narrowest mark, for the row that carries state
 
 	Closed: "▸",
 	Open:   "▾",
 
-	Branch: "├─",
-	Last:   "└─",
-	Pipe:   "│ ",
+	Branch: elbow + hairH,
+	Last:   corner + hairH,
+	Pipe:   hairV + " ",
 	Gap:    "  ",
 
-	H:    "━",
-	V:    "┃",
-	TopL: "┏",
-	TopR: "┓",
-	BotL: "┗",
-	BotR: "┛",
-	TeeL: "┣",
-	TeeR: "┫",
-	Nub:  "╾",
-	Seg:  "▌",
-	Tick: "▚",
+	H:    pxTop,
+	Hair: hairH,
+	V:    hairV,
+	// The notch's ink sits on the LABEL's side of its cell, so the rule appears
+	// to step down and bracket the label instead of floating beside it; the
+	// other side of the label is this glyph's mirror (halfL), which ui.reverse
+	// resolves — the two halves of one cell are two code points.
+	Nub:  halfR,
+	Seg:  halfL,
+	Tick: pxQuad,
 }
 
 // Dither is the density ramp, lightest to densest.

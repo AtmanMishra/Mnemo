@@ -78,16 +78,21 @@
   <div class="term big">▀▄█ ░▒▓█ ─│┌┐└┘ ├─└─ ▐█▌</div>
 
   <h2>Speaker gutters — the current set, from the code</h2>
-  <p>These are the real values shipping today (generated above). Each is one character, and each is meant to tell you <em>who is speaking before you read a word</em>:</p>
+  <p>These are the real values shipping today (generated above). Each is a two-cell figure — the
+  pixels of a 2×2 sprite — and each is meant to tell you <em>who is speaking before you read a
+  word</em>, which one character cannot do:</p>
   <div class="term" id="current-gutters">Heavy — the shipping set:
 
-▊  you        U+258A
-│  agent      U+2502
-·  thinking   U+00B7
-●  tool       U+25CF
+█▄ you        U+2588 U+2584
+█▌ agent      U+2588 U+258C
+░▄ thinking   U+2591 U+2584
+▐▌ tool       U+2590 U+258C
 
 ramp:    ░ ▒ ▓ █   (5 levels, lightest to densest)</div>
-  <p class="cap">The gutter is followed by a space, so a line costs two columns today. That is the budget the replacement has to fit inside — it may not widen the transcript.</p>
+  <p class="cap">Two columns, and the air beside the prose is the figure's own half-empty right pixel
+  rather than a space after it — so the gutter costs the transcript exactly what the one-character
+  version did, and no line re-wraps. The candidates below are kept as the reasoning behind these
+  four; what shipped, every pose and the art as you edit it, is <code>docs/design-preview.html</code>.</p>
 
   <h2>The target: block figures instead of letters</h2>
   <p>Two columns, one row tall, built from blocks so the shape carries the meaning and colour only reinforces it. Three candidates — this is the part worth arguing about:</p>
