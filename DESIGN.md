@@ -859,3 +859,106 @@ values and one key binding — the missing piece was a place to persist the choi
 open so the choice can be tried rather than guessed at, and remembers it. The
 glyph set as a second axis, and whether a light-ground preset is worth painting
 the ground for, stay open.
+
+---
+
+## 19. The interface language: blocks, motion, and the thinking state
+
+The register is set by two things at once. The palette direction (§18) says
+Greek/Roman: pottery, meander, laurel, a myth in the name. The other says what
+this should feel like to *look at* — the blocky, simple, hand-redrawable
+figures of a pixel-art mascot pack.
+
+Those are not in conflict. In a terminal, pixel art has an exact technique
+rather than a style: **half-blocks**. `▀▄█` and the quadrants `▖▗▘▝` give every
+cell two vertical pixels, so a five-cell-wide figure is a ten-pixel-tall sprite
+drawn in text. Box-drawing gives the chrome. A meander border and a blocky
+creature come out of the same vocabulary, which is why this is a language and
+not a decoration.
+
+### The vocabulary
+
+Every visual element is one of four things, and nothing is a one-off:
+
+    blocks        ▀▄█▖▗▘▝   sprites: speakers, mascot, pulse
+    box drawing   ─│┌┐└┘├┤  chrome: panels, rules, trees
+    dither ramp   ░▒▓█      depth and fade, never ornament
+    space         ·         the only thing that means "nothing here"
+
+The speaker gutters — the two cells at the left of every transcript line, one
+per block type — are sprites rather than letters. They are the densest
+information in the interface: at a glance, before reading a word, the eye
+should know whether a line came from the person, the agent, the agent thinking,
+or a tool. The previous set was single characters and the previous mascot was a
+cat detailed enough that nobody redrew it; both are replaced.
+
+**The contract, tested rather than asserted:**
+
+1. A glyph is 1 or 2 cells wide, measured with a width function, never `len()`.
+   Width drift does not look like a bug, it looks like a broken layout three
+   screens later.
+2. Every glyph in a set is used. An unused glyph is a guess that survived.
+3. Every frame of a sprite has the same dimensions as its siblings, so an
+   animation cannot jitter the layout while it plays.
+4. Meaning survives the loss of colour. Shape carries the signal; colour
+   reinforces it. The interface stays readable in sixteen colours and in none.
+
+### Motion
+
+Motion comes from springs (`internal/anim`, over `charm.land/harmonica`) with a
+preset per *purpose*, not per component — a thing appearing, an overlay
+arriving, a pulse for something alive:
+
+    snappy    a block appearing, a fold opening
+    soft      an overlay arriving or leaving
+    slow      the live indicator's pulse
+
+Two rules make motion safe rather than decorative:
+
+**Nothing animates while nothing changes.** One question is asked — does any
+spring still need a frame? — and the redraw loop stops when the answer is no. An
+interface that repaints forever is a bug wearing animation's clothes: it wakes
+the terminal, drains a laptop, and makes "is it stuck?" unanswerable.
+
+**Motion is optional.** `MNEMO_NO_ANIMATION=1` makes every value jump to its
+target, and one tick then reports itself settled. Terminals get recorded and
+read back; someone reading a transcript of a session should not be shown half
+of every transition. This is a floor, not a courtesy.
+
+### The thinking state
+
+Thinking is the state this interface spends most of its time in, and it was the
+least designed: a spinner in the status line and a block kind. Three changes:
+
+**A live line while it works.** Above the prompt: a sprung pulse, the elapsed
+time, and what is actually happening — the tool it is in, how many calls, not a
+generic "working". When the pulse stops, the line goes with it; the transcript
+holds the record. The pulse is the only thing on screen that moves when idle
+input is not arriving, and it stops the moment the turn does.
+
+**Thinking folds with its real duration.** A completed thought collapses to a
+label carrying the number it actually took (`▸ thought for 12s`), not a
+reconstructed one. Duration is data from the stream; inventing it would be the
+kind of plausible-looking lie this project keeps having to fix.
+
+**History fades through the ramp, not to a colour.** Older thinking recedes
+along the dither ramp, so depth is structural rather than a second style, and
+the most recent thought is the only one at full weight. Tool blocks get the same
+treatment: running, done, and failed are distinguishable by shape first.
+
+### Logs
+
+The logs pane holds two kinds of thing and says so, because conflating them is
+how a diagnostic surface becomes useless: **trace spans**, which are a tree and
+are rendered as one, and **log lines** from the interface's own structured
+logger (`charm.land/log/v2`, level and key=value, never written to the screen).
+A reader should never have to guess which they are looking at, and an empty
+pane says which kind is empty.
+
+### What this deliberately does not do
+
+Worth writing down, because each was considered and rejected rather than
+forgotten: no full-screen animation or splash that delays the first frame; no
+blinking cursor or loading bar that never finishes; nothing that redraws while
+idle; no colour-only signalling; no animation on the critical path of typing,
+where a late frame is a lost keystroke.
