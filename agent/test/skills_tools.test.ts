@@ -18,6 +18,11 @@ import { textOf } from "../src/tools/types.ts";
 let tmp: string;
 beforeEach(async () => {
   tmp = await fs.mkdtemp(path.join(os.tmpdir(), "sea-skills-"));
+  // A `.git` marker ends discovery's ancestor walk inside the fixture.
+  // os.tmpdir() sits under the user's home on Windows, so without it the walk
+  // escapes through `C:\Users\<user>\.agents\skills` and every developer's own
+  // skills appear as PROJECT skills in the catalogue these tests assert on.
+  await fs.mkdir(path.join(tmp, ".git"), { recursive: true });
   setSkillsHome(tmp);
   setProjectRoot(tmp); // isolate from this repo's own .agents/skills
 });

@@ -4,6 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert";
+import * as path from "node:path";
 import { pace, steps, canAnimate, plain, WALK_BODY, WALK_LEGS } from "../bin/install.ts";
 
 test("Nyx walks out and back rather than teleporting", () => {
@@ -52,8 +53,12 @@ test("animation is off wherever nobody is watching", () => {
 
 test("every step names a real directory of this repo", () => {
   const all = steps("/repo");
+  // path.join, not a POSIX literal: steps() builds its cwd values with the
+  // platform separator, so hard-coding "/repo/agent" here fails on Windows for
+  // a reason that has nothing to do with the directory being wrong.
   assert.deepEqual(all.map((s) => s.cwd), [
-    "/repo/agent", "/repo/harness-engine", "/repo/memory-layer", "/repo/tui-go",
+    path.join("/repo", "agent"), path.join("/repo", "harness-engine"),
+    path.join("/repo", "memory-layer"), path.join("/repo", "tui-go"),
   ]);
   // node before rust: the agent is what the TUI drives, and a cargo build is
   // the slowest thing here — failing fast on a missing npm is kinder

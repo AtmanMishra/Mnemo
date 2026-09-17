@@ -14,6 +14,18 @@ import {
   shellLabel,
 } from "../src/tools/shell.ts";
 
+/**
+ * The tool runs commands through the platform's shell: POSIX `/bin/sh` on
+ * POSIX, cmd.exe on Windows (D7). Test commands are therefore written for the
+ * shell they will actually reach — `>&2; exit 3` is POSIX, and cmd.exe reads
+ * the `;` as a literal argument, so the command "succeeds" with exit code 0,
+ * nothing is redirected, and the test fails for a reason that has nothing to
+ * do with bash_exec.
+ */
+function forShell(posix: string, cmd: string): string {
+  return resolveShell().label.startsWith("cmd.exe") ? cmd : posix;
+}
+
 test("bash_exec captures stdout and exit code", async () => {
   const res = await bashExecTool.execute("t1", { command: "echo hello" });
   assert.match(textOf(res), /hello/);
@@ -21,23 +33,42 @@ test("bash_exec captures stdout and exit code", async () => {
 });
 
 test("bash_exec captures stderr without throwing", async () => {
-  const res = await bashExecTool.execute("t2", { command: "echo oops >&2; exit 3" });
+  const res = await bashExecTool.execute("t2", {
+    command: forShell("echo oops >&2; exit 3", "echo oops 1>&2 & exit /b 3"),
+  });
   assert.match(textOf(res), /oops/);
   assert.equal((res.details as any).exitCode, 3);
   assert.match(textOf(res), /exit code: 3/);
 });
 
 test("bash_exec times out and throws", async () => {
+  // a command that blocks for ~5s in the shell that will run it: `sleep` is
+  // POSIX (and only accidentally on PATH in a Windows run started from a POSIX
+  // shell), ping is the portable Windows one
   await assert.rejects(
-    () => bashExecTool.execute("t3", { command: "sleep 5", timeout_ms: 300 }),
+    () => bashExecTool.execute("t3", {
+      command: forShell("sleep 5", "ping -n 6 127.0.0.1"),
+      timeout_ms: 300,
+    }),
     /timed out/,
   );
 });
 
 test("runBash honors cwd", async () => {
-  const res = await runBash("pwd", { cwd: "/tmp" });
-  // macOS reports the physical path (/tmp is a symlink to /private/tmp).
-  assert.equal(res.stdout.trim(), fs.realpathSync("/tmp"));
+  // A directory the test owns: `/tmp` is POSIX-only, and on Windows it resolves
+  // to C:\tmp, which normally does not exist (and is machine state either way).
+  // `pwd` is POSIX-only too, so the child prints its cwd through node, which is
+  // on PATH wherever the suite can run at all.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sea-cwd-"));
+  try {
+    const res = await runBash(`node -p "process.cwd()"`, { cwd: dir });
+    assert.equal(res.exitCode, 0, res.stderr);
+    // realpath on both sides: macOS reports /private/tmp for /tmp, and a
+    // Windows temp path can come back in its 8.3 short form
+    assert.equal(fs.realpathSync(res.stdout.trim()), fs.realpathSync(dir));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // --- 22 (D7): the description tells the truth about the shell ------------

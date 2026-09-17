@@ -18,6 +18,7 @@ function tmpHome(name: string): string {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), `mnemo-perm-${name}-`));
   return d;
 }
+const IS_WINDOWS = process.platform === "win32";
 const allowUI = { confirm: async () => true };
 const denyUI = { confirm: async () => false };
 const interactive = { MNEMO_APPROVAL_MODE: "interactive" } as NodeJS.ProcessEnv;
@@ -175,14 +176,26 @@ test("ask keeps the existing gate behaviour exactly", async () => {
       denyUI, {} as NodeJS.ProcessEnv, true, p), {});
 });
 
-test("rules round-trip through the file, private to the user", () => {
+test("rules round-trip through the file, private to the user", (t) => {
   const home = tmpHome("roundtrip");
   const p = perms([{ tool: "bash_exec", pattern: "rm *", action: "deny" }], "allow");
   savePermissions(p, home);
-  assert.deepEqual(loadPermissions(home), p);
+  // normalizePermissions() always spells out `yolo` (an absent flag means
+  // "off"), so a round trip through the file returns it explicitly — the
+  // same value a file written before yolo existed loads as. The writer
+  // normalizes too, so what is compared here is the normalized form.
+  assert.deepEqual(loadPermissions(home), { ...p, yolo: false });
   const mode = fs.statSync(permissionsFile(home)).mode & 0o777;
-  assert.equal(mode, 0o600, "permissions.json is user-only");
   fs.rmSync(home, { recursive: true, force: true });
+  // Windows has no POSIX file modes: chmod(0o600) is unobservable in
+  // fs.statSync().mode there (NTFS reports 0666/0444 only), so asserting 0600
+  // would fail while asserting 0666 would pass even if the mode request were
+  // dropped. Skipped BY NAME on Windows rather than weakened; the mode is
+  // asserted for real on POSIX.
+  if (IS_WINDOWS) return void t.skip(
+    "Windows has no POSIX file modes: fs.statSync().mode cannot report 0600 on NTFS",
+  );
+  assert.equal(mode, 0o600, "permissions.json is user-only");
 });
 
 test("a missing or broken file never bricks the CLI", () => {

@@ -188,22 +188,60 @@ test("resultText flattens a tool result to what the program sees", () => {
 
 // --- parallel tool calling ---------------------------------------------
 
-function slowTool(name: string, ms: number, fn: (args: any) => string): SeaTool {
+function slowTool(
+  name: string,
+  ms: number,
+  fn: (args: any) => string,
+  track?: (phase: "start" | "end") => void,
+): SeaTool {
   return {
     name, label: name, description: name,
     parameters: Type.Object({}),
     execute: async (_id, params) => {
-      await new Promise((r) => setTimeout(r, ms));
-      return textResult(fn(params));
+      track?.("start");
+      try {
+        await new Promise((r) => setTimeout(r, ms));
+        return textResult(fn(params));
+      } finally {
+        track?.("end");
+      }
     },
+  };
+}
+
+/**
+ * Peak number of calls that were in flight at the same time.
+ *
+ * "N calls cost one round trip, not N" is a statement about OVERLAP, and a
+ * count of concurrent calls proves it on any machine; a wall-clock threshold
+ * only proves it on a machine as fast as the one it was written on. Both are
+ * asserted below — the count first, because that is the claim.
+ */
+function concurrency() {
+  let live = 0;
+  let high = 0;
+  return {
+    track: (phase: "start" | "end") => {
+      live += phase === "start" ? 1 : -1;
+      if (live > high) high = live;
+    },
+    peak: () => high,
   };
 }
 
 test("tools.parallel really runs them at the same time", async () => {
   // the point of the batch is wall-clock: eight 100ms calls in one round trip
   // must not take eight times 100ms
-  const tools = [slowTool("read_file", 100, (a) => `contents of ${a.path}`)];
+  const at = concurrency();
+  const tools = [slowTool("read_file", 100, (a) => `contents of ${a.path}`, at.track)];
   const k = kernel(makeKernelDispatcher(tools, allow));
+
+  // Warm the kernel before starting the clock. The first run() on a fresh
+  // kernel pays the interpreter's cold start — spawn plus the ping handshake,
+  // measured at ~700ms for a python launcher on Windows — and that has nothing
+  // to do with whether the batch runs the calls concurrently.
+  const warm = await k.run("1");
+  assert.equal(warm.ok, true, warm.error ?? "run failed");
 
   const started = Date.now();
   const res = await k.run(`
@@ -215,7 +253,11 @@ out
   assert.equal(res.ok, true, res.error ?? "run failed");
   assert.match(res.result ?? "", /contents of f0\.ts/);
   assert.match(res.result ?? "", /contents of f7\.ts/);
-  assert.ok(elapsed < 500, `8x100ms concurrently should be well under 500ms, took ${elapsed}ms`);
+  assert.equal(at.peak(), 8, "all eight calls were in flight at once");
+  // 800ms is what eight 100ms calls cost one after another; one wave is ~100ms
+  // plus IPC, so this bound is loose on purpose — it separates "concurrent"
+  // from "serial", it does not time the interpreter.
+  assert.ok(elapsed < 8 * 100, `8x100ms in one wave must beat 800ms serial, took ${elapsed}ms`);
 });
 
 test("results come back in the order they were sent", async () => {
@@ -297,12 +339,17 @@ test("approval prompts are serialized even when the calls are not", async () => 
     inFlight -= 1;
     return {};
   };
-  const k = kernel(makeKernelDispatcher([slowTool("read_file", 60, () => "x")], gate));
+  const at = concurrency();
+  const k = kernel(makeKernelDispatcher([slowTool("read_file", 60, () => "x", at.track)], gate));
+  // cold start is not what this measures: see the parallel-batch test above
+  const warm = await k.run("1");
+  assert.equal(warm.ok, true, warm.error ?? "run failed");
   const started = Date.now();
   const res = await k.run(`tools.parallel([("read_file", {}) for _ in range(4)])`);
   const elapsed = Date.now() - started;
   assert.equal(res.ok, true, res.error ?? "run failed");
   assert.equal(maxConcurrentGates, 1, "one prompt at a time");
+  assert.ok(at.peak() > 1, `the calls behind the prompts still overlap (peak ${at.peak()})`);
   assert.ok(elapsed < 4 * 60, `execution still overlaps, took ${elapsed}ms`);
 });
 

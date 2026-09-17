@@ -59,7 +59,21 @@ jobs:
         run: cargo test --locked --offline --test memeval_gate
 
   agent:
-    runs-on: ubuntu-latest
+    # Two runners, not one. This suite was written on a POSIX host and
+    # carried assumptions that only Windows disproves: os.tmpdir() there
+    # sits under the user's home, so skill discovery's ancestor walk left
+    # the fixture and picked up the developer's own ~/.agents/skills as
+    # "project" skills; commands go through cmd.exe, not /bin/sh; and NTFS
+    # has no POSIX mode bits, so a 0600 assertion cannot hold there at all.
+    # Every one of those passed on ubuntu for as long as nobody ran the
+    # suite on Windows - which is exactly the failure this leg moves from a
+    # maintainer's laptop to a PR.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    name: agent (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     steps:
       # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

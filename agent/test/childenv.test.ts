@@ -18,6 +18,18 @@ import {
   PI_SESSION_ENV_NAMES,
 } from "../src/childenv.ts";
 import { runBash } from "../src/tools/bash_exec.ts";
+import { resolveShell } from "../src/tools/shell.ts";
+
+/**
+ * Print the child's environment in the shell the tool will actually use:
+ * `env` is a POSIX utility that only happens to exist on a Windows machine
+ * when the run was started from a POSIX shell (Git Bash puts `usr/bin` on
+ * PATH); cmd.exe's equivalent is the `set` builtin. Both print NAME=value
+ * lines, which is what these assertions read.
+ */
+function envDumpCommand(): string {
+  return resolveShell().label.startsWith("cmd.exe") ? "set" : "env";
+}
 
 test("scrubChildEnv drops every credential-shaped variable", () => {
   const env = {
@@ -70,7 +82,7 @@ test("bash_exec 'env' does not show a credential the parent holds", async () => 
   process.env.FAKE_TEST_API_KEY = "sk-test-leaked-value-123456789";
   process.env.FAKE_TEST_VISIBLE = "visible-marker";
   try {
-    const res = await runBash("env", { timeoutMs: 20000 });
+    const res = await runBash(envDumpCommand(), { timeoutMs: 20000 });
     assert.equal(res.exitCode, 0);
     assert.doesNotMatch(res.stdout, /sk-test-leaked-value-123456789/,
       "the key must not be readable via env");
