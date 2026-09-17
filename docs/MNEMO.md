@@ -127,6 +127,27 @@ would rather build the interface than download it from
 provider and pasting a key, `/model` picks the default. Both write
 `~/.mnemo/auth.json` (0600, never in the repo).
 
+**A project's instructions, and its pull request.** `mnemo init` looks at the
+repository — manifests, the scripts they define, top-level layout, CI workflows,
+the docs already there — and proposes the file pi loads at startup for a
+project's instructions (pi's own preference order: `AGENTS.override.md`,
+`AGENTS.md`, `CLAUDE.md`). Creating a file writes it; changing one shows the
+diff and asks, and an unanswered question is a refusal — `--yes` is the same
+consent stated in the command, and with no TTY at all there is no other way to
+give it. The generated part lives between `mnemo:init` markers, so a second run
+refreshes it in place and never reorders a line a person wrote, and a
+`write_file` deny rule blocks the whole command like it blocks any other write.
+
+`mnemo pr` opens a pull request for the current branch from the commits
+themselves: the branch's first commit titles it, the log and the real
+`git diff --stat` are the body, and no model writes a word. It refuses rather
+than guesses — on the base branch, with nothing committed ahead of it, without
+an authenticated `gh`, with no `origin`, and when the remote has commits the
+branch does not have — and it never force-pushes; a branch whose remote moved on
+is a refusal that tells you to merge or rebase yourself. `mnemo pr --review`
+posts a summary of the diff, behind its own flag: a summary, not a verdict,
+because nothing reviewed anything.
+
 ## 6. Where things live
 
 | Path | What it is |

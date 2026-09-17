@@ -45,10 +45,60 @@ On first launch, `mnemo` runs a colourful pixel-themed onboarding wizard inside 
 | `mnemo auth [status\|logout <provider>]` | Credential management (status checks provider/key; logout removes a provider) |
 | `mnemo consolidate` | Distil recurring episodes into semantic lessons |
 | `mnemo traces [session-id]` | Span trees from ~/.mnemo/logs; `--json` for raw output |
+| `mnemo init [--dry-run\|--yes]` | Propose the project-memory file pi loads — `AGENTS.md`, or the one already there |
+| `mnemo pr [--base <ref>] [--dry-run] [--review]` | Open a pull request for the current branch, titled and described from its commits |
 | `mnemo --list-models` | Show available models per provider |
 | `mnemo --list-sessions` | List past sessions |
 
 Inside a running session, use `/login` and `/model` to change provider or model.
+Any other `/name` the interface does not implement itself is sent to the agent
+verbatim — which is how the agent's own commands (`/hook`, `/schedule`,
+`/trigger`, `/now`), a prompt template, or `/skill:<name>` is reached.
+
+`mnemo init` reads the repository — manifests, scripts, top-level layout, CI
+workflows, existing docs — and proposes the instructions file pi loads at
+startup for this project. Creating one writes it; changing one shows the diff
+and asks, and an unanswered question is a refusal (`--yes` is you answering it
+in advance). The generated part sits between `mnemo:init` markers, so a second
+run refreshes it in place and never reorders a line you wrote; a `write_file`
+deny rule covers it like any other write.
+
+`mnemo pr` derives its title and body from the commits on the branch — the
+branch's first commit titles it, and the body is the log plus the real
+`git diff --stat`; no model writes a word of it. It refuses rather than guesses:
+on the base branch, with nothing committed, without an authenticated `gh`, or
+when the remote has commits the branch does not have. It never force-pushes.
+`--review` posts a summary of the diff behind its own flag — a summary, not a
+verdict, because nothing reviewed anything.
+
+### Your own slash commands: prompt templates
+
+pi's prompt templates are Markdown files that become `/name` — no code, no
+registration, nothing to add to this repository:
+
+| Where | Scope |
+|-------|-------|
+| `~/.pi/agent/prompts/<name>.md` | global — every project |
+| `.pi/prompts/<name>.md` | this project, once the project is trusted — Mnemo asks once, records the answer in `~/.mnemo/trust.json` and says so in the transcript |
+
+`review.md` is `/review`. Frontmatter takes an optional `description` and
+`argument-hint`; the body is the prompt, with pi's argument syntax (`$1`, `$@` or
+`$ARGUMENTS`, `${1:-default}`). pi expands the template before the prompt is
+sent, so `/review main` reaches the model as your review prompt with `main` in
+it — Mnemo does not reinterpret it.
+
+They are listed next to skills and the agent's own commands in the palette
+(`^k`) and the slash menu: the interface asks the agent for its command list and
+shows what comes back, so a template appears with its path and `prompt · user`
+provenance the next time the agent starts. A template can also be typed by name
+without ever opening the palette.
+
+**Which to write**: a prompt template for a repeatable *instruction* — something
+you say — and a skill for a repeatable *procedure* — steps, references, maybe
+scripts. A skill is discovered by its description, so the agent can pick it
+itself; a template is only ever chosen by you, by name. pi's own docs cover the
+frontmatter and argument syntax in full.
+
 
 ## Configuration
 
@@ -59,10 +109,12 @@ Files under `~/.mnemo/`:
 | `auth.json` | Provider credentials (chmod 600); never committed |
 | `permissions.json` | Tool allow/deny rules with glob patterns (enforced everywhere, with or without a TTY). The `ask` tier is asked in the interface: the TUI spawns the agent with `MNEMO_APPROVAL_MODE=interactive` and answers pi's dialog. A run with no UI at all fails open (automation keeps working) — except a delegated sub-agent child, which fails closed |
 | `mcp.json` | MCP servers as registered tools (named `mcp__<server>__<tool>`) |
+| `tools.json` | Which tools the agent is offered: `{"disabled": ["web_search"]}`. A `<project>/.mnemo/tools.json` is unioned with it and can only restrict, never re-enable. Takes effect on the next run — the tool list is part of the model's cached prompt prefix, not a mid-session switch |
 | `logs/<date>.jsonl` | Structured trace spans; secrets redacted before write |
 
 Environment variables:
 
+- `MNEMO_HOME` — where Mnemo keeps its per-user state, `~/.mnemo` by default: `tools.json`, `skill-history/`, and the memory sidecar and its journal
 - `MNEMO_APPROVAL_MODE=interactive` — prompt before mutating tools
 - `MNEMO_PLAN_MODE=1` — read-only phase
 - `MNEMO_LOG_LEVEL` — debug, info, warn, error, or off

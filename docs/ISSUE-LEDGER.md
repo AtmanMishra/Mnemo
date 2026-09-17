@@ -82,7 +82,7 @@ worth keeping. Where an entry says "uncommitted", read it as "uncommitted at the
 | 4 | Mouse click and wheel hit-testing are declared but not implemented | CLOSED | `MouseModeNone` was set and `chat.BlockAtRow` was tested with no caller — a dead code path that looked live. |
 | 5 | memory-layer:  is unreachable and  only speaks hand-written English | CLOSED | `search_ann` had no production caller, and `route_query` scores areas by literal English cue phrases. |
 | 6 | ipy_run's in-kernel tool channel has no per-call timeout; spawn_subagent has no depth cap | CLOSED | Two documented-unbounded resource paths: one hung tool could hang the kernel; a child could nest forever. |
-| 7 | Harness bundles run in-process with full privileges — the gate filters loads, it does not sandbox runs | OPEN | The safety gate scans imports at load; a registered bundle then runs with the host process's rights. |
+| 7 | Harness bundles run in-process with full privileges — the gate filters loads, it does not sandbox runs | CLOSED | The safety gate scans imports at load; a registered bundle then runs with the host process's rights. Bundles now run in a boundary child by default (scrubbed env, cwd jail, timeout, tree kill); no isolation is claimed. |
 | 8 | Pre-alpha gaps from the research catalogue: /init, , PR automation, cost-budget auto-switch, lesson autowrite | OPEN | Five catalogue features `plan.md` did not carry; `on_cost_over` fired with nothing listening. |
 | 9 | harness-engine's watcher latency test is timing-flaky under parallel load | OPEN | The test asserts watcher pickup inside a fixed wall-clock budget; CI hides it with `npm test \|\| npm test`. |
 | 10 | Eval work is designed but unbuilt: constraint-persistence probe, nightly LLM-judged evals, pre-release benchmark runs | CLOSED | The eval plan existed on paper and the headline claim rested on a measurement nothing re-ran. |
@@ -446,7 +446,7 @@ sub-agent fan-out. Depth is bounded; breadth is not.
 
 ## #7 — Harness bundles run in-process with full privileges — the gate filters loads, it does not sandbox runs
 
-**OPEN** · filed 2026-09-14 · `enhancement` (accepted risk, filed so it is visible)
+**CLOSED** · filed 2026-09-14 · fixed 2026-09-17 · `enhancement` (was an accepted risk, filed so it is visible)
 
 **Cause.** `harness-engine`'s safety gate is *lexical*. It scans static and dynamic imports and
 `require` specifiers (including backtick forms), rejects non-literal specifiers, blocks
@@ -470,20 +470,53 @@ added is that documentation is not enforcement. `create_harness` — the tool by
 writes its own tools, accepting a model-authored spec **by design** — is simultaneously the
 loosest entry point in the system.
 
-**Fix.** None. Recorded as an accepted risk during the security audit and carried in
-`plan.md` 12.16 as a "design confirmation (not defect)", filed as an issue so it is visible to
-anyone evaluating Mnemo for their own machine. The issue's own definition of done is either
-real isolation (a `node --permission` worker or a container per bundle) or "a prominent,
-documented statement of trust at every entry point that accepts bundles — including
-`create_harness`".
+**Fix.** Landed 2026-09-17 — the second branch of the issue's own definition of done, plus the
+blast-radius half that neither branch named.
 
-**After effect.** Partial, in one direction only: the trust statement exists in
-`harness-engine/README.md:195-201` ("It does **NOT** sandbox anything", plus the four escape
-classes) and not in the place the model reads. `create_harness`'s tool description
-(`agent/src/tools/harness.ts:20-27`) lists what the gate *rejects* and never says that what it
-accepts runs with your privileges — so the acceptance test in the issue is unmet, and a model
-told only about the gate can reasonably believe it is constrained. Anyone running Mnemo on
-their own machine should read this entry as: **a harness bundle is code you are executing**.
+- **Execution becomes a boundary** (`harness-engine/src/boundary.ts`, `src/child-runner.ts`). In
+  `execution: "child"` the host never evaluates bundle code at all: a child process describes each
+  tool (name/schema) and every `execute()` is another child. The child gets an explicit
+  environment **allowlist** (`DEFAULT_ENV_ALLOWLIST`) instead of an inherited copy, so the agent's
+  provider API keys are structurally absent rather than pattern-matched away — and a
+  credential-shaped *or* interpreter-injection-shaped name (`NODE_OPTIONS`, `LD_PRELOAD`, …) is
+  refused even if a caller allowlists it. Its cwd is the bundle directory (realpath'd). A
+  wall-clock timeout ends the process **tree**: SIGTERM → SIGKILL on POSIX, `taskkill /T` →
+  `taskkill /T /F` on Windows, mirroring `agent/src/mcp.ts`'s `terminateTree` (this package has no
+  dependency on the agent, so the approach is mirrored, not imported). stdout/stderr are captured
+  and byte-capped; a non-zero exit reports the thrown message *and* what the bundle printed, so a
+  failure is never swallowed into "it did not work". The verdict travels as a file in a scratch
+  dir the bundle cannot name — a stdout marker would be forgeable by anything that can `print`.
+- **Where the default lives** (`bundle.ts`, `create-harness.ts`, `watcher.ts`, `cli.ts`):
+  `createHarness` (the seam the model's code takes), `SkillsWatcher` and the CLI default to
+  `"child"`; `loadBundle` itself defaults to `"in-process"` so metadata paths do not pay for a
+  spawn — and every `LoadedBundle` carries `execution`, so which one a caller holds is never a
+  guess. The downgrade is explicit and announced in `create_harness`'s result text.
+- **The trust statement, at the places the model reads** — the other half of the issue's
+  definition of done, and the one its "after effect" said was unmet: `create_harness`'s tool
+  description now states that a bundle is third-party code, that it runs in a child with a
+  scrubbed env, and that this is **not** a sandbox; the generated `SKILL.md` says the same to
+  anyone who reads the skill (both asserted in tests); the CLI's own help says it.
+- **Documented precisely** in `harness-engine/README.md` § "Execution boundary" (what is and is
+  not prevented, and the design decision) and summarised in `docs/MNEMO-INTERNALS.md` §5.
+
+**Tests that assert the properties** (`harness-engine/test/boundary.test.ts`, 12 tests; the two
+agent-side statements in `agent/test/harness_tool.test.ts`, `agent/test/harness_bridge.test.ts`):
+a secret in the host's env is absent from the child *as attested by the child*; the module's
+top-level side effect lands in the bundle dir and reports a pid that is not the host's (so the
+host really did not import it); a `while (true)` bundle is killed at the wall clock and its pid is
+gone afterwards; escalation is asserted with an injected kill system on both platform paths;
+a 20 000-line stdout flood is bounded without losing the verdict; a failing bundle's error
+contains its message, its stderr, its stdout and its exit code; a bundle that calls `exit(3)`
+takes only itself down and the host goes on to run another bundle; the gate refuses **before**
+any spawn (proved with an impossible `nodePath`).
+
+**After effect.** A bundle can no longer take the agent down with it (crash, `process.exit`,
+hang, fork-bomb-in-a-tool), and it cannot read the agent's credentials out of its environment.
+What is still **not** delivered, and is not claimed anywhere: isolation. The child is the same
+user — same filesystem rights, same network reach — the timeout bounds wall clock and not memory
+or CPU, `allowModules` remains the caller's escape hatch, and a grandchild that detaches outlives
+the tree kill. Anyone who reads "runs in a child process" as "sandboxed" should read the README's
+table; the sentence that matters there is the one that starts "It is **not** a sandbox".
 
 ---
 
@@ -801,7 +834,7 @@ explained rather than hidden. The policy question lives in #14's P7.
 
 ## #14 — command surface: proposals P1-P8 from the Hermes review
 
-**OPEN** · filed 2026-09-14 · status at the snapshot below · `enhancement`
+**OPEN** · filed 2026-09-14 · status at the snapshot below, then a second pass on 2026-09-17 (uncommitted) · `enhancement`
 
 **Cause.** The headline finding of `research/hermes-command-surface-review.md` (pushed in
 `a61c1b4`): Mnemo has **three command registries** — the TUI's own list, pi's extension
@@ -855,11 +888,156 @@ is a checklist nobody has ticked.
   thing that would let someone extend Mnemo without a PR to Mnemo.
 - **P8 — `mnemo skills list|check`. NOT LANDED.** No such subcommand exists.
 
+**Second pass, 2026-09-17 — what landed, and what the rest would take.** The block above
+is the snapshot's status word; this is the work. "Landed" here means *in the working tree
+of this pass*, which is **uncommitted — no sha yet** — and the tests it names are the ones
+to run against it. The three landed items are the ones whose files were free: the agent
+side, `docs/` and the README. Everything the interface owns stayed untouched, and that is
+most of P4 and P5.
+
+**P3 — prompt templates. LANDED (docs; the snapshot's "not listed" was half wrong).**
+A live `get_commands` on this machine returns **19 commands: 5 extension, 3 prompt, 11
+skill** — `implement`, `implement-and-review`, `scout-and-plan` arrive as `source:
+"prompt"` with `sourceInfo.path` pointing at `~/.pi/agent/prompts/*.md`. The interface
+maps every one of those onto a palette row (`app/update.go:501-521` `agentCommands`, scope
+`prompt · user`), so since P2 they *are* listed: the snapshot's claim holds only for the
+**offline disk scan**, which is what the palette falls back to with no agent attached.
+That is the real remainder, and it is small and specific: `Roots()`
+(`tui-go/internal/command/command.go:98-124`) walks `.claude`/`.pi`/`.agents` for skills
+and never `~/.pi/agent/prompts` or `.pi/prompts`. Two traps for whoever adds it: a
+template row must be **sent verbatim** (`runSlash`'s `Kind == Agent` branch,
+`app/update.go:1181-1192`), not rewritten by `Command.Prompt()` into "Use the X skill"
+(`command.go:433-445`); and `.pi/prompts` is trust-gated like the rest of `.pi`
+(#17). Landed in this pass: the README's "Your own slash commands" section (both
+locations, `description`/`argument-hint`, the argument syntax, that the palette lists
+them, and the split rule — *a template for a repeatable instruction, a skill for a
+repeatable procedure*) and a row in `docs/MNEMO-INTERNALS.md` §8. Verifying the Go half is
+a `ScanPrompts` test in the idiom of `app/commands_test.go`: a temp home with
+`prompts/review.md` must yield a row, and with no agent attached `--dump --keys
+"/,r,e,v,i,e,w,enter"` must still refuse rather than silently succeed.
+
+**P4 — argument completion. NOT LANDED, and one part of it is not yet knowable.**
+Completion is `prompt.Complete()` (`internal/prompt/prompt.go:132-139`), which writes
+`"/" + name + " "` and clears the menu; an argument source is a per-command table in
+`internal/command` plus a second population mode for the menu that already exists. The
+data exists, and where it lives is now checked rather than assumed: providers and model
+catalogues in `internal/auth` (drift-tested against `agent/src/auth/store.ts` by
+`internal/auth/providers_test.go`); model ids from pi — `get_available_models` over RPC,
+which `pi.go` does not implement; hook ids from the manifests the agent scans
+(`agent/src/hooks/scanner.ts:39-58`: project `<cwd>/.mnemo/hooks`, user `~/.mnemo/hooks`,
+global `~/.config/mnemo/hooks`, `*.json`, `{id,trigger,matcher,command}`) — and **tui-go has
+no hook reader at all** (only `internal/schedule`), so that table needs one; schedule ids
+from `~/.mnemo/schedules.json` through `internal/schedule` (`schedule.go:53`), which
+already reads the same file the agent writes. **The blocker found in this pass**: the
+`argument-hint` frontmatter field is *not* in the RPC reply — the raw `get_commands`
+answer was grepped for `argumentHint`/`argument-hint` and contains neither, only
+`name`/`description`/`source`/`sourceInfo{path,scope,baseDir}` — so hints have to come
+from reading `sourceInfo.path`'s frontmatter, or the hint half of P4 is dropped. Two
+things it could break: the deliberate prefix-then-substring rule applies to *names* and
+must not be extended to arguments (review §5), and a completion that keeps the menu open
+changes what `Complete()` returns, which the existing key tests pin. Verified by
+`internal/prompt` tests for the matcher plus a fake-agent test that `/model <tab>` reads
+the auth store and `/hook <tab>` reads a temp hooks dir.
+
+**P5 — session/context commands. NOT LANDED (all of it is in tui-go and `pi.go`).**
+`pi.go` writes exactly eight verbs — `prompt` (719), `steer` (722), `abort` (725),
+`switch_session` (739), `new_session` (747), `get_commands` (755), `compact` (763),
+`get_fork_messages` (780) — so `/name` (`set_session_name`), `/status` (`get_state`) and
+`/thinking <level>` (`set_thinking_level`, plus `get_available_thinking_levels` for a
+picker) are one method each beside them, and pi's own docs give the reply shapes (rpc.md
+§State, §Thinking, §Session). `/status` is the one with a debt behind it: #16's entry says
+the transcript's agreement with the model is *asserted, not verified* on the failure path,
+and `get_state` is how a refused `switch_session` gets reconciled. A name collision to
+keep straight: the builtin `thinking` (`command.go:76`) opens every thinking block; the
+reasoning level is a different thing and must not become a second row with that name
+(`/new` is the precedent — one name, one row, `app/update.go:1147-1152`). What could
+break: a successful reply that says nothing is the *rule* here (`/compact`'s precedent,
+documented at `pi.ParseEvent`), so the new verbs must be told apart from acknowledgements
+by their `data`, and a reply that lands while #15's dialog is queued must not be eaten by
+the dialog. Verified in `pi/fakepi_test.go`'s fake agent (it answers by command name) plus
+`app` tests for the notices.
+
+**P6 — tool exposure policy. HALF LANDED: the agent enforces it, the interface cannot yet
+read it back.**
+Landed, in the working tree: `agent/src/tools/policy.ts` (the reader, the union, the
+failure rules), `agent/src/tools/index.ts` where `allTools` is now `toolInventory` minus
+the disabled names, and `agent/src/home.ts` (one definition of `~/.mnemo`/`MNEMO_HOME`,
+re-exported by `src/hooks/memory.ts` and used by `src/skills/skill-history.ts` — two
+copies of that resolution existed and only one honoured `MNEMO_HOME`). Measured, not
+asserted: with `{"disabled":["web_search","create_harness"]}` in a temp `MNEMO_HOME` and
+`{"disabled":["read_image"]}` in the project's `.mnemo/`, the real inline extension factory
+registers **15** names instead of 19, `allTools` is 13 of 16, `web_search` is never even
+offered at `session_start`, and a broken file yields `broken: "not JSON: …"` with the list
+otherwise unchanged. The decisions and their reasons are in the file headers (disabled
+list not enabled; no wildcard; project files restrict only, so no trust decision; read
+once at extension load, so an edit lands on the next run — invariant 6 enforced by
+construction). **The finding that changes the proposal**: pi already has a tool policy of
+its own — `defaultTools` (settings.md:221-237) and `--exclude-tools`/`--tools`
+(settings.md:239) — but `defaultTools` explicitly does not cover extension tools
+("Extension and SDK custom tools remain enabled"), and all 19 of Mnemo's tools *are*
+extension tools, so the client-side filter is not a duplicate of the obvious knob.
+`--exclude-tools` filters the resulting list and might be, which makes one decision real:
+filter in-process (what landed — works in every mode, including `mnemo "<prompt>"` and
+subagents) or translate the file into pi's own argv (pi's list, but the argv is
+hardcoded in `tui-go/internal/pi/pi.go`'s `Spawn` and in `bin/mnemo.ts`). Not landed:
+`/tools` itself — a builtin row in `command.go`'s `Builtins()` plus a case in
+`runSlash`, reading the same two JSON files; and the report a typo needs, since nothing
+reads `disabled` back today (a name that matches no tool is silently inert).
+**The cost, named**: the read is a lookup at import rather than an injected parameter
+(invariant 5 would prefer injection; the wiring site is an inline extension factory with
+no arguments), so a test asserting the full inventory has to state its own `MNEMO_HOME` —
+`agent/test/sea_tools_inline.test.ts`'s `EXPECTED` list is the one, and the one-line fix
+is a temp `MNEMO_HOME` at the top of that file. Without a policy file every test sees the
+inventory it saw before, which is why CI and this machine are unaffected.
+
+**P7 — the third-party extension path. LANDED (docs + a live check); the policy question
+it exists to raise is still open.**
+`docs/MNEMO-INTERNALS.md` §8 now names `~/.pi/agent/extensions/*.ts`,
+`~/.pi/agent/extensions/*/index.ts`, `.pi/extensions/*.ts` and `.pi/extensions/*/index.ts`
+as the third-party surface, with `/reload` as the reason to use them over `pi -e`, and the
+full list of names Mnemo itself claims. Verified against the installed pi with a probe,
+not by reading docs: an extension at `<agent dir>/extensions/demo/index.ts` registering one
+command came back **first** in `get_commands` with `source: "extension"`,
+`sourceInfo.path` = its own file and `scope: "user"`, under Mnemo's own spawn argv (no
+`-ne`) — so a stranger's file reaches `^k` with its path and `/stranger-demo` routes
+verbatim. Not landed, and it is the part that costs something: the `-ne` decision (#13's
+wart, whose entry already says the policy question lives in this proposal) and a test that
+pins Mnemo's claimed names so a rename cannot silently start a collision — it would go in
+`agent/test/sea_tools_inline.test.ts` against a frozen list, with a live check gated on an
+env var like #13's. What that test can and cannot catch is worth writing down before
+someone trusts it: it catches a rename *inside* Mnemo, and it cannot catch a stranger's
+file, because the stranger's file is not in this repository — which is exactly why the
+list belongs in the docs as a contract.
+
+**P8 — `mnemo skills list|check`. NOT LANDED — the door is in a file this pass did not
+own, and the snapshot credits the wrong half as missing.**
+The *listing* half largely exists: pi answers 11 `skill:` commands on this machine (live
+`get_commands`, same probe as P3) and the palette shows them with paths (#18), and the
+agent already has `list_skills` as a tool. What has no surface is the **curator** half —
+provenance (which root, which scope: `agent/src/skills/discovery.ts`) and staleness (the
+skill's mtime, and whether Mnemo ever touched it: `~/.mnemo/skill-history/<name>/`, which
+does not exist on this machine because nothing has been patched here yet). What it would
+take: a new `agent/src/skills/report.ts` (one formatter, so the tool and the CLI cannot
+disagree), a new `agent/src/skills/cli.ts` in the idiom of `agent/src/schedule/cli.ts`, and
+two dispatch lines in `agent/bin/mnemo.ts` — which was out of this pass's ownership, and a
+module with no caller is the dead code this ledger files issues about, so it was left
+unbuilt rather than landed as decoration. Both files are listed here so the next pass does
+not have to rediscover them. Verified the way `agent/test/schedule_cli.test.ts` verifies
+its surface: a temp `MNEMO_HOME` with two skills, one patched, one not, and the exact
+lines `mnemo skills check` must print.
+
 **After effect.** The class of lie this issue was filed about is gone: an unknown slash name is
-sent to the agent, and the palette says where each row came from. What remains is the smaller
-half — argument completion, the session/context verbs, the tool policy, and the documentation
-of the extension surface — plus the fact that P3 is a routing win rather than a listing win, so
-a user still cannot *see* their prompt templates.
+sent to the agent, and the palette says where each row came from. Two of the remaining items
+landed in the second pass and two did not, so the honest split is now by owner rather than by
+size: **the agent side is done for what it can do alone** — the extension surface is documented
+against a live probe (P7) and the tool policy is read and enforced at registration, next-run
+(P6) — while **everything the interface owns is still open**: the `/tools` readback, the `-ne`
+decision, P4 entire, P5 entire, and the offline half of P3. P8 turned out to be a curator
+report rather than a listing, and its door is `bin/mnemo.ts`. And one correction to the
+snapshot's last clause, because it is the kind of sentence a reader would act on: P3 is *not* a
+routing win rather than a listing win — since P2 a prompt template **is** listed in the palette,
+because the agent answers for it; what is missing is listing it with no agent attached, from
+the disk scan.
 
 ---
 

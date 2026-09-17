@@ -44,7 +44,16 @@ cross-session and cross-project. Neither is derivable from the other.
 list of `Fact`s, an append-only `log` of `LogEntry`, and a `context` field that
 is explicitly **derived** and never journaled. A **Fact** is a key/value pair
 with `Active`/`Superseded` status: superseding flips the status and records
-`superseded_by`, so history survives. An **Edge** is typed
+`superseded_by`, so history survives. A key has **one current value**: a write
+under a key that already has one supersedes it rather than appending, which is
+what stops a changed constraint coming back as two live instructions with
+nothing marking which is current (issue #24). The retired value is never
+deleted — it keeps its id, key and value, and `memsrv`'s `history` op returns
+it alongside what replaced it. The derived state text says so (`N retired
+value(s) kept as history`) and does not re-state a retired value anywhere, log
+lines included: the facts block IS the fact record. `fact`'s `append: true` is
+the explicit opt-out, used only where a key really is a set (a harness's tool
+list). An **Edge** is typed
 (`SuppliesContext`, `PartOf`, `DerivedFrom`, `Supersedes`, `ActivatedWith`),
 weighted, directional, with success/failure counters and `valid_from`/
 `invalid_at` — `Unlink` is a soft kill, and `Edge::alive_at(t)` is the three
@@ -154,10 +163,16 @@ few log lines.
 Line-JSON-RPC over stdio: `{"id":N,"method":"M","params":{…}}` →
 `{"id":N,"ok":true,"result":…}`. It replays the journal on startup, opens an
 embedder, and serves one request per line until `exit`. Methods: `ping`, `dump`,
-`state`, `search`, `create_node`, `episode`, `fact`, `link`, `commit_log`,
+`state`, `history`, `search`, `create_node`, `episode`, `fact`, `link`,
+`commit_log`,
 `steer`, `set_area`, `good`, `consolidate`, `mark_useful`, `stats`, `remember`,
 `recall_brief`, plus the audit-era additions (`unlink`, `reweight`,
-`record_outcome`). Search results carry label, kind, area and state text — the
+`record_outcome`). `fact` supersedes a same-key value unless `append: true`
+says the key is a set, and answers with the fact id it wrote plus the id it
+superseded; `history` returns every fact a node ever had with its status and
+`superseded_by`, which is where retired values are read. `dump` carries a
+`retired` count beside `facts`. Search results carry label, kind, area and state
+text — the
 project learned once that ids plus scores are useless to a model. Clients:
 `agent/extensions/memory-layer.ts` (FIFO-queued, lazily spawned, agent tools),
 `agent/src/hooks/memory.ts` (the hooks sync), and `tui-go/internal/memory`
@@ -205,7 +220,7 @@ identical in every mode):
 
 ### 3.2 Tools
 
-`allTools` (16) from `src/tools/index.ts` — `bash_exec`, `read_file`,
+`allTools` (16, or the inventory minus the policy below) from `src/tools/index.ts` — `bash_exec`, `read_file`,
 `write_file`, `apply_edit`, `glob_list`, `ipy_run`, `list_skills`, `load_skill`,
 `create_skill`, `patch_skill`, `retire_skill`, `spawn_subagent`, `create_harness`,
 `web_fetch`, `web_search`, `read_image` — plus three memory tools, MCP tools
@@ -214,6 +229,30 @@ discovered before `main()` runs, and whatever a harness bundle adds at runtime.
 globally-installed pi package has not already claimed those names, because two
 tools with one name make pi refuse the whole extension and kill the session at
 startup.
+
+**Tool exposure** (issue #14 P6) is the other half of that sentence, and it is a
+different question from permissions: `permissions.json` decides whether a call is
+allowed once the model asks, `~/.mnemo/tools.json` decides whether the tool is
+offered at all — the one that costs a turn when it is wrong, since `web_search`
+with no key is otherwise offered every session and explains itself every session.
+The format is `{ "disabled": ["web_search", …] }`, unioned with
+`<project>/.mnemo/tools.json`, and it is applied in `src/tools/index.ts`: `allTools`
+is the inventory minus the disabled names, so the tool is absent from the prompt
+*and* from the in-kernel `tools.<name>()` dispatcher, which is built from the same
+array. Polarity is deliberate — a *disabled* list means a tool added in a later
+version is on by default for everyone who already has a file, where an enabled
+list would quietly take a new capability away from every user who never heard of
+it. There is no wildcard and no patterns: `"*"` is only useful with an enable list
+to add things back, and two lists of opposite polarity is the second registry this
+whole issue exists to prevent. A project file can only restrict (a union, never an
+override), so it needs no trust decision — a file that could *re-enable* what the
+operator turned off would. The file is read once, at extension load, so an edit
+lands on the next run: invariant 6 makes the tool list part of the cached prompt
+prefix, and that is enforced by construction rather than by a notice. With no file
+present the list is exactly what it was. Two things it does not have, stated
+because a policy file with a typo fails silently: nothing reads `disabled` back
+(the interface's `/tools` is the unbuilt half of P6), and a name that matches no
+tool is therefore reported nowhere.
 
 `patch_skill` is the self-improvement seam and is deliberately hard to use
 wrong: it needs a stated reason and at least one piece of memory evidence, edits
@@ -360,9 +399,23 @@ gate scans static/dynamic imports and `require`, rejects non-literal specifiers,
 blocks `fs`/`child_process`/net-class/host-info modules, rejects direct
 `process` access, confines relative imports to the bundle directory (lexically
 and after realpath, depth 3), and syntax-checks before import — fail-closed
-everywhere. It does **not** sandbox: registered tools run in-process with full
-privileges (issue #7). The registry layers session/project/global scopes with
-the nearest winning, shadows loudly via `ShadowEvent`, and the watcher re-gates
+everywhere. It does **not** sandbox, and it never will: it filters what loads.
+
+Execution is the other half, and it is a real boundary now (issue #7). In
+`execution: "child"` — the default for `createHarness`, the watcher and the CLI
+— the host never evaluates bundle code at all: a child process is asked to
+describe each tool, and every `execute()` is another child, with an explicit
+environment allowlist (no API keys; credential- and injection-shaped names are
+refused even if allowlisted), a cwd jailed to the bundle directory, a
+wall-clock timeout that ends the process TREE (SIGTERM → SIGKILL;
+`taskkill /T` → `/T /F`), and stdout/stderr captured and byte-capped. That is
+**blast-radius control and secret hiding, not isolation**: the child is the same
+user, with the same filesystem and network reach, and the timeout bounds wall
+clock rather than memory or CPU. The full statement of what is and is not
+prevented — and why a child process rather than a worker or a container — lives
+in `harness-engine/README.md`, "Execution boundary". The registry layers
+session/project/global scopes with the nearest winning, shadows loudly via
+`ShadowEvent`, and the watcher re-gates
 on rewrite.
 
 ---
@@ -420,7 +473,48 @@ directory on Windows).
 | a UI overlay | `internal/overlay` + a case in `chooseOverlay`; render from `keymap` so help cannot drift |
 | a hook | a manifest in `.mnemo/hooks/`, or `/hook add` |
 | a scheduled job | `mnemo schedule add …` or `~/.mnemo/schedules.json` |
+| a prompt template | a `.md` in `~/.pi/agent/prompts/` or `.pi/prompts/` — pi expands `/<filename>` before the prompt is sent, so it appears in the palette once `get_commands` answers |
+| a third-party pi extension | `~/.pi/agent/extensions/*.ts`, `.pi/extensions/*` — the path that needs no PR to Mnemo (see below) |
 | a background memory job | `research/memory-runtime-design.md` (designed, not built) |
+
+### A stranger's extension: pi's on-disk path
+
+Mnemo's own six extensions are **inline** — shipped with the binary, no per-user
+install, identical in every mode. The third-party path is pi's, and it is a
+directory, not a PR:
+
+| Where | Scope |
+|---|---|
+| `~/.pi/agent/extensions/*.ts`, `~/.pi/agent/extensions/*/index.ts` | global — every project |
+| `.pi/extensions/*.ts`, `.pi/extensions/*/index.ts` | project-local, once the project is trusted (#17) |
+
+`pi -e ./path.ts` is for quick tests and is not reloadable; the two directories
+above are what `/reload` watches (pi's `docs/extensions.md`). An extension may
+register tools, commands, hook handlers and UI requests, and everything it
+registers arrives through the same `get_commands` answer the palette already
+reads — so it needs no change here to be visible or runnable (P2, #18).
+
+Verified against the installed pi rather than assumed (2026-09-17): an extension
+at `<agent dir>/extensions/demo/index.ts` registering one command answered first
+in `get_commands` with `source: "extension"`, `sourceInfo.path` = its own file and
+`scope: "user"`, under Mnemo's own spawn argv (no `-ne`) — so a command from a
+file a stranger wrote reaches `^k` as a row with its path, and `/stranger-demo`
+routes to pi verbatim.
+
+Two costs of courting that path, both measured rather than hypothetical:
+
+- **Two extensions claiming one tool name make pi refuse to start.** Reproduced in
+  issue #13 (which is why the child's stderr is now captured and shown as one
+  transcript notice); Mnemo loads user extensions — it does not pass `-ne` — so the
+  `-ne` decision is still open, and it is P7's to make.
+- **Names Mnemo already claims**, which a third party must not reuse: the 16 tools
+  of `src/tools/index.ts`, `memory_search` / `memory_write_fact` / `memory_steer`,
+  `mcp__<server>__<tool>`, the commands `hook`, `schedule`, `trigger`, `now`, and
+  the inline extension names `sea-tools`, `sea-memory`, `sea-approval`,
+  `sea-tracing`, `sea-hooks`, `sea-schedules`. `web_search` and `web_fetch` are the
+  exception that proves the rule: Mnemo claims those only at `session_start`, and
+  only if nobody else has (pi kills the whole extension on a duplicate, so the
+  deferral is what keeps a package like `pi-web-access` installable).
 
 ---
 
