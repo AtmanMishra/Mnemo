@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/app"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/auth"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/doctor"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/limits"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/logging"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/pi"
@@ -24,6 +27,7 @@ type options struct {
 	home, cwd, keys, repo, session, memsrv, journal, bundles string
 	dump                                                     bool
 	version                                                  bool
+	doctor                                                   bool
 	cols, rows                                               int
 
 	// The interface's timings and limits, as the reader typed them. Strings,
@@ -62,6 +66,7 @@ func parseFlags(args []string) options {
 	fs := flag.NewFlagSet("mnemo", flag.ContinueOnError)
 	var o options
 	fs.BoolVar(&o.version, "version", false, "print the version and exit")
+	fs.BoolVar(&o.doctor, "doctor", false, "check that this installation can work, print a diagnosis, and exit")
 	fs.StringVar(&o.home, "home", "", "override the home directory sessions are read from")
 	fs.StringVar(&o.cwd, "cwd", "", "override the working directory")
 	fs.BoolVar(&o.dump, "dump", false, "render one frame to stdout and exit (for scripts and screenshots)")
@@ -94,6 +99,46 @@ func main() {
 	// terminal. It has to work on a machine where none of the rest does.
 	if o.version {
 		fmt.Println(versionLine())
+		return
+	}
+	// A diagnosis has the same constraint as the version question: it must
+	// work when nothing else does, so it runs before any config is loaded, no
+	// agent is spawned, and no model is called. The exit code is the answer a
+	// script needs; the lines above it are the answer a person needs.
+	if o.doctor {
+		home := o.home
+		if home == "" {
+			home, _ = os.UserHomeDir()
+		}
+		cwd := o.cwd
+		if cwd == "" {
+			cwd, _ = os.Getwd()
+		}
+		report := doctor.Run(doctor.Env{
+			Home: home, CWD: cwd, Repo: o.repo, Memsrv: o.memsrv,
+			// The same loader /login writes through, so doctor and the
+			// interface can never disagree about whether a provider is set up.
+			Auth: func(home string) ([]string, string) {
+				f := auth.Load(home)
+				return f.LoggedIn(), f.DefaultModelFor(f.EffectiveProvider())
+			},
+			LookPath:  exec.LookPath,
+			Stat:      os.Stat,
+			ReadFile:  os.ReadFile,
+			WriteFile: os.WriteFile,
+			Remove:    os.Remove,
+			MkdirAll:  os.MkdirAll,
+			Run: func(name string, args ...string) (string, error) {
+				out, err := exec.Command(name, args...).CombinedOutput()
+				return string(out), err
+			},
+		})
+		fmt.Println("mnemo doctor — can this installation work?")
+		fmt.Print(report)
+		fmt.Println(report.Summary())
+		if n := report.Failed(); n > 0 {
+			os.Exit(1)
+		}
 		return
 	}
 	// os.Exit lives HERE and only here. run() holds every defer — the agent
