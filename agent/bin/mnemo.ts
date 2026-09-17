@@ -6,6 +6,10 @@
 //   mnemo                     interactive TUI (pi interactive mode)
 //   mnemo consolidate         distil recurring episodes into semantic lessons
 //   mnemo traces [session]    print span trees from ~/.mnemo/logs (--json)
+//   mnemo init [--dry-run|--yes]   propose the project-memory file pi loads
+//   mnemo pr [--base R] [--dry-run] [--review]
+//                             open a PR for this branch, titled and described
+//                             from its commits (never force-pushes)
 //
 // MCP servers listed in ~/.mnemo/mcp.json are connected before pi starts and
 // their tools registered as mcp__<server>__<tool>.
@@ -43,6 +47,8 @@ import { memoryLayerHooks, runConsolidate, sharedMem } from "../extensions/memor
 import { discoverMcpTools, loadMcpConfig, setMcpTools } from "../src/mcp.ts";
 import { formatTree, readSpans, sessionsOf } from "../src/trace.ts";
 import { runSchedule } from "../src/schedule/cli.ts";
+import { runInit } from "../src/init.ts";
+import { runPr } from "../src/pr.ts";
 import { checkNodeVersion } from "../src/runtime_check.ts";
 import { setAgentProcessMarkers } from "../src/childenv.ts";
 import approvalExt from "../extensions/approval-gate.ts";
@@ -311,6 +317,30 @@ async function run(): Promise<void> {
     } finally {
       sharedMem.stop();
     }
+    return;
+  }
+  // `/init` (issue #8): project memory is local files — no provider, no model,
+  // no network. It proposes, and the operator consents (see src/init.ts).
+  if (argv[0] === "init") {
+    process.exitCode = await runInit(argv.slice(1), {
+      cwd: process.cwd(),
+      home: process.env.HOME ?? process.env.USERPROFILE ?? "",
+      env: process.env,
+      log: (s) => console.log(s),
+      err: (s) => console.error(s),
+    });
+    return;
+  }
+  // PR automation (issue #8): git and gh carry their own credentials, so this
+  // needs no provider of ours either. It refuses to force-push, ever.
+  if (argv[0] === "pr") {
+    process.exitCode = await runPr(argv.slice(1), {
+      cwd: process.cwd(),
+      home: process.env.HOME ?? process.env.USERPROFILE ?? "",
+      env: process.env,
+      log: (s) => console.log(s),
+      err: (s) => console.error(s),
+    });
     return;
   }
   // schedules/triggers read and fire from local files; the spawned children
