@@ -80,7 +80,7 @@ func Builtins() []Command {
 		{Name: "copy", Desc: "copy the whole transcript", Kind: Builtin, Chord: "Y"},
 		{Name: "clear", Desc: "start a new session", Kind: Builtin},
 		{Name: "compact", Desc: "summarise the older turns to shrink the context", Kind: Builtin},
-		{Name: "fork", Desc: "branch the session at the message you last sent", Kind: Builtin},
+		{Name: "fork", Desc: "branch the session at the message you choose", Kind: Builtin},
 		{Name: "commands", Desc: "ask the agent for its command list again", Kind: Builtin},
 		{Name: "theme", Desc: "pick the palette — saved to ~/.mnemo/theme.json", Kind: Builtin},
 		{Name: "yolo", Desc: "stop asking for approval — on|off, saved to this project", Kind: Builtin},

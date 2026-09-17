@@ -432,24 +432,63 @@ func oneLine(s string) string {
 // lastUserIndex is the index of the newest block the reader sent, or -1.
 //
 // Two callers need it and they need the same answer: undo cuts the transcript
-// at it, and a fork cuts at it because the branch starts from that message.
-func lastUserIndex(blocks []*chat.Block) int {
-	last := -1
-	for i, b := range blocks {
-		if b.Kind == chat.User {
-			last = i
+// at it, and a fork with no message chosen cuts at the last message sent.
+func lastUserIndex(blocks []*chat.Block) int { return backUserIndex(blocks, 0) }
+
+// backUserIndex is the index of the n-th block the reader sent, counting from
+// the newest: 0 is the message just sent, 1 the one before it.
+//
+// A branch is a rewind, so how far back IS the address: the reader picks a
+// message, and the transcript has to be cut at that message rather than at the
+// newest one.
+func backUserIndex(blocks []*chat.Block, back int) int {
+	for i := len(blocks) - 1; i >= 0; i-- {
+		if blocks[i].Kind != chat.User {
+			continue
 		}
+		if back == 0 {
+			return i
+		}
+		back--
 	}
-	return last
+	return -1
 }
 
-// foldForkPoints forks at the newest branchable message.
+// sentText is a user block's body as the reader typed it — the newlines Split
+// took out, put back.
+func sentText(b *chat.Block) string { return strings.Join(b.Body, "\n") }
+
+// branchCut is where a fork cuts the transcript back to: the index of the
+// message the branch starts from.
 //
-// pi's list is ordered oldest first, so the last entry is the message just
-// sent — the one a reader would edit and resend, which is what a branch is for.
-// Picking among the older ones is the obvious next step and is deliberately not
-// built yet: this slice is "branch here, now", and a picker can be added on top
-// of the same answer without changing anything below it.
+// pi's acknowledgement carries the message's WORDS, and this side is the one
+// that knows where they are, so the position comes from the picker — counted
+// from the newest, because the same line sent twice is ordinary and searching
+// for it would land on the later copy, cutting the transcript at the wrong
+// message. The words are then the check: a transcript that does not agree with
+// them is not the conversation the branch came from, and the answer falls back
+// to the newest message it does agree on, or to the newest there is.
+func branchCut(blocks []*chat.Block, text string, back int) int {
+	if i := backUserIndex(blocks, back); i >= 0 && sentText(blocks[i]) == text {
+		return i
+	}
+	for i := len(blocks) - 1; i >= 0; i-- {
+		if blocks[i].Kind == chat.User && sentText(blocks[i]) == text {
+			return i
+		}
+	}
+	return lastUserIndex(blocks)
+}
+
+// foldForkPoints opens the picker: pi's list IS the answer, one row per message
+// a branch can start from.
+//
+// Newest first, because the newest is the message just sent — the one a reader
+// would edit and resend — and it is the row the cursor starts on, so enter is
+// the branch you get by not deciding, exactly as /fork behaved while it forked
+// at the newest message itself. An empty list is a session with nothing to
+// branch from: said in the transcript rather than shown as a picker with no
+// rows, which is a surface there is nothing to do in.
 func (m *Model) foldForkPoints(p agent.ForkPoints) tea.Cmd {
 	m.awaitingFork = false
 	if len(p.List) == 0 {
@@ -458,7 +497,62 @@ func (m *Model) foldForkPoints(p agent.ForkPoints) tea.Cmd {
 		}})
 		return m.notify("no message to branch from")
 	}
-	return m.agent.Fork(p.List[len(p.List)-1].EntryID)
+	m.forks = p.List
+	return m.openForks()
+}
+
+// openForks builds the picker's rows: the message as the label, how far back it
+// sits as the detail, and pi's entry id as what the row means.
+func (m *Model) openForks() tea.Cmd {
+	items := make([]overlay.Item, 0, len(m.forks))
+	// pi answers oldest first and the picker reads newest first, so the list is
+	// walked backwards: the row's distance from its end is its distance from
+	// the newest message, which is the distance the cut uses.
+	for back := 0; back < len(m.forks); back++ {
+		p := m.forks[len(m.forks)-1-back]
+		detail := plural(back, "message") + " back"
+		if back == 0 {
+			// The tip: where the session is now, and the one row that branches
+			// without leaving anything behind.
+			detail = "you are here"
+		}
+		items = append(items, overlay.Item{Label: oneLine(p.Text), Detail: detail, ID: "fork:" + p.EntryID})
+	}
+	// No empty state of its own: the picker only opens with rows in it, and a
+	// filter that matches nothing is not "nothing to branch from" — the
+	// overlay's own line says that without denying the rows underneath.
+	//
+	// The purpose line carries esc as well as enter, and it is kept short
+	// enough to survive the panel: a key the reader cannot see is a key they
+	// do not have, and the action line every other list gets is cleared by the
+	// view unless the list sets its own.
+	m.ov = overlay.NewList(overlay.Fork,
+		"where a branch can start — enter branches, esc cancels",
+		items)
+	m.armOverlay()
+	return m.notify("branch where? — enter branches at the row under the cursor")
+}
+
+// forkAt branches the session at the message the reader picked.
+//
+// The row's id is pi's entry id so the fork itself needs nothing re-derived —
+// but how far back the message sits does, because the cut that follows the
+// acknowledgement is a position in the transcript.
+func (m *Model) forkAt(entryID string) tea.Cmd {
+	back := -1
+	for i, p := range m.forks {
+		if p.EntryID == entryID {
+			back = len(m.forks) - 1 - i
+			break
+		}
+	}
+	if back < 0 {
+		// The id came from this list, so this is a row that has stopped
+		// existing under the picker. Saying so beats forking at nothing.
+		return m.notify("that message is no longer on the branch — ask again with /fork")
+	}
+	m.forkBack = back
+	return tea.Batch(m.agent.Fork(entryID), m.notify("branching at the message you picked"))
 }
 
 // foldForked reports the branch, and puts its message back in the editor.
@@ -469,6 +563,10 @@ func (m *Model) foldForkPoints(p agent.ForkPoints) tea.Cmd {
 // works to avoid. What is cut is not lost — it is in the session file the
 // branch was forked from.
 func (m *Model) foldForked(f agent.Forked) tea.Cmd {
+	// Consumed either way: a choice that was refused is not one to cut at when
+	// the next fork's acknowledgement arrives.
+	back := m.forkBack
+	m.forkBack = 0
 	if f.Cancelled {
 		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{
 			"an extension refused the branch — the session is unchanged",
@@ -484,7 +582,7 @@ func (m *Model) foldForked(f agent.Forked) tea.Cmd {
 	}
 	// Cut first — TruncateAt drops from the fork point on, so a notice
 	// appended before it would be cut with the branch it is describing.
-	if i := lastUserIndex(m.chat.Blocks()); i >= 0 {
+	if i := branchCut(m.chat.Blocks(), f.Text, back); i >= 0 {
 		m.chat.TruncateAt(i)
 	}
 	m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{line}})
@@ -1488,8 +1586,15 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.ov.Kind == overlay.Models {
 			m.wizard = "" // skipping the wizard's model step is a choice, not a stuck flag
 		}
+		// The fork picker is the one list whose esc decides something: the
+		// rows are branches not taken, so leaving has to say that nothing was
+		// forked — a picker that just vanishes reads as a key that did nothing.
+		fork := m.ov.Kind == overlay.Fork
 		m.ov = nil
 		m.mode = keymap.Insert
+		if fork {
+			return tea.Batch(m.prompt.Focus(), m.notify("no branch — the session is unchanged"))
+		}
 		return m.prompt.Focus()
 	}
 	if key.Matches(msg, k.Choose) {
@@ -1600,6 +1705,12 @@ func (m *Model) chooseOverlay() tea.Cmd {
 	}
 	id, ok := ov.Selected()
 	if !ok {
+		if ov.Kind == overlay.Fork {
+			// A filter that matches nothing, then enter: no row was chosen, so
+			// nothing is forked — and the reader is told, because returning in
+			// silence here looks like a key that does nothing.
+			return m.notify("no message chosen — the session is unchanged")
+		}
 		return nil
 	}
 	switch ov.Kind {
@@ -1637,6 +1748,12 @@ func (m *Model) chooseOverlay() tea.Cmd {
 		// Applying stays in the surface too, for the same reason: the rows
 		// are already re-rendered, so trying the whole list is one visit.
 		return m.pickTheme(strings.TrimPrefix(id, "theme:"))
+	case overlay.Fork:
+		// The picker closes on the choice — a branch is a move, not a
+		// preference to try on, and there is one of it to make.
+		m.ov = nil
+		m.mode = keymap.Insert
+		return tea.Batch(m.prompt.Focus(), m.forkAt(strings.TrimPrefix(id, "fork:")))
 	default:
 		m.ov = nil
 		m.mode = keymap.Insert
@@ -1708,13 +1825,15 @@ func (m *Model) compact(instructions string) tea.Cmd {
 	return tea.Batch(m.agent.Compact(instructions), m.notify("asked the agent to compact the context"))
 }
 
-// fork branches the session at the message you last sent.
+// fork branches the session at the message the reader chooses.
 //
-// The smallest honest slice of session branching: pi is asked which of its
-// messages a branch can start from, the newest one is forked, and the message
-// comes back into the editor to be edited and sent — which is what a branch is
-// for. Which message to fork from, the session tree, and naming a branch are
-// not built; the answer this uses is the same list a picker would need.
+// pi is asked which of its messages a branch can start from; the answer opens
+// the picker (foldForkPoints), and what the reader picks is what is forked. The
+// ask is the whole round trip — the interface cannot enumerate those messages
+// itself, because a fork point is an entry id only pi can mint.
+//
+// The session tree, and naming a branch, are not built: a fork is one step of
+// the family this belongs to, and it is the step the picker completes.
 func (m *Model) fork() tea.Cmd {
 	if !m.liveAgent() {
 		return m.notify("branching is the agent's to do — no agent is attached")
@@ -1723,7 +1842,7 @@ func (m *Model) fork() tea.Cmd {
 		return m.notify("the agent is working — branch when the turn ends")
 	}
 	m.awaitingFork = true
-	return tea.Batch(m.agent.ForkPoints(), m.notify("finding the message to branch from"))
+	return tea.Batch(m.agent.ForkPoints(), m.notify("finding where a branch can start"))
 }
 
 func entryBlock(e session.Entry) *chat.Block {

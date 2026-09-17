@@ -157,7 +157,7 @@ func TestATreeOverlayDelegatesToTheTree(t *testing.T) {
 }
 
 func TestKindNamesAreLowercaseForTheRule(t *testing.T) {
-	for k, want := range map[Kind]string{Palette: "palette", Sessions: "sessions", Help: "keys", None: ""} {
+	for k, want := range map[Kind]string{Palette: "palette", Sessions: "sessions", Help: "keys", Fork: "fork", None: ""} {
 		if k.String() != want {
 			t.Fatalf("Kind(%d) = %q, want %q", k, k.String(), want)
 		}

@@ -357,12 +357,16 @@ func TestCompactingOfflineSaysWhoDoesIt(t *testing.T) {
 	}
 }
 
-// TestForkBranchesAtTheLastMessageAndHandsItBack is the whole slice: ask which
-// messages a branch can start from, branch at the newest one, and put that
-// message back in the editor — which is what a branch is for. The transcript is
-// cut back with it, because the branch does not contain the turns that came
-// after it, and leaving them on screen would show a conversation the model no
-// longer has.
+// TestForkBranchesAtTheLastMessageAndHandsItBack is the original slice, kept
+// whole: ask which messages a branch can start from, branch at the newest one,
+// and put that message back in the editor — which is what a branch is for. The
+// transcript is cut back with it, because the branch does not contain the turns
+// that came after it, and leaving them on screen would show a conversation the
+// model no longer has.
+//
+// The newest message is what the picker opens on, so this is one enter away
+// from the branch it always was: the default IS the choice a reader who does
+// not choose makes.
 func TestForkBranchesAtTheLastMessageAndHandsItBack(t *testing.T) {
 	m, d := liveFixture(t, 100, 30)
 	typeIn(t, m, "make the parser stricter")
@@ -381,6 +385,7 @@ func TestForkBranchesAtTheLastMessageAndHandsItBack(t *testing.T) {
 		{EntryID: "abc123", Text: "an earlier prompt"},
 		{EntryID: "def456", Text: "make the parser stricter"},
 	}})
+	press(t, m, "enter") // the newest row is the one under the cursor
 	if got := d.Sent(); got[len(got)-1] != "fork def456" {
 		t.Fatalf("the fork must be at the newest message, got %q", got)
 	}
@@ -432,6 +437,7 @@ func TestARefusedForkLeavesTheSessionAlone(t *testing.T) {
 	typeIn(t, m, "/fork")
 	press(t, m, "enter")
 	m.Update(agent.ForkPoints{List: []agent.ForkPoint{{EntryID: "def456", Text: "make the parser stricter"}}})
+	press(t, m, "enter") // pick the one message there is
 	m.Update(agent.Forked{Text: "make the parser stricter", Cancelled: true})
 
 	// The only thing a refused branch may add is the line that says so: the

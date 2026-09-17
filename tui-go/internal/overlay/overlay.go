@@ -39,6 +39,12 @@ const (
 	// this package already draws. It is the one overlay whose rows are an
 	// answer rather than an action.
 	Dialog
+	// Fork is the branch picker: the messages a fork can start from, newest
+	// first. Its rows are actions like the palette's — enter branches at the
+	// row — and it is the one list whose esc decides something, because
+	// leaving it forks nothing. Appended rather than slotted in beside Themes
+	// so every Kind already in the wild keeps its number.
+	Fork
 )
 
 func (k Kind) String() string {
@@ -63,6 +69,8 @@ func (k Kind) String() string {
 		return "theme"
 	case Dialog:
 		return "dialog"
+	case Fork:
+		return "fork"
 	}
 	return ""
 }

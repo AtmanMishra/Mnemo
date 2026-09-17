@@ -19,7 +19,7 @@
                   │   /copy                        Y  copy the whole transcript  │                
   │ It reads flags│   /clear                                start a new session  │                
                   │   /compact  summarise the older turns to shrink the context  │                
-  ● ▸ read  limit=│   /fork     branch the session at the message you last sent  │           40 ln
+  ● ▸ read  limit=│   /fork        branch the session at the message you choose  │           40 ln
                   │   /commands        ask the agent for its command list again  │                
   ● ▸ bash  go tes│   /theme    pick the palette — saved to ~/.mnemo/theme.json  │          exit 1
                   ╰──────────────────────────────────────────────────────────────╯                

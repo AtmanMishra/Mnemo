@@ -201,6 +201,18 @@ type Model struct {
 
 	// awaitingFork is true while get_fork_messages is in flight.
 	awaitingFork bool
+
+	// forks is pi's answer while the picker is up: the rows are drawn from it
+	// and the branch is asked for from it, so the row under the cursor and the
+	// message the fork starts from cannot come from two different lists.
+	forks []agent.ForkPoint
+
+	// forkBack is how far the chosen message sits from the newest one, counted
+	// in messages the reader sent. It is held between the pick and pi's
+	// acknowledgement because that answer carries the message's words and the
+	// transcript has to be cut at its POSITION — the two only agree once the
+	// choice is remembered here.
+	forkBack int
 }
 
 // New builds the application.
