@@ -150,6 +150,79 @@ pub fn plan_search(ann_enabled: bool, live_nodes: usize) -> SearchPlan {
     }
 }
 
+/// `MNEMO_SEARCH_ANN=1|true|yes|on` — the opt-in, read from a value rather than
+/// from the environment so the routing can be tested without setting one.
+pub fn ann_requested(value: Option<&str>) -> bool {
+    matches!(
+        value.map(|v| v.trim().to_ascii_lowercase()).as_deref(),
+        Some("1") | Some("true") | Some("yes") | Some("on")
+    )
+}
+
+/// Live nodes: every node that has not been deleted. This is the number the
+/// ANN threshold is about — an index built over nodes nobody can retrieve
+/// amortises nothing.
+pub fn live_nodes(store: &StoreData) -> usize {
+    store.nodes.values().filter(|n| !n.deleted).count()
+}
+
+/// THE search entry point: decide the path, run it, and hand the decision back.
+///
+/// It exists because the decision and the search were separate for too long:
+/// `plan_search` was written, tested and never called, so `MNEMO_SEARCH_ANN`
+/// was a switch that did nothing and the ANN path was unreachable from the
+/// server while looking reachable from the tests. One caller, one decision,
+/// and the reason travels with the results.
+///
+/// `live_nodes` is a parameter rather than a count taken here so the routing
+/// is testable at the boundary that matters without building a graph of
+/// `ANN_MIN_NODES` nodes to exercise it.
+#[allow(clippy::too_many_arguments)]
+pub fn search_routed(
+    store: &StoreData,
+    vectors: &HashMap<NodeId, Vec<f32>>,
+    emb: &dyn Embedder,
+    query: &str,
+    k: usize,
+    now: Millis,
+    opts: &SearchOpts,
+    ann_enabled: bool,
+    live: usize,
+) -> (Vec<SearchResult>, SearchPlan) {
+    let plan = plan_search(ann_enabled, live);
+    let results = search_with_path(store, vectors, emb, query, k, now, opts, plan.path);
+    (results, plan)
+}
+
+/// Run the search the plan chose. Split out from `search_routed` because a
+/// cache HIT has no search to run but still has a request to answer: the plan
+/// is computed once per request (it is pure) and the caller reports it either
+/// way, so the response says which path this query is served by even when the
+/// answer came from the cache.
+#[allow(clippy::too_many_arguments)]
+pub fn search_with_path(
+    store: &StoreData,
+    vectors: &HashMap<NodeId, Vec<f32>>,
+    emb: &dyn Embedder,
+    query: &str,
+    k: usize,
+    now: Millis,
+    opts: &SearchOpts,
+    path: SeedPath,
+) -> Vec<SearchResult> {
+    match path {
+        SeedPath::Ann => {
+            // Built here, per search: hnsw_rs assigns layers from OS entropy
+            // and inserts in parallel, so a cached index would be a different
+            // graph per process anyway. Only above `ANN_MIN_NODES` and only
+            // when asked for, which is the whole point of the threshold.
+            let index = crate::ann::AnnIndex::build(vectors);
+            search_ann(store, &index, emb, query, k, now, opts)
+        }
+        SeedPath::Brute => search(store, vectors, emb, query, k, now, opts),
+    }
+}
+
 /// ML-2: retrieval-score bias per net usefulness vote (`useful - unhelpful`).
 /// Small on purpose: it breaks near-ties toward nodes the agent/user actually
 /// found useful, but never outranks a genuinely better match. With zero votes
@@ -252,7 +325,6 @@ fn passes_filter(store: &StoreData, id: NodeId, opts: &SearchOpts) -> bool {
 /// Search v1: brute-force cosine seeds + graph expansion (exact; fine to ~100k
 /// nodes). This is the default and the fallback; `memsrv` routes through
 /// `search_ann` only behind `MNEMO_SEARCH_ANN=1` + `ANN_MIN_NODES` (`plan_search`).
-#[allow(dead_code)]
 pub fn search(
     store: &StoreData,
     vectors: &HashMap<NodeId, Vec<f32>>,

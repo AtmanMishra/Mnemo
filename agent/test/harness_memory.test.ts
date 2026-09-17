@@ -51,8 +51,9 @@ test("indexes a harness as a Procedural Harness node with manifest facts", async
   const facts = client.calls.slice(1).map((c) => c.params);
   assert.deepEqual(facts, [
     { node: 5, key: "description", value: "debug a broken cluster" },
-    { node: 5, key: "tool", value: "kubectl_watch" },
-    { node: 5, key: "tool", value: "helm_status" },
+    // the tool list is a set, so those writes opt out of supersession
+    { node: 5, key: "tool", value: "kubectl_watch", append: true },
+    { node: 5, key: "tool", value: "helm_status", append: true },
     { node: 5, key: "location", value: "/tmp/.agents/skills/k8s-debug" },
     { node: 5, key: "bundle", value: "k8s-debug@1" },
   ]);

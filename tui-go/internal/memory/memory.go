@@ -26,7 +26,12 @@ import (
 // Timeout bounds every request. memsrv loads and replays a journal at start
 // up, so the first call can be slow; a hung sidecar must not hang the
 // interface.
-const Timeout = 10 * time.Second
+//
+// A variable rather than a constant because an operator sets it: the value
+// here is the built-in default, and ~/.mnemo/limits.json ("memory_timeout")
+// changes it without a rebuild (internal/limits). Open reads it, so the value
+// in force when the client starts is the one every call waits on.
+var Timeout = 10 * time.Second
 
 // Node is one memory: what it is about, which brain area it lives in, and how
 // much it actually knows.
@@ -62,8 +67,9 @@ type Client struct {
 	waiters map[int]chan reply
 	readErr error // set once, when the sidecar's output ended
 
-	// callTimeout bounds each request; Timeout is the default. A field (not
-	// the const) so a test can time out in milliseconds, not seconds.
+	// callTimeout bounds each request; Timeout is the default, and Open
+	// snapshots it. A field (not the package variable) so a test can time
+	// out in milliseconds, not seconds.
 	callTimeout time.Duration
 }
 
@@ -451,12 +457,14 @@ func (c *Client) Forget(id int) (string, error) {
 
 // --- writes -------------------------------------------------------------
 
-// AddFact appends one fact to a memory and returns its id (HANDOFF §5).
+// AddFact writes one fact to a memory and returns its id (HANDOFF §5).
 //
-// The journal is append-only: nothing here rewrites history, so a "corrected"
-// re-statement lands as a new fact. The old line stays active — this matches
-// how the agent writes facts (memory_write_fact) — while the true replacement
-// mechanism, supersede, is Steer's fix: it needs the id AddFact returns.
+// The journal is append-only and nothing here rewrites history, but the write
+// path does supersede: a fact written under a key that already has a current
+// value on that node REPLACES it — one value answers a later read, and the
+// replaced value keeps its text and gains `superseded_by` rather than
+// disappearing (readable through the sidecar's `history` op). Steer's fix is
+// the same supersede, reached from a failure that names the fact to correct.
 func (c *Client) AddFact(node int, key, value string) (int, error) {
 	res, err := c.Call("fact", map[string]any{"node": node, "key": key, "value": value})
 	if err != nil {

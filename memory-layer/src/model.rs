@@ -57,6 +57,11 @@ pub enum FactStatus {
     Superseded,
 }
 
+/// A key/value fact. `Active` means it answers a query NOW; a key has at most
+/// one `Active` value per node ("supersede, never delete" — #24). A
+/// `Superseded` fact keeps its id, key and value for good and points at the
+/// value that replaced it through `superseded_by`, so history is readable
+/// (`memsrv`'s `history` op) without ever answering as if it were current.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fact {
     pub id: u64,

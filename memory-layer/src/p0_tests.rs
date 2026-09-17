@@ -53,6 +53,39 @@ mod p0 {
     }
 
     #[test]
+    fn superseding_a_key_retires_every_live_copy_and_replays_exact() {
+        // #24: the write path used to append, so a journal can hold two live
+        // values under one key — the ambiguity a model was handed. Superseding
+        // is the repair: the new value is the only active one, the older copies
+        // keep their text and name what replaced them, and replaying the same
+        // ops lands in the same state.
+        let mut s = StoreData::new();
+        let t = now();
+        let ops = vec![
+            Op::CreateNode { id: 1, kind: NodeKind::Aspect, label: "repo conventions".into(), at: t },
+            Op::AddFact { node: 1, fact_id: 1, key: "package manager".into(), value: "use npm".into(), at: t },
+            Op::AddFact { node: 1, fact_id: 2, key: "package manager".into(), value: "use pnpm".into(), at: t + 1 },
+            Op::SupersedeFact { node: 1, old_fact: 1, new_key: "package manager".into(),
+                new_value: "use bun".into(), new_fact_id: 3, at: t + 2 },
+        ];
+        for op in &ops { s.apply(op).unwrap(); }
+
+        let facts = &s.nodes[&1].facts;
+        let live: Vec<&Fact> = s.nodes[&1].active_facts().collect();
+        assert_eq!(live.len(), 1, "one value answers a query: {facts:?}");
+        assert_eq!(live[0].value, "use bun");
+        assert_eq!(facts.len(), 3, "supersede never deletes: {facts:?}");
+        for f in facts.iter().filter(|f| f.status == FactStatus::Superseded) {
+            assert_eq!(f.superseded_by, Some(3), "each retired value names its replacement: {f:?}");
+        }
+
+        let mut replayed = persist::replay(&ops).unwrap();
+        assert_eq!(replayed.nodes[&1].active_facts().count(), 1);
+        assert_eq!(replayed.state_of(1).unwrap(), s.state_of(1).unwrap(),
+            "replay(ops) == state, supersession included");
+    }
+
+    #[test]
     fn journal_roundtrip_exact() {
         let dir = std::env::temp_dir().join("memlayer-test");
         let _ = std::fs::remove_dir_all(&dir);

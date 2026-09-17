@@ -384,7 +384,7 @@ export const MEMORY_DIRECTIVE = [
   "## Persistent memory",
   "You have long-term memory tools: memory_search, memory_write_fact, memory_steer.",
   "- Relevant memory is retrieved for you and appended below when there is any. Call memory_search yourself when that block is missing or does not cover what you need — never claim you lack information without searching first.",
-  "- When you learn a durable fact (stack decisions, fixes that worked or failed, credentials locations), store it via memory_write_fact.",
+  "- When you learn a durable fact (stack decisions, fixes that worked or failed, credentials locations), store it via memory_write_fact. A key holds one current value: when a stored fact changes, write it under the same key again — that replaces the old value instead of leaving two versions of it for a later session to choose between.",
 ].join("\n");
 
 function usageTokens(text: string): Set<string> {
@@ -581,12 +581,20 @@ export async function indexHarness(
   client: Pick<MemClient, "request">,
   bundle: HarnessIndexInput,
 ): Promise<{ ok: true; node: number } | { ok: false; error: string }> {
-  const facts: Array<[string, string]> = [
-    ["description", bundle.description ?? ""],
-    ...(bundle.tools ?? []).map((t): [string, string] => ["tool", t]),
+  // A harness's tool list is the one SET-valued thing here: several values
+  // under one `tool` key, none of which replaces another, so those writes opt
+  // out of supersession explicitly. Everything else is single-valued — a
+  // re-index replaces the previous value instead of leaving two live copies
+  // under one key (supersede, never delete).
+  type FactWrite = { key: string; value: string; append?: boolean };
+  const facts: FactWrite[] = [
+    { key: "description", value: bundle.description ?? "" },
+    ...(bundle.tools ?? [])
+      .filter((t) => t)
+      .map((t): FactWrite => ({ key: "tool", value: t, append: true })),
   ];
-  if (bundle.dir) facts.push(["location", bundle.dir]);
-  if (bundle.bundleId) facts.push(["bundle", bundle.bundleId]);
+  if (bundle.dir) facts.push({ key: "location", value: bundle.dir });
+  if (bundle.bundleId) facts.push({ key: "bundle", value: bundle.bundleId });
   try {
     const created = await client.request("create_node", {
       kind: "harness",
@@ -595,10 +603,12 @@ export async function indexHarness(
     });
     if (!created.ok) return { ok: false, error: created.error ?? "create_node failed" };
     const node = Number(created.result?.node);
-    for (const [key, value] of facts) {
-      if (!value) continue;
-      const f = await client.request("fact", { node, key, value });
-      if (!f.ok) return { ok: false, error: `fact ${key}: ${f.error}` };
+    for (const f of facts) {
+      if (!f.value) continue;
+      const params: Record<string, unknown> = { node, key: f.key, value: f.value };
+      if (f.append) params.append = true;
+      const res = await client.request("fact", params);
+      if (!res.ok) return { ok: false, error: `fact ${f.key}: ${res.error}` };
     }
     return { ok: true, node };
   } catch (err) {
@@ -687,7 +697,10 @@ export function makeMemoryTools(client: MemClient = sharedMem, state: LifecycleS
       label: "Memory write fact",
       description:
         "Attach a key/value fact to a memory node. Creates a fresh aspect node (label defaults " +
-        "to the key) when no node id is given.",
+        "to the key) when no node id is given. Writing a key that already has a value on that " +
+        "node REPLACES it: one current value answers a later recall, and the replaced one is " +
+        "kept as history — so record a changed constraint by re-writing its key rather than " +
+        "adding a second copy of it.",
       parameters: writeFactParams,
       async execute(_id: string, params: any) {
         await ensureEpisode(client, state);
@@ -702,9 +715,16 @@ export function makeMemoryTools(client: MemClient = sharedMem, state: LifecycleS
         }
         const res = await client.request("fact", { node: nodeId, key: params.key, value: params.value });
         if (!res.ok) throw new Error(`memory_write_fact: ${res.error}`);
+        const superseded = res.result.superseded;
         return {
-          content: [{ type: "text", text: `fact ${res.result.fact} written to node ${nodeId}` }],
-          details: { node: nodeId, fact: res.result.fact },
+          content: [{
+            type: "text",
+            text: superseded
+              ? `fact ${res.result.fact} written to node ${nodeId}, replacing fact ${superseded} ` +
+                "(one current value per key; the replaced value is kept as history)"
+              : `fact ${res.result.fact} written to node ${nodeId}`,
+          }],
+          details: { node: nodeId, fact: res.result.fact, superseded: superseded ?? null },
         };
       },
     },

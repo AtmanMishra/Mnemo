@@ -162,6 +162,26 @@ mod state_memo_tests {
     }
 
     #[test]
+    fn supersede_invalidates_the_memo_too() {
+        // #24: superseding moves a value OUT of the facts block, so a memo left
+        // warm from before the write would keep handing the model the value it
+        // just replaced — the exact staleness the issue is about, one layer up.
+        let mut s = base();
+        let before = s.state_of(1).unwrap();
+        assert!(before.contains("nginx rewrite-target annotation"));
+
+        s.apply(&Op::SupersedeFact { node: 1, old_fact: 1,
+            new_key: "rewrite".into(), new_value: "middleware path rewrites only".into(),
+            new_fact_id: 2, at: t() + 5 }).unwrap();
+        let after = s.state_of(1).unwrap();
+
+        assert!(after.contains("middleware path rewrites only"), "{after}");
+        assert!(!after.contains("nginx rewrite-target annotation"),
+            "the retired value must leave the rendered state: {after}");
+        assert!(after.contains("1 retired value"), "{after}");
+    }
+
+    #[test]
     fn edge_only_ops_do_not_invalidate_state() {
         // state_of reads facts/log/context only; edge rows are not part of
         // the derived text, so Link/unlink/reweight must leave it identical.

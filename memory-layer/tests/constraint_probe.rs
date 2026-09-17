@@ -94,6 +94,12 @@ impl Srv {
             .unwrap_or_default()
     }
 
+    /// Every fact the node ever had, current and retired, with the status and
+    /// the `superseded_by` that say which is which.
+    fn history(&mut self, id: u32, node: u64) -> serde_json::Value {
+        self.call(id, "history", serde_json::json!({"node": node}))
+    }
+
     /// The state text of the top hit — what a model would actually be handed.
     fn top_state(&mut self, id: u32, q: &str) -> String {
         let res = self.call(id, "search", serde_json::json!({"query": q, "k": 3}));
@@ -195,37 +201,47 @@ fn a_constraint_stated_once_is_recalled_later() {
 /// one visibly retired — the knowledge-update case, and the one a naive
 /// append-only memory gets wrong by returning both.
 ///
-/// IGNORED, and this is a finding rather than a skip: the write path does not
-/// supersede. `memsrv`'s `fact` op appends, so after the constraint changes the
-/// state handed to the model is
+/// The probe found this on its first run and filed it: `memsrv`'s `fact` op
+/// appended, so after the constraint changed the state handed to the model was
 ///
 ///     facts:
 ///       - package manager: use npm in this repo; pnpm is not installed here
 ///       - package manager: use pnpm in this repo; the registry outage is over
 ///
 /// — two live instructions, one of them wrong, and nothing marking which. The
-/// steering path supersedes; the write path does not. Filed as its own issue;
-/// run `cargo test --test constraint_probe -- --ignored` to watch it fail.
+/// write path now supersedes, as the steering path always did: one current
+/// value answers a live query, and the retired one is kept (status superseded,
+/// `superseded_by` pointing at what replaced it) rather than deleted, which is
+/// what `history` returns and what the journal held all along.
 #[test]
-#[ignore = "found by this probe: same-key writes append instead of superseding (see the issue it filed)"]
 fn a_changed_constraint_returns_the_new_value_and_retires_the_old() {
-    let mut s = spawn(&journal("changed"));
+    let jpath = journal("changed");
+    let mut s = spawn(&jpath);
     let n = s.node(1, "repo conventions");
-    s.fact(
+    let first = s.call(
         2,
-        n,
-        "package manager",
-        "use npm in this repo; pnpm is not installed here",
-    );
+        "fact",
+        serde_json::json!({
+            "node": n, "key": "package manager",
+            "value": "use npm in this repo; pnpm is not installed here"
+        }),
+    )["fact"]
+        .as_u64()
+        .expect("the first write returns its fact id");
 
     // Same key, new value: supersession, not an append.
-    s.call(
+    let second = s.call(
         3,
         "fact",
         serde_json::json!({
             "node": n, "key": "package manager",
             "value": "use pnpm in this repo; the registry outage is over"
         }),
+    );
+    assert_eq!(
+        second["superseded"].as_u64(),
+        Some(first),
+        "a same-key write must name the fact it supersedes: {second}"
     );
 
     let state = s.top_state(4, "which package manager should I use here");
@@ -236,6 +252,64 @@ fn a_changed_constraint_returns_the_new_value_and_retires_the_old() {
     assert!(
         !state.contains("use npm in this repo"),
         "the retired value must not be presented as a live instruction: {state:?}"
+    );
+    assert!(
+        state.contains("retired") && state.contains("current"),
+        "the answer must say which value is current and that the other is kept: {state:?}"
+    );
+
+    // Supersede, never delete: the old value is still there, marked retired and
+    // pointing at what replaced it. Exactly one fact under the key is active.
+    let hist = s.history(5, n);
+    let facts = hist["facts"].as_array().expect("history lists facts");
+    assert_eq!(facts.len(), 2, "both versions must survive: {hist}");
+    let live: Vec<&serde_json::Value> = facts
+        .iter()
+        .filter(|f| f["status"] == "active")
+        .collect();
+    let retired: Vec<&serde_json::Value> = facts
+        .iter()
+        .filter(|f| f["status"] == "superseded")
+        .collect();
+    assert_eq!(live.len(), 1, "exactly one value answers a live query: {hist}");
+    assert_eq!(retired.len(), 1, "the replaced value is kept as history: {hist}");
+    assert_eq!(live[0]["id"].as_u64(), Some(second["fact"].as_u64().unwrap()));
+    assert!(
+        live[0]["value"].as_str().unwrap().contains("pnpm"),
+        "the live value is the new one: {hist}"
+    );
+    assert_eq!(
+        retired[0]["id"].as_u64(),
+        Some(first),
+        "the retired value keeps its own id: {hist}"
+    );
+    assert!(
+        retired[0]["value"].as_str().unwrap().contains("use npm"),
+        "the retired value keeps its text: {hist}"
+    );
+    assert_eq!(
+        retired[0]["superseded_by"].as_u64(),
+        live[0]["id"].as_u64(),
+        "the retired value records what replaced it: {hist}"
+    );
+
+    // And the write is on the journal as a supersede, not an append: a cold
+    // replay reproduces the same one-current-value graph, retired value and all.
+    let ops = memory_layer::persist::Journal::read_all(&jpath).expect("read the journal");
+    let mut replayed = memory_layer::store::StoreData::new();
+    for op in &ops {
+        replayed.apply(op).expect("replay");
+    }
+    let facts = &replayed.nodes[&n].facts;
+    assert_eq!(
+        replayed.nodes[&n].active_facts().count(),
+        1,
+        "replay must leave exactly one current value: {facts:?}"
+    );
+    assert_eq!(facts.len(), 2, "replay keeps both values: {facts:?}");
+    assert!(
+        ops.iter().any(|op| matches!(op, memory_layer::model::Op::SupersedeFact { .. })),
+        "the change must be journaled as a supersede: {ops:?}"
     );
 }
 

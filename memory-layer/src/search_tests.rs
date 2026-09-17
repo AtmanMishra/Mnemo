@@ -31,6 +31,69 @@ mod p1 {
         s
     }
 
+    // --- the routing switch (#5) ------------------------------------------
+    //
+    // The switch existed as a decision function with no caller: `plan_search`
+    // was written, tested and never invoked, so `MNEMO_SEARCH_ANN=1` was a
+    // flag that did nothing and the ANN path was unreachable from the server
+    // while looking reachable from its own tests. These tests pin the routing
+    // at the entry point the server actually calls, so that cannot recur
+    // silently: turning the switch on must change the path that runs.
+
+    fn routed(ann: bool, live: usize) -> (Vec<crate::search::SearchResult>, crate::search::SearchPlan) {
+        use crate::search::search_routed;
+        let s = store_with(&[]);
+        let emb = HashingEmbedder;
+        let vectors = build_vectors(&s, &emb);
+        search_routed(&s, &vectors, &emb, "helm rollback", 3, t(), &SearchOpts::default(), ann, live)
+    }
+
+    #[test]
+    fn the_switch_off_means_the_exact_path_and_says_how_to_turn_it_on() {
+        let (hits, plan) = routed(false, 100_000);
+        assert_eq!(plan.path, crate::search::SeedPath::Brute);
+        assert!(plan.why.contains("MNEMO_SEARCH_ANN=1"), "the reason must name the switch: {}", plan.why);
+        assert!(!hits.is_empty(), "the brute path still answers");
+    }
+
+    #[test]
+    fn the_switch_on_below_the_threshold_stays_exact_and_says_why() {
+        let (hits, plan) = routed(true, crate::search::ANN_MIN_NODES - 1);
+        assert_eq!(plan.path, crate::search::SeedPath::Brute);
+        assert!(plan.why.contains("would not amortise"), "the reason must explain the threshold: {}", plan.why);
+        assert!(!hits.is_empty());
+    }
+
+    #[test]
+    fn the_switch_on_above_the_threshold_runs_the_ann_path() {
+        let (hits, plan) = routed(true, crate::search::ANN_MIN_NODES);
+        assert_eq!(plan.path, crate::search::SeedPath::Ann, "the flag must actually change the path");
+        assert!(plan.why.contains("HNSW"), "the reason must name the path that ran: {}", plan.why);
+        assert!(!hits.is_empty(), "the ANN path answers too — an empty result would be a silent failure");
+    }
+
+    #[test]
+    fn the_switch_is_read_leniently_and_never_guesses() {
+        use crate::search::ann_requested;
+        for on in ["1", "true", "TRUE", " yes ", "on"] {
+            assert!(ann_requested(Some(on)), "{on:?} must be read as on");
+        }
+        for off in ["", "0", "false", "no", "maybe", "2"] {
+            assert!(!ann_requested(Some(off)), "{off:?} must not be read as on");
+        }
+        assert!(!ann_requested(None), "unset is off");
+    }
+
+    #[test]
+    fn live_nodes_counts_what_can_be_retrieved() {
+        use crate::search::live_nodes;
+        let s = store_with(&[]);
+        assert_eq!(live_nodes(&s), 3);
+        let mut s2 = store_with(&[]);
+        s2.apply(&Op::DeleteNode { node: 2, hard: false, at: t() }).unwrap();
+        assert_eq!(live_nodes(&s2), 2, "a deleted node must not count toward the ANN threshold");
+    }
+
     #[test]
     fn embedder_is_deterministic_and_normalized() {
         let e = HashingEmbedder;

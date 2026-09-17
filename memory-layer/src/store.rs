@@ -3,6 +3,13 @@
 use crate::model::*;
 use std::collections::HashMap;
 
+/// Log kinds that record a FACT and repeat its value in `detail`. The facts
+/// block of `state_of` is the fact record — the current value per key — so these
+/// lines are not re-stated there: a value that has since been superseded would
+/// otherwise reach the model through a second path, unmarked (#24). They stay in
+/// the log on disk and come back verbatim from `history`.
+const FACT_LOG_KINDS: [&str; 2] = ["fact_added", "fact_superseded"];
+
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct StoreData {
     pub nodes: HashMap<NodeId, Node>,
@@ -57,15 +64,39 @@ impl StoreData {
                     .ok_or_else(|| format!("fact {old_fact} not on node {node}"))?;
                 old.status = FactStatus::Superseded;
                 old.superseded_by = Some(*new_fact_id);
+                // One current value per key (#24). Any OTHER fact still active
+                // under `new_key` is retired by this same replacement — it
+                // keeps its id and value and gains `superseded_by`, so nothing
+                // is deleted — because two live values under one key is the
+                // ambiguity that handed a model both versions of a changed
+                // constraint. This also converges data written before the
+                // write path superseded: the next write under that key
+                // retires every stale copy at once.
+                let mut also_retired = 0usize;
+                for f in n.facts.iter_mut() {
+                    if f.status == FactStatus::Active && f.key == *new_key {
+                        f.status = FactStatus::Superseded;
+                        f.superseded_by = Some(*new_fact_id);
+                        also_retired += 1;
+                    }
+                }
                 n.facts.push(Fact {
                     id: *new_fact_id, key: new_key.clone(), value: new_value.clone(),
                     status: FactStatus::Active, created_at: *at, superseded_by: None,
                 });
                 n.log.push(LogEntry {
                     at: *at, kind: "fact_superseded".into(),
-                    detail: format!("{} -> {}: {}", old_fact, new_fact_id, new_value),
+                    detail: if also_retired > 0 {
+                        format!("{} (+{also_retired} other live '{new_key}') -> {}: {}",
+                            old_fact, new_fact_id, new_value)
+                    } else {
+                        format!("{} -> {}: {}", old_fact, new_fact_id, new_value)
+                    },
                 });
                 self.next_fact = self.next_fact.max(new_fact_id + 1);
+                // superseding changes the node's derived text (a fact's status
+                // is what puts it in — or takes it out of — the facts block)
+                self.state_memo.remove(node);
             }
             Op::SetArea { node, area, at } => {
                 let n = self.get_mut(*node)?;
@@ -170,9 +201,32 @@ impl StoreData {
         for f in n.active_facts() {
             s.push_str(&format!("  - {}: {}\n", f.key, f.value));
         }
+        // #24: a key has one current value, so retired ones are NOT rendered as
+        // live instructions — two versions of a changed constraint with nothing
+        // marking which is current was the failure this fixes. They are still
+        // in the store (status Superseded, `superseded_by` set) and reachable
+        // through `history`; saying so here is what keeps supersede-never-delete
+        // visible instead of silent.
+        let retired = n.facts.len() - n.active_facts().count();
+        if retired > 0 {
+            let noun = if retired == 1 { "value" } else { "values" };
+            s.push_str(&format!(
+                "  ({retired} retired {noun} kept as history, not current — the facts above are the current answer)\n"
+            ));
+        }
         s.push_str("recent log:\n");
-        for l in n.log.iter().rev().take(5).collect::<Vec<_>>().iter().rev() {
-            s.push_str(&format!("  [{}] {}: {}\n", l.at, l.kind, l.detail));
+        // #24: the facts block above IS the fact record — the current value per
+        // key. A fact-write log line repeats a value that may since have been
+        // superseded, and that repeated copy is how the retired instruction got
+        // its second path into the model's prompt (nothing marked it as stale;
+        // the line was just a line). So those two kinds are not re-stated here:
+        // the current value is above, the retired ones are in `history`, and the
+        // log on disk is unchanged either way.
+        for l in n.log.iter()
+            .filter(|l| !FACT_LOG_KINDS.contains(&l.kind.as_str()))
+            .rev().take(5).collect::<Vec<_>>().iter().rev()
+        {
+            s.push_str(&format!("  [{}] {}: {}\\n", l.at, l.kind, l.detail));
         }
         s.push_str(&format!("context chunks: {}\n", n.context.len()));
         for c in &n.context {

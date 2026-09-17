@@ -7,7 +7,10 @@
 use memory_layer::model::*;
 use memory_layer::persist::{self, Journal};
 use memory_layer::remote::OpenRouterEmbedder;
-use memory_layer::search::{build_vectors, route_query, search, SearchOpts};
+use memory_layer::search::{
+    ann_requested, build_vectors, live_nodes, plan_search, route_query, search_with_path,
+    SeedPath, SearchOpts,
+};
 use memory_layer::cache::{normalize_query, touched_nodes, SearchCache, SearchKey, SEARCH_CACHE_CAP};
 use memory_layer::consolidate::consolidate;
 use memory_layer::steering::{reinforce, steer, Correction};
@@ -287,6 +290,10 @@ fn handle(
             let nodes: Vec<serde_json::Value> = s.nodes.values().filter(|n| !n.deleted).map(|n| json!({
                 "id": n.id, "kind": n.kind, "area": n.area, "label": n.label,
                 "facts": n.active_facts().count(),
+                // #24: superseded values are kept, so a listing that only
+                // counted live facts could not tell "one value" from "one
+                // value and three retired ones" — `history` returns those.
+                "retired": n.facts.len() - n.active_facts().count(),
                 "feeders": s.feeders_of(n.id, *clock).len(),
             })).collect();
             Ok(json!({ "nodes": nodes }))
@@ -295,6 +302,32 @@ fn handle(
         "state" => {
             let id = p_node(params, "node")?;
             Ok(json!({ "state": s.state_of(id)? }))
+        }
+
+        "history" => {
+            // #24: the other half of supersede-never-delete. `state` is the
+            // present — the current value per key, with nothing retired shown
+            // as if it were live; this is the record: every fact the node ever
+            // had, each with the status that says whether it still answers a
+            // query and the `superseded_by` that says what replaced it. Read
+            // only; the journal holds it with or without this call.
+            let id = p_node(params, "node")?;
+            let n = s.nodes.get(&id).ok_or_else(|| format!("node {id} missing"))?;
+            let facts: Vec<serde_json::Value> = n.facts.iter().map(|f| json!({
+                "id": f.id,
+                "key": f.key,
+                "value": f.value,
+                "status": match f.status {
+                    FactStatus::Active => "active",
+                    FactStatus::Superseded => "superseded",
+                },
+                "created_at": f.created_at,
+                "superseded_by": f.superseded_by,
+            })).collect();
+            let log: Vec<serde_json::Value> = n.log.iter().map(|l| json!({
+                "at": l.at, "kind": l.kind, "detail": l.detail,
+            })).collect();
+            Ok(json!({ "node": id, "label": n.label, "facts": facts, "log": log }))
         }
 
         "create_node" => {
@@ -325,8 +358,39 @@ fn handle(
             let key = params.get("key").and_then(|k| k.as_str()).ok_or("missing 'key'")?;
             let value = params.get("value").and_then(|v| v.as_str()).ok_or("missing 'value'")?;
             let fact_id = s.next_fact;
-            apply(s, j, Op::AddFact { node, fact_id, key: key.into(), value: value.into(), at: *clock })?;
-            Ok(json!({ "fact": fact_id }))
+            // #24: a key has ONE current value. A write under a key that
+            // already has one SUPERSEDES it — the old fact keeps its id, key
+            // and value with status `superseded` and `superseded_by` set, so
+            // history survives and `history` still returns it, but a live read
+            // answers with one value instead of two contradictory ones. This
+            // is what the steering path always did (`fix: {node, fact, ...}`);
+            // appending was the write path's bug, and after a changed
+            // constraint it handed the model both versions with nothing
+            // marking which was current.
+            //
+            // `append: true` is the explicit opt-out, only for a genuinely
+            // SET-VALUED key (a harness's tool list, where one key carries
+            // several values and none supersedes another). It is never the
+            // default: an append is how the ambiguity above got written.
+            let append = params.get("append").and_then(|a| a.as_bool()).unwrap_or(false);
+            let current = s.nodes.get(&node)
+                .and_then(|n| n.active_facts().find(|f| f.key == key).map(|f| f.id));
+            let superseded = match (append, current) {
+                (false, Some(old_fact)) => {
+                    apply(s, j, Op::SupersedeFact {
+                        node, old_fact, new_key: key.into(), new_value: value.into(),
+                        new_fact_id: fact_id, at: *clock,
+                    })?;
+                    Some(old_fact)
+                }
+                _ => {
+                    apply(s, j, Op::AddFact {
+                        node, fact_id, key: key.into(), value: value.into(), at: *clock,
+                    })?;
+                    None
+                }
+            };
+            Ok(json!({ "fact": fact_id, "superseded": superseded }))
         }
 
         "link" => {
@@ -373,12 +437,22 @@ fn handle(
             // the query/filter, so (query, areas, k) fully determines the
             // result. A hit skips routing+embed+scoring entirely.
             let key = SearchKey { query: normalize_query(query), areas: asked.clone(), k };
+            // The decision is pure and per-request, so it is taken once and
+            // reported either way: on a cache hit there is no search to run,
+            // but the caller still has to be told which path this query is
+            // served by and why — that is the difference between "ANN is on
+            // and did nothing" and "ANN is on but the graph is too small".
+            let plan = plan_search(
+                ann_requested(std::env::var("MNEMO_SEARCH_ANN").ok().as_deref()),
+                live_nodes(s),
+            );
             let (results, from_cache) = match cache.get(&key) {
                 Some((hits, _)) => (hits.clone(), "hit"),
                 None => {
                     let opts = SearchOpts::areas(asked).prefer(routed.clone());
                     let vectors = build_vectors(s, emb);
-                    let results = search(s, &vectors, emb, query, k, *clock, &opts);
+                    let results =
+                        search_with_path(s, &vectors, emb, query, k, *clock, &opts, plan.path);
                     // enrich hits with label + derived state so the caller can READ
                     // what was found (scores alone are useless to an LLM)
                     let enriched: Vec<serde_json::Value> = results.iter().map(|r| {
@@ -402,6 +476,11 @@ fn handle(
                 "results": results,
                 "routed": routed.iter().map(|a| format!("{a:?}")).collect::<Vec<_>>(),
                 "cache": from_cache,
+                "path": match plan.path {
+                    SeedPath::Ann => "ann",
+                    SeedPath::Brute => "brute",
+                },
+                "why": plan.why,
             }))
         }
 
@@ -532,7 +611,7 @@ fn handle(
             Ok(json!({ "forgot": node, "label": label }))
         }
 
-        other => Err(format!("unknown method '{other}' (supported: ping stats dump state create_node episode fact link unlink reweight record_outcome search recall_brief remember set_area forget steer good consolidate mark_useful)")),
+        other => Err(format!("unknown method '{other}' (supported: ping stats dump state history create_node episode fact link unlink reweight record_outcome search recall_brief remember set_area forget steer good consolidate mark_useful)")),
     }
 }
 
@@ -551,7 +630,15 @@ fn recall_brief(
 ) -> Result<String, String> {
     let opts = SearchOpts::areas(asked.to_vec()).prefer(routed.to_vec());
     let vectors = build_vectors(s, emb);
-    let results = search(s, &vectors, emb, query, k, now, &opts);
+    // The same decision the `search` method takes, taken the same way: recall
+    // is the path the agent actually reads through, so a switch that changed
+    // `search` but not `recall_brief` would be a switch that changes nothing
+    // anyone notices.
+    let plan = plan_search(
+        ann_requested(std::env::var("MNEMO_SEARCH_ANN").ok().as_deref()),
+        live_nodes(s),
+    );
+    let results = search_with_path(s, &vectors, emb, query, k, now, &opts, plan.path);
 
     let mut block = format!("[memory recall \"{query}\"]\n\n");
     block.push_str(&format!("routed areas: {}\n\n", area_names(routed)));
