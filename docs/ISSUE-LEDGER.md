@@ -27,6 +27,24 @@ Where a closing comment claims a fix the code does not contain, the entry says s
 - Test counts quoted are counts of `test(...)` / `func Test…` declarations where the issue
   gives a number, not of assertions.
 
+## Update since the snapshot (read this before the in-flight entries)
+
+The snapshot above caught the tree mid-write, and within the hour every item it called
+in-flight or unfixed had landed. The entries below still describe what was checked; this
+block is what changed, and supersedes them where they disagree:
+
+| commit | changes the entry for |
+| --- | --- |
+| `183a671` memory: a same-key write supersedes, and the ANN switch finally does something | **#24** (fixed: supersede + `history`, probe un-ignored, memeval byte-identical) and **#5** (the entry is right that the ANN path was dead — it is wired now, with routing tests, and the issue comment that claimed otherwise was written before the code caught up) |
+| `5974613` consent: stop the watcher holding the process open… | the `/yolo` work named as just-landed in the snapshot: the watcher no longer stops the process exiting, and the confirm fallback shows the call it is asking about |
+| `76992c4` tests: no literal python3, canonical temp paths, and a watcher that fires on command | **#1** (MCP tests resolve the interpreter; the %TEMP% 8.3 case canonicalises) and **#9** (scheduler injected; `start()` was also not awaited, which made a missed event look like a slow one) |
+| `2834405` tui-go: the timings are configurable, and yolo reaches the spawn | **#20** (the five timings resolve flag → env → file → default; `notice_for` remains parsed-but-unread for the reason the entry gives) |
+| `447d007` | this file |
+
+Nothing below has been rewritten to match: an entry that was true at the snapshot and false
+an hour later is a record of the tree the author could see, which is the only kind of record
+worth keeping. Where an entry says "uncommitted", read it as "uncommitted at the snapshot".
+
 ## Two rules, from this repo's own history
 
 1. **A claim of "fixed" needs a commit sha or a test name.** A few comments in this tracker

@@ -67,9 +67,14 @@ type Config struct {
 
 // NoticeFor is how long a one-off message stays in the status line.
 //
+// A var, not a const, because it is one of the interface's tunables
+// (~/.mnemo/limits.json, MNEMO_NOTICE_FOR, --notice-for): the value is set
+// once at startup by limits.Apply, and the default here is what applies when
+// nothing configures it.
+//
 // Without this, a command's result is overwritten by the next frame and every
 // chord looks like it did nothing.
-const NoticeFor = 5 * time.Second
+var NoticeFor = 5 * time.Second
 
 // Model is the whole application.
 type Model struct {

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/app"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/auth"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/limits"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/memory"
@@ -264,9 +265,11 @@ func keepTunables(t *testing.T) {
 	t.Helper()
 	list, key := auth.ListTimeout, auth.MinKeyLen
 	wait, rows, notice := memory.Timeout, prompt.MenuRows, limits.NoticeFor
+	window := app.NoticeFor
 	t.Cleanup(func() {
 		auth.ListTimeout, auth.MinKeyLen = list, key
 		memory.Timeout, prompt.MenuRows, limits.NoticeFor = wait, rows, notice
+		app.NoticeFor = window
 	})
 }
 
@@ -344,11 +347,15 @@ func TestRunAppliesTheConfiguredNumbers(t *testing.T) {
 	if auth.MinKeyLen != 4 {
 		t.Fatalf("auth.MinKeyLen = %d, want the file's 4", auth.MinKeyLen)
 	}
-	// The notice window is carried, not applied: app/model.go's constant is
-	// app/**'s to change, and until it reads this the interface keeps its
-	// five seconds. The key is resolved and validated all the same.
 	if limits.NoticeFor != 250*time.Millisecond {
 		t.Fatalf("limits.NoticeFor = %v, want the file's 250ms", limits.NoticeFor)
+	}
+	// The notice window is the one tunable the interface owns rather than a
+	// package under it, so it is pushed in beside limits.Apply — this asserts
+	// the push happened, because a value resolved correctly and never read is
+	// the exact failure this file exists to catch.
+	if app.NoticeFor != 250*time.Millisecond {
+		t.Fatalf("app.NoticeFor = %v, want the file's 250ms", app.NoticeFor)
 	}
 }
 

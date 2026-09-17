@@ -219,7 +219,13 @@ func run(o options) error {
 	// Applied before anything reads one of them: the prompt's menu height,
 	// the catalogue's bound and the memory client's snapshot are all taken
 	// from these values at the moment they are first used.
-	limits.Apply(tunables(o))
+	lim := tunables(o)
+	limits.Apply(lim)
+	// NoticeFor is the one tunable the interface owns rather than a package
+	// under it: app cannot import limits without the import going both ways,
+	// so the value is pushed in here, at the same moment and for the same
+	// reason as the rest.
+	app.NoticeFor = lim.NoticeFor
 	cfg := app.Config{Home: o.home, CWD: o.cwd, Dark: true, Mouse: mouseEnabled(os.Getenv(mouseEnv)),
 		MemsrvBin: o.memsrv, MemJournal: o.journal, HarnessDir: o.bundles, Repo: o.repo}
 

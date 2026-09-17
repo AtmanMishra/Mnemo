@@ -107,11 +107,12 @@ numbers. An unreadable layer is skipped rather than fatal — a typo in the
 environment does not throw away a good file, and a bad flag does not throw away
 either.
 
-One detail worth knowing: the notice window is the constant `NoticeFor` in
-`app/model.go:72` today. The key is parsed, validated and carried in
-`internal/limits.NoticeFor`, but the interface keeps its five seconds until that
-constant becomes a read of the resolved value — a one-line change in `app/**`,
-which is not this change's to make.
+One detail worth knowing: the notice window lives in `app`, not in a package
+under it, because `app` cannot import `internal/limits` without the import
+going both ways. `NoticeFor` in `app/model.go` is therefore a `var` set once at
+startup from the resolved value (`cmd/mnemo/main.go`, beside `limits.Apply`) —
+the same moment and the same reason as every other tunable. Setting it in a
+test is safe for the same reason: nothing reads it before `run()`.
 
 ## Pi-parity: the gap list
 
