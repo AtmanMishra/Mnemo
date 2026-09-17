@@ -19,7 +19,22 @@ cd self-evolving-agent
 ./scripts/install.sh              # macOS / Linux
 .\scripts\install.ps1             # Windows (PowerShell)
 
-# or do it by hand:
+Both are interactive onboarding, not a script that clones and hopes. They check
+your toolchain and show you a table of what they found, let you choose which
+components to install (the interface, the agent runtime, the memory sidecar, the
+harness engine), tell you exactly what they are about to run and ask, then
+install — and then **verify by rendering a frame**: `mnemo --version` and an
+offline `--dump`, reporting a failure if either does not exit 0.
+
+They are built on [gum](https://github.com/charmbracelet/gum) and bootstrap it
+themselves (`go install`, then a release download, then plain prompts), so gum is
+a nicer way to ask and never a requirement. `--yes` / `-Yes` takes the defaults
+with no questions, `--dry-run` / `-DryRun` prints every command without running
+one — which is also what happens automatically when there is no terminal, so
+nothing ever sits waiting for a keypress it will not get. Running either twice is
+safe. They create `~/.mnemo` if it is missing and never touch what is inside it.
+
+To install the pieces by hand instead:
 cd memory-layer && cargo build --bin memsrv   # the Memory pane talks to this
 cd ../agent && npm install                     # the agent the TUI drives
 cd ../tui-go && go build -o mnemo ./cmd/mnemo  # or drop the release binary here
