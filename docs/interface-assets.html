@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mnemo — interface assets</title>
+<style>
+  :root {
+    --bg: #12100e; --panel: #1b1815; --edge: #2c2620; --ink: #e8e0d4;
+    --muted: #8b8175; --accent: #d8a45c; --warn: #c9714a; --ok: #7fa66a;
+    --ship: #7fa66a; --flight: #d8a45c; --idea: #8b8175;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 32px 24px 80px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-size: 17px; margin: 40px 0 6px; color: var(--accent); }
+  h3 { font-size: 14px; margin: 22px 0 6px; color: var(--ink); }
+  p, li { color: #cfc6b8; }
+  .sub { color: var(--muted); margin: 0 0 4px; }
+  .term {
+    font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+    background: #0c0a09; border: 1px solid var(--edge); border-radius: 6px;
+    padding: 14px 16px; white-space: pre; overflow-x: auto; line-height: 1.35;
+    font-size: 13.5px;
+  }
+  .term.big { font-size: 17px; line-height: 1.3; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; }
+  td.mono, .mono { font-family: "Cascadia Mono", Consolas, monospace; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 600; border: 1px solid; }
+  .s-ship { color: var(--ship); border-color: var(--ship); }
+  .s-flight { color: var(--flight); border-color: var(--flight); }
+  .s-idea { color: var(--idea); border-color: var(--idea); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 800px) { .cols { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 8px; padding: 14px 16px; }
+  .grid { display: grid; gap: 4px; font-family: "Cascadia Mono", Consolas, monospace; }
+  .sprite { display: inline-grid; gap: 3px; margin-right: 18px; vertical-align: bottom; }
+  .sprite .cell { width: 13px; height: 26px; background: #241f1a; border-radius: 1px; position: relative; overflow: hidden; }
+  .sprite .cell .top, .sprite .cell .bot { position: absolute; left: 0; right: 0; height: 50%; }
+  .sprite .cell .top { top: 0; } .sprite .cell .bot { bottom: 0; }
+  .sprite .cell .full { position: absolute; inset: 0; }
+  .sprite .cell .quad { position: absolute; width: 50%; height: 50%; }
+  .cap { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+  .spring { height: 26px; background: #0c0a09; border: 1px solid var(--edge); border-radius: 4px; position: relative; margin: 6px 0 12px; }
+  .spring .dot { position: absolute; top: 4px; width: 18px; height: 18px; border-radius: 3px; background: var(--accent); transition: none; }
+  button {
+    background: #241f1a; color: var(--ink); border: 1px solid var(--edge);
+    border-radius: 5px; padding: 6px 13px; font: inherit; font-size: 13px; cursor: pointer; margin-right: 8px;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  .kv { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; color: var(--muted); }
+  .note { border-left: 2px solid var(--flight); padding-left: 12px; color: #cfc6b8; }
+  code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 13px; color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Mnemo — interface assets</h1>
+  <p class="sub">The visual vocabulary the redesign is being built from: glyphs, sprites, motion, and the thinking state.</p>
+  <p class="sub">Reference: <code>DESIGN.md §19 — the interface language</code>. Current-column values are generated from <code>tui-go/internal/theme/theme.go</code> by <code>docs/gen-assets.mjs</code>, so this page cannot drift from the code.</p>
+
+  <h2>The vocabulary</h2>
+  <p>Terminal pixel art is a technique, not a mood. Half-blocks give every cell two vertical pixels, so a figure is drawn in text. Four elements, and nothing is a one-off:</p>
+  <table>
+    <tr><th>Element</th><th>Characters</th><th>Used for</th></tr>
+    <tr><td>Blocks</td><td class="mono">▀ ▄ █ ▖ ▗ ▘ ▝ ▐ ▌</td><td>sprites: speakers, mascot, pulse</td></tr>
+    <tr><td>Box drawing</td><td class="mono">─ │ ┌ ┐ └ ┘ ├ ┤ ┏ ┓ ┗ ┛</td><td>chrome: panels, rules, trees</td></tr>
+    <tr><td>Dither ramp</td><td class="mono">░ ▒ ▓ █</td><td>depth and fade — never ornament</td></tr>
+    <tr><td>Space</td><td class="mono">·</td><td>the only thing that means “nothing here”</td></tr>
+  </table>
+  <div class="term big">▀▄█ ░▒▓█ ─│┌┐└┘ ├─└─ ▐█▌</div>
+
+  <h2>Speaker gutters — the current set, from the code</h2>
+  <p>These are the real values shipping today (generated above). Each is one character, and each is meant to tell you <em>who is speaking before you read a word</em>:</p>
+  <div class="term" id="current-gutters">Heavy — the shipping set:
+
+▊  you        U+258A
+│  agent      U+2502
+·  thinking   U+00B7
+●  tool       U+25CF
+
+ramp:    ░ ▒ ▓ █   (5 levels, lightest to densest)</div>
+  <p class="cap">The gutter is followed by a space, so a line costs two columns today. That is the budget the replacement has to fit inside — it may not widen the transcript.</p>
+
+  <h2>The target: block figures instead of letters</h2>
+  <p>Two columns, one row tall, built from blocks so the shape carries the meaning and colour only reinforces it. Three candidates — this is the part worth arguing about:</p>
+
+  <div class="cols">
+    <div class="card">
+      <h3>Set A — “carved”</h3>
+      <p class="cap">Solid marks, meander-adjacent. Reads as pottery stamps.</p>
+      <div class="term big">▐▌ person
+██ agent
+▒▒ thinking
+▌▐ tool</div>
+    </div>
+    <div class="card">
+      <h3>Set B — “blocky figures”</h3>
+      <p class="cap">Each gutter is a two-pixel silhouette of a thing.</p>
+      <div class="term big">▗▖ person
+▛▜ agent
+░▒ thinking
+▙▟ tool</div>
+    </div>
+    <div class="card">
+      <h3>Set C — “pixel pictograms”</h3>
+      <p class="cap">Half-blocks only: two pixels of information per cell.</p>
+      <div class="term big">▄▖ person
+█▀ machine
+░▄ thought
+▐▌ tool</div>
+    </div>
+  </div>
+
+  <h3>Block headers with a portrait</h3>
+  <p>The richer idea, and the one that earns the word <em>sprite</em>: the first line of a block carries a 2×2-cell portrait, and continuation lines carry the pipe. Two rows per <em>block</em> rather than per line, so it costs almost nothing and gives the transcript a face:</p>
+  <div class="term big">┌────────────────────────────────────────────
+│ <span style="color:var(--accent)">▄▖
+│ ▀▘</span>  you  · the gutter question
+│ █│  …
+│ █│  …
+│ <span style="color:var(--ok)">▗▄
+│ ▝▀</span>  agent · set C is the one that reads
+└────────────────────────────────────────────</div>
+
+  <h2>Mascots — three simple creatures</h2>
+  <p>The cat is being retired: it was detailed enough that nobody redrew it. These are 5×3 cells, drawn from half-blocks, each with an idle pose, a blink, a bob and a thinking pose. Hand-redrawable in thirty seconds is the test.</p>
+
+  <div class="cols">
+    <div class="card">
+      <h3>Crab — the reference register</h3>
+      <div id="m-crab"></div>
+      <p class="cap">Wide, low, obvious. The one to reach for when the splash needs to feel friendly.</p>
+    </div>
+    <div class="card">
+      <h3>Amphora — from the palette direction</h3>
+      <div id="m-amphora"></div>
+      <p class="cap">Upright and classical; reads as a vessel rather than an animal, which suits a memory system.</p>
+    </div>
+    <div class="card">
+      <h3>Owl — the one that watches</h3>
+      <div id="m-owl"></div>
+      <p class="cap">Two eyes already means “attention”; the thinking pose reuses them as the pulse.</p>
+    </div>
+  </div>
+  <p style="margin-top:16px">
+    <button onclick="playMascots()">Play idle · blink · bob · thinking</button>
+    <button onclick="stopMascots()">Stop</button>
+  </p>
+  <p class="cap">Frame changes do not resize: every frame of a sprite keeps its siblings’ dimensions, or the animation jitters the layout around it. That is a tested invariant, not a habit.</p>
+
+  <h2>Motion — springs, and when they stop</h2>
+  <p>Motion comes from <code>charm.land/harmonica</code> with one preset per <em>purpose</em> rather than per component. Below is the same physics the Go package will use, simulated live so the differences are visible:</p>
+
+  <div class="card">
+    <h3>snappy <span class="kv">— a block appearing, a fold opening</span></h3>
+    <div class="spring" id="s-snappy"><div class="dot"></div></div>
+    <h3>soft <span class="kv">— an overlay arriving or leaving</span></h3>
+    <div class="spring" id="s-soft"><div class="dot"></div></div>
+    <h3>slow <span class="kv">— the live indicator’s pulse</span></h3>
+    <div class="spring" id="s-slow"><div class="dot"></div></div>
+    <p><button onclick="playSprings()">Run all three</button></p>
+    <p class="kv" id="spring-readout">frames drawn: 0 — a spring that has settled asks for no more frames.</p>
+  </div>
+  <div class="note" style="margin-top:14px">
+    <p><strong>The rule that matters:</strong> the app asks one question — <em>does any spring still need a frame?</em> — and the redraw loop stops when the answer is no. An interface that repaints forever wakes the terminal, drains a battery, and makes “is it stuck?” unanswerable.</p>
+    <p><strong>And it is optional:</strong> <code>MNEMO_NO_ANIMATION=1</code> jumps every value straight to its target, and one tick reports itself settled. Terminals get recorded and read back.</p>
+  </div>
+
+  <h2>The thinking state</h2>
+  <p>Where the interface spends most of its time, and the least designed thing in it. Three changes: a live line while it works, folding that carries the real duration, and history that recedes along the dither ramp instead of switching to a second colour.</p>
+
+  <div class="term big" id="think-line">▚ thinking · 0.0s · bash_exec (2 calls)</div>
+  <p><button onclick="playThinking()">Run the live line</button><button onclick="stopThinking()">Stop</button></p>
+
+  <h3>Folding, with the number it actually took</h3>
+  <div class="term">▸ thought for 12s            <span style="color:var(--muted)">← collapsed: the duration is data from the stream</span>
+▾ thought for 12s
+  the constraint is about the port, not the host — check what
+  the config already says before asking again</div>
+  <p class="cap">The duration is measured, never reconstructed. A plausible-looking number that was invented is the kind of lie this project keeps having to fix.</p>
+
+  <h3>Depth through the ramp</h3>
+  <div class="term">█ most recent thought  — full weight
+▓ one turn ago
+▒ two turns ago
+░ three turns ago
+· older than that, folded away</div>
+
+  <h2>Logs — two kinds of thing, labelled</h2>
+  <p>The pane holds trace spans (a tree) and log lines (structured, level + key=value) and says which is which, because conflating them is how a diagnostic surface stops being useful:</p>
+  <div class="term"><span style="color:var(--muted)">─ spans ────────────────────────────────────────</span>
+● turn 2026-09-17T10:41Z  bash_exec  312ms
+  ├─ spawn   48ms
+  └─ exit 0
+<span style="color:var(--muted)">─ log ──────────────────────────────────────────</span>
+DBUG session attached        provider=opencode-go model=deepseek-v4.1
+INFO permission granted     pattern=npm test* scope=project
+WARN frame dropped          reason=spring-window-exceeded</div>
+  <p class="cap">Written to <code>~/.mnemo/logs/mnemo.log</code> — never to stdout, because a stray log line corrupts the frame the interface owns.</p>
+
+  <h2>Where each asset stands</h2>
+  <table id="status">
+    <tr><th>Asset</th><th>State</th><th>Evidence</th></tr>
+    <tr><td>This vocabulary, written down</td><td><span class="pill s-ship">landed</span></td><td class="mono">62834af · DESIGN.md §19</td></tr>
+    <tr><td>Glyph family + three mascots</td><td><span class="pill s-flight">in flight</span></td><td class="mono">internal/theme, internal/brand</td></tr>
+    <tr><td>internal/anim (harmonica springs)</td><td><span class="pill s-flight">in flight</span></td><td class="mono">charm.land/harmonica v0.2.0</td></tr>
+    <tr><td>Structured log (charm log v2)</td><td><span class="pill s-flight">in flight</span></td><td class="mono">charm.land/log/v2 v2.0.1</td></tr>
+    <tr><td>Thinking line, fold durations, ramp depth</td><td><span class="pill s-idea">proposed</span></td><td class="mono">held for wave 2 — touches app/view.go</td></tr>
+    <tr><td>Mouse, theme picker, /fork picker</td><td><span class="pill s-ship">landed</span></td><td class="mono">b965caf, 2f6135</td></tr>
+  </table>
+  <p class="cap">Everything above marked <em>proposed</em> or <em>in flight</em> is a target, not a description of the running binary. The candidate glyph sets and mascot poses on this page are hand-drawn for review; the ones that ship are built and tested in <code>internal/theme</code> and <code>internal/brand</code>, and the preview there is generated from that same data.</p>
+
+</div>
+
+<script>
+// --- sprites -------------------------------------------------------------
+// Each sprite is rows of cell specs. A cell is one of '', 'top', 'bot',
+// 'full' (half-block rows) or a quadrant. Rendered as divs so the browser
+// draws exactly what a terminal cell would.
+const C = { ' ': [], '▀': ['top'], '▄': ['bot'], '█': ['full'],
+            '▖': ['quad-bl'], '▗': ['quad-br'], '▘': ['quad-tl'], '▝': ['quad-tr'],
+            '▌': ['half-l'], '▐': ['half-r'],
+            '▛': ['quad-tl','quad-tr','quad-bl'], '▜': ['quad-tl','quad-tr','quad-br'],
+            '▙': ['quad-tl','quad-bl','quad-br'], '▟': ['quad-tr','quad-bl','quad-br'],
+            '░': ['d1'], '▒': ['d2'], '▓': ['d3'] };
+
+const MASCOTS = {
+  crab: {
+    idle:     [' ▄▖ ▗▄ ', '▐█████▌', '▝▀▀▀▀▀▘'],
+    blink:    [' ▄▖ ▗▄ ', '▐█▄▄█▌', '▝▀▀▀▀▀▘'],
+    bob:      ['▄▖   ▗▄', '▐█████▌', ' ▀▀▀▀▀ '],
+    thinking: [' ▄▖ ▗▄ ', '▐█▒▒█▌', '▝▀▀▀▀▀▘'],
+  },
+  amphora: {
+    idle:     [' ▗▄▖ ', '▐███▌', '▝▄▄▄▘', ' ▀▀▀ '],
+    blink:    [' ▗▄▖ ', '▐▄▄▄▌', '▝▄▄▄▘', ' ▀▀▀ '],
+    bob:      ['  ▄  ', '▐███▌', '▝▄▄▄▘', '▀▀▀▀▀'],
+    thinking: [' ▗▄▖ ', '▐█▒▌ ', '▝▄▄▄▘', ' ▀▀▀ '],
+  },
+  owl: {
+    idle:     ['▗▄▄▄▖', '██▀██', '▝█▀█▘', ' ▀▀▀ '],
+    blink:    ['▗▄▄▄▖', '█▄▀▄█', '▝█▀█▘', ' ▀▀▀ '],
+    bob:      [' ▄▄▄ ', '██▀██', '▝█▀█▘', '▀▀▀▀▀'],
+    thinking: ['▗▄▄▄▖', '█▒▀▒█', '▝█▀█▘', ' ▀▀▀ '],
+  },
+};
+
+function renderSprite(rows) {
+  const el = document.createElement('div');
+  el.className = 'sprite';
+  el.style.gridTemplateColumns = `repeat(${rows[0].length}, 13px)`;
+  for (const row of rows) {
+    for (const ch of row) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      for (const part of (C[ch] || [])) {
+        if (part === 'top' || part === 'bot') {
+          const d = document.createElement('div');
+          d.className = part;
+          d.style.background = 'var(--accent)';
+          cell.appendChild(d);
+        } else if (part === 'full') {
+          const d = document.createElement('div');
+          d.className = 'full';
+          d.style.background = 'var(--accent)';
+          cell.appendChild(d);
+        } else if (part.startsWith('quad-')) {
+          const d = document.createElement('div');
+          d.className = 'quad';
+          d.style.background = 'var(--accent)';
+          if (part.includes('tl')) { d.style.top = '0'; d.style.left = '0'; }
+          if (part.includes('tr')) { d.style.top = '0'; d.style.right = '0'; }
+          if (part.includes('bl')) { d.style.bottom = '0'; d.style.left = '0'; }
+          if (part.includes('br')) { d.style.bottom = '0'; d.style.right = '0'; }
+          cell.appendChild(d);
+        } else if (part === 'half-l' || part === 'half-r') {
+          const d = document.createElement('div');
+          d.className = 'full';
+          d.style.width = '50%';
+          d.style.background = 'var(--accent)';
+          if (part === 'half-r') { d.style.left = '50%'; }
+          cell.appendChild(d);
+        } else if (part.startsWith('d')) {
+          const d = document.createElement('div');
+          d.className = 'full';
+          const level = +part[1];
+          d.style.background = 'var(--accent)';
+          d.style.opacity = String(0.25 * level);
+          cell.appendChild(d);
+        }
+      }
+      el.appendChild(cell);
+    }
+  }
+  return el;
+}
+
+for (const [name, poses] of Object.entries(MASCOTS)) {
+  const host = document.getElementById('m-' + name);
+  if (host) host.appendChild(renderSprite(poses.idle));
+}
+
+let mascotTimer = null, pose = 0;
+const POSE_ORDER = ['idle', 'idle', 'blink', 'idle', 'bob', 'idle', 'thinking', 'idle'];
+function playMascots() {
+  stopMascots();
+  mascotTimer = setInterval(() => {
+    pose = (pose + 1) % POSE_ORDER.length;
+    for (const [name, poses] of Object.entries(MASCOTS)) {
+      const host = document.getElementById('m-' + name);
+      if (!host) continue;
+      host.replaceChildren(renderSprite(poses[POSE_ORDER[pose]]));
+    }
+  }, 420);
+}
+function stopMascots() { if (mascotTimer) clearInterval(mascotTimer); mascotTimer = null; }
+
+// --- springs -------------------------------------------------------------
+// The same update the Go package will run: semi-implicit Euler on a damped
+// harmonic oscillator, advanced at a fixed dt so a slow machine changes the
+// frame rate and never the motion.
+function makeSpring(angular, damping, dt) {
+  return { x: 0, v: 0, t: 0, angular, damping, dt };
+}
+function step(s, target) {
+  const f = -s.angular * s.angular * (s.x - target) - 2 * s.damping * s.angular * s.v;
+  s.v += f * s.dt;
+  s.x += s.v * s.dt;
+  s.t += s.dt;
+}
+function settled(s, target) { return Math.abs(s.x - target) < 0.01 && Math.abs(s.v) < 0.05; }
+
+const PRESETS = { snappy: { angular: 22, damping: 1.0 }, soft: { angular: 11, damping: 0.85 }, slow: { angular: 6, damping: 0.5 } };
+let springFrames = 0, springRAF = null, springs = [], springTarget = 1;
+
+function playSprings() {
+  if (springRAF) cancelAnimationFrame(springRAF);
+  springs = Object.entries(PRESETS).map(([name, p]) => ({ name, s: makeSpring(p.angular, p.damping, 1 / 60) }));
+  springFrames = 0; springTarget = 1;
+  const readout = document.getElementById('spring-readout');
+  let done = false;
+  const tick = () => {
+    if (done) return;
+    springFrames++;
+    let anyMoving = false;
+    for (const { name, s } of springs) {
+      step(s, springTarget);
+      if (!settled(s, springTarget)) anyMoving = true;
+      const host = document.getElementById('s-' + name);
+      const w = host.clientWidth - 24;
+      const dot = host.querySelector('.dot');
+      dot.style.left = (4 + Math.max(0, Math.min(1, s.x)) * w) + 'px';
+    }
+    readout.textContent = `frames drawn: ${springFrames} — a spring that has settled asks for no more frames.`;
+    if (!anyMoving) {
+      done = true;
+      springRAF = null;
+      readout.textContent = `frames drawn: ${springFrames} — all three settled, the loop stopped. It did not idle.`;
+      setTimeout(playSprings, 1400);
+      return;
+    }
+    springRAF = requestAnimationFrame(tick);
+  };
+  springRAF = requestAnimationFrame(tick);
+}
+
+// --- thinking line -------------------------------------------------------
+const GLYPHS = ['▚', '▞', '▚', '▞', '▙', '▛'];
+const CALLS = ['bash_exec', 'read_file', 'apply_edit', 'npm test'];
+let thinkTimer = null, thinkT0 = 0, thinkI = 0;
+function playThinking() {
+  stopThinking();
+  thinkT0 = performance.now();
+  thinkTimer = setInterval(() => {
+    const secs = ((performance.now() - thinkT0) / 1000);
+    const g = GLYPHS[thinkI++ % GLYPHS.length];
+    const calls = Math.floor(secs / 1.7) + 1;
+    const tool = CALLS[Math.floor(secs / 1.7) % CALLS.length];
+    document.getElementById('think-line').textContent =
+      `${g} thinking · ${secs.toFixed(1)}s · ${tool} (${calls} call${calls === 1 ? '' : 's'})`;
+  }, 110);
+}
+function stopThinking() {
+  if (thinkTimer) clearInterval(thinkTimer);
+  thinkTimer = null;
+}
+</script>
+</body>
+</html>
