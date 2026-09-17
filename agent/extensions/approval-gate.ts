@@ -33,9 +33,20 @@
  * "delegated" mode, so the in-tool readline gate auto-approves instead of
  * asking a second time on the TUI-owned stdin.
  */
+import * as os from "node:os";
 import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
 import { setDelegatedApproval } from "../src/approval.ts";
-import { DEFAULT_PERMISSIONS, loadPermissions, resolveAction, type Permissions } from "../src/permissions.ts";
+import {
+  DEFAULT_PERMISSIONS,
+  loadPermissions,
+  loadScopedPermissions,
+  permissionsFile,
+  projectPermissionsFile,
+  resolveAction,
+  subjectOf,
+  type Permissions,
+} from "../src/permissions.ts";
+import { mergeGrantedRules, similarPattern, watchGrants, writeGrant } from "../src/grants.ts";
 import { isPlanMode, planModeFromEnv, setPlanMode, withPlanMode, PLAN_MODE_REASON } from "../src/plan_mode.ts";
 
 export const GATED_TOOLS: ReadonlySet<string> = new Set([
@@ -43,6 +54,12 @@ export const GATED_TOOLS: ReadonlySet<string> = new Set([
   "write_file",
   "apply_edit",
   "ipy_run", // 0384ee03: a Python cell is bash wearing a kernel — same gate
+  // #7: a harness bundle is third-party tool code loaded into THIS process
+  // with our privileges. The loader validates the manifest; nothing stops the
+  // code. Treating the load as a gated call is what makes #7's "in-process
+  // with full privileges" a decision the operator makes rather than one we
+  // make for them — and in yolo it is answered once, at the top.
+  "harness",
 ]);
 
 /** Set on children spawned by spawn_subagent (see src/tools/subagent.ts). */
@@ -81,6 +98,81 @@ export interface ApprovalDecisionInput {
 }
 export interface ConfirmUI {
   confirm(title: string, message: string): Promise<boolean>;
+  /** pi's selector. Absent in older/plain contexts, hence optional. */
+  select?(title: string, options: string[], opts?: { timeoutMs?: number }): Promise<string | undefined>;
+  /** pi's text dialog, used for the "Other" answer. */
+  input?(title: string, placeholder?: string, opts?: { timeoutMs?: number }): Promise<string | undefined>;
+  /** Fire and forget; used to tell this session what another one decided. */
+  notify?(message: string, level?: string): void;
+}
+
+// --- the consent dialog's five answers ------------------------------------
+//
+// The labels are the contract between this file and the person: the two
+// "always" options NAME THE FILE they write, because "always" without a scope
+// is how a user ends up with a grant they cannot find. Matching is by prefix
+// (pi hands back the string it was given), so the parenthetical detail can
+// change without breaking the decision.
+
+export const ALLOW_ONCE = "Allow once";
+export const ALLOW_PROJECT = "Allow always in this project";
+export const ALLOW_GLOBAL = "Allow always, everywhere";
+export const DENY_ONCE = "Don't allow";
+export const OTHER = "Other — tell the agent what to do instead";
+
+/** The options for one call. See grants.ts for why "always" can be absent. */
+export function consentOptions(tool: string, subject: string): string[] {
+  const pattern = similarPattern(tool, subject);
+  if (pattern === null) {
+    // Many commands, or nothing to generalise: "always" would approve more
+    // than the user was shown. Offer the honest three.
+    return [ALLOW_ONCE, DENY_ONCE, OTHER];
+  }
+  return [
+    ALLOW_ONCE,
+    `${ALLOW_PROJECT} — stores ${pattern} in .mnemo/permissions.json`,
+    `${ALLOW_GLOBAL} — stores ${pattern} in ~/.mnemo/permissions.json`,
+    DENY_ONCE,
+    OTHER,
+  ];
+}
+
+export type ConsentOutcome =
+  | { kind: "once" }
+  | { kind: "grant"; scope: "project" | "global"; pattern: string }
+  | { kind: "deny" }
+  | { kind: "other"; text: string }
+  | { kind: "other"; text: null };
+
+/**
+ * Read one answer. Split out from decideApproval so the mapping from a chosen
+ * label to an outcome is testable without a UI, an event or a file system.
+ */
+export async function readConsent(
+  ui: ConfirmUI,
+  toolName: string,
+  subject: string,
+): Promise<ConsentOutcome> {
+  const options = consentOptions(toolName, subject);
+  const pattern = similarPattern(toolName, subject);
+  if (!ui.select) {
+    // A UI with only confirm() (older contexts, and the in-tool readline gate
+    // when it is driving): yes is "once", no is "do not allow". Never a grant —
+    // a y/n cannot express a scope, so it must not silently pick one.
+    return (await ui.confirm(`Approve ${toolName}?`, summarizeToolCall(toolName, { }))) ? { kind: "once" } : { kind: "deny" };
+  }
+  const choice = await ui.select(`Approve ${toolName}?`, options);
+  if (choice === undefined) return { kind: "deny" }; // dismissed: unanswered is not consent
+  if (choice.startsWith(ALLOW_PROJECT) && pattern) return { kind: "grant", scope: "project", pattern };
+  if (choice.startsWith(ALLOW_GLOBAL) && pattern) return { kind: "grant", scope: "global", pattern };
+  if (choice.startsWith(ALLOW_ONCE)) return { kind: "once" };
+  if (choice.startsWith(DENY_ONCE)) return { kind: "deny" };
+  // "Other": the operator writes the answer, so the model is corrected rather
+  // than merely stopped. An empty answer is a plain refusal.
+  const text = ui.input
+    ? (await ui.input("What should the agent do instead?", "e.g. use pnpm, not npm")) ?? null
+    : null;
+  return { kind: "other", text };
 }
 export interface ApprovalDecision {
   block?: boolean;
@@ -125,6 +217,9 @@ export async function decideApproval(
   // that calls this depend on the developer's real machine state.
   perms: Permissions = DEFAULT_PERMISSIONS,
   plan: boolean = isPlanMode(),
+  /** Where a project-scoped grant is stored. */
+  cwd: string = process.cwd(),
+  home?: string,
 ): Promise<ApprovalDecision> {
   perms = withPlanMode(perms, plan);
   // 4.3: rules are consulted for EVERY tool, not just the gated three — a deny
@@ -144,6 +239,11 @@ export async function decideApproval(
   if (action === "allow") return {};
 
   if (!GATED_TOOLS.has(ev.toolName)) return {}; // not gated
+
+  // YOLO: ask is allow. Checked AFTER deny (above) and after an explicit allow
+  // rule, so the mode can only ever relax a prompt — never a prohibition.
+  if (perms.yolo) return {};
+
   if (!approvalInteractive(env)) return {}; // mode off/0/unset: the force-approve hatch
 
   if (!uiAvailable) {
@@ -167,8 +267,28 @@ export async function decideApproval(
   }
 
   const summary = summarizeToolCall(ev.toolName, ev.input);
-  const ok = await ui.confirm(`Approve ${ev.toolName}?`, summary);
-  if (ok) return {};
+  const outcome = await readConsent(ui, ev.toolName, subjectOf(ev.toolName, ev.input));
+  if (outcome.kind === "once") return {};
+  if (outcome.kind === "grant") {
+    const file = writeGrant({ scope: outcome.scope, tool: ev.toolName, pattern: outcome.pattern, cwd, home });
+    ui.notify?.(
+      file
+        ? `allowed ${outcome.pattern} — written to ${file}`
+        : `allowed ${outcome.pattern} (already granted)`,
+    );
+    return {};
+  }
+  if (outcome.kind === "other" && outcome.text) {
+    // The operator's words go back to the model verbatim: a refusal the model
+    // cannot act on is a dead end, and the common case is "not like that, do
+    // it this way".
+    return {
+      block: true,
+      reason:
+        `ERROR: the operator did not approve ${ev.toolName}. Do NOT retry the same call. ` +
+        `They said: "${outcome.text}".`,
+    };
+  }
   return {
     block: true,
     reason: `ERROR: user denied ${ev.toolName}. Action was NOT executed: ${summary}`,
@@ -180,15 +300,77 @@ export async function decideApproval(
  * `perms` is injectable so tests do not read the developer's own
  * ~/.mnemo/permissions.json.
  */
-export function approvalExtensionFactory(pi: ExtensionAPI, perms: Permissions = loadPermissions()): void {
+export function approvalExtensionFactory(
+  pi: ExtensionAPI,
+  perms?: Permissions,
+  cwd: string = process.cwd(),
+  home?: string,
+): void {
   setDelegatedApproval(true);
   // read once per session: a mid-session edit should not change the rules
   // under a run that is already executing
   setPlanMode(planModeFromEnv());
-  pi.on("tool_call", async (event: any, ctx: any) =>
-    decideApproval(event as ApprovalDecisionInput, ctx.ui as ConfirmUI,
-      process.env, hasDialogUI(ctx), perms),
+
+  // Both scopes, project first, with the environment as the last word on yolo.
+  let live: Permissions = perms ?? loadScopedPermissions(cwd, home);
+
+  // The UI arrives with the first tool call, so notices are sent from there.
+  let ui: ConfirmUI | undefined;
+  let announced = false;
+
+  // A grant made in another session is this session's business too: a person
+  // who answered "always, everywhere" in one window should not be asked the
+  // same question in the next one. The watcher is what makes "all the other
+  // sessions get notified" true rather than aspirational — and because the
+  // callback re-reads the file, a missed event costs a stale view, never a
+  // decision made from one.
+  watchGrants(
+    [projectPermissionsFile(cwd), permissionsFile(home ?? os.homedir())],
+    (changed) => {
+      const before = live;
+      const fresh = loadScopedPermissions(cwd, home);
+      live = {
+        ...mergeGrantedRules(before, fresh.rules),
+        // yolo may be turned on or off by the file too; a grant that only
+        // worked when the file was read at the right moment would be worse
+        // than no grant at all.
+        yolo: fresh.yolo,
+      };
+      const added = live.rules.length - before.rules.length;
+      if (added > 0) {
+        ui?.notify?.(`${added} permission${added === 1 ? "" : "s"} granted in ${changed}`);
+      } else if (fresh.yolo !== before.yolo) {
+        ui?.notify?.(fresh.yolo ? "yolo is on: prompts are now auto-approved" : "yolo is off");
+      }
+    },
   );
+
+  pi.on("tool_call", async (event: any, ctx: any) => {
+    ui = ctx.ui as ConfirmUI;
+    if (!announced) {
+      announced = true;
+      // A mode that is on must say so: yolo's whole risk is being on without
+      // anyone remembering they turned it on.
+      if (live.yolo) {
+        const denies = live.rules.filter((r) => r.action === "deny").length;
+        ui.notify?.(
+          denies === 0
+            ? "yolo: prompts are auto-approved"
+            : `yolo: prompts are auto-approved, but ${denies} deny rule${denies === 1 ? "" : "s"} still hold`,
+        );
+      }
+    }
+    return decideApproval(
+      event as ApprovalDecisionInput,
+      ui,
+      process.env,
+      hasDialogUI(ctx),
+      live,
+      isPlanMode(),
+      cwd,
+      home,
+    );
+  });
 }
 
 export const approvalExt: InlineExtension = {

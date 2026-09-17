@@ -83,6 +83,7 @@ func Builtins() []Command {
 		{Name: "fork", Desc: "branch the session at the message you last sent", Kind: Builtin},
 		{Name: "commands", Desc: "ask the agent for its command list again", Kind: Builtin},
 		{Name: "theme", Desc: "pick the palette — saved to ~/.mnemo/theme.json", Kind: Builtin},
+		{Name: "yolo", Desc: "stop asking for approval — on|off, saved to this project", Kind: Builtin},
 		{Name: "login", Desc: "log in a provider — /login <provider> <key>, or /login alone to list them", Kind: Builtin},
 		{Name: "model", Desc: "pick the default model from what your providers offer", Kind: Builtin},
 		{Name: "logout", Desc: "forget a provider's key — /logout <provider>", Kind: Builtin},

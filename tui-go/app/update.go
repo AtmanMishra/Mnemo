@@ -1234,6 +1234,8 @@ func (m *Model) runSlash(c command.Command, args string) tea.Cmd {
 		return m.askCommands()
 	case "theme":
 		return m.openThemes()
+	case "yolo":
+		return m.yoloCommand(args)
 	case "quit":
 		m.quitting = true
 		return tea.Quit

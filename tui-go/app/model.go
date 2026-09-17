@@ -24,6 +24,7 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/markdown"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/memory"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/pi"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/prompt"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/theme"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/tree"
@@ -171,6 +172,11 @@ type Model struct {
 	// empty once New has run: an unset or unusable name normalises to the
 	// shipping palette, so the picker always has a row to mark as in use.
 	themeName string
+	// yolo is the approval mode in force, read at startup from the project and
+	// the user's permissions files (internal/pi/yolo.go). It is a field rather
+	// than a lookup at draw time because the status line says whether it is on,
+	// and a mode nobody can see is a mode nobody remembers turning on.
+	yolo bool
 
 	// disk is the disk scan: the whole command catalogue when no agent is
 	// attached, and the fallback row set while one is. live is the agent's own
@@ -217,6 +223,7 @@ func New(cfg Config) *Model {
 		agent:     cfg.Agent,
 		mouse:     cfg.Mouse,
 		themeName: savedTheme(cfg.Home),
+		yolo:      pi.Yolo(cfg.CWD, cfg.Home),
 		openTool:  map[string]*chat.Block{},
 		schedSeen: map[string]string{},
 		extStatus: map[string]string{},

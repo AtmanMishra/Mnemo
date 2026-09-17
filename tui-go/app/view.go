@@ -449,6 +449,13 @@ func (m *Model) status() string {
 	if m.mouse {
 		right = append(right, ui.Seg{Text: "mouse · ^g", Style: m.th.Muted})
 	}
+	// Same reason as the mouse segment: yolo changes what the interface does
+	// without changing what it looks like, and "why did it not ask me?" is a
+	// question the status line can answer. Marked in the palette's warning
+	// style because the mode is a real concession, not a preference.
+	if m.yolo {
+		right = append(right, ui.Seg{Text: "yolo · no approvals", Style: m.th.Warn})
+	}
 	if m.working {
 		right = append(right, ui.Seg{
 			Text:  theme.Spinner[m.tick%len(theme.Spinner)] + " working · ^c stops",
