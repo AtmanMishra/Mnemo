@@ -1,8 +1,8 @@
   ▚ MNEMO ───────────────────────────────────────────────────────────────────── ~/tui-go ▌ offline
   
   ▀▀▐ TRANSCRIPT · 1 THINKING HIDDEN · ^E ▌▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-                                                                                                  
-    · nothing is s╭──────────────────────────────────────────────────────────────╮                
+    3. ask for something — the agent reads, edits and runs commands, asking first                 
+                  ╭──────────────────────────────────────────────────────────────╮                
     · / — commands│ ▀▀▐ PALETTE ▌▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ │                
     · ^k — the sam│ every command, skill and plugin — the list on disk           │                
     · ^e — open ev│ BUILT-IN                                                     │                

@@ -1,8 +1,15 @@
   ▚ MNEMO ───────────────────────────────────────────────────────────────────── ~/tui-go ▌ offline
   
   ▀▀▐ TRANSCRIPT ▌▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  █▌ready.                                                                                        
                                                                                                   
-    · nothing is set up yet — /login logs in a provider, /model picks the default                 
+    nothing is set up yet — a terminal coding agent whose memory persists                         
+    between sessions, so it does not start from zero every time.                                  
+                                                                                                  
+    1. /login — pick a provider and paste its API key (run it bare for the list)                  
+    2. /model — choose the default model from what that key can run                               
+    3. ask for something — the agent reads, edits and runs commands, asking first                 
+                                                                                                  
     · / — commands, skills and plugins. Start typing; pick with ↑ ↓                               
     · ^k — the same list, as a palette                                                            
     · ^e — open every thinking block at once                                                      
@@ -17,13 +24,6 @@
                                                                                                   
   ░▄▾ thinking                                                                                    
     The parser lives in internal/pi. Let me confirm how it splits flags.                          
-                                                                                                  
-  █▌It reads flags from the process table, not from the keyboard.                                 
-                                                                                                  
-  ▐▌▾ read  limit=40 path=main.go                                                            40 ln
-    package main                                                                                  
-                                                                                                  
-    func main() {}                                                                                
   
   █▄ask, or press ^k                                                                              
   

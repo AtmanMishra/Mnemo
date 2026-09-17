@@ -135,7 +135,7 @@ type Model struct {
 	// files is the working tree's relative file list, for @-mentions,
 	// scanned once and never guessed at.
 	files []string
-	mem *memory.Client
+	mem   *memory.Client
 
 	// schedSeen remembers which job results have already been toasted on the
 	// status line, so a finished schedule chips exactly once per run.
@@ -319,7 +319,13 @@ func (m *Model) welcome() {
 	// hint at the top is what makes a yes/no of it.
 	if !auth.Load(m.cfg.Home).Configured() {
 		body = append(body,
-			"- nothing is set up yet — `/login` logs in a provider, `/model` picks the default",
+			"**nothing is set up yet** — a terminal coding agent whose memory persists",
+			"between sessions, so it does not start from zero every time.",
+			"",
+			"1. `/login` — pick a provider and paste its API key (run it bare for the list)",
+			"2. `/model` — choose the default model from what that key can run",
+			"3. ask for something — the agent reads, edits and runs commands, asking first",
+			"",
 			"")
 	}
 	body = append(body,

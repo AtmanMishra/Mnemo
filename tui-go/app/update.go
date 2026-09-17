@@ -2662,6 +2662,18 @@ func (m *Model) openModels() tea.Cmd {
 // model step. During a login you can only pick that provider's models, else
 // the stored key you just pasted cannot serve what you picked.
 func (m *Model) openModelsFor(provider string) tea.Cmd {
+	// With no provider configured there is nothing to fetch, and opening an
+	// overlay that spins and then apologises is how `/model` becomes "random
+	// bullshit" to someone who has not logged in yet. Say it where they can
+	// read it, name the command that fixes it, and do not open the overlay.
+	if provider == "" && !auth.Load(m.cfg.Home).Configured() {
+		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{
+			"no provider is configured yet, so there are no models to list.",
+			"start with `/login`: it takes a provider and its key, then comes",
+			"straight back here to pick the default model.",
+		}})
+		return nil
+	}
 	m.wizard = provider
 	purpose := "every model your logged-in providers offer — enter makes it the default"
 	if provider != "" {
@@ -2811,6 +2823,22 @@ func (m *Model) login(args string) tea.Cmd {
 	}
 	if strings.TrimSpace(key) == "" {
 		m.prompt.SetValue("/login " + provider + " ")
+		// The instruction goes in the TRANSCRIPT, not only the status line.
+		// The status line clears after five seconds, so anyone who looks away
+		// — or reads the provider name, or fetches their key — sees an empty
+		// screen and concludes /login did nothing. That is a real report from
+		// a real user, and the fix is to stop telling people what to do next
+		// in the one place that erases itself.
+		m.chat.Append(&chat.Block{Kind: chat.Notice, Body: []string{
+			"paste " + provider + "'s API key after the provider name, then press enter:",
+			// Backticks, not quotes: the transcript is rendered as markdown, and
+			// a bare <key> is read as an HTML tag and silently deleted — the
+			// instruction then reads "/login opencode" with the placeholder gone,
+			// which is worse than no instruction. Inside a code span it survives.
+			"    `/login " + provider + " <key>`",
+			"the key is written to ~/.mnemo/auth.json — it is never echoed here.",
+			"not sure of the provider's name? run `/login` on its own to choose from a list.",
+		}})
 		return m.notify("paste the key after the provider, then enter")
 	}
 	if _, err := auth.SetKey(m.cfg.Home, provider, key, "", time.Now()); err != nil {

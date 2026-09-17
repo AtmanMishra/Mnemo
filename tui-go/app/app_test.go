@@ -443,7 +443,6 @@ func TestTrailingBlankLinesAreDroppedFromToolOutput(t *testing.T) {
 	}
 }
 
-
 func TestAResultWithNoCallIsStillShown(t *testing.T) {
 	m := fixture(t, 100, 30)
 	before := m.Chat().Len()
@@ -1169,7 +1168,10 @@ func TestFirstRunWithALiveAgentOpensTheAccountsList(t *testing.T) {
 	if m.Overlay() != nil {
 		t.Fatal("the accounts list is an overlay like every other: esc dismisses it")
 	}
-	if !strings.Contains(screen(m), "/login logs in a provider") {
+	// The wording moved to the numbered onboarding, so the assertion follows
+	// it — the requirement is unchanged: dismissing the accounts list must
+	// leave the way back on screen.
+	if !strings.Contains(screen(m), "pick a provider and paste its API key") {
 		t.Fatal("the hint must survive dismissal, so the way back is findable")
 	}
 }
@@ -1301,6 +1303,14 @@ func TestTheLoginListDKeyLogsOutWithConfirmation(t *testing.T) {
 
 func TestModelOverlayExplainsWhenItCannotAsk(t *testing.T) {
 	m := fixture(t, 100, 30)
+	// A configured provider whose catalogue cannot be fetched is a DIFFERENT
+	// state from "nothing is configured": here the reader has done their part,
+	// so the failure belongs in the overlay with the concrete fix (--repo).
+	// The fixture is unconfigured, which is why this used to pass by accident
+	// before the unconfigured case started short-circuiting.
+	if _, err := auth.SetKey(m.Home(), "anthropic", "sk-ant-test-key-1234", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	press(t, m, "/")
 	typeIn(t, m, "model")
 	press(t, m, "enter")
@@ -1370,16 +1380,46 @@ func TestAModelCatalogueThatArrivesAfterTheOverlayClosedIsIgnored(t *testing.T) 
 }
 
 func TestModelOnlyMakesSenseForALoggedInProvider(t *testing.T) {
-	// Greenfield: /model with nothing logged in still explains itself instead
-	// of pretending there is nothing to see. The overlay's empty state names
-	// the missing step.
+	// Greenfield: /model must not open an overlay it cannot fill. Spinning and
+	// then apologising is how a command reads as noise to someone who has not
+	// logged in yet, so it says what is missing and names the fix instead.
 	m := fixture(t, 100, 30)
 	press(t, m, "/")
 	typeIn(t, m, "model")
 	press(t, m, "enter")
-	m.Update(modelsMsg{models: nil, err: nil})
-	if !strings.Contains(screen(m), "Log in to a provider first: /login") {
-		t.Fatalf("an empty catalogue must say what fills it:\n%s", screen(m))
+
+	if m.Overlay() != nil {
+		t.Fatalf("with no provider there is no catalogue to show, so no overlay: %v", m.Overlay().Kind)
+	}
+	s := screen(m)
+	if !strings.Contains(s, "no provider is configured yet") {
+		t.Fatalf("it must say why there is nothing to list:\n%s", s)
+	}
+	if !strings.Contains(s, "/login") {
+		t.Fatalf("and name the command that fixes it:\n%s", s)
+	}
+}
+
+// The report this answers: "/login is not working". The command was working —
+// it wrote its instruction to the status line, which clears after five
+// seconds, so anyone who looked away saw an empty screen and concluded
+// nothing happened. An instruction a person has to act on must live somewhere
+// that does not erase itself.
+func TestLoginWithoutAKeyLeavesTheInstructionOnScreen(t *testing.T) {
+	m := fixture(t, 100, 30)
+	typeIn(t, m, "/login opencode")
+	press(t, m, "enter")
+
+	s := screen(m)
+	if !strings.Contains(s, "/login opencode <key>") {
+		t.Fatalf("the transcript must say exactly what to type next:\n%s", s)
+	}
+	if !strings.Contains(s, "never echoed here") {
+		t.Fatalf("and say the key is not displayed:\n%s", s)
+	}
+	// The prompt keeps the prefix, so the reader only has to paste.
+	if v := m.prompt.Value(); !strings.HasPrefix(v, "/login opencode") {
+		t.Fatalf("prompt = %q, want the prefix ready for the key", v)
 	}
 }
 
@@ -1574,7 +1614,7 @@ func TestEditingAFactCorrectsItsValue(t *testing.T) {
 	m := memFixture(t, capt)
 	press(t, m, "ctrl+m")
 	m.Overlay().Tree().ExpandAll()
-	press(t, m, "down") // the memory
+	press(t, m, "down")  // the memory
 	press(t, m, "right") // load its facts
 	press(t, m, "down")  // onto "port: 8080"
 	press(t, m, "e")
