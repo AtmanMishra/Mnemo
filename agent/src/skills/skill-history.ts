@@ -9,8 +9,8 @@
  */
 import * as crypto from "node:crypto";
 import * as fsp from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
+import { mnemoHome as envMnemoHome } from "../home.ts";
 
 let mnemoHomeOverride: string | null = null;
 
@@ -19,9 +19,16 @@ export function setMnemoHome(home: string | null): void {
   mnemoHomeOverride = home;
 }
 
-/** The Mnemo home: history + retired trees live here. */
+/**
+ * The Mnemo home: history + retired trees live here.
+ *
+ * The default is `src/home.ts`'s — `$MNEMO_HOME`, then `~/.mnemo` — so a
+ * relocated home moves the skill history with the journal instead of leaving
+ * backups behind in a directory the user no longer uses. The explicit override
+ * above wins over both, because a test must never touch the real home.
+ */
 export function mnemoHome(): string {
-  return mnemoHomeOverride ?? path.join(os.homedir(), ".mnemo");
+  return mnemoHomeOverride ?? envMnemoHome();
 }
 
 /** History directory for one skill: ~/.mnemo/skill-history/<name>. */

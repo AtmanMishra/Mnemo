@@ -15,11 +15,11 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Hook } from "./types.ts";
 import { scrubChildEnv } from "../childenv.ts";
+import { mnemoHome } from "../home.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -28,12 +28,9 @@ const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 // call reports a missing sidecar while the built binary sits right there.
 export const MEMSRV_NAME = process.platform === "win32" ? "memsrv.exe" : "memsrv";
 
-/** The per-user Mnemo home an installed build keeps its state in. */
-export function mnemoHome(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.MNEMO_HOME?.trim();
-  if (override) return override;
-  return path.join(os.homedir(), ".mnemo");
-}
+// Re-exported, not re-implemented: the Mnemo home is one fact
+// (`src/home.ts`), and this name is what the extension and the tests import.
+export { mnemoHome };
 
 export interface MemsrvPaths {
   /** The sidecar binary to spawn. */
