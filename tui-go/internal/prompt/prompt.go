@@ -27,7 +27,11 @@ const (
 
 // MenuRows is the most suggestions shown at once. Eight is enough to pick
 // from and short enough that the menu never swallows the transcript.
-const MenuRows = 8
+//
+// A variable rather than a constant because an operator sets it: the value
+// here is the built-in default, and ~/.mnemo/limits.json ("menu_rows")
+// changes it without a rebuild (internal/limits).
+var MenuRows = 8
 
 // Model is the prompt, its queue, and the slash menu.
 type Model struct {

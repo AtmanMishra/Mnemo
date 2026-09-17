@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/app"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/limits"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/pi"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/session"
 )
@@ -23,6 +24,13 @@ type options struct {
 	dump                                                     bool
 	version                                                  bool
 	cols, rows                                               int
+
+	// The interface's timings and limits, as the reader typed them. Strings,
+	// because "" then means "this flag was not given" and each number has its
+	// own grammar (a duration may be "20s" or 20) — parsing is
+	// internal/limits' job, and its answer is that a value nobody could use
+	// falls back instead of failing the run.
+	limitsFile, listTimeout, memoryTimeout, noticeFor, menuRows, minKeyLen string
 }
 
 // version is the build's identity. The release workflow sets it with
@@ -64,6 +72,15 @@ func parseFlags(args []string) options {
 	fs.StringVar(&o.memsrv, "memsrv", "", "path to the built memsrv binary")
 	fs.StringVar(&o.journal, "journal", "", "path to the memory journal memsrv should open")
 	fs.StringVar(&o.bundles, "bundles", "", "directory of harness tool bundles")
+	// The interface's timings and limits. The file they come from is
+	// documented in README.md; every one of these beats it, and an
+	// unreadable value falls through to it rather than failing the run.
+	fs.StringVar(&o.limitsFile, "limits", "", "path to the tunables file (default ~/.mnemo/limits.json)")
+	fs.StringVar(&o.listTimeout, "list-timeout", "", "how long to wait for the model catalogue, e.g. 20s")
+	fs.StringVar(&o.memoryTimeout, "memory-timeout", "", "how long a memory query may wait, e.g. 10s")
+	fs.StringVar(&o.noticeFor, "notice-for", "", "how long a status-line notice stays, e.g. 5s")
+	fs.StringVar(&o.menuRows, "menu-rows", "", "how many slash-menu rows to show at once, e.g. 8")
+	fs.StringVar(&o.minKeyLen, "min-key-len", "", "the shortest API key to accept, e.g. 8")
 	// A flag error is a usage question, not a crash; ContinueOnError hands
 	// it back instead of taking the process down.
 	_ = fs.Parse(args)
@@ -151,11 +168,58 @@ func spawnPlan(o options) (string, string, pi.Trust) {
 	}
 	// Both resolved against the SAME home, so the sessions the browser lists
 	// and the sessions the agent writes are the same directory.
-	return cwd, session.SpawnDir(home(o.home)), pi.ResolveTrust(home(o.home), cwd)
+	trust := pi.ResolveTrust(home(o.home), cwd)
+	// Yolo means the operator has said "do not ask me": the consent gate stops
+	// prompting, and pi is told to trust the project, so its own settings,
+	// extensions and skills load instead of being ignored. Both halves matter —
+	// without the flag, "full privileges" would still silently drop the
+	// project's own extensions, which is the half a person notices last.
+	if pi.Yolo(cwd, home(o.home)) {
+		trust.Approve = true
+	}
+	return cwd, session.SpawnDir(home(o.home)), trust
+}
+
+// limitsEnv names the tunables file when the flag is silent — the same shape
+// as MNEMO_MOUSE: a preference about this terminal, said once in the
+// environment rather than passed on every run.
+const limitsEnv = "MNEMO_LIMITS_FILE"
+
+// limitsPath is the tunables file for this run: the flag, then the
+// environment, then ~/.mnemo/limits.json, beside auth.json and theme.json.
+// All three levels can be silent; the answer is then no file, which is the
+// same as a file that says nothing.
+func limitsPath(o options) string {
+	if o.limitsFile != "" {
+		return o.limitsFile
+	}
+	if p := strings.TrimSpace(os.Getenv(limitsEnv)); p != "" {
+		return p
+	}
+	return limits.Path(home(o.home))
+}
+
+// tunables resolves the interface's timings and limits: flag, then
+// environment, then file, then the built-in default that lives next to the
+// behaviour it governs. It cannot fail — a file that is missing, truncated or
+// wrong is "not configured", not an error — so no preference, however badly
+// written, can keep the interface from starting.
+func tunables(o options) limits.Limits {
+	return limits.Resolve(limitsPath(o), limits.Overrides{
+		ListTimeout:   o.listTimeout,
+		MemoryTimeout: o.memoryTimeout,
+		NoticeFor:     o.noticeFor,
+		MenuRows:      o.menuRows,
+		MinKeyLen:     o.minKeyLen,
+	}, os.Getenv)
 }
 
 func run(o options) error {
 	defaultMemorySidecar(&o)
+	// Applied before anything reads one of them: the prompt's menu height,
+	// the catalogue's bound and the memory client's snapshot are all taken
+	// from these values at the moment they are first used.
+	limits.Apply(tunables(o))
 	cfg := app.Config{Home: o.home, CWD: o.cwd, Dark: true, Mouse: mouseEnabled(os.Getenv(mouseEnv)),
 		MemsrvBin: o.memsrv, MemJournal: o.journal, HarnessDir: o.bundles, Repo: o.repo}
 

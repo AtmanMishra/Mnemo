@@ -45,6 +45,7 @@ is one control chord away and dismissed with `esc`.
 | `internal/filetree` | a directory as tree nodes, lazily. |
 | `internal/prompt` | input, history, and the queue. |
 | `internal/agent` | the backend boundary — four methods and some messages. |
+| `internal/limits` | the timings and limits, and the `~/.mnemo/limits.json` they come from. |
 | `app` | the root model: three modes, one screen. |
 
 ## Running and checking
@@ -59,6 +60,58 @@ MNEMO_MOUSE=1 go run ./cmd/mnemo                    # mouse on: wheel scrolls, c
 
 `--dump` exists because a TUI cannot be screenshotted from a script, and "it
 looked right when I ran it" is not a check anybody else can repeat.
+
+## Timings and limits (`~/.mnemo/limits.json`)
+
+Five numbers the interface used to ship as constants compiled into the packages
+that use them. An operator on a slow machine — or a fast one — moves them
+without a rebuild. Every key is optional, and the file lives beside the other
+preferences (`auth.json`, `theme.json`).
+
+```json
+{
+  "list_timeout": "20s",
+  "memory_timeout": "10s",
+  "notice_for": "5s",
+  "menu_rows": 8,
+  "min_key_len": 8
+}
+```
+
+**Precedence, per key: flag → environment → file → built-in default.**
+
+| key | flag | environment | default | what it moves |
+|---|---|---|---|---|
+| `list_timeout` | `--list-timeout` | `MNEMO_LIST_TIMEOUT` | `20s` (`internal/auth/models.go:38`) | how long `/model` waits for the agent's catalogue before it says the listing timed out. Raise it on a slow machine; a provider that hangs holds the pane for this long and not one second more. |
+| `memory_timeout` | `--memory-timeout` | `MNEMO_MEMORY_TIMEOUT` | `10s` (`internal/memory/memory.go:34`) | how long one memsrv request may wait. memsrv replays a journal at start up, so the first memory query can be slow: raise it for a big journal. |
+| `notice_for` | `--notice-for` | `MNEMO_NOTICE_FOR` | `5s` (`app/model.go:72`) | how long a one-off message stays on the status line before the next frame's silence replaces it. |
+| `menu_rows` | `--menu-rows` | `MNEMO_MENU_ROWS` | `8` (`internal/prompt/prompt.go:34`) | how many slash-menu suggestions are shown at once. The menu scrolls inside this window; the transcript keeps the rest. |
+| `min_key_len` | `--min-key-len` | `MNEMO_MIN_KEY_LEN` | `8` (`internal/auth/auth.go:90`) | the shortest API key `/login` will accept, and the shortest stored key that counts as logged in. A paste check, not a policy. |
+
+The file is found at `$HOME/.mnemo/limits.json` unless `--limits <path>` or
+`MNEMO_LIMITS_FILE` says otherwise (flag over environment). Durations are
+written the way Go writes them (`"20s"`, `"1m30s"`) or as a bare number of
+seconds (`20`); `menu_rows` and `min_key_len` are whole numbers.
+
+**Nothing here can keep the interface from starting.** A missing file, a
+truncated one, an unknown key, a key of the wrong type and a value outside its
+range are all the same answer: *that key was not configured*, and the default
+answers for it alone — the way a broken `theme.json` falls back to the built-in
+palette. Within one file, each key is read on its own, so one typo does not
+cost the other four. A value is usable only inside its range: durations from
+`1ms` to `24h`, `menu_rows` from 1 to 100, `min_key_len` from 1 to 256. Outside
+that it is a typo and the default answers.
+
+The file is read once, at startup, before anything asks for one of these
+numbers. An unreadable layer is skipped rather than fatal — a typo in the
+environment does not throw away a good file, and a bad flag does not throw away
+either.
+
+One detail worth knowing: the notice window is the constant `NoticeFor` in
+`app/model.go:72` today. The key is parsed, validated and carried in
+`internal/limits.NoticeFor`, but the interface keeps its five seconds until that
+constant becomes a read of the resolved value — a one-line change in `app/**`,
+which is not this change's to make.
 
 ## Pi-parity: the gap list
 

@@ -247,3 +247,84 @@ func TestEnvKeyNamesAreTheOnesTheProvidersActuallyUse(t *testing.T) {
 		}
 	}
 }
+
+// --- the two numbers an operator can move (~/.mnemo/limits.json) ----------
+
+// TestTheBuiltInDefaultsAreWhatTheyShippedAs: both numbers are variables now,
+// because ~/.mnemo/limits.json can set them, and until a file says otherwise
+// they must be exactly what the interface has always used. A default that
+// drifts is a behaviour change nobody asked for.
+func TestTheBuiltInDefaultsAreWhatTheyShippedAs(t *testing.T) {
+	if ListTimeout != 20*time.Second {
+		t.Fatalf("ListTimeout = %v, want the 20s it shipped with (limits.json \"list_timeout\" moves it)", ListTimeout)
+	}
+	if MinKeyLen != 8 {
+		t.Fatalf("MinKeyLen = %d, want the 8 it shipped with (limits.json \"min_key_len\" moves it)", MinKeyLen)
+	}
+}
+
+// TestTheShortKeyCheckUsesTheConfiguredLength: moving the number has to change
+// what is accepted, not just what is stored.
+func TestTheShortKeyCheckUsesTheConfiguredLength(t *testing.T) {
+	old := MinKeyLen
+	t.Cleanup(func() { MinKeyLen = old })
+
+	MinKeyLen = 4
+	if _, err := SetKey(home(t), "anthropic", "abcd", "", time.Now()); err != nil {
+		t.Fatalf("four characters must be accepted when the minimum is four: %v", err)
+	}
+	if _, err := SetKey(home(t), "anthropic", "abc", "", time.Now()); err == nil {
+		t.Fatal("three characters must be refused when the minimum is four")
+	}
+
+	// And the same number decides which stored providers count as logged in.
+	MinKeyLen = 12
+	if _, err := SetKey(home(t), "anthropic", "abcdefghij", "", time.Now()); err == nil {
+		t.Fatal("ten characters must be refused when the minimum is twelve")
+	}
+}
+
+// TestTheCatalogueCallGivesUpAtTheConfiguredBound is the behavioural half: the
+// bound is consulted at the moment of the call, so a provider that never
+// answers must not hold the interface for the fake's thirty seconds.
+//
+// The window is deliberately loose — one second of waiting, and everything
+// under ten seconds is a pass. What is being claimed is "it gave up long
+// before the fake would have finished", not a stopwatch reading: a spawned
+// child costs more to start and kill on a loaded machine than the bound it is
+// held to, and a regression here (a bound that is not consulted at all) waits
+// out the fake or the old twenty-second default, both far past ten.
+func TestTheCatalogueCallGivesUpAtTheConfiguredBound(t *testing.T) {
+	repo := fakeNode(t, 30_000) // node that never answers
+	old := ListTimeout
+	t.Cleanup(func() { ListTimeout = old })
+
+	ListTimeout = time.Second
+	start := time.Now()
+	_, err := Fetch(repo)
+	elapsed := time.Since(start)
+
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("a catalogue that never answers must say it timed out, got: %v", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("the call waited %v; the bound in force was %v", elapsed, ListTimeout)
+	}
+}
+
+// TestACatalogueThatAnswersInsideTheBoundStillReads: the bound must not be so
+// eager that a slow-but-working provider is cut off.
+func TestACatalogueThatAnswersInsideTheBoundStillReads(t *testing.T) {
+	repo := fakeNode(t, 100) // node that answers, emptily, after 100ms
+	old := ListTimeout
+	t.Cleanup(func() { ListTimeout = old })
+
+	ListTimeout = 5 * time.Second
+	models, err := Fetch(repo)
+	if err != nil {
+		t.Fatalf("a call inside the bound must not be cut off: %v", err)
+	}
+	if len(models) != 0 {
+		t.Fatalf("the fake prints no table, so there are no models; got %#v", models)
+	}
+}

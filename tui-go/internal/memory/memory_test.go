@@ -264,3 +264,41 @@ func TestACallAfterTheSidecarDiedFailsFast(t *testing.T) {
 		t.Fatalf("a known-dead connection must fail fast, took the whole timeout: %v", elapsed)
 	}
 }
+
+// --- the number an operator can move (~/.mnemo/limits.json) --------------
+
+// TestTheBuiltInTimeoutIsWhatItShippedAs: Timeout is a variable now, because
+// ~/.mnemo/limits.json ("memory_timeout") sets it, and until a file says
+// otherwise it must be the ten seconds every call has always waited.
+func TestTheBuiltInTimeoutIsWhatItShippedAs(t *testing.T) {
+	if Timeout != 10*time.Second {
+		t.Fatalf("Timeout = %v, want the 10s it shipped with", Timeout)
+	}
+}
+
+// TestTheCallTimeoutIsTheConfiguredOne: the value has to reach the calls, not
+// just sit in a variable. Open snapshots it, so what a test gets is what a call
+// waits — and a sidecar that never answers must give up at that bound, not at
+// the fifteen seconds its fake would sleep for or the ten its default would
+// wait. The window is loose on purpose: a loaded machine costs a process more
+// to start and kill than the bound it is held to, and what is being claimed is
+// "it gave up long before it would have otherwise", not a stopwatch reading.
+func TestTheCallTimeoutIsTheConfiguredOne(t *testing.T) {
+	old := Timeout
+	t.Cleanup(func() { Timeout = old })
+
+	Timeout = 250 * time.Millisecond
+	c := open(t, fakeSrv(t, fakeSpec{Result: `{"nodes":[]}`, DelayOnce: 15_000}))
+	if c.callTimeout != Timeout {
+		t.Fatalf("the client snapshotted %v, want the configured %v", c.callTimeout, Timeout)
+	}
+
+	start := time.Now()
+	_, err := c.Dump()
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("a sidecar that never answers must time out, got: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 8*time.Second {
+		t.Fatalf("the call waited %v; the bound in force was %v", elapsed, Timeout)
+	}
+}

@@ -83,7 +83,11 @@ type File struct {
 // MinKeyLen is the shortest thing that could be a real API key. Anything
 // shorter is a paste that went wrong, and storing it means the failure
 // surfaces much later as an authentication error nobody connects to this.
-const MinKeyLen = 8
+//
+// A variable rather than a constant because an operator sets it: the value
+// here is the built-in default, and ~/.mnemo/limits.json ("min_key_len")
+// changes it without a rebuild (internal/limits).
+var MinKeyLen = 8
 
 // LoggedIn lists providers with a usable credential, in a stable order.
 func (f File) LoggedIn() []string {

@@ -261,3 +261,61 @@ func TestTheViewShowsTheQueueAsNumberedPromises(t *testing.T) {
 		t.Fatalf("a queued message must be visible and numbered:\n%s", v)
 	}
 }
+
+// --- the number an operator can move (~/.mnemo/limits.json) --------------
+
+// TestTheBuiltInMenuRowsIsWhatItShippedAs: MenuRows is a variable now, because
+// ~/.mnemo/limits.json ("menu_rows") sets it. Until a file says otherwise the
+// menu is the eight rows it has always been.
+func TestTheBuiltInMenuRowsIsWhatItShippedAs(t *testing.T) {
+	if MenuRows != 8 {
+		t.Fatalf("MenuRows = %d, want the 8 it shipped with", MenuRows)
+	}
+}
+
+// TestTheMenuShowsAsManyRowsAsItIsConfiguredTo: the number has to reach the
+// drawn menu, the height the layout reserves for it, and the window that
+// scrolling moves inside. Three places read it, and all three have to agree —
+// a menu that reserves eight rows and draws three pushes the transcript off
+// the screen for no reason.
+func TestTheMenuShowsAsManyRowsAsItIsConfiguredTo(t *testing.T) {
+	old := MenuRows
+	t.Cleanup(func() { MenuRows = old })
+	MenuRows = 3
+
+	m := New(true)
+	m.SetWidth(80)
+	input := m.Rows() // the input alone: nothing is suggested yet
+	m.Suggest(suggestions(20))
+
+	if got := m.Rows(); got != input+MenuRows+1 {
+		t.Fatalf("a menu of 20 reserves %d rows, want %d", got-input, MenuRows+1)
+	}
+	rows := func() []string { return strings.Split(m.menuView(theme.Default()), "\n") }
+	if got := len(rows()); got != MenuRows+1 {
+		t.Fatalf("the menu drew %d rows, want %d (the configured rows and the line that labels the arrows)", got, MenuRows+1)
+	}
+
+	// Scrolling inside the shorter window shows no more than the configured
+	// rows, and never loses the highlighted one.
+	m.SugMove(MenuRows + 2)
+	sel, ok := m.SugSelected()
+	if !ok {
+		t.Fatal("a suggestion must stay selected")
+	}
+	if got := len(rows()); got != MenuRows+1 {
+		t.Fatalf("scrolling grew the menu to %d rows", got)
+	}
+	if !strings.Contains(strings.Join(rows(), "\n"), "/"+sel.Name) {
+		t.Fatalf("the highlighted %q must be inside the window", sel.Name)
+	}
+}
+
+// suggestions is n commands with distinct names — all the menu reads.
+func suggestions(n int) []command.Command {
+	out := make([]command.Command, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, command.Command{Name: "cmd" + itoa(i), Desc: "a command"})
+	}
+	return out
+}

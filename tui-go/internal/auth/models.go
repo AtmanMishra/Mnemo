@@ -31,7 +31,11 @@ func (m Model) String() string { return m.Provider + "/" + m.Name }
 
 // ListTimeout bounds the catalogue call. It normally takes about half a
 // second; without a bound, a provider that hangs hangs the interface with it.
-const ListTimeout = 20 * time.Second
+//
+// A variable rather than a constant because an operator sets it: the value
+// here is the built-in default, and ~/.mnemo/limits.json ("list_timeout")
+// changes it without a rebuild (internal/limits).
+var ListTimeout = 20 * time.Second
 
 // ParseList reads the `--list-models` table.
 //
