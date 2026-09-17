@@ -18,10 +18,10 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/memory"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/overlay"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/pi"
-	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/session"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/schedule"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/session"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/theme"
-	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/trace"
+
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/tree"
 )
 
@@ -150,7 +150,8 @@ func (m *Model) fold(msg tea.Msg) tea.Cmd {
 		}
 		return nil
 
-	case agent.Delegated:		st := chat.OK
+	case agent.Delegated:
+		st := chat.OK
 		if !msg.OK {
 			st = chat.Failed
 		}
@@ -2297,16 +2298,12 @@ func FindJob(jobs []schedule.Job, id string) schedule.Job {
 }
 
 func (m *Model) openLogs() tea.Cmd {
-	nodes := trace.Nodes(trace.Read(m.cfg.Home))
-	m.ov = overlay.NewTree(overlay.Logs,
-		"every run as a call graph — durations, tokens, and where it failed",
-		nodes,
-		"No traces yet.",
-		"Each run writes one, under ~/.mnemo/logs, and it appears here",
-		"as a tree: the session, the model round trips inside it, and any",
-		"sub-agents underneath those. Branches containing a failure open",
-		"themselves.",
-	)
+	// The pane holds two kinds of thing — trace spans, which are a tree, and
+	// the interface's own structured log, which is lines — so its shape is
+	// app/logs.go's to decide rather than this function's. It used to build
+	// the span tree here, which is why the log section existed but never
+	// appeared: one builder, one place that can forget the other half.
+	m.ov = m.logsPane()
 	m.armOverlay()
 	return nil
 }

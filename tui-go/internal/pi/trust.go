@@ -50,7 +50,26 @@ type decisions map[string]bool
 // TrustFile is where a project-trust decision is recorded, under a home.
 func TrustFile(home string) string { return filepath.Join(home, ".mnemo", "trust.json") }
 
-// ResolveTrust reads the recorded decision for a project directory.
+// ResolveTrust reads the recorded decision for a project directory, and
+// records it in the interface's log.
+//
+// Logged here, at the moment the decision is made, rather than where it is
+// used: by the time the transcript builds its note the reason is a sentence,
+// and this is the record of the fact — which project, approved or not, on
+// whose word. A decision taken by default (nothing recorded) is the one a
+// reader most often needs to find afterwards.
+func ResolveTrust(home, project string) Trust {
+	t := resolveTrust(home, project)
+	log().Info("trust.decided",
+		"project", project,
+		"approve", t.Approve,
+		"from", first(t.From, "-"),
+		"err", t.Err,
+	)
+	return t
+}
+
+// resolveTrust is the decision itself.
 //
 // The lookup walks from the project up to the filesystem root and takes the
 // closest entry, because that is what pi does with its own trust store and
@@ -60,7 +79,7 @@ func TrustFile(home string) string { return filepath.Join(home, ".mnemo", "trust
 // Every failure — no file, unreadable file, malformed JSON, empty home —
 // lands on the same safe answer. A trust decision that defaults to "yes"
 // when the file is broken is not a decision.
-func ResolveTrust(home, project string) Trust {
+func resolveTrust(home, project string) Trust {
 	t := Trust{File: TrustFile(home)}
 	if home == "" {
 		return t

@@ -13,13 +13,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/logging"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/tree"
 )
 
 // Dir is where the span log lives under a given home. Home is a parameter,
 // never a lookup: a test that reads the real ~/.mnemo passes for the wrong
 // reason.
-func Dir(home string) string { return filepath.Join(home, ".mnemo", "logs") }
+//
+// The directory itself is spelled in internal/logging, which writes the
+// interface's own log beside these spans and is the one place that has to
+// agree with the agent that writes them.
+func Dir(home string) string { return logging.Dir(home) }
 
 // Span is one recorded operation.
 type Span struct {
@@ -38,9 +43,18 @@ type Span struct {
 //
 // A missing directory is no spans, never an error: traces are a convenience,
 // and their absence must not look like a failure of the thing being traced.
+// What cannot be read silently is the other case — a directory that is there
+// and unreadable, spans this reader had to drop — and those go to the
+// interface's own log, because a pane that says "no traces yet" about a run
+// that happened is a pane that has lost the only record of it.
 func Read(home string) []Span {
-	entries, err := os.ReadDir(Dir(home))
+	log := logging.At(home)
+	dir := Dir(home)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Warn("trace.read", "dir", dir, "err", err.Error())
+		}
 		return nil
 	}
 	names := make([]string, 0, len(entries))
@@ -53,16 +67,19 @@ func Read(home string) []Span {
 
 	var out []Span
 	for _, n := range names {
-		data, err := os.ReadFile(filepath.Join(Dir(home), n))
+		data, err := os.ReadFile(filepath.Join(dir, n))
 		if err != nil {
+			log.Warn("trace.read", "file", n, "err", err.Error())
 			continue
 		}
+		skipped := 0
 		for _, line := range strings.Split(string(data), "\n") {
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
 			var v map[string]any
 			if json.Unmarshal([]byte(line), &v) != nil {
+				skipped++
 				continue
 			}
 			s := Span{
@@ -82,11 +99,24 @@ func Read(home string) []Span {
 			}
 			s.Attrs, _ = v["attrs"].(map[string]any)
 			if s.ID == "" {
+				skipped++
 				continue
 			}
 			out = append(out, s)
 		}
+		if skipped > 0 {
+			// The spans behind these lines are gone from the view, so the
+			// count is said rather than dropped: "unlinked" in the tree shows
+			// an orphan whose parent was rotated away, and this is the other
+			// half of the same story.
+			log.Warn("trace.read", "file", n, "skipped", skipped)
+		}
 	}
+	// Debug, not Info: opening the pane is not an event worth a line, but
+	// "how much did it read" is the first question a reader asks when the pane
+	// looks wrong, and MNEMO_LOG_LEVEL=debug is how they get it answered
+	// without a rebuild.
+	log.Debug("trace.read", "files", len(names), "spans", len(out))
 	return out
 }
 

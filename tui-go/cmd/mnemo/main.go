@@ -13,6 +13,7 @@ import (
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/app"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/limits"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/logging"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/pi"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/session"
 )
@@ -215,6 +216,18 @@ func tunables(o options) limits.Limits {
 }
 
 func run(o options) error {
+	// The interface's own log, opened once, here, where the home is decided —
+	// and beside the span log, so the logs pane reads one directory. Logging
+	// is configured before anything can want to log about it, and this call is
+	// the only one in the program: every call site takes the logger from there
+	// rather than deciding where a log goes on its own.
+	//
+	// A home that cannot be resolved, a level set to off, an unwritable file:
+	// Configure answers with a logger that writes nothing, and the interface
+	// runs. That is the trade this makes on purpose — a log is a convenience,
+	// and a TUI that will not start without one has made it a dependency.
+	logging.Configure(home(o.home))
+	defer logging.Close()
 	defaultMemorySidecar(&o)
 	// Applied before anything reads one of them: the prompt's menu height,
 	// the catalogue's bound and the memory client's snapshot are all taken

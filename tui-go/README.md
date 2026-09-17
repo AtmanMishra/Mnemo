@@ -13,12 +13,21 @@ is one control chord away and dismissed with `esc`.
 
 ```
 ▚ MNEMO ░░░░░░░░░░░░░░░░  ~/repo ▌ model      header, the band travels while working
-━━╾ TRANSCRIPT ╼━━━━━━━━┃━━╾ EXPLORER ╼━━     regions are always labelled
+▀▀▐ TRANSCRIPT ▌▀▀▀▀▀▀▀▀┃▀▀▐ EXPLORER ▌▀▀     regions are always labelled
 │ …                     ┃ ▾ repo
-● read main.go   ▸ 40 ln┃   ├─▸ app           the explorer, ^t
-▊ ▏                                            prompt: enter queues, alt+enter steers
+▐▌ read main.go  ▸ 40 ln┃   ├─▸ app           the explorer, ^t
+█▄ ▏                                            prompt: enter queues, alt+enter steers
  INSERT ▌ … ▌ …          0/6 thinking ▌ 9 blk  mode, live keys, counts
 ```
+
+The two cells at the left of every transcript line are the speaker, and they are
+the densest thing on screen — you should know who is talking before reading a
+word: `█▄` you, `█▌` the agent, `░▄` thinking, `▐▌` a tool. They are half-block
+figures rather than letters, and they are exactly the two columns the transcript
+spent before them, so nothing re-wraps. The vocabulary and the rules behind it
+are in `DESIGN.md §19`; the current values, with their code points, are on
+`docs/interface-assets.html`, which is generated from `internal/theme` rather
+than written down.
 
 ## Keys that matter
 
@@ -46,6 +55,7 @@ is one control chord away and dismissed with `esc`.
 | `internal/prompt` | input, history, and the queue. |
 | `internal/agent` | the backend boundary — four methods and some messages. |
 | `internal/limits` | the timings and limits, and the `~/.mnemo/limits.json` they come from. |
+| `internal/anim` | the springs and the pulsing indicator, and the one question that decides whether a frame is needed at all. |
 | `app` | the root model: three modes, one screen. |
 
 ## Running and checking
@@ -56,6 +66,9 @@ go run ./cmd/mnemo                                  # the interface
 go run ./cmd/mnemo --dump --cols 110 --rows 24      # one frame, to stdout
 go run ./cmd/mnemo --dump --keys "ctrl+t,down,l"    # …after pressing keys
 MNEMO_MOUSE=1 go run ./cmd/mnemo                    # mouse on: wheel scrolls, click folds, ^g gives it back
+MNEMO_NO_ANIMATION=1 go run ./cmd/mnemo             # no motion — springs jump to their target, the thinking pulse stays lit
+MNEMO_LOG_LEVEL=debug go run ./cmd/mnemo            # how much the interface logs (debug, info, warn, error, off)
+MNEMO_LOG_FILE=/tmp/mnemo.log go run ./cmd/mnemo    # where it logs, instead of ~/.mnemo/logs/mnemo.log
 ```
 
 `--dump` exists because a TUI cannot be screenshotted from a script, and "it

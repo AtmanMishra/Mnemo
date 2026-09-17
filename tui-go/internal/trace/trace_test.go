@@ -6,13 +6,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/logging"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/tree"
 )
 
 // write puts a span log under a temporary home. Home is always a parameter
 // here; nothing in this file may read the developer's real ~/.mnemo.
+//
+// It also closes the interface's log when the test is over. Reading spans now
+// writes about the ones it had to drop, and a log left open is a temporary
+// directory Windows will not remove — a failure that lands in t.TempDir's
+// cleanup and mentions nothing about the log that caused it. Cleanups run
+// last-in-first-out, so registering the close here puts it before the removal.
 func write(t *testing.T, home, name string, lines ...string) {
 	t.Helper()
+	t.Cleanup(func() { _ = logging.Close() })
 	if err := os.MkdirAll(Dir(home), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -196,5 +204,73 @@ func TestFilesAreReadOldestFirst(t *testing.T) {
 	got := Read(h)
 	if len(got) != 2 || got[0].ID != "a" {
 		t.Fatalf("got %#v", got)
+	}
+}
+
+// --- what the reader says about what it could not read -----------------------
+
+// Reading spans writes about the ones it had to drop. The record is the only
+// place that loss is visible: the tree shows the spans that survived, and a
+// file whose parent span was rotated away looks exactly like one that never
+// had a parent.
+func TestSpansThatHadToBeDroppedAreSaidInTheInterfacesLog(t *testing.T) {
+	t.Setenv(logging.EnvLevel, "info")
+	t.Setenv(logging.EnvFile, "")
+	h := t.TempDir()
+	write(t, h, "a.jsonl",
+		"not json",
+		`{"no":"id"}`,
+		span("1", "", "session", "session", 100, 10, true, `{"cwd":"/x"}`),
+	)
+	if got := Read(h); len(got) != 1 {
+		t.Fatalf("got %d spans, want the one good line", len(got))
+	}
+
+	recs := logging.Read(h)
+	if len(recs) != 1 {
+		t.Fatalf("the interface's log holds %v, want one record about the dropped lines", recs)
+	}
+	if recs[0].Msg != "trace.read" || recs[0].Level != logging.Warn {
+		t.Fatalf("record = %+v", recs[0])
+	}
+	if got, want := recs[0].Text(), "file=a.jsonl skipped=2"; got != want {
+		t.Fatalf("record says %q, want %q", got, want)
+	}
+}
+
+// A span log that reads cleanly writes nothing at all: the file is opened on
+// the first record, not on sight, so a reader that has nothing to report
+// leaves no trace of its own.
+func TestAReadableSpanLogWritesNothing(t *testing.T) {
+	t.Setenv(logging.EnvLevel, "")
+	t.Setenv(logging.EnvFile, "")
+	h := t.TempDir()
+	write(t, h, "a.jsonl", span("1", "", "session", "session", 100, 10, true, `{"cwd":"/x"}`))
+	if got := Read(h); len(got) != 1 {
+		t.Fatalf("got %d spans, want 1", len(got))
+	}
+	if recs := logging.Read(h); len(recs) != 0 {
+		t.Fatalf("a clean read logged %v", recs)
+	}
+	if _, err := os.Stat(logging.Path(h)); err == nil {
+		t.Fatal("a clean read created the interface's log")
+	}
+}
+
+// A missing span directory is the normal state of a fresh install, so it is
+// not worth a log line: the pane's own empty state says it better, and a log
+// that fills with "nothing here yet" is a log nobody reads.
+func TestAMissingSpanDirectoryIsNotWorthALogLine(t *testing.T) {
+	t.Setenv(logging.EnvLevel, "info")
+	t.Setenv(logging.EnvFile, "")
+	h := t.TempDir()
+	if got := Read(h); len(got) != 0 {
+		t.Fatalf("got %d spans from a home with no span log", len(got))
+	}
+	if recs := logging.Read(h); len(recs) != 0 {
+		t.Fatalf("a missing span directory was logged as %v", recs)
+	}
+	if _, err := os.Stat(logging.Dir(h)); err == nil {
+		t.Fatal("reading a home with no spans created the span directory")
 	}
 }

@@ -19,9 +19,18 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/agent"
+	"github.com/AtmanMishra/self-evolving-agent/tui-go/internal/logging"
+	"github.com/charmbracelet/x/ansi"
 )
+
+// log is where the interface records what its agent backend did.
+//
+// logging.Default, not a field: this package is handed no home — its spawn
+// signature belongs to its caller — and the process's log is configured once,
+// by cmd/mnemo, where the home is decided. Before that it is disabled, which
+// is why a test that exercises this package writes nothing anywhere.
+func log() *logging.Logger { return logging.Default() }
 
 // ParseEvent turns one protocol line into at most one interface message.
 //
@@ -274,11 +283,23 @@ func uiRequest(v map[string]any) tea.Msg {
 				d.Options = append(d.Options, ResultText(o))
 			}
 		}
+		// The question, not its contents: a dialog can carry a token or a
+		// path the reader pasted, and a log file is not a place to widen how
+		// far that travels. Which question arrived, and later which answer
+		// went back, is what a reader is looking for here anyway.
+		log().Info("dialog.request", "method", method, "id", id)
 		return d
 	case "notify":
 		return agent.UINotify{Message: str(v, "message"), Kind: str(v, "notifyType")}
 	case "setStatus":
 		return agent.UIStatus{Key: str(v, "statusKey"), Text: str(v, "statusText")}
+	}
+	// A method this build has no surface for — pi's own set_editor_text, or
+	// one added after this build. Nothing is lost by ignoring it, and nothing
+	// is lost by saying so either: at debug level the log answers "is the
+	// agent asking for something we do not draw?".
+	if l := log(); l.Enabled(logging.Debug) {
+		l.Debug("dialog.request", "method", method, "id", id, "handled", false)
 	}
 	return nil
 }
@@ -427,8 +448,14 @@ type Session struct {
 func Spawn(repoRoot, cwd, sessionFile, sessionDir string, trust Trust) (*Session, error) {
 	entry := filepath.Join(repoRoot, "agent", "bin", "mnemo.ts")
 	if _, err := os.Stat(entry); err != nil {
+		log().Warn("agent.spawn", "ok", false, "repo", repoRoot, "err", err.Error())
 		return nil, fmt.Errorf("no agent script at %s (--repo must point at the repository root, not a subdirectory)", entry)
 	}
+	// The plan, before anything is started: this is the one record that says
+	// which process the interface was trying to run, in which directory, on
+	// which session. Everything after it — start, exit — is about that process
+	// going right or wrong.
+	log().Info("agent.spawn", "cwd", cwd, "session", first(sessionFile, "-"), "trust", trust.Flag())
 	// SAFETY: args is a slice (never a shell string) and entry is a file path
 	// resolved under the operator-provided --repo root; exec.Command passes
 	// argv verbatim with no shell interpretation, so a hostile repo path
@@ -505,9 +532,14 @@ func Start(cmd *exec.Cmd) (*Session, error) {
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
+		log().Error("agent.start", "ok", false, "err", err.Error())
 		return nil, err
 	}
 	s := &Session{cmd: cmd, stdin: stdin, msgs: make(chan tea.Msg, 256), nextID: 1, model: "pi"}
+	// Attached: the process exists. A reader looking for "what did the
+	// interface run" has the spawn line; this one is what says it actually
+	// came up, and what to look for in `ps`.
+	log().Info("agent.start", "pid", cmd.Process.Pid)
 	// The stderr drain is waited for before the exit is reported. A child that
 	// fails at startup writes its reason and is gone, so both pipes reach EOF
 	// within microseconds of each other; reporting the exit first would put
@@ -647,11 +679,20 @@ func (s *Session) read(r io.Reader, stderrDone <-chan struct{}) {
 		}
 		var v map[string]any
 		if json.Unmarshal([]byte(line), &v) != nil {
-			// A non-JSON line is stray output, not a protocol failure.
+			// A non-JSON line is stray output, not a protocol failure — and
+			// it is dropped, which is the one kind of loss this log exists to
+			// make answerable. Debug, because pi writes progress chatter that
+			// nobody is looking for until something else is wrong.
+			if l := log(); l.Enabled(logging.Debug) {
+				l.Debug("agent.stray", "bytes", len(line))
+			}
 			continue
 		}
 		msg := ParseEvent(v)
 		if msg == nil {
+			if l := log(); l.Enabled(logging.Debug) {
+				l.Debug("agent.unhandled", "type", str(v, "type"))
+			}
 			continue
 		}
 		if st, ok := msg.(agent.Stats); ok && st.Model != "" {
@@ -666,11 +707,22 @@ func (s *Session) read(r io.Reader, stderrDone <-chan struct{}) {
 	<-stderrDone
 	if f, ok := s.exitFailure(); ok {
 		s.emit(f)
+		log().Warn("agent.exit", "ok", false, "reason", f.Err.Error())
+		return
 	}
+	log().Info("agent.exit", "ok", true)
 }
 
 func (s *Session) emit(msg tea.Msg) {
-	defer func() { _ = recover() }() // a send on a closed channel is not worth a crash
+	defer func() {
+		if r := recover(); r != nil {
+			// A send on a closed channel is a message the interface never saw.
+			// Swallowing it is right — a crash on the way out is worse — but
+			// swallowing it silently is how a stream loses its last event and
+			// nobody can tell.
+			log().Warn("agent.emit", "dropped", fmt.Sprintf("%T", msg))
+		}
+	}()
 	s.msgs <- msg
 }
 
@@ -812,8 +864,13 @@ func (s *Session) Answer(d agent.UIDialog, a agent.UIAnswer) tea.Cmd {
 			cmd["value"] = a.Value
 		}
 		if err := s.send(cmd); err != nil {
+			log().Error("dialog.answered", "ok", false, "method", d.Method, "err", err.Error())
 			return agent.Failed{Err: err}
 		}
+		// Which question and how it was answered — cancelled, confirmed, or a
+		// value — and never the value itself: an input dialog is exactly
+		// where a key gets pasted, and a log is not a place to keep one.
+		log().Info("dialog.answered", "method", d.Method, "id", d.ID, "cancelled", a.Cancelled)
 		return nil
 	}
 }
@@ -839,6 +896,7 @@ func (s *Session) Close() error {
 		_ = s.cmd.Process.Kill()
 	}
 	_ = s.cmd.Wait()
+	log().Info("agent.close", "pid", s.cmd.Process.Pid)
 	return nil
 }
 
