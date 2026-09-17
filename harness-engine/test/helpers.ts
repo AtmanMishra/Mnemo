@@ -37,6 +37,29 @@ export async function makeTmpDir(prefix = "harness-engine-test-"): Promise<strin
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
+/**
+ * Remove a tree, retrying briefly on EBUSY/EPERM.
+ *
+ * Windows keeps a directory locked while a process has it as its cwd — which is
+ * exactly what the #7 boundary gives a bundle child. The child steps out of the
+ * jail on exit (child-runner.ts), but the OS can be a beat behind the process
+ * being gone, and an in-flight watcher reload can hold a fresh child for a
+ * moment longer. Any other error still fails immediately: this tolerates a
+ * timing wart, not a permission problem.
+ */
+export async function rmTree(dir: string, attempts = 25, delayMs = 100): Promise<void> {
+  for (let i = 0; ; i++) {
+    try {
+      await fs.rm(dir, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (i >= attempts || (code !== "EBUSY" && code !== "EPERM")) throw err;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+}
+
 export async function writeBundleDir(
   root: string,
   bundleName: string,

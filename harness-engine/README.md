@@ -31,7 +31,8 @@ stripping — no build step).
                     │   writeBundle    │     manifest.json
                     │   (bundle.ts)    │     tools/<tool>.mjs
                     └────────┬─────────┘
-                             │ import() with cache-busting nonce
+                             │ boundary child by default (see
+                             │ "Execution boundary" below)
                              ▼
    ┌─────────────────────────────────────────────────────┐
    │                 ToolRegistry                        │
@@ -135,11 +136,105 @@ registry.register(sessionBundle, "session");
 ```sh
 node bin/harness-engine.js list                          # visible tools
 node bin/harness-engine.js create spec.json --skills ./skills --scope project
+node bin/harness-engine.js run ./skills/kit greet --params '{"who":"you"}'
 node bin/harness-engine.js watch                         # ./skills + ~/.agent/skills
 ```
 
 `spec.json` is a `HarnessSpec`: `{ name, description, version?, tools: [{name,
 description?, schema, source}] }`.
+
+`list`, `run` and `watch` put bundle code behind the execution boundary by
+default; `--in-process` is the explicit downgrade, and `--timeout <ms>` sets the
+per-call wall clock. `run` prints the tool's return value, or — on failure — the
+whole report: how the process ended, why the boundary stopped it, and everything
+the bundle printed.
+
+## Execution boundary (issue #7)
+
+**The problem.** A bundle is third-party code: `create_harness` accepts a
+model-authored spec by design, and bundle source is therefore
+attacker-influenceable through prompt injection. The safety gate
+(`src/safety.ts`) is *lexical* — it filters what gets LOADED. It cannot
+constrain what a loaded tool does at runtime, and it never could: `fetch()` is a
+global with no import to scan, `eval` can hide anything, and a loop can hang the
+host. Before this change a registered tool ran **in the agent's own process,
+with the agent's environment (including its API keys) and its filesystem
+reach**.
+
+**What the boundary is.** `src/boundary.ts` + `src/child-runner.ts`. Bundle code
+runs in a child process, and the host never evaluates it:
+
+| | host | boundary child |
+|---|---|---|
+| reads manifest, gates on-disk source | yes | re-gates before import (closes the TOCTOU window) |
+| imports the tool module | **never** (child mode) | yes, after the gate |
+| builds `execute()` | a proxy holding name/description/schema | — |
+| environment | the agent's env | explicit allowlist; credential- and injection-shaped names refused even if allowlisted |
+| working directory | the agent's cwd | the bundle directory (realpath'd) |
+| wall clock | a timer per call | killed at the limit: SIGTERM → SIGKILL on POSIX, `taskkill /T` → `taskkill /T /F` on Windows |
+| stdout/stderr | captured, byte-capped, reported with the failure | whatever the bundle prints |
+| failure | `execute()` throws a report | writes a result frame, exits non-zero |
+
+The result frame travels as a **file in a scratch dir**, not on stdout: stdout
+is the bundle's channel, and a bundle that can print could print a fake frame.
+Its path is never in argv or the child's environment (the request arrives on
+stdin), so bundle code cannot forge its verdict. The cache-busting nonce still
+exists — in child mode every call is a fresh process, so module state cannot
+leak between calls at all.
+
+**What it does NOT do — read this before reading "isolated" anywhere else.**
+
+- It is **not a sandbox and not isolation.** The child is the same user, with
+  the same filesystem rights and the same network reach. A bundle can still
+  `fetch()`, still read `~/.ssh/id_rsa` **if** it gets past the gate to a
+  filesystem module, and still write anywhere the user can. The cwd jail is a
+  default, not a wall.
+- **The timeout bounds wall clock, not resources.** Memory, CPU and disk are
+  unbounded; a bundle can allocate until the OS says no.
+- **The gate's allowlist is the caller's decision.** `allowModules` was already
+  the documented escape hatch; a bundle that is allowed `node:fs` can do
+  everything that module can do, from the child.
+- **Grandchildren that detach are beyond the tree kill.** `taskkill /T` and a
+  POSIX process-group signal reach what the OS still tracks as the tree.
+- **On Windows, a bundle directory stays locked while a child has it as cwd** —
+  the boundary steps out of the jail on exit, but the OS can be a beat behind,
+  so deleting a bundle dir immediately after a run may need a retry.
+
+What it *does* buy: a crash, a `process.exit`, a hang or a fork-bomb-in-a-tool
+can no longer take the agent with it, and the agent's API keys are not in the
+child's environment.
+
+**Design decision — why a child process.** The honest portable option, and the
+reasoning is short: a `worker_thread` shares the parent's environment, so it
+cannot hide the API keys; a container or VM is real isolation but is not
+portable to a laptop and would be the first runtime dependency this package has
+ever had; `node --permission` is promising but is still experimental, and a
+permission model that silently changes between Node minors is worse than a
+boundary you can explain. A child process is the only option that is portable
+across Windows/macOS/Linux with zero dependencies, can be killed **as a tree**,
+and can be given a **different environment**. `BoundaryOptions.nodeArgs` exists
+so a caller who wants `--permission` on top can have it.
+
+**Where the default lives.** `createHarness()` (the self-extension seam, the
+path the model's own code takes), `SkillsWatcher`, and the CLI all default to
+`execution: "child"`. `loadBundle()` itself defaults to `"in-process"` so
+metadata paths and gate tests do not pay for a spawn — and every `LoadedBundle`
+carries `execution`, so a caller can never be unsure which one it holds. The
+downgrade is explicit (`execution: "in-process"`, CLI `--in-process`) and it is
+reported in the result text, because a silent downgrade is how this issue
+happened in the first place.
+
+**Tests that assert the properties** (`test/boundary.test.ts`, 12 tests): env
+scrubbing (a secret in the host's env is absent from the child, attested by the
+child), the cwd jail (module top-level side effects land in the bundle dir), that
+the host never imports the bundle (the module reports a pid that is not the
+host's), timeout + tree kill (the pid is gone afterwards), escalation
+(SIGTERM → SIGKILL / `taskkill /T` → `/T /F`, with an injected kill system so no
+real tree is signalled), bounded output (a 20k-line flood, verdict intact),
+honest failure (thrown message + stderr + stdout + exit code in the error),
+a bundle that calls `exit(3)` taking only itself down while the host keeps
+running bundles, gate ordering (the gate refuses *before* any spawn), and the
+defaults above.
 
 ## Tests
 
@@ -148,10 +243,11 @@ npm install && npm test     # node:test, no LLM calls, no network
 npm run typecheck           # tsc --noEmit
 ```
 
-50 tests cover: bundle create/dispose roundtrip, scope override precedence
-(and loud shadow warnings), watched-dir pickup latency (<1s), invalidation on
-file rewrite and on deletion, symlink-escape containment, loader-tool
-activation, and all safety-gate rejection paths.
+The suite (`npm test`, 42 tests) covers: bundle create/dispose roundtrip, scope
+override precedence (and loud shadow warnings), watched-dir pickup latency,
+invalidation on file rewrite and on deletion, symlink-escape containment,
+loader-tool activation, every safety-gate rejection path, and the
+execution-boundary properties listed above.
 
 ## Security notes — read before loading agent-written code
 
@@ -192,20 +288,31 @@ bundle whose tool names hide broader-scope tools records a `ShadowEvent`
 (`registry.shadowEvents`) and warns — nearest-shadows is the design, but it
 is never silent.
 
-It does **NOT** sandbox anything:
+It did **NOT** sandbox anything — and the runtime half of that is now addressed
+by the **Execution boundary** section above:
 
-- Registered tools execute **inside this Node process with full privileges**
-  (a739fbd8 — documented, accepted risk). The gate filters what gets LOADED;
-  it cannot constrain what a loaded tool does at runtime.
+- Registered tools no longer execute **inside this Node process with full
+  privileges** by default (a739fbd8 — the documented, accepted risk). The gate
+  still filters what gets LOADED and still cannot constrain what a loaded tool
+  does at runtime; the boundary changes WHERE that runtime is. `in-process`
+  remains available and explicit, and then this paragraph applies verbatim:
+  the tool runs in the agent's process, with the agent's environment.
 - Escapes the gate cannot see: `fetch()` (global, no import), prototype
   pollution, infinite loops, and obfuscation inside `eval`/`Function` bodies.
+  The boundary contains the *consequences* of the last two (a hang is killed, a
+  crash dies alone); it does nothing about network reach or prototype pollution
+  in the child — and a bundle that polls prototypes does it in a process that
+  then exits.
 - ESM caches cannot be surgically evicted; unregistering drops the strong
   reference and every reload uses a unique URL nonce so stale module instances
   are never reused (they become garbage-collectable). Memory of dead modules is
-  reclaimed by GC, not freed deterministically.
+  reclaimed by GC, not freed deterministically. In child mode this is moot:
+  every call is a fresh process.
 
-For real isolation run bundles in `node --permission` workers or containers.
-Treat every registered bundle as trusted code from the moment it loads.
+For real isolation run bundles in `node --permission` workers or containers —
+`BoundaryOptions.nodeArgs` is the seam for the former. Treat every bundle as
+code you are executing: the boundary bounds the blast radius and hides the
+agent's secrets. It does not make the code safe.
 
 ## Future attachment plans (not implemented here)
 

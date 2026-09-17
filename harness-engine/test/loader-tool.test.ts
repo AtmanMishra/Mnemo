@@ -12,6 +12,7 @@ function makeRegistryWithTools(): ToolRegistry {
         dir: `/virtual/${name}`,
         manifest: { name, version: "0.1.0", description: "", tools: [`tools/${name}.mjs`] },
         scope: "session",
+        execution: "in-process",
         tools: new Map([
           [
             name,

@@ -80,6 +80,19 @@ export function renderSkillMd(b: HarnessBundleInfo): string {
     "",
     ...b.tools.map((t) => `- ${t}`),
     "",
+    "## Running these tools",
+    "",
+    "Each tool runs in a CHILD process, not in the agent: the environment is",
+    "scrubbed to an explicit allowlist (no API keys or tokens), the working",
+    "directory is this bundle's directory, and a wall-clock timeout kills the",
+    "process tree if the tool hangs. Everything the tool prints is captured and",
+    "reported, bounded, along with a non-zero exit.",
+    "",
+    "That is blast-radius control and secret hiding. It is **not** a sandbox —",
+    "the child runs as the same user, so it can still read and write anything",
+    "that user can, and reach the network. Treat this bundle as code you are",
+    "executing. See `harness-engine/README.md`, \"Execution boundary\".",
+    "",
   ];
   return lines.join("\n");
 }

@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { ToolRegistry } from "../src/registry.ts";
 import { SkillsWatcher, type WatcherOptions } from "../src/watcher.ts";
-import { makeTmpDir, writeBundleDir, waitFor } from "./helpers.ts";
+import { makeTmpDir, rmTree, writeBundleDir, waitFor } from "./helpers.ts";
 
 function setup(root: string, options: WatcherOptions = {}) {
   const registry = new ToolRegistry();
@@ -74,7 +74,7 @@ test("a bundle written after start is picked up when its debounce fires", async 
       `debounces armed: ${JSON.stringify(sched.fired)}`);
   } finally {
     watcher.stop();
-    await fs.rm(root, { recursive: true, force: true });
+    await rmTree(root);
   }
 });
 
@@ -108,7 +108,7 @@ test("rewriting a tool file invalidates and reloads the bundle", async () => {
     assert.ok(watcher.errors.length > 0, "expected an invalidation error recorded");
   } finally {
     watcher.stop();
-    await fs.rm(root, { recursive: true, force: true });
+    await rmTree(root);
   }
 });
 
@@ -119,11 +119,11 @@ test("deleting a bundle directory unregisters it", async () => {
   try {
     const dir = await writeBundleDir(root, "doomed", [{ name: "gone" }]);
     await waitFor(() => registry.resolve("gone") !== undefined, 1000);
-    await fs.rm(dir, { recursive: true, force: true });
+    await rmTree(dir);
     await waitFor(() => registry.resolve("gone") === undefined, 1000);
   } finally {
     watcher.stop();
-    await fs.rm(root, { recursive: true, force: true });
+    await rmTree(root);
   }
 });
 
@@ -159,7 +159,7 @@ test("an unsafe bundle is skipped with an error and never imported; the watcher 
     assert.equal(await registry.resolve("stillworks")!.tool.execute({}), "ran:good-after:stillworks");
   } finally {
     watcher.stop();
-    await fs.rm(root, { recursive: true, force: true });
+    await rmTree(root);
   }
 });
 
@@ -182,7 +182,7 @@ test("bundles reached via a symlink outside the watched root are ignored (593e9a
     await waitFor(() => registry.resolve("insider") !== undefined, 1000);
   } finally {
     watcher.stop();
-    await fs.rm(root, { recursive: true, force: true });
-    await fs.rm(outside, { recursive: true, force: true });
+    await rmTree(root);
+    await rmTree(outside);
   }
 });

@@ -113,5 +113,60 @@ describe("create_harness tool", () => {
     assert.match(textOf(proc), /create_harness failed/);
   });
 
+  test("create_harness hands the bundle to the boundary child by default (#7)", async () => {
+    const mod = await import("../../harness-engine/src/create-harness.ts");
+    const { ToolRegistry } = await import("../../harness-engine/src/registry.ts");
+    const registry = new (ToolRegistry as any)();
+    const seen: any[] = [];
+    const tool = makeCreateHarnessTool({
+      root,
+      indexHarness: async () => "",
+      createHarness: async (opts: any) => {
+        seen.push(opts);
+        opts.registry = registry;
+        return mod.createHarness(opts);
+      },
+    });
+    const res = await tool.execute!("t6", {
+      name: "bounded-kit",
+      description: "must run behind the boundary",
+      tools: [{ name: "where_am_i", schema: undefined, source: "return `ran ${params.tag ?? 'unset'}`;" }],
+    });
+    const text = textOf(res);
+
+    // 1. The seam asks for the boundary, and says which mode it got.
+    assert.equal(seen[0].execution, "child", "create_harness must ask for child execution");
+    assert.match(text, /execution: each tool runs in a CHILD process/);
+    assert.match(text, /not a sandbox/i, "the model must be told what the boundary is NOT");
+    // 2. The tool is really callable and really runs (in the child) end to end.
+    const found = registry.resolve("where_am_i");
+    assert.ok(found, "the created tool is registered on the injected registry");
+    assert.equal(await found.tool.execute({ tag: "agent" }), "ran agent");
+    assert.equal(found.bundle.execution, "child");
+
+    // 3. The explicit downgrade is available, visible, and reported as such.
+    const inProc = makeCreateHarnessTool({
+      root,
+      execution: "in-process",
+      indexHarness: async () => "",
+      createHarness: async (opts: any) => {
+        opts.registry = new (ToolRegistry as any)();
+        return mod.createHarness(opts);
+      },
+    });
+    const downgraded = await inProc.execute!("t7", {
+      name: "downgraded-kit",
+      description: "explicitly in-process",
+      tools: [{ name: "hello_again", source: "return 'hi';" }],
+    });
+    assert.match(textOf(downgraded), /in-process \(explicitly requested\)/);
+
+    // 4. The tool description itself carries the trust statement — the issue's
+    //    own acceptance test: a model told only about the gate can reasonably
+    //    believe it is constrained.
+    assert.match(tool.description!, /NOT a sandbox/);
+    assert.match(tool.description!, /same user/);
+  });
+
   test("cleanup", () => rmSync(tmp, { recursive: true, force: true }));
 });

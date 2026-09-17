@@ -6,7 +6,7 @@
   "engines": { "node": ">=22.18" },
   "bin": { "harness-engine": "./bin/harness-engine.js" },
   "scripts": {
-    "test": "node --test test/bundle.test.ts test/safety.test.ts test/registry.test.ts test/create-harness.test.ts test/loader-tool.test.ts test/watcher.test.ts",
+    "test": "node --test test/bundle.test.ts test/safety.test.ts test/registry.test.ts test/create-harness.test.ts test/loader-tool.test.ts test/watcher.test.ts test/boundary.test.ts",
     "typecheck": "tsc --noEmit",
     "cli": "node bin/harness-engine.js"
   },

@@ -34,6 +34,9 @@ describe("harness bridge", () => {
     const md = readFileSync(skillPath, "utf8");
     assert.ok(md.includes("name: k8s-debug"));
     assert.ok(md.includes("- pod_status"));
+    // #7: the skill a model reads must state the boundary AND its limit.
+    assert.match(md, /runs in a CHILD process/);
+    assert.match(md, /not\*\* a sandbox|not a sandbox/);
 
     const skills = await discoverSkills({ cwd: tmp, home: path.join(tmp, "home") });
     const k = skills.find((s) => s.name === "k8s-debug");

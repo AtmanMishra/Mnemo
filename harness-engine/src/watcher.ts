@@ -9,7 +9,8 @@ import { watch, type FSWatcher } from "node:fs";
 import * as path from "node:path";
 import type { Disposable, ScopeName } from "./types.ts";
 import type { ToolRegistry } from "./registry.ts";
-import { loadBundle } from "./bundle.ts";
+import { loadBundle, type ExecutionMode } from "./bundle.ts";
+import type { BoundaryOptions } from "./boundary.ts";
 import { isWithin } from "./safety.ts";
 
 export interface WatchedDir {
@@ -20,6 +21,14 @@ export interface WatchedDir {
 export interface WatcherOptions {
   debounceMs?: number; // default 500
   onError?(err: Error, bundleDir: string): void;
+  /**
+   * Where watched bundles' tools execute. Default "child" (#7): a bundle that
+   * appears on disk is somebody else's code, and the watcher registers it for
+   * the session, so it runs behind the boundary. Pass "in-process" to opt out.
+   */
+  execution?: ExecutionMode;
+  /** Boundary knobs for child mode (timeout, env allowlist, cwd). */
+  boundary?: BoundaryOptions;
   /**
    * Test override: arm the debounce without real time. Handed the fire callback
    * and the debounce, it returns a cancel. Defaults to setTimeout — the same
@@ -37,6 +46,8 @@ export class SkillsWatcher implements Disposable {
   #dirs: WatchedDir[];
   #debounceMs: number;
   #onError?: NonNullable<WatcherOptions["onError"]>;
+  #execution: ExecutionMode;
+  #boundary?: BoundaryOptions;
   #watchers: FSWatcher[] = [];
   #timers = new Map<string, { cancel(): void }>();
   #arm: (fire: () => void, ms: number) => { cancel(): void };
@@ -51,6 +62,10 @@ export class SkillsWatcher implements Disposable {
     this.#dirs = dirs.map((d) => ({ ...d, path: path.resolve(d.path) }));
     this.#debounceMs = options.debounceMs ?? 500;
     this.#onError = options.onError;
+    // #7: watched bundles are third-party code by the time they are on disk, so
+    // the default is the boundary. Opting out is explicit and per-watcher.
+    this.#execution = options.execution ?? "child";
+    this.#boundary = options.boundary;
     // Arm the debounce through an injectable scheduler: the same discipline as
     // the hooks executor's scheduleTimeout, so the debounce deadline can be
     // fired by a test instead of raced by it.
@@ -138,7 +153,10 @@ export class SkillsWatcher implements Disposable {
         continue;
       }
       try {
-        const bundle = await loadBundle(realBundle, dir.scope);
+        const bundle = await loadBundle(realBundle, dir.scope, {
+          execution: this.#execution,
+          boundary: this.#boundary,
+        });
         this.#realDirs.set(bundleDir, realBundle);
         this.#registry.register(bundle, dir.scope); // replaces same-name entry in this scope
       } catch (err) {
