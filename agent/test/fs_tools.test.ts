@@ -73,11 +73,18 @@ test("glob_list matches relative patterns under root", async () => {
 // --- 12.6 (e00cd116): the workspace root is a real jail ---------------------
 
 test("resolveInWorkspace rejects absolute paths outside the root", async () => {
-  // a relative target resolves to the canonical root + name, even if the file does not exist yet
+  // A relative target resolves to the canonical root + name, even if the file
+  // does not exist yet. Canonicalize BOTH sides: %TEMP% can be handed out in
+  // its 8.3 short form (C:\Users\ATMANM~1\...) while the expected path is long
+  // form, and realpath does not spell the two the same way — the comparison
+  // must be between two canonical paths, not two spellings of one. The tail
+  // may not exist, so canonicalize the (existing) directory and rejoin it.
   const canon = await fs.realpath(tmp);
-  assert.equal(resolveInWorkspace("in.txt"), path.join(canon, "in.txt"));
+  const canonical = async (p: string) =>
+    path.join(await fs.realpath(path.dirname(p)), path.basename(p));
+  assert.equal(await canonical(resolveInWorkspace("in.txt")), path.join(canon, "in.txt"));
   // sanity: the root itself is inside
-  assert.equal(resolveInWorkspace("."), canon);
+  assert.equal(await canonical(resolveInWorkspace(".")), canon);
   for (const outside of ["/etc/hosts", "/etc"]) {
     assert.throws(() => resolveInWorkspace(outside), /outside the workspace root/,
       `${outside} must be rejected`);

@@ -20,6 +20,14 @@ export interface WatchedDir {
 export interface WatcherOptions {
   debounceMs?: number; // default 500
   onError?(err: Error, bundleDir: string): void;
+  /**
+   * Test override: arm the debounce without real time. Handed the fire callback
+   * and the debounce, it returns a cancel. Defaults to setTimeout — the same
+   * discipline as the hooks executor's scheduleTimeout, so a test that must not
+   * race a wall clock under load fires the callback itself instead of sleeping
+   * and hoping the 250ms landed.
+   */
+  schedule?: (fire: () => void, ms: number) => { cancel(): void };
 }
 
 const NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_-]*$/;
@@ -30,7 +38,8 @@ export class SkillsWatcher implements Disposable {
   #debounceMs: number;
   #onError?: NonNullable<WatcherOptions["onError"]>;
   #watchers: FSWatcher[] = [];
-  #timers = new Map<string, ReturnType<typeof setTimeout>>();
+  #timers = new Map<string, { cancel(): void }>();
+  #arm: (fire: () => void, ms: number) => { cancel(): void };
   #pending = new Map<string, { root: string; scope: ScopeName; child: string | null }>();
   #realDirs = new Map<string, string>(); // lexical bundle dir -> canonical dir (last good load)
   #started = false;
@@ -42,6 +51,15 @@ export class SkillsWatcher implements Disposable {
     this.#dirs = dirs.map((d) => ({ ...d, path: path.resolve(d.path) }));
     this.#debounceMs = options.debounceMs ?? 500;
     this.#onError = options.onError;
+    // Arm the debounce through an injectable scheduler: the same discipline as
+    // the hooks executor's scheduleTimeout, so the debounce deadline can be
+    // fired by a test instead of raced by it.
+    this.#arm =
+      options.schedule ??
+      ((fire: () => void, ms: number) => {
+        const t = setTimeout(fire, ms);
+        return { cancel: () => clearTimeout(t) };
+      });
   }
 
   /**
@@ -76,10 +94,10 @@ export class SkillsWatcher implements Disposable {
       child = parts.length > 0 ? parts[0]! : null;
     }
     const key = child ? path.join(dir.path, child) : dir.path + "::all";
-    clearTimeout(this.#timers.get(key));
+    this.#timers.get(key)?.cancel();
     this.#timers.set(
       key,
-      setTimeout(() => {
+      this.#arm(() => {
         this.#timers.delete(key);
         this.#refresh(dir, child).catch((err) => this.#recordError(key, err as Error));
       }, this.#debounceMs),
@@ -155,7 +173,7 @@ export class SkillsWatcher implements Disposable {
   stop(): void {
     this.#started = false;
     for (const w of this.#watchers.splice(0)) w.close();
-    for (const t of this.#timers.values()) clearTimeout(t);
+    for (const t of this.#timers.values()) t.cancel();
     this.#timers.clear();
   }
 

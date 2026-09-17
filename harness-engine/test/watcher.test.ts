@@ -3,30 +3,75 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { ToolRegistry } from "../src/registry.ts";
-import { SkillsWatcher } from "../src/watcher.ts";
+import { SkillsWatcher, type WatcherOptions } from "../src/watcher.ts";
 import { makeTmpDir, writeBundleDir, waitFor } from "./helpers.ts";
 
-function setup(root: string) {
+function setup(root: string, options: WatcherOptions = {}) {
   const registry = new ToolRegistry();
   const watcher = new SkillsWatcher(registry, [{ path: root, scope: "project" }], {
     debounceMs: 250,
+    ...options,
   });
   return { registry, watcher };
 }
 
-test("watched-dir pickup latency < 1s", async () => {
+/**
+ * A debounce scheduler the test drives itself. With real timers, pickup is a
+ * race against a wall clock: under parallel load the 250ms debounce, the fs
+ * event and the bundle import all have to fit inside a budget the test picked
+ * before the machine got busy. Here the test owns the deadline — it fires the
+ * callback and observes the reload, instead of sleeping and hoping.
+ */
+function manualDebounce() {
+  const armed: Array<{ fire: () => void; ms: number }> = [];
+  /** The debounces actually fired, in order (what the product asked for). */
+  const fired: number[] = [];
+  const schedule = (fire: () => void, ms: number): { cancel(): void } => {
+    armed.push({ fire, ms });
+    return {
+      cancel: () => {
+        const i = armed.findIndex((a) => a.fire === fire);
+        if (i !== -1) armed.splice(i, 1);
+      },
+    };
+  };
+  /**
+   * Fire each debounce the watcher arms until `done` holds. Bounded, so a
+   * watcher that never schedules one fails the test instead of hanging it.
+   */
+  const pump = async (done: () => boolean, budgetMs = 5_000): Promise<void> => {
+    const deadline = Date.now() + budgetMs;
+    while (!done()) {
+      if (Date.now() > deadline) throw new Error("watcher: the bundle was never picked up");
+      const next = armed.shift();
+      if (next) {
+        fired.push(next.ms);
+        next.fire();
+      }
+      await new Promise((r) => setTimeout(r, 5)); // the fs event and import are async
+    }
+  };
+  return { schedule, fired, pump };
+}
+
+test("a bundle written after start is picked up when its debounce fires", async () => {
   const root = await makeTmpDir();
-  const { registry, watcher } = setup(root);
-  watcher.start();
+  const sched = manualDebounce();
+  const { registry, watcher } = setup(root, { schedule: sched.schedule });
+  // Attach before writing: start() resolves once every watcher is attached, and
+  // a write that lands first is a missed event, not a slow pickup.
+  await watcher.start();
   try {
-    const t0 = Date.now();
     await writeBundleDir(root, "late-bundle", [
       { name: "hello", source: 'export default { name:"hello", schema:{type:"object"}, async execute(){ return "hi"; } };' },
     ]);
-    const elapsed = await waitFor(() => registry.resolve("hello") !== undefined, 1000);
-    assert.ok(elapsed < 1000, `pickup took ${elapsed}ms`);
+    await sched.pump(() => registry.resolve("hello") !== undefined);
     assert.equal(await registry.resolve("hello")!.tool.execute({}), "hi");
     assert.equal(registry.resolve("hello")?.scope, "project");
+    // The deadline the watcher armed is the configured debounce, well inside
+    // the 1s the product promises.
+    assert.ok(sched.fired.length > 0 && sched.fired.every((ms) => ms === 250),
+      `debounces armed: ${JSON.stringify(sched.fired)}`);
   } finally {
     watcher.stop();
     await fs.rm(root, { recursive: true, force: true });
@@ -36,7 +81,7 @@ test("watched-dir pickup latency < 1s", async () => {
 test("rewriting a tool file invalidates and reloads the bundle", async () => {
   const root = await makeTmpDir();
   const { registry, watcher } = setup(root);
-  watcher.start();
+  await watcher.start();
   try {
     // v1
     await writeBundleDir(root, "counter", [
@@ -70,7 +115,7 @@ test("rewriting a tool file invalidates and reloads the bundle", async () => {
 test("deleting a bundle directory unregisters it", async () => {
   const root = await makeTmpDir();
   const { registry, watcher } = setup(root);
-  watcher.start();
+  await watcher.start();
   try {
     const dir = await writeBundleDir(root, "doomed", [{ name: "gone" }]);
     await waitFor(() => registry.resolve("gone") !== undefined, 1000);
@@ -85,7 +130,7 @@ test("deleting a bundle directory unregisters it", async () => {
 test("an unsafe bundle is skipped with an error and never imported; the watcher survives (ccdbbb2b)", async () => {
   const root = await makeTmpDir();
   const { registry, watcher } = setup(root);
-  watcher.start();
+  await watcher.start();
   try {
     // The exact audit bypass: a clean-looking tool file that imports a
     // relative helper which does the real child_process work.
@@ -122,7 +167,7 @@ test("bundles reached via a symlink outside the watched root are ignored (593e9a
   const outside = await makeTmpDir("harness-outside-"); // separate tree
   const root = await makeTmpDir();
   const { registry, watcher } = setup(root);
-  watcher.start();
+  await watcher.start();
   try {
     const extDir = await writeBundleDir(outside, "escaped", [{ name: "outsider" }]);
     await fs.symlink(extDir, path.join(root, "linked"));

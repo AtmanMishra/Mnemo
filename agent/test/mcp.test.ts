@@ -13,9 +13,23 @@ import {
   mcpConfigFile, mcpToolName, toSeaTool, getMcpTools, setMcpTools,
 } from "../src/mcp.ts";
 import { textOf } from "../src/tools/types.ts";
+import { resolvePythonBin } from "../src/python.ts";
 
 const clients: McpClient[] = [];
 after(() => { for (const c of clients) c.stop(); setMcpTools([]); });
+
+/**
+ * The interpreter the fake servers run under, resolved once and lazily.
+ * `python3` is the POSIX name for python and is not an interpreter on Windows:
+ * there it is usually the Microsoft Store alias stub, which prints "Python was
+ * not found" and exits 9009 — taking every real-server test with it. Ask the
+ * same resolver the ipy kernel uses instead of guessing a POSIX name; it
+ * throws naming what it tried when there is no python at all.
+ */
+let pythonBin: string | undefined;
+function python(): string {
+  return (pythonBin ??= resolvePythonBin());
+}
 
 /** A minimal MCP server: initialize, tools/list, tools/call. */
 const SERVER = `
@@ -50,7 +64,7 @@ for line in sys.stdin:
 `;
 
 function fakeServer(extra: string[] = []): McpClient {
-  const c = new McpClient("fake", { command: "python3", args: ["-c", SERVER, ...extra] }, 10_000);
+  const c = new McpClient("fake", { command: python(), args: ["-c", SERVER, ...extra] }, 10_000);
   clients.push(c);
   return c;
 }
@@ -137,9 +151,9 @@ test("an unknown method surfaces the server's JSON-RPC error", async () => {
 test("discovery collects tools and keeps one broken server from stopping startup", async () => {
   const config = {
     servers: {
-      good: { command: "python3", args: ["-c", SERVER] },
+      good: { command: python(), args: ["-c", SERVER] },
       broken: { command: "definitely-not-a-real-binary-xyz", args: [] },
-      off: { command: "python3", args: ["-c", SERVER], disabled: true },
+      off: { command: python(), args: ["-c", SERVER], disabled: true },
     },
   };
   const made: McpClient[] = [];
