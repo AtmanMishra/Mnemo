@@ -1,3 +1,5 @@
+import type { ApprovalPrompt } from "../policy/prompt.ts";
+
 /**
  * The session's event vocabulary.
  *
@@ -8,11 +10,17 @@
  *
  * The shapes are the ones a terminal transcript actually needs to distinguish:
  * text that is still arriving, a tool that is running, a tool that finished, a
- * turn that ended. Anything richer can be added when a block needs it — the
- * point of a small vocabulary is that adding to it is a deliberate act.
+ * question waiting to be answered, a turn that ended. Anything richer can be
+ * added when a block needs it — the point of a small vocabulary is that adding
+ * to it is a deliberate act.
  */
 export type SessionEvent =
   | { type: "user"; text: string }
+  /**
+   * A call the gate would not decide alone. The prompt arrives already built, so
+   * the session renders a question without knowing anything about policy.
+   */
+  | { type: "ask"; prompt: ApprovalPrompt }
   /** A chunk of the answer as it arrives. */
   | { type: "assistant-delta"; text: string }
   /** The answer is complete; nothing more will be appended to it. */

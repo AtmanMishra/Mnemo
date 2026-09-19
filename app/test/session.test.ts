@@ -12,6 +12,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Session } from "../src/session/session.ts";
 import type { SessionEvent } from "../src/session/events.ts";
+import { decide, type ToolCall } from "../src/policy/gate.ts";
+import { approvalPrompt } from "../src/policy/prompt.ts";
 
 /** Apply events, rendering after each, and keep what the screen showed. */
 function play(events: SessionEvent[], width: number, keepLive = 12) {
@@ -172,4 +174,39 @@ test("streaming and runningTools report the session's actual state", () => {
 
   session.apply({ type: "tool-end", id: "t1", ok: true });
   assert.equal(session.runningTools, 0);
+});
+
+test("a question appears where the turn reached it, and the answer is what remains", () => {
+  const call: ToolCall = { toolName: "bash", input: { command: "git push origin main" } };
+  const prompt = approvalPrompt(call, decide(call, { project: [], global: [], deny: [] }))!;
+  const session = new Session({ keepLive: 0 });
+  session.apply({ type: "user", text: "ship it" });
+  session.apply({ type: "assistant-delta", text: "Pushing now.\n" });
+  session.apply({ type: "ask", prompt });
+
+  const asked = session.render(62);
+  const question = [...asked.history, ...asked.viewport].join("\n");
+  assert.match(question, /\? git push origin main/, "the command, in the words it was written in");
+  assert.match(question, /\[allow once\]/);
+  assert.match(question, /approve git push\* in this checkout/, "what 'always' would store");
+  assert.ok(session.awaitingAnswer, "and the session knows it is waiting");
+
+  assert.equal(session.answer("always-project"), true);
+  assert.equal(session.awaitingAnswer, undefined, "answering ends the wait");
+
+  const decided = session.render(62);
+  // Both frames' scrollback: a frame's `history` is the part of it that has not
+  // been delivered yet, so the rows the question's frame retired are only in
+  // *that* frame. Reading one frame's delta and calling it "the screen" is the
+  // mistake this suite has made more than once.
+  const record = [...asked.history, ...decided.history, ...decided.viewport].join("\n");
+  assert.match(record, /→ always, this project — approve git push\* in this checkout/);
+  assert.doesNotMatch(record, /\[allow once\]/, "the menu is gone; the decision is what stays");
+  assert.match(record, /Pushing now\./, "and the turn around it is untouched");
+});
+
+test("an answer with nowhere to go is refused, not silently ignored", () => {
+  const session = new Session();
+  assert.equal(session.answer("once"), false, "there is no question waiting");
+  assert.equal(session.awaitingAnswer, undefined);
 });

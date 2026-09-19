@@ -14,6 +14,7 @@
 import { AssistantBlock, wrapLine } from "../transcript/streaming-block.ts";
 import { Transcript, type Entry, type TranscriptBlock, type TranscriptRender } from "../transcript/transcript.ts";
 import type { SessionEvent } from "./events.ts";
+import { promptLines, type ApprovalChoice, type ApprovalPrompt } from "../policy/prompt.ts";
 
 /** Simple finished-or-not block for lines that do not stream. */
 class LinesBlock implements TranscriptBlock {
@@ -72,6 +73,8 @@ export class Session {
   #assistant: AssistantBlock | undefined;
   #assistantEntry: Entry | undefined;
   #tools = new Map<string, ToolBlock>();
+  /** The question waiting to be answered, if any. */
+  #ask: { block: LinesBlock; prompt: ApprovalPrompt } | undefined;
   #keepLive: number;
 
   constructor(options: SessionOptions = {}) {
@@ -86,6 +89,19 @@ export class Session {
         this.#assistantEntry = undefined;
         this.transcript.add(new LinesBlock([`▶ ${event.text}`]));
         break;
+
+      case "ask": {
+        // A question is a block like anything else: it appears where the turn
+        // reached it and stays there once answered — a record of what was asked
+        // and what was decided, not a dialog that vanishes.
+        this.#assistant?.finish();
+        this.#assistant = undefined;
+        this.#assistantEntry = undefined;
+        const block = new LinesBlock(promptLines(event.prompt), false);
+        this.#ask = { block, prompt: event.prompt };
+        this.transcript.add(block);
+        break;
+      }
 
       case "assistant-delta": {
         // An answer is one block however many chunks arrive, and a second
@@ -153,5 +169,33 @@ export class Session {
   /** A tool that started and has not reported back. */
   get runningTools(): number {
     return this.#tools.size;
+  }
+
+  /** The question waiting for an answer, if one is. */
+  get awaitingAnswer(): ApprovalPrompt | undefined {
+    return this.#ask?.prompt;
+  }
+
+  /**
+   * Answer the pending question.
+   *
+   * The block is rewritten to say what was decided and finalized, so the
+   * transcript may retire it into scrollback: an answered question is history,
+   * and a question left in the live region is a decision nobody can look up.
+   */
+  answer(choice: ApprovalChoice, note?: string): boolean {
+    const pending = this.#ask;
+    if (!pending) return false;
+    const option = pending.prompt.options.find((candidate) => candidate.id === choice);
+    const outcome =
+      choice === "other" && note
+        ? `you said: ${note}`
+        : option
+          ? `${option.label} — ${option.effect}`
+          : choice;
+    pending.block.setLines([`? ${pending.prompt.title}`, `  → ${outcome}`]);
+    pending.block.finish();
+    this.#ask = undefined;
+    return true;
   }
 }
