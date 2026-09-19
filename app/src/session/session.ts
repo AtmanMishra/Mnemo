@@ -142,14 +142,13 @@ export class Session {
         this.transcript.add(new LinesBlock([`! ${event.text}`]));
         break;
 
+      // All three are "the interface has lines to show": finished on arrival,
+      // because each reports a state as of now, and a later look is a new answer
+      // rather than an update to this one. Keeping any of them live would mean a
+      // stale panel redrawn as if it were current.
       case "memory":
-        // Finished on arrival: the panel reports what memory holds *now*, and a
-        // later look is a new answer rather than an update to this one — keeping
-        // it live would mean a stale panel redrawn as if it were current.
-        this.transcript.add(new LinesBlock(event.lines));
-        break;
-
       case "opening":
+      case "lines":
         this.transcript.add(new LinesBlock(event.lines));
         break;
 

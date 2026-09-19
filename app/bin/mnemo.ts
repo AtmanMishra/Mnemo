@@ -180,6 +180,7 @@ function interactive(): void {
       stdout: process.stdout,
     },
     session,
+    facts: { home: facts.home, provider: facts.provider, model: facts.model },
     exit: (code) => process.exit(code ?? 0),
   });
 }

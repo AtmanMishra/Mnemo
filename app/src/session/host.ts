@@ -21,6 +21,7 @@
 import type { Session } from "./session.ts";
 import { Composer, type LoopHost } from "../input/loop.ts";
 import type { ApprovalChoice, ApprovalPrompt } from "../policy/prompt.ts";
+import { runCommand } from "../commands/commands.ts";
 
 /** The part of the agent this needs. A test can be a plain object. */
 export interface TurnRunner {
@@ -40,6 +41,8 @@ export interface HostOptions {
   redraw(): void;
   /** Called when the reader asked to leave. */
   onExit?: () => void;
+  /** Where the home is and what is configured, for the commands that ask. */
+  facts?: { home: string; provider?: string; model?: string };
 }
 
 export function sessionHost(options: HostOptions): LoopHost {
@@ -47,6 +50,24 @@ export function sessionHost(options: HostOptions): LoopHost {
 
   return {
     submit(text: string) {
+      // A command is not a message, and this ordering is the whole point: the
+      // interface once told the reader to run `/login`, submitted it as a turn,
+      // and the turn answered "run /login". The loop could not be escaped from
+      // inside, which is what makes an instruction pointing at nothing worse
+      // than no instruction at all.
+      if (text.trimStart().startsWith("/")) {
+        const result = runCommand(text, {
+          session,
+          home: options.facts?.home ?? "",
+          provider: options.facts?.provider,
+          model: options.facts?.model,
+          exit: () => options.onExit?.(),
+        });
+        session.apply({ type: "lines", lines: [`▶ ${text.trim()}`, ...result.lines] });
+        redraw();
+        return;
+      }
+
       // 1: on screen before the turn, so a failure cannot erase the question.
       session.apply({ type: "user", text });
       redraw();

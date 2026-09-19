@@ -42,6 +42,8 @@ export interface StartOptions {
   exit(code?: number): void;
   /** How long to wait before deciding a lone Escape was the Escape key. */
   settleMs?: number;
+  /** Where the home is and what is configured, for the commands that ask. */
+  facts?: { home: string; provider?: string; model?: string };
 }
 
 export interface RunningTui {
@@ -73,7 +75,13 @@ export function startTui(options: StartOptions): RunningTui {
   // it makes it, and late-binds the frame to break the circle between the two.
   let frame!: ReturnType<typeof attach>;
   const repaint = () => frame.repaint();
-  const iface = createInterface({ session, agent, redraw: repaint, onExit: () => stop(0) });
+  const iface = createInterface({
+    session,
+    agent,
+    redraw: repaint,
+    onExit: () => stop(0),
+    facts: options.facts,
+  });
   frame = attach({ iface, session, screen, onExit: () => stop(0) });
 
   if (stdin.setRawMode) stdin.setRawMode(true);

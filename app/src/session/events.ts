@@ -44,6 +44,8 @@ export type SessionEvent =
    * exact failure this rebuild exists to fix.
    */
   | { type: "opening"; lines: string[] }
+  /** Lines the interface drew itself: a command's answer, a panel's contents. */
+  | { type: "lines"; lines: string[] }
   /** The turn is over: everything that can settle, settles. */
   | { type: "turn-end" };
 
