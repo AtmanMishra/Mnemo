@@ -19,6 +19,8 @@ export interface LoopHost {
   submit(text: string): void;
   /** The reader answered a question. `note` is present for an "other" answer. */
   answer(choice: ApprovalChoice, note?: string): void;
+  /** A secret was typed — a key. It is not a message, and never becomes one. */
+  secret(text: string, provider: string): void;
   /** ctrl+c. */
   interrupt(): void;
   /** ctrl+d on an empty prompt. */
@@ -33,6 +35,7 @@ export class Composer {
   #buffer = "";
   #question: ApprovalPrompt | undefined;
   #answering = false;
+  #secret: { provider: string; buffer: string } | undefined;
 
   constructor(host: LoopHost) {
     this.#host = host;
@@ -51,6 +54,25 @@ export class Composer {
     return this.#question;
   }
 
+  /** The key prompt's state: which provider, and how much has been typed. */
+  get secret(): { provider: string; length: number } | undefined {
+    if (!this.#secret) return undefined;
+    return { provider: this.#secret.provider, length: this.#secret.buffer.length };
+  }
+
+  /**
+   * Ask for a key.
+   *
+   * What is typed next is not echoed, not routed, and not remembered: it goes
+   * from the terminal into the host and nowhere else. A key that reached the
+   * transcript through any path — a rendered buffer, an echoed command, a
+   * history file — would be in scrollback forever.
+   */
+  enterSecret(provider: string): void {
+    this.#secret = { provider, buffer: "" };
+    this.#host.changed();
+  }
+
   /**
    * A call is waiting on the reader.
    *
@@ -66,7 +88,54 @@ export class Composer {
 
   /** Feed a chunk from the terminal. */
   push(chunk: string): void {
-    this.#apply(this.#reader.push(chunk));
+    const keys = this.#reader.push(chunk);
+    // One key at a time, re-reading the mode each time — because a mode can
+    // change *within* a chunk. A terminal hands over whatever was in the pipe:
+    // a paste, a script, a fast typist. `/login openrouter\rsk-or-…\r` arrives
+    // as a single chunk, and checking the mode once per chunk sent the key
+    // straight through the router, where it became a message and was echoed into
+    // the transcript. The separator that disables this is a human typing slowly
+    // enough to fill several reads, which is not a guarantee worth having.
+    for (const key of keys) {
+      if (this.#secret) this.#applySecret([key]);
+      else this.#apply([key]);
+    }
+  }
+
+  #applySecret(keys: readonly Key[]): void {
+    const secret = this.#secret;
+    if (!secret) return;
+    let visible = false;
+
+    for (const key of keys) {
+      switch (key.kind) {
+        case "text":
+        case "paste": // pasting a key is the normal way to enter one
+          secret.buffer += key.text;
+          visible = true;
+          break;
+        case "backspace":
+          secret.buffer = secret.buffer.slice(0, -1);
+          visible = true;
+          break;
+        case "ctrl":
+          if (key.letter === "c") {
+            this.#secret = undefined;
+            this.#host.changed();
+            return;
+          }
+          break;
+        case "enter": {
+          const { provider, buffer } = secret;
+          this.#secret = undefined;
+          this.#host.secret(buffer.trim(), provider);
+          return;
+        }
+        default:
+          break;
+      }
+    }
+    if (visible) this.#host.changed();
   }
 
   /** Nothing has arrived for a moment: settle a pending lone Escape. */

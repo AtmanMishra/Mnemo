@@ -27,7 +27,12 @@ import type { UiState } from "./router.ts";
  * type and nothing on screen changes, which is the most alarming thing an
  * interface can do.
  */
-export function promptLines(state: UiState): string[] {
+export function promptLines(state: UiState, secret?: { provider: string; length: number }): string[] {
+  if (secret) {
+    // One dot per character, capped: the reader needs to know something is being
+    // accepted, and nobody else needs to know how long their key is.
+    return [`key for ${secret.provider}> ${"\u2022".repeat(Math.min(secret.length, 24))}\u2588`];
+  }
   if (state.question && !state.answering) {
     // The question is a block in the transcript; what is live here is the keys.
     return [`  ${keyHints(state.question)}`];
@@ -118,7 +123,7 @@ export function attach(options: AttachOptions) {
     screen.draw({
       history: frame.history,
       // The session's live part, then the prompt the reader is typing into.
-      viewport: [...frame.viewport, ...promptLines(iface.composer.state)],
+      viewport: [...frame.viewport, ...promptLines(iface.composer.state, iface.composer.secret)],
     });
   };
 

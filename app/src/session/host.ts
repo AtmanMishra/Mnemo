@@ -22,6 +22,7 @@ import type { Session } from "./session.ts";
 import { Composer, type LoopHost } from "../input/loop.ts";
 import type { ApprovalChoice, ApprovalPrompt } from "../policy/prompt.ts";
 import { runCommand } from "../commands/commands.ts";
+import { describeKeyShape, saveKey } from "../commands/store.ts";
 
 /** The part of the agent this needs. A test can be a plain object. */
 export interface TurnRunner {
@@ -43,6 +44,8 @@ export interface HostOptions {
   onExit?: () => void;
   /** Where the home is and what is configured, for the commands that ask. */
   facts?: { home: string; provider?: string; model?: string };
+  /** Ask the reader for a secret. Wired to the composer by `createInterface`. */
+  beginSecret?(provider: string): void;
 }
 
 export function sessionHost(options: HostOptions): LoopHost {
@@ -64,6 +67,7 @@ export function sessionHost(options: HostOptions): LoopHost {
           exit: () => options.onExit?.(),
         });
         session.apply({ type: "lines", lines: [`▶ ${text.trim()}`, ...result.lines] });
+        if (result.beginSecret) options.beginSecret?.(result.beginSecret);
         redraw();
         return;
       }
@@ -93,6 +97,32 @@ export function sessionHost(options: HostOptions): LoopHost {
 
     answer(choice: ApprovalChoice, note?: string) {
       session.answer(choice, note);
+      redraw();
+    },
+
+    secret(text: string, provider: string) {
+      const home = options.facts?.home ?? "";
+      const lines: string[] = [];
+
+      if (!text) {
+        lines.push(`${provider}: nothing entered — nothing changed`);
+      } else {
+        const complaint = describeKeyShape(text);
+        if (complaint) {
+          lines.push(`${provider}: ${complaint} — nothing changed`);
+        } else {
+          try {
+            saveKey(home, provider, text);
+            lines.push(`logged in to ${provider}`, "  next: `/model` lists what that key can run");
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            lines.push(`could not store the key: ${reason}`);
+          }
+        }
+      }
+
+      // The confirmation mentions the provider and never the key.
+      session.apply({ type: "lines", lines });
       redraw();
     },
 
@@ -141,8 +171,12 @@ export interface MnemoInterface {
 }
 
 export function createInterface(options: HostOptions): MnemoInterface {
-  const host = sessionHost(options);
+  // The composer is created after the host but before anything can ask for a
+  // secret; the arrow keeps the two from having to know each other's order.
+  const askForSecret: { to?: (provider: string) => void } = {};
+  const host = sessionHost({ ...options, beginSecret: (provider) => askForSecret.to?.(provider) });
   const composer = new Composer(host);
+  askForSecret.to = (provider) => composer.enterSecret(provider);
   return {
     host,
     composer,

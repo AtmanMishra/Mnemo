@@ -12,6 +12,7 @@ function host() {
   const host: LoopHost = {
     submit: (text) => calls.push(`submit:${text}`),
     answer: (choice, note) => calls.push(note === undefined ? `answer:${choice}` : `answer:${choice}:${note}`),
+    secret: (text, provider) => calls.push(`secret:${provider}:${text.length}`),
     interrupt: () => calls.push("interrupt"),
     exit: () => calls.push("exit"),
     changed: () => calls.push("changed"),

@@ -30,6 +30,8 @@ export interface CommandResult {
   lines: string[];
   /** True when the command ended the session. */
   exited?: boolean;
+  /** When set, the interface asks for a secret for this provider. */
+  beginSecret?: string;
 }
 
 /** The providers a key can be added for, in the order we suggest them. */
@@ -117,12 +119,11 @@ function login(argument: string, ctx: CommandContext): CommandResult {
     return { lines: [`unknown provider: ${argument}`, ...PROVIDERS.map((p) => `  ${p.id}`)] };
   }
 
-  // Named without being able to finish: say exactly what is missing rather than
-  // accepting a key we cannot yet store safely.
   return {
     lines: [
-      `${known.label}: key entry lands next — it will ask for the key without echoing it`,
-      `for now, put it in ${ctx.home}/auth.json and restart`,
+      `${known.label} — paste the key and press enter. It is not echoed and not kept in the transcript.`,
+      `  ctrl+c cancels. It is stored in ${ctx.home}/auth.json`,
     ],
+    beginSecret: known.id,
   };
 }
