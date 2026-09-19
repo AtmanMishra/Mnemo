@@ -18,6 +18,8 @@
  */
 import { collectFacts } from "../src/facts.ts";
 import { renderFrame } from "../src/frame/frame.ts";
+import { startTui } from "../src/input/pty.ts";
+import { Session } from "../src/session/session.ts";
 
 export const VERSION = "0.1.0";
 
@@ -108,7 +110,7 @@ function doctor(): number {
   return failed > 0 ? 1 : 0;
 }
 
-function run(): number {
+function run(): number | "interactive" {
   const bun = (globalThis as { Bun?: { version: string } }).Bun;
   if (!bun) {
     console.error(
@@ -134,10 +136,38 @@ function run(): number {
   }
   if (argv[0] === "doctor") return doctor();
 
+  if (argv.length === 0 || argv[0] === "chat" || argv[0] === "run") {
+    interactive();
+    return "interactive";
+  }
+
   console.error(USAGE);
   return 2;
 }
 
+/**
+ * The interface itself.
+ *
+ * No agent yet: one is built from the configured provider, and until that is
+ * wired the interface still runs, still takes input, and says what to do about
+ * it. A program that refuses to start because it is not configured is a program
+ * you cannot configure from inside it.
+ */
+function interactive(): void {
+  const session = new Session();
+  startTui({
+    streams: {
+      stdin: process.stdin,
+      stdout: process.stdout,
+    },
+    session,
+    exit: (code) => process.exit(code ?? 0),
+  });
+}
+
 if (import.meta.main) {
-  process.exitCode = run();
+  const result = run();
+  // "interactive" means the interface owns the process from here; setting an
+  // exit code would end it immediately after drawing the first frame.
+  if (result !== "interactive") process.exitCode = result;
 }
