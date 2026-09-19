@@ -121,13 +121,20 @@ export class MemoryClient {
     const child = this.#readonly.spawn(this.#readonly.binaryPath, [this.#readonly.journalPath]);
     child.stdout?.on("data", (chunk) => this.#ingest(chunk));
     child.on("exit", () => {
+      // Only the current child's death is about the current requests: a
+      // replaced sidecar's exit arrives after its replacement is serving, and
+      // resolving the new one's calls with the old one's death is a lie about
+      // the wrong process. (Found in the kernel client, fixed in both — the
+      // shape is identical, so the bug was too.)
+      if (this.#child !== child) return;
       for (const [, resolve] of this.#pending) {
         resolve({ ok: false, error: "memory sidecar exited" });
       }
       this.#pending.clear();
-      if (this.#child === child) this.#child = null;
+      this.#child = null;
     });
     child.on("error", (error) => {
+      if (this.#child !== child) return;
       for (const [, resolve] of this.#pending) {
         resolve({ ok: false, error: `memory sidecar error: ${String(error)}` });
       }
