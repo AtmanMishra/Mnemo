@@ -129,6 +129,17 @@ test("exit clears the live part before leaving the terminal", () => {
 });
 
 test("the width comes from the terminal, not from a constant", () => {
+  // A turn in flight announces itself, with the one key that stops it: silence
+  // while working is indistinguishable from a hang.
+  const running = wired({ run: () => {}, interrupt: () => {} });
+  running.session.apply({ type: "assistant-delta", text: "thinking out loud" });
+  running.frame.repaint();
+  assert.match(running.t.all(), /working\u2026 \(ctrl\+c stops it\)/, "the reader knows it is running");
+
+  const idle = wired();
+  idle.frame.repaint();
+  assert.doesNotMatch(idle.t.all(), /working/, "and an idle prompt does not pretend to be busy");
+
   const wide = surface(120);
   const session = new Session({ keepLive: 0 });
   const iface = createInterface({ session, redraw: () => {} });

@@ -31,8 +31,12 @@ export function promptLines(
   state: UiState,
   secret?: { provider: string; length: number },
   status?: string,
+  working?: boolean,
 ): string[] {
-  const chrome = status ? [status] : [];
+  // A turn in flight says so, with the one key that stops it. Silence while
+  // working is indistinguishable from a hang, and the reader's next move is
+  // always the same question: is it doing something, and can I stop it?
+  const chrome = [...(working ? [`  \u00b7 working\u2026 (ctrl+c stops it)`] : []), ...(status ? [status] : [])];
   if (secret) {
     // One dot per character, capped: the reader needs to know something is being
     // accepted, and nobody else needs to know how long their key is.
@@ -138,7 +142,12 @@ export function attach(options: AttachOptions) {
       // The session's live part, then the prompt the reader is typing into.
       viewport: [
         ...frame.viewport,
-        ...promptLines(iface.composer.state, iface.composer.secret, options.status?.()),
+        ...promptLines(
+          iface.composer.state,
+          iface.composer.secret,
+          options.status?.(),
+          session.streaming || session.runningTools > 0,
+        ),
       ],
     });
   };
