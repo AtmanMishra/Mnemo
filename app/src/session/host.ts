@@ -77,10 +77,17 @@ export function sessionHost(options: HostOptions): LoopHost {
       redraw();
 
       if (!agent) {
+        // Two different situations, two different sentences. Saying "no provider
+        // — /login" to someone who logged in thirty seconds ago is the interface
+        // not knowing its own state, which is the failure this rebuild exists to
+        // remove: an instruction that points at a step already taken.
+        const provider = options.facts?.provider;
         session.apply({
           type: "notice",
-          text: "no model is configured yet — /login to add a provider, then /model to choose one",
           tone: "warn",
+          text: provider
+            ? `nothing can run yet: ${provider} is configured but no turn is wired — /model picks a default model in the meantime`
+            : "no model is configured yet — /login to add a provider, then /model to choose one",
         });
         redraw();
         return;

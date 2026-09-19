@@ -126,3 +126,34 @@ test("every visible change repaints exactly once per change", () => {
   composer.push("\x1b[D"); // an arrow: nothing here uses it
   assert.equal(redraws(), mid, "a key that did nothing did not repaint");
 });
+
+test("with a provider configured, the notice does not send you back to /login", () => {
+  // The bug this prevents: telling someone who just logged in to log in.
+  const session = new Session({ keepLive: 0 });
+  let scrollback: string[] = [];
+  const iface = createInterface({ session, redraw: () => {}, facts: { home: "C:/home/.mnemo", provider: "openrouter" } });
+  const screen = () => {
+    const { history, viewport } = session.render(80);
+    scrollback = [...scrollback, ...history];
+    return [...scrollback, ...viewport].join("\n");
+  };
+
+  iface.host.submit("hello");
+  const shown = screen();
+  assert.doesNotMatch(shown, /\/login to add a provider/, "it does not ask for a step already taken");
+  assert.match(shown, /openrouter is configured/, "it says what is actually true");
+  assert.match(shown, /\/model/, "and names the step that is actually next");
+});
+
+test("with nothing configured, the notice is the first-run one", () => {
+  const session = new Session({ keepLive: 0 });
+  let scrollback: string[] = [];
+  const iface = createInterface({ session, redraw: () => {}, facts: { home: "C:/home/.mnemo" } });
+  const screen = () => {
+    const { history, viewport } = session.render(80);
+    scrollback = [...scrollback, ...history];
+    return [...scrollback, ...viewport].join("\n");
+  };
+  iface.host.submit("hello");
+  assert.match(screen(), /\/login to add a provider/, "a fresh machine is told how to start");
+});
