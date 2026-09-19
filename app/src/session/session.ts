@@ -149,6 +149,10 @@ export class Session {
         this.transcript.add(new LinesBlock(event.lines));
         break;
 
+      case "opening":
+        this.transcript.add(new LinesBlock(event.lines));
+        break;
+
       case "turn-end":
         this.#assistant?.finish();
         this.#assistant = undefined;

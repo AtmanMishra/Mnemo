@@ -35,6 +35,15 @@ export type SessionEvent =
    * happens where the sidecar's answer arrives.
    */
   | { type: "memory"; lines: string[] }
+  /**
+   * The first thing the interface shows: identity, and the way in.
+   *
+   * A block rather than chrome, because on an append-only terminal the opening
+   * is the top of the transcript and should scroll away like everything else —
+   * and because an interface that greets a first run with a bare cursor is the
+   * exact failure this rebuild exists to fix.
+   */
+  | { type: "opening"; lines: string[] }
   /** The turn is over: everything that can settle, settles. */
   | { type: "turn-end" };
 

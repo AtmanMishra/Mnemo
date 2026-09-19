@@ -17,7 +17,7 @@
  *   mnemo --version | --help
  */
 import { collectFacts } from "../src/facts.ts";
-import { renderFrame } from "../src/frame/frame.ts";
+import { renderFrame, banner, setupSteps, statusLines } from "../src/frame/frame.ts";
 import { startTui } from "../src/input/pty.ts";
 import { Session } from "../src/session/session.ts";
 
@@ -154,7 +154,26 @@ function run(): number | "interactive" {
  * you cannot configure from inside it.
  */
 function interactive(): void {
-  const session = new Session();
+  // `keepLive: 0`: the opening is the top of the transcript, so it settles into
+  // scrollback immediately and stays there. With the default the opening was
+  // still "live" when the reader left, and pressing ctrl+d erased the banner and
+  // the instructions with `\x1b[10A` — the interface deleting its own welcome on
+  // the way out.
+  const session = new Session({ keepLive: 0 });
+  // The same opening `--dump` renders, shown here too. It existed in one code
+  // path and was missing from the one people actually run: a clean home got a
+  // bare `> ` cursor with no word about what to do, which is the exact failure
+  // the old interface was retired over.
+  const facts = collectFacts();
+  const cols = process.stdout.columns ?? 80;
+  session.apply({
+    type: "opening",
+    lines: [
+      banner(cols, facts.runtime),
+      "",
+      ...(facts.provider ? statusLines(cols, facts) : setupSteps(cols)),
+    ],
+  });
   startTui({
     streams: {
       stdin: process.stdin,
