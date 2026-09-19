@@ -64,7 +64,7 @@ const invokedDirectly = (() => {
   }
 })();
 
-async function handleListSessions(): Promise<void> {
+export async function handleListSessions(): Promise<void> {
   const sessions = await listSessions(defaultSessionDir());
   if (sessions.length === 0) {
     console.log("(no saved sessions)");
@@ -91,7 +91,7 @@ function realIO() {
 }
 
 /** mnemo auth [status|logout <provider>] — login lives in mnemo-agent (8.8) */
-async function handleAuth(args: string[]): Promise<void> {
+export async function handleAuth(args: string[]): Promise<void> {
   const sub = args[1] ?? "login";
   if (sub === "logout") {
     const p = args[2] as ProviderId | undefined;
@@ -142,7 +142,7 @@ async function handleAuth(args: string[]): Promise<void> {
  *
  * Returns whether anything at all can run a model.
  */
-async function ensureAuthenticated(): Promise<boolean> {
+export async function ensureAuthenticated(): Promise<boolean> {
   const forced = (process.env.MNEMO_PROVIDER ?? process.env.SEA_PROVIDER)?.trim();
   const selection = pickProvider();
   // Normalised the way pickProvider normalises it, so `MNEMO_PROVIDER=OpenAI`
@@ -239,7 +239,7 @@ export function renderTraces(
 }
 
 /** Connect to configured MCP servers before pi registers tools. */
-async function loadMcpTools(): Promise<void> {
+export async function loadMcpTools(): Promise<void> {
   const config = loadMcpConfig(process.env.HOME ?? undefined);
   if (Object.keys(config.servers).length === 0) return;
   const { tools, errors } = await discoverMcpTools(config);
@@ -248,7 +248,7 @@ async function loadMcpTools(): Promise<void> {
   for (const e of errors) console.error(`mcp: ${e.server} unavailable — ${e.error}`);
 }
 
-async function printSkillsBanner(): Promise<void> {
+export async function printSkillsBanner(): Promise<void> {
   try {
     const skills = await discoverSkills();
     console.error(`skills: ${skills.length} loaded`);
@@ -258,7 +258,7 @@ async function printSkillsBanner(): Promise<void> {
 }
 
 /** All sea extensions as pi InlineExtensions. */
-function factories() {
+export function factories() {
   return [
     seaToolsInline,
     // hooks-only: the 3 memory tools are registered by sea-tools-inline
