@@ -18,6 +18,7 @@
  */
 import { collectFacts } from "../src/facts.ts";
 import { renderFrame, banner, setupSteps, statusLines } from "../src/frame/frame.ts";
+import { renderStatusLine } from "../src/status/status.ts";
 import { startTui } from "../src/input/pty.ts";
 import { Session } from "../src/session/session.ts";
 
@@ -181,6 +182,9 @@ function interactive(): void {
     },
     session,
     facts: { home: facts.home, provider: facts.provider, model: facts.model },
+    // Re-collected every frame, so `/login` and `/model` are visible in the
+    // chrome the moment they take effect rather than after a restart.
+    status: () => renderStatusLine(collectFacts(), { width: process.stdout.columns ?? 80, preset: "default" }),
     exit: (code) => process.exit(code ?? 0),
   });
 }

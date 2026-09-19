@@ -44,6 +44,8 @@ export interface StartOptions {
   settleMs?: number;
   /** Where the home is and what is configured, for the commands that ask. */
   facts?: { home: string; provider?: string; model?: string };
+  /** The chrome under the prompt: identity of the machine, redrawn each frame. */
+  status?(): string;
 }
 
 export interface RunningTui {
@@ -82,7 +84,7 @@ export function startTui(options: StartOptions): RunningTui {
     onExit: () => stop(0),
     facts: options.facts,
   });
-  frame = attach({ iface, session, screen, onExit: () => stop(0) });
+  frame = attach({ iface, session, screen, onExit: () => stop(0), status: options.status });
 
   if (stdin.setRawMode) stdin.setRawMode(true);
   stdin.resume?.();
