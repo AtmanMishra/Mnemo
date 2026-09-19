@@ -35,10 +35,14 @@ test("a first run is told what to do, in order", () => {
 
 test("a configured machine is not onboarded", () => {
   const frame = renderFrame(configured);
-  assert.match(frame, /ready\. openrouter \/ deepseek-v4/);
+  // The facts come from the status module now, so the line reads as its
+  // segments rather than as a hand-built sentence.
+  assert.match(frame, /ready\. openrouter {2}· {2}deepseek-v4/);
   assert.doesNotMatch(frame, /nothing is set up/);
   assert.doesNotMatch(frame, /\/login/, "no setup instructions it does not need");
-  assert.match(frame, /memory on.*kernel on/s);
+  // An on feature is named, an off one says "off": a status line that appended
+  // "on" to everything would be noise where it is read most.
+  assert.match(frame, /memory {2}· {2}kernel/s);
 });
 
 test("no line exceeds the width, whatever the width is", () => {

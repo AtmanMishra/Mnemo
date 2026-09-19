@@ -78,7 +78,7 @@ test("--dump shows the configured provider instead of onboarding", { skip: !bun 
   });
   try {
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /ready\. openrouter \/ deepseek-v4/);
+    assert.match(result.stdout, /ready\. openrouter {2}· {2}deepseek-v4/);
     assert.doesNotMatch(result.stdout, /nothing is set up/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

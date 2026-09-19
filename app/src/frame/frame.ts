@@ -18,6 +18,8 @@
  *     renderer that reflows drops a tail without complaining and the terminal
  *     decides the width, not us.
  */
+import { renderStatusLine } from "../status/status.ts";
+
 export interface FrameFacts {
   /** e.g. "Bun 1.3.14" — stated, never implied. */
   runtime: string;
@@ -79,8 +81,10 @@ export function setupSteps(cols: number): string[] {
 
 /** The same frame as a status line, once there is something to report. */
 export function statusLines(cols: number, facts: FrameFacts): string[] {
-  const model = facts.model ? ` / ${facts.model}` : "";
-  return [fit(`  ready. ${facts.provider}${model}`, cols), ""];
+  // Built by the status module, not spelled out here: the frame and the status
+  // bar show the same machine, and two renderers for one fact is how they start
+  // disagreeing.
+  return [renderStatusLine(facts, { width: cols, preset: "default", prefix: "  ready. " }), ""];
 }
 
 /**
@@ -96,11 +100,11 @@ export function renderFrame(options: FrameOptions): string {
   rows.push(rule("TRANSCRIPT", cols));
   rows.push(...(options.provider ? statusLines(cols, options) : setupSteps(cols)));
 
-  const features = [
-    `memory ${options.memory ? "on" : "off"}`,
-    `kernel ${options.kernel ? "on" : "off"}`,
-  ].join("   ·   ");
-  rows.push(fit(`  ${features}`, cols));
+  // On a configured machine the status line above already said all of this; on a
+  // fresh one it is the only place the alarm can appear.
+  if (!options.provider) {
+    rows.push(renderStatusLine(options, { width: cols, preset: "default", prefix: "  " }));
+  }
   rows.push(fit(`  home ${options.home}`, cols));
 
   // Keep the head — identity and instructions — and drop the tail rather than
