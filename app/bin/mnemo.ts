@@ -22,6 +22,7 @@ import { renderStatusLine } from "../src/status/status.ts";
 import { splash } from "../src/brand/brand.ts";
 import { startTui } from "../src/input/pty.ts";
 import { Session } from "../src/session/session.ts";
+import { PiTurnRunner } from "../src/session/pi-client.ts";
 
 export const VERSION = "0.1.0";
 
@@ -112,7 +113,7 @@ function doctor(): number {
   return failed > 0 ? 1 : 0;
 }
 
-function run(): number | "interactive" {
+async function run(): Promise<number | "interactive"> {
   const bun = (globalThis as { Bun?: { version: string } }).Bun;
   if (!bun) {
     console.error(
@@ -139,7 +140,7 @@ function run(): number | "interactive" {
   if (argv[0] === "doctor") return doctor();
 
   if (argv.length === 0 || argv[0] === "chat" || argv[0] === "run") {
-    interactive();
+    await interactive();
     return "interactive";
   }
 
@@ -155,7 +156,7 @@ function run(): number | "interactive" {
  * it. A program that refuses to start because it is not configured is a program
  * you cannot configure from inside it.
  */
-function interactive(): void {
+async function interactive(): Promise<void> {
   // `keepLive: 0`: the opening is the top of the transcript, so it settles into
   // scrollback immediately and stays there. With the default the opening was
   // still "live" when the reader left, and pressing ctrl+d erased the banner and
@@ -179,12 +180,37 @@ function interactive(): void {
       ...(facts.provider ? statusLines(cols, facts) : setupSteps(cols)),
     ],
   });
+
+  // The agent, when there is something to run on. Building it is a spawn, so a
+  // failure here is reported and the interface still starts: an interface that
+  // refuses to open because the agent would not is one you cannot fix from
+  // inside it.
+  let agent: PiTurnRunner | undefined;
+  if (facts.provider) {
+    try {
+      agent = await PiTurnRunner.create(session, {
+        repoRoot: new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
+        cwd: process.cwd(),
+        home: facts.home,
+        provider: facts.provider,
+        model: facts.model,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      session.apply({
+        type: "notice",
+        tone: "warn",
+        text: `could not start the agent: ${reason} — the interface still works, commands still answer`,
+      });
+    }
+  }
   startTui({
     streams: {
       stdin: process.stdin,
       stdout: process.stdout,
     },
     session,
+    agent,
     facts: { home: facts.home, provider: facts.provider, model: facts.model },
     // Re-collected every frame, so `/login` and `/model` are visible in the
     // chrome the moment they take effect rather than after a restart.
@@ -194,7 +220,7 @@ function interactive(): void {
 }
 
 if (import.meta.main) {
-  const result = run();
+  const result = await run();
   // "interactive" means the interface owns the process from here; setting an
   // exit code would end it immediately after drawing the first frame.
   if (result !== "interactive") process.exitCode = result;
