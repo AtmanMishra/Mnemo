@@ -15,12 +15,19 @@
  *     appearing to work. Pretending is how the loop started.
  */
 import type { Session } from "../session/session.ts";
+import { fetchModels, renderModels, setModel } from "../models/catalogue.ts";
 
 export interface CommandContext {
   session: Session;
   home: string;
   provider?: string;
   model?: string;
+  /** The configured model, spelled out for the catalogue line. */
+  current?: string;
+  /** The provider's key, when one is stored. */
+  key?: string;
+  /** Injected so a test never opens a socket. */
+  fetchImpl?: typeof fetch;
   /** Leave the interface. */
   exit(): void;
 }
@@ -32,6 +39,14 @@ export interface CommandResult {
   exited?: boolean;
   /** When set, the interface asks for a secret for this provider. */
   beginSecret?: string;
+  /**
+   * Lines that need the network, resolved after the command returns.
+   *
+   * A catalogue fetch is a round trip; the command surface stays synchronous so
+   * that everything about it remains testable without a server, and only the
+   * part that genuinely needs the world goes async.
+   */
+  deferred?: () => Promise<string[]>;
 }
 
 /** The providers a key can be added for, in the order we suggest them. */
@@ -80,17 +95,24 @@ export function runCommand(input: string, ctx: CommandContext): CommandResult {
       return login(argument, ctx);
 
     case "/model":
-      // The catalogue comes from the provider's own API, which needs a key — so
-      // this cannot invent a list, and saying so is the honest answer.
       if (!ctx.provider) {
         return { lines: ["no provider yet — `/login` first, then `/model` lists what that key can run"] };
       }
+      if (argument) {
+        try {
+          setModel(ctx.home, ctx.provider, argument);
+          return { lines: [`${ctx.provider}: ${argument} is now the default`, "  it shows in the bar under the prompt"] };
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          return { lines: [`could not set that model: ${reason}`] };
+        }
+      }
       return {
-        lines: [
-          `provider: ${ctx.provider}`,
-          ctx.model ? `current model: ${ctx.model}` : "no default model chosen yet",
-          "choosing from the catalogue lands next — it needs the provider's model list",
-        ],
+        lines: [`${ctx.provider}: ${ctx.current ? `currently ${ctx.current}` : "no default chosen"}`, "asking for the catalogue…"],
+        deferred: async () => {
+          const answer = await fetchModels({ provider: ctx.provider!, key: ctx.key, fetchImpl: ctx.fetchImpl });
+          return "error" in answer ? [`could not list models: ${answer.error}`] : renderModels(answer.models);
+        },
       };
 
     case "/memory":

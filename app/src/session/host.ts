@@ -23,6 +23,7 @@ import { Composer, type LoopHost } from "../input/loop.ts";
 import type { ApprovalChoice, ApprovalPrompt } from "../policy/prompt.ts";
 import { runCommand } from "../commands/commands.ts";
 import { describeKeyShape, saveKey } from "../commands/store.ts";
+import { readAuth } from "../commands/store.ts";
 
 /** The part of the agent this needs. A test can be a plain object. */
 export interface TurnRunner {
@@ -59,16 +60,38 @@ export function sessionHost(options: HostOptions): LoopHost {
       // inside, which is what makes an instruction pointing at nothing worse
       // than no instruction at all.
       if (text.trimStart().startsWith("/")) {
+        const home = options.facts?.home ?? "";
+        const provider = options.facts?.provider;
         const result = runCommand(text, {
           session,
-          home: options.facts?.home ?? "",
-          provider: options.facts?.provider,
+          home,
+          provider,
           model: options.facts?.model,
+          // What the provider's catalogue needs: the key to send, and what is
+          // currently chosen.
+          key: provider ? readAuth(home).providers[provider]?.key : undefined,
+          current: options.facts?.model,
           exit: () => options.onExit?.(),
         });
         session.apply({ type: "lines", lines: [`▶ ${text.trim()}`, ...result.lines] });
         if (result.beginSecret) options.beginSecret?.(result.beginSecret);
         redraw();
+        if (result.deferred) {
+          // The command answered immediately with "asking for the catalogue…",
+          // and the answer lands when it lands — the interface stays usable
+          // while a provider is being asked something.
+          result
+            .deferred()
+            .then((lines) => {
+              session.apply({ type: "lines", lines });
+              redraw();
+            })
+            .catch((error: unknown) => {
+              const reason = error instanceof Error ? error.message : String(error);
+              session.apply({ type: "lines", lines: [`the catalogue failed: ${reason}`] });
+              redraw();
+            });
+        }
         return;
       }
 
