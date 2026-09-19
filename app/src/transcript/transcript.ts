@@ -122,6 +122,17 @@ const NO_STABLE_ROWS: readonly StableRow[] = [];
 export class Transcript {
   #entries: Entry[] = [];
   #history: string[] = [];
+  /**
+   * How many history rows the caller has already been given.
+   *
+   * The transcript owns one history; frames carry *the part of it that has not
+   * been delivered yet*. Without this cursor, rows appended between two renders
+   * — by `retire()`, which commits outside any frame — would never reach the
+   * terminal at all: they would be in the transcript's history and in nobody
+   * else's, which is how content goes missing while every local assertion
+   * still passes.
+   */
+  #delivered = 0;
   #host: TranscriptHost = { requestRender: () => {} };
   /** Rendered stable-row cache per (block, width). */
   #stableCache = new WeakMap<TranscriptBlock, Map<number, { count: number; rows: readonly string[] }>>();
@@ -293,7 +304,6 @@ export class Transcript {
    * caller is told about, and the one the transcript believes.
    */
   render(width: number): TranscriptRender {
-    const before = this.#history.length;
     const viewport: string[] = [];
 
     for (const entry of this.#entries) {
@@ -307,7 +317,8 @@ export class Transcript {
     // destructive reset, and there is no such path yet. When one is added it
     // must set this flag, which is why the field exists before the feature.
     const reset = false;
-    const history = this.#history.slice(before);
+    const history = this.#history.slice(this.#delivered);
+    this.#delivered = this.#history.length;
     this.#lastViewport = viewport;
     return { history, viewport, reset };
   }

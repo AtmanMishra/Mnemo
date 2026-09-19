@@ -54,12 +54,16 @@ of throwing, and width-keyed caches. This is first because it is the question
 the old interface answered by accident: which rows may be rewritten? Everything
 else in the interface stands on the answer.
 
-**Phase 1 — the session spine.**
-The entry, the frame, and the transcript wired to pi's loop: a run that starts,
-paints its first frame with no key, streams an answer through an append-only
-block, and retires it into scrollback. Verification: a `--dump`-style frame plus
-a scripted fake model that streams three chunks, asserting the head leaves the
-viewport exactly once.
+**Phase 1 — the session spine. (built, except the pi adapter)**
+The entry, the frame, the transcript, and a session that turns events into blocks:
+a user turn, a streamed answer whose finished lines retire into scrollback, a
+tool call that says what it is doing while it runs and becomes one line of record
+when it reports. Verified against a scripted event stream — no key, so it cannot
+flake — with the invariant asserted on what the *screen* ends up showing:
+scrollback plus the live viewport are exactly the rows of the turn, each once.
+Outstanding: mapping pi's events onto this vocabulary and driving a real turn
+through it. The session knows nothing about pi, deliberately, so that is an
+adapter rather than a rewrite.
 
 **Phase 2 — memory on screen.**
 The Rust sidecar behind a client of our own (`src/memory/`), with a panel that
