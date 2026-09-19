@@ -215,12 +215,13 @@ test("a failing tool in a real turn is marked, not thrown", async () => {
 
   const screen = session.transcript.history.join("\n");
   assert.ok(
-    painted.some((row) => row.includes("▌ bash — false …")),
+    painted.some((row) => row.includes("▌ bash — false")),
     "the running form was painted while the tool ran",
   );
-  assert.match(screen, /▌ bash — exit 1 {2}\(failed\)/);
+  assert.match(screen, /✗ bash/, "a failing tool takes the failing marker");
+  assert.match(screen, /exit 1/, "and keeps its reason");
   assert.ok(
-    !screen.includes("false …"),
+    !screen.includes("▌ bash — false"),
     "and the durable line is the result, not the request",
   );
 });

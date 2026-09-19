@@ -44,21 +44,40 @@ class LinesBlock implements TranscriptBlock {
   }
 }
 
-/** A tool call: its body while it runs, one line of record once it is done. */
+/**
+ * A tool call, in two states.
+ *
+ * While it runs, the marker says *running* — the same `▌` the transcript uses for
+ * anything in progress, and the chrome above the prompt adds the working line, so
+ * the reader can see something is happening without reading the call.
+ *
+ * Once it is done, the marker becomes the record: `✓` or `✗`. That single glyph
+ * is the difference between a transcript you read top to bottom and one you can
+ * scan — in a long session the question is "what worked and what didn't", and a
+ * column of identical markers answers nothing. An oh-my-pi panel taught the value
+ * of the check; the box around it we do not need.
+ *
+ * A failure keeps its reason on its own line rather than trailing the header: a
+ * tool that failed with a message is the case a reader most needs to read.
+ */
 export class ToolBlock extends LinesBlock {
   readonly id: string;
   readonly name: string;
 
   constructor(event: { id: string; name: string; summary?: string }) {
-    super([`▌ ${event.name}${event.summary ? ` — ${event.summary}` : ""} …`], false);
+    super([`▌ ${event.name}${event.summary ? ` — ${event.summary}` : ""}`], false);
     this.id = event.id;
     this.name = event.name;
   }
 
-  /** One line for the record: what ran and how it went. */
+  /** The record: what ran, and how it went. */
   complete(ok: boolean, summary?: string): void {
-    const tail = summary ? ` — ${summary}` : "";
-    this.setLines([`▌ ${this.name}${tail}${ok ? "" : "  (failed)"}`]);
+    const head = `${ok ? "✓" : "✗"} ${this.name}`;
+    if (ok) {
+      this.setLines([summary ? `${head} — ${summary}` : head]);
+    } else {
+      this.setLines([head, `  ${summary ?? "no reason given"}`]);
+    }
     this.finish();
   }
 }

@@ -77,7 +77,7 @@ test("while a tool runs, the transcript says what it is doing", () => {
   session.apply({ type: "tool-start", id: "t1", name: "bash", summary: "ls" });
 
   const live = session.render(40).viewport.join("\n");
-  assert.match(live, /▌ bash — ls …/, "it says what is running");
+  assert.match(live, /▌ bash — ls/, "it says what is running");
   assert.doesNotMatch(live, /3 files/, "and does not claim a result it does not have");
   assert.equal(session.runningTools, 1);
 });
@@ -98,7 +98,7 @@ test("a finished tool is one line of record, and the running form is gone", () =
   );
 
   const all = onScreen().join("\n");
-  assert.match(all, /▌ bash — 3 files/, "when it is done, it is one line of record");
+  assert.match(all, /✓ bash — 3 files/, "when it is done, the marker becomes the record");
   assert.doesNotMatch(all, /ls …/, "and the running form is gone, not both");
   assert.ok(!session.streaming);
 
@@ -118,7 +118,8 @@ test("a failed tool says so", () => {
     60,
   );
   const all = onScreen().join("\n");
-  assert.match(all, /▌ bash — exit 1 {2}\(failed\)/);
+  assert.match(all, /✗ bash/, "a failure takes the failing marker");
+  assert.match(all, /exit 1/, "and keeps its reason, on its own line");
 });
 
 test("settled blocks retire into scrollback and stop being redrawn", () => {
