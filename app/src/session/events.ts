@@ -29,6 +29,12 @@ export type SessionEvent =
   | { type: "tool-end"; id: string; ok: boolean; summary?: string }
   /** Something the user must read: a warning, a failure, a state change. */
   | { type: "notice"; text: string; tone?: "info" | "warn" | "error" }
+  /**
+   * What memory knows, already formatted. Lines rather than a structure because
+   * the only thing the session does with them is draw them — the interpreting
+   * happens where the sidecar's answer arrives.
+   */
+  | { type: "memory"; lines: string[] }
   /** The turn is over: everything that can settle, settles. */
   | { type: "turn-end" };
 

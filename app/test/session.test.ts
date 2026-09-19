@@ -210,3 +210,23 @@ test("an answer with nowhere to go is refused, not silently ignored", () => {
   assert.equal(session.answer("once"), false, "there is no question waiting");
   assert.equal(session.awaitingAnswer, undefined);
 });
+
+test("what memory knows appears in the turn, and retires like anything else", () => {
+  const { onScreen, session } = play(
+    [
+      { type: "user", text: "what do you remember?" },
+      { type: "memory", lines: ["memory: 2 nodes", "  the rebuild [tasks] episode"] },
+      { type: "assistant-delta", text: "Two things.\n" },
+      { type: "assistant-done" },
+      { type: "turn-end" },
+    ],
+    60,
+    0,
+  );
+
+  const screen = onScreen().join("\n");
+  assert.match(screen, /memory: 2 nodes/);
+  assert.match(screen, /the rebuild \[tasks\] episode/);
+  assert.match(screen, /Two things\./, "and the answer around it is intact");
+  assert.deepEqual(session.transcript.render(60).viewport, [], "the panel is history once the turn ends");
+});

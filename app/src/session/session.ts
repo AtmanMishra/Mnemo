@@ -142,6 +142,13 @@ export class Session {
         this.transcript.add(new LinesBlock([`! ${event.text}`]));
         break;
 
+      case "memory":
+        // Finished on arrival: the panel reports what memory holds *now*, and a
+        // later look is a new answer rather than an update to this one — keeping
+        // it live would mean a stale panel redrawn as if it were current.
+        this.transcript.add(new LinesBlock(event.lines));
+        break;
+
       case "turn-end":
         this.#assistant?.finish();
         this.#assistant = undefined;
