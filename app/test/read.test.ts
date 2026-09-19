@@ -74,7 +74,7 @@ test("the real sidecar: what was written is what the panel shows", { skip: !have
     assert.match(empty.lines.join("\n"), /memory: empty/);
 
     const episode = await client.request("episode", { label: "the panel proves itself" });
-    assert.equal(episode.ok, true, episode.error);
+    assert.equal(episode.ok, true, episode.error ?? "the sidecar refused the call");
 
     const filled = await readMemory(client);
     assert.equal(filled.total, 1);
