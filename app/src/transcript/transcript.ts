@@ -110,13 +110,6 @@ export interface TranscriptRender {
 const EMPTY: readonly string[] = [];
 const NO_STABLE_ROWS: readonly StableRow[] = [];
 
-/** Byte-for-byte equality of two row arrays — identity first, contents second. */
-function sameRows(a: readonly string[], b: readonly string[]): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
-  return true;
-}
 
 /**
  * The transcript: an append-only history of rows that have left, plus the live
@@ -161,6 +154,11 @@ export class Transcript {
    * settled are committed oldest-first until the live region fits. A block that
    * is still `active` is never retired, however tight the budget — its rows are
    * the ones the user is watching.
+   *
+   * A settled block with nothing left to draw is committed even when there is
+   * room: its rows are already in scrollback, so keeping it "live" would only
+   * mean it is offered for redrawing forever. Getting this wrong is how a
+   * finished answer ends up in neither the scrollback nor the viewport.
    */
   retire(keepLive: number, width: number): void {
     let liveRows = 0;
@@ -168,12 +166,12 @@ export class Transcript {
       if (entry.state === "committed") continue;
       liveRows += this.#liveRows(entry, width).length;
     }
-    if (liveRows <= keepLive) return;
 
     for (const entry of this.#entries) {
-      if (liveRows <= keepLive) break;
       if (entry.state !== "settled") continue;
       const rows = this.#liveRows(entry, width);
+      const hasRoom = liveRows > keepLive;
+      if (!hasRoom && rows.length > 0) continue;
       this.#commit(entry, rows);
       liveRows -= rows.length;
     }
@@ -288,19 +286,28 @@ export class Transcript {
   /**
    * Render one frame: history is the batch that belongs to scrollback, the
    * viewport is everything still owned by the transcript.
+   *
+   * Published stable rows are *the* scrollback — they are appended to the
+   * transcript's history as they are published, and the returned batch is this
+   * frame's share of it. Anything else would mean two histories: the one the
+   * caller is told about, and the one the transcript believes.
    */
   render(width: number): TranscriptRender {
-    const history: string[] = [];
+    const before = this.#history.length;
     const viewport: string[] = [];
 
     for (const entry of this.#entries) {
       if (entry.state === "committed") continue;
       this.settleFinished();
-      history.push(...this.#publish(entry, width));
+      this.#history.push(...this.#publish(entry, width));
       viewport.push(...this.#liveRows(entry, width));
     }
 
-    const reset = !sameRows(this.#lastViewport, viewport) ? false : false;
+    // History is append-only here: the one thing that may replace it is a
+    // destructive reset, and there is no such path yet. When one is added it
+    // must set this flag, which is why the field exists before the feature.
+    const reset = false;
+    const history = this.#history.slice(before);
     this.#lastViewport = viewport;
     return { history, viewport, reset };
   }
