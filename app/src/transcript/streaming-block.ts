@@ -19,16 +19,27 @@ import type { StableRow, TranscriptBlock } from "./transcript.ts";
 /** Greedy word wrap to `width`, hard-splitting a word that cannot fit. */
 export function wrapLine(text: string, width: number): string[] {
   if (width <= 0) return [text];
+  // A line that fits is passed through *byte for byte*. Wrapping is only for
+  // lines that are too long — and the rebuild below is lossy in two ways that
+  // were invisible until something depended on the spaces being there:
+  //
+  //   - it eats leading indentation (the first empty words collapse), so every
+  //     indented row in the transcript arrived flush left;
+  //   - it collapses runs of spaces, so pixel art built from half-blocks lost
+  //     the gaps that make it read as a figure at all.
+  if (text.length <= width) return [text];
+
+  const indent = /^[ \t]*/.exec(text)?.[0] ?? "";
   const out: string[] = [];
-  let line = "";
-  for (const word of text.split(" ")) {
+  let line = indent;
+  for (const word of text.slice(indent.length).split(" ")) {
     if (line === "") {
       line = word;
     } else if (line.length + 1 + word.length <= width) {
       line += ` ${word}`;
     } else {
       out.push(line);
-      line = word;
+      line = indent + word;
     }
     while (line.length > width) {
       out.push(line.slice(0, width));

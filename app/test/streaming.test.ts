@@ -149,3 +149,21 @@ test("wrapLine is greedy, hard-splits, and never loses a character", () => {
     assert.equal(joined.replace(/\s+/g, " ").trim(), text);
   }
 });
+
+test("indentation survives the wrapper, and art is not reflowed", () => {
+  // The wrapper rebuilds a line from its words, and a rebuild is lossy: leading
+  // indentation vanished and runs of spaces collapsed. Both were invisible until
+  // a figure made of half-blocks depended on the gaps.
+  assert.deepEqual(wrapLine("  indented line", 60), ["  indented line"], "a line that fits is untouched");
+  assert.deepEqual(wrapLine("██  ██  ██", 60), ["██  ██  ██"], "art keeps its gaps");
+  // Narrower than the line still hard-splits — that is the wrapper's job. The
+  // figure is protected upstream instead: `splash()` refuses below 36 columns,
+  // so art is never handed to a width that would cut it.
+
+  const wrapped = wrapLine("   one two three four five", 12);
+  assert.ok(wrapped.length > 1, "a long line still wraps");
+  for (const line of wrapped) {
+    assert.match(line, /^ {2}/, `every wrapped row keeps the indent: ${JSON.stringify(line)}`);
+    assert.ok(line.length <= 12, `and fits: ${JSON.stringify(line)}`);
+  }
+});

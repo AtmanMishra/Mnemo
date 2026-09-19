@@ -19,6 +19,7 @@
 import { collectFacts } from "../src/facts.ts";
 import { renderFrame, banner, setupSteps, statusLines } from "../src/frame/frame.ts";
 import { renderStatusLine } from "../src/status/status.ts";
+import { splash } from "../src/brand/brand.ts";
 import { startTui } from "../src/input/pty.ts";
 import { Session } from "../src/session/session.ts";
 
@@ -172,6 +173,9 @@ function interactive(): void {
     lines: [
       banner(cols, facts.runtime),
       "",
+      // The figure below the banner, dropped entirely when the terminal is too
+      // narrow to show it whole — a half-drawn crab is worse than none.
+      ...splash(cols),
       ...(facts.provider ? statusLines(cols, facts) : setupSteps(cols)),
     ],
   });
