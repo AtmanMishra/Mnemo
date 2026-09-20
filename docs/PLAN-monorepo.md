@@ -96,3 +96,59 @@ treading on each other.
 Features then land inside the new shape, in this order: line editing (precondition
 first: frame-diff repaint), markdown, code blocks and diffs, tool output with
 truncation, tokens/cost in the status bar, sessions, and the chord panels.
+
+## The package table, mapped
+
+oh-my-pi's table is a map of *capabilities*, and each row exists because someone
+else might want that one thing. Ours, with what each package owns and what it is
+built on. The rule for dependencies: a platform built-in first, then a small
+focused package, and never a framework for something we already have.
+
+    @mnemo/tui         terminal kit — Screen (differential rendering), KeyReader,
+                       Composer/line editor, transcript, theme, brand, overlays
+                       built on: nothing. It is ours, it is ~600 lines, and it is
+                       the piece most other agents get from a framework.
+    @mnemo/agent       the turn — pi RPC client, event translation, block model
+                       built on: @earendil-works/pi-coding-agent (RpcClient) —
+                       already installed; our adapter is what makes it a Mnemo
+    @mnemo/harness     tools, prompts, approval wiring, sub-agent spawning —
+                       what turns pi into *this* agent
+                       built on: pi's tool surface + nothing else
+    @mnemo/memory      TS client and panels for the Rust sidecar
+                       built on: the memsrv protocol. Storage is Rust; recall and
+                       consolidation live there, not here.
+    @mnemo/kernel      the ipy bridge client and its boundary
+                       built on: a JSON-line protocol to kernel/ipy_bridge.py
+    @mnemo/policy      the gate, its questions, dispatch, grants store
+                       built on: node:fs for the store (JSON, 0600)
+    @mnemo/catalog     providers, model catalogue, auth store, config
+                       built on: the provider HTTP APIs; the model database is a
+                       bundled JSON, refreshed rather than hand-maintained
+    @mnemo/cli         the `mnemo` binary — composition root, only printer
+
+    crates/memsrv      the memory layer: journal, recall, consolidation
+    crates/sandbox     later, and only if the kernel needs isolation that a
+                       persistent interpreter cannot give — the open decision
+    python/ipy         the interpreter bridge
+
+## Libraries, per remaining feature
+
+    line editor          done — ours, in @mnemo/tui
+    markdown             `marked` to tokenize (small, no DOM), rendered by us to
+                         ANSI. Not a terminal-markdown framework: we need control
+                         over wrapping, because wrapped markdown is where every
+                         terminal agent's rendering falls apart.
+    syntax highlighting  `cli-highlight` — highlight.js with a terminal theme,
+                         lazy-loaded per language so start-up stays fast
+    diffs                `diff` (jsdiff) for the algorithm; rendering ours, with
+                         the +/- lines coloured and hunks folded
+    tool output          ours: capture, truncate to N lines, `… 7 more` with the
+                         key that expands it
+    tokens · cost        from pi's session stats — it already reports them; we
+                         display them in the status bar
+    sessions             `bun:sqlite` — built in, so no dependency at all, and it
+                         gives FTS for `/search` later
+    autocomplete         ours: the command catalogue and a file index built from
+                         the walker when it exists, otherwise a directory walk
+    key bindings         ctrl+L (clear), ctrl+R (history search), esc (interrupt)
+                         — all in @mnemo/tui, where the keys already live
