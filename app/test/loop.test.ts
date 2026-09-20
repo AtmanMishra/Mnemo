@@ -39,8 +39,16 @@ test("the screen is redrawn when something changed, and not otherwise", () => {
   composer.push("ab");
   const afterTyping = calls.filter((c) => c === "changed").length;
   assert.ok(afterTyping > 0, "typing is visible");
-  composer.push("\x1b[D"); // left arrow: nothing in this interface uses it
+  composer.push("\t"); // a tab: nothing in this interface binds it
   assert.equal(calls.filter((c) => c === "changed").length, afterTyping, "a key that did nothing did not redraw");
+  // The caret can move now, so an arrow is no longer an inert key: it redraws
+  // because the line on screen genuinely changed.
+  composer.push("\x1b[D");
+  assert.equal(
+    calls.filter((c) => c === "changed").length,
+    afterTyping + 1,
+    "and a key that moved the caret did redraw",
+  );
 });
 
 test("a question is answered by its keys, and the answer is the only thing that closes it", () => {

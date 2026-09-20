@@ -31,6 +31,8 @@ export type Key =
   | { kind: "down" }
   | { kind: "left" }
   | { kind: "right" }
+  | { kind: "home" }
+  | { kind: "end" }
   | { kind: "ctrl"; letter: string }
   | { kind: "paste"; text: string }
   | { kind: "unknown"; raw: string };
@@ -45,6 +47,11 @@ const SEQUENCES: Record<string, Key> = {
   B: { kind: "down" },
   C: { kind: "right" },
   D: { kind: "left" },
+  // Home and End are one family written two ways, depending on the terminal:
+  // `\x1b[H`/`\x1b[F` on one, `\x1b[1~`/`\x1b[4~` on another. Both are handled,
+  // because a reader who presses Home and gets nothing blames the editor.
+  H: { kind: "home" },
+  F: { kind: "end" },
 };
 
 export class KeyReader {
@@ -128,6 +135,13 @@ export class KeyReader {
       // `\x1b[` with nothing after it is still incomplete.
       if (this.#pending.length === CSI.length) return undefined;
       const final = this.#pending[CSI.length]!;
+      if (final === "1" || final === "4") {
+        const tilde = /^\x1b\[([14])~/.exec(this.#pending);
+        if (tilde) {
+          this.#pending = this.#pending.slice(tilde[0].length);
+          return tilde[1] === "1" ? { kind: "home" } : { kind: "end" };
+        }
+      }
       const sequence = SEQUENCES[final];
       if (sequence) {
         this.#pending = this.#pending.slice(CSI.length + 1);

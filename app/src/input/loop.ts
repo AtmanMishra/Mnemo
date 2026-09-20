@@ -9,6 +9,12 @@
  * The host is the other half: it is told *what happened* (submitted, answered,
  * interrupted, exit) and decides what that means. This file never runs a turn,
  * calls a model, or touches a screen.
+ *
+ * What a key means is decided in this order:
+ *
+ *   secret  → a key being entered, which is not a command and not remembered
+ *   editing → the line editor: caret, history, kill keys — what a text field is
+ *   routing → what the key means to the interface: a decision, an answer, a message
  */
 import { KeyReader, type Key } from "./reader.ts";
 import { route, type UiState, type Action } from "./router.ts";
@@ -33,6 +39,9 @@ export class Composer {
   readonly #host: LoopHost;
   readonly #reader = new KeyReader();
   #buffer = "";
+  #cursor = 0;
+  #history: string[] = [];
+  #recall: number | undefined;
   #question: ApprovalPrompt | undefined;
   #answering = false;
   #secret: { provider: string; buffer: string } | undefined;
@@ -48,6 +57,16 @@ export class Composer {
 
   get buffer(): string {
     return this.#buffer;
+  }
+
+  /** Where the caret is, in characters from the start of the line. */
+  get cursor(): number {
+    return this.#cursor;
+  }
+
+  /** Everything sent so far, oldest first. */
+  get history(): readonly string[] {
+    return this.#history;
   }
 
   get question(): ApprovalPrompt | undefined {
@@ -90,18 +109,135 @@ export class Composer {
   push(chunk: string): void {
     const keys = this.#reader.push(chunk);
     // One key at a time, re-reading the mode each time — because a mode can
-    // change *within* a chunk. A terminal hands over whatever was in the pipe:
-    // a paste, a script, a fast typist. `/login openrouter\rsk-or-…\r` arrives
-    // as a single chunk, and checking the mode once per chunk sent the key
-    // straight through the router, where it became a message and was echoed into
-    // the transcript. The separator that disables this is a human typing slowly
+    // change *within* a chunk. A terminal hands over whatever was in the pipe: a
+    // paste, a script, a fast typist. `/login openrouter\rsk-or-…\r` arrives as a
+    // single chunk, and checking the mode once per chunk sent the key straight
+    // through the router, where it became a message and was echoed into the
+    // transcript. The separator that disables this is a human typing slowly
     // enough to fill several reads, which is not a guarantee worth having.
     for (const key of keys) {
-      if (this.#secret) this.#applySecret([key]);
-      else this.#apply([key]);
+      if (this.#secret) {
+        this.#applySecret([key]);
+      } else if (this.#editing(key)) {
+        this.#host.changed();
+      } else {
+        this.#apply([key]);
+      }
     }
   }
 
+  /** Nothing has arrived for a moment: settle a pending lone Escape. */
+  tick(): void {
+    if (!this.#reader.incomplete) return;
+    this.#apply(this.#reader.flush());
+  }
+
+  /**
+   * The line editor: caret movement, history, and the kill keys.
+   *
+   * Every terminal agent has these, and their absence is not "simpler" — it is a
+   * prompt you have to retype whenever you mistype a word. They live here rather
+   * than in the router because they are not decisions about the interface; they
+   * are what a text field *is*.
+   *
+   * Returns true when the line on screen changed. Not when a key was merely
+   * claimed: an arrow at the end of the line is consumed and does nothing, and
+   * reporting that as a change would redraw a frame showing the same pixels.
+   */
+  #editing(key: Key): boolean {
+    const at = this.#cursor;
+
+    switch (key.kind) {
+      case "left":
+        if (at === 0) return false;
+        this.#cursor = at - 1;
+        return true;
+
+      case "right":
+        if (at >= this.#buffer.length) return false;
+        this.#cursor = at + 1;
+        return true;
+
+      case "home":
+        if (at === 0) return false;
+        this.#cursor = 0;
+        return true;
+
+      case "end":
+        if (at === this.#buffer.length) return false;
+        this.#cursor = this.#buffer.length;
+        return true;
+
+      case "up": {
+        // History walks backwards from the newest and stops at the oldest rather
+        // than wrapping: a reader holding up expects the beginning, not a jump
+        // back to where they started.
+        if (this.#history.length === 0) return true;
+        const next =
+          this.#recall === undefined ? this.#history.length - 1 : Math.max(0, this.#recall - 1);
+        if (next === this.#recall) return true;
+        this.#recall = next;
+        this.#buffer = this.#history[next] ?? "";
+        this.#cursor = this.#buffer.length;
+        return true;
+      }
+
+      case "down": {
+        if (this.#recall === undefined) return true;
+        if (this.#recall >= this.#history.length - 1) {
+          this.#recall = undefined;
+          this.#buffer = "";
+        } else {
+          this.#recall += 1;
+          this.#buffer = this.#history[this.#recall] ?? "";
+        }
+        this.#cursor = this.#buffer.length;
+        return true;
+      }
+
+      case "backspace":
+        if (at === 0) return false;
+        this.#buffer = this.#buffer.slice(0, at - 1) + this.#buffer.slice(at);
+        this.#cursor = at - 1;
+        return true;
+
+      case "ctrl":
+        switch (key.letter) {
+          case "a":
+            if (at === 0) return false;
+            this.#cursor = 0;
+            return true;
+          case "e":
+            if (at === this.#buffer.length) return false;
+            this.#cursor = this.#buffer.length;
+            return true;
+          case "u": // kill from the start of the line to the caret
+            if (at === 0) return false;
+            this.#buffer = this.#buffer.slice(at);
+            this.#cursor = 0;
+            return true;
+          case "k": // kill from the caret to the end
+            if (at >= this.#buffer.length) return false;
+            this.#buffer = this.#buffer.slice(0, at);
+            return true;
+          case "w": {
+            // the word before the caret, and the space before that
+            const head = this.#buffer.slice(0, at).replace(/\S*\s*$/, "");
+            if (head === this.#buffer.slice(0, at)) return false;
+            this.#buffer = head + this.#buffer.slice(at);
+            this.#cursor = head.length;
+            return true;
+          }
+          default:
+            return false;
+        }
+
+      default:
+        return false;
+    }
+  }
+
+  /** The key prompt's own handling — not the line editor, deliberately. */
   #applySecret(keys: readonly Key[]): void {
     const secret = this.#secret;
     if (!secret) return;
@@ -138,12 +274,6 @@ export class Composer {
     if (visible) this.#host.changed();
   }
 
-  /** Nothing has arrived for a moment: settle a pending lone Escape. */
-  tick(): void {
-    if (!this.#reader.incomplete) return;
-    this.#apply(this.#reader.flush());
-  }
-
   #apply(keys: readonly Key[]): void {
     let visible = false;
     for (const key of keys) {
@@ -157,17 +287,24 @@ export class Composer {
   #perform(action: Action): boolean {
     switch (action.kind) {
       case "insert":
-        this.#buffer += action.text;
+        this.#buffer =
+          this.#buffer.slice(0, this.#cursor) + action.text + this.#buffer.slice(this.#cursor);
+        this.#cursor += action.text.length;
         return true;
 
       case "backspace":
-        this.#buffer = this.#buffer.slice(0, -1);
+        if (this.#cursor === 0) return false;
+        this.#buffer = this.#buffer.slice(0, this.#cursor - 1) + this.#buffer.slice(this.#cursor);
+        this.#cursor -= 1;
         return true;
 
       case "submit": {
         const text = action.text;
+        if (text.trim() !== "") this.#history.push(text);
+        this.#recall = undefined;
         const wasAnswering = this.#answering;
         this.#buffer = "";
+        this.#cursor = 0;
         if (wasAnswering) {
           // Writing a reply to a question *is* the answer; the question closes.
           this.#answering = false;
@@ -188,6 +325,7 @@ export class Composer {
       case "begin-other":
         this.#answering = true;
         this.#buffer = "";
+        this.#cursor = 0;
         return true;
 
       case "interrupt":

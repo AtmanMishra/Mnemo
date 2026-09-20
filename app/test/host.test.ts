@@ -123,8 +123,10 @@ test("every visible change repaints exactly once per change", () => {
   composer.push("abc");
   assert.ok(redraws() > before, "typing is visible");
   const mid = redraws();
-  composer.push("\x1b[D"); // an arrow: nothing here uses it
+  composer.push("\t"); // a tab: nothing here binds it
   assert.equal(redraws(), mid, "a key that did nothing did not repaint");
+  composer.push("\x1b[D"); // the caret has somewhere to go now
+  assert.equal(redraws(), mid + 1, "and a key that moved it did repaint");
 });
 
 test("with a provider configured, the notice does not send you back to /login", () => {

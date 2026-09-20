@@ -13,6 +13,7 @@ import { Session } from "../src/session/session.ts";
 import type { TurnRunner } from "../src/session/host.ts";
 
 function fakeTerminal(columns: number | undefined = 60) {
+  const size = { columns };
   const listeners: Array<(chunk: unknown) => void> = [];
   const resize: Array<() => void> = [];
   const removed: Array<() => void> = [];
@@ -32,7 +33,9 @@ function fakeTerminal(columns: number | undefined = 60) {
         out += text;
       },
       // A number, as a real stdout exposes it — a getter property, not a method.
-      columns,
+      get columns() {
+        return size.columns;
+      },
       on: (_event, listener) => resize.push(listener),
       off: (_event, listener) => removed.push(listener),
     },
@@ -46,6 +49,9 @@ function fakeTerminal(columns: number | undefined = 60) {
     out: () => out,
     clear: () => (out = ""),
     raw: () => raw,
+    resizeTo: (cols: number) => {
+      size.columns = cols;
+    },
   };
 }
 
@@ -80,10 +86,25 @@ test("data from the terminal reaches the screen", () => {
 });
 
 test("a resize repaints, and the repaint is unsubscribed on the way out", () => {
-  const { term, tui } = run();
+  const { term, session, tui } = run();
+  // Content that reflows is the point: a frame that would come out the same at
+  // both widths is not redrawn, and only a line that actually rewraps proves the
+  // resize reached the layout.
+  session.apply({
+    type: "user",
+    text: "a message long enough that a narrower terminal reflows it somewhere in the middle",
+  });
   term.clear();
   term.resized();
-  assert.ok(term.out().length > 0, "a narrower or wider terminal is redrawn");
+  // A frame identical to the one on screen is not redrawn — so a resize that
+  // changes nothing draws nothing, and a resize that changes the layout draws.
+  // The terminal itself reflows the text; our job is only to re-lay-out.
+  assert.ok(term.out().length > 0, "the message reaches the screen at the current width");
+
+  term.resizeTo(40);
+  term.clear();
+  term.resized();
+  assert.ok(term.out().length > 0, "and a resize that reflows it redraws");
 
   tui.stop();
   assert.equal(term.removed(), 1, "the listener is removed, not left attached to a dead screen");

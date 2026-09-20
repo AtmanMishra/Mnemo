@@ -32,6 +32,7 @@ export function promptLines(
   secret?: { provider: string; length: number },
   status?: string,
   working?: boolean,
+  cursor = Number.MAX_SAFE_INTEGER,
 ): string[] {
   // A turn in flight says so, with the one key that stops it. Silence while
   // working is indistinguishable from a hang, and the reader's next move is
@@ -47,7 +48,10 @@ export function promptLines(
     return [`  ${keyHints(state.question)}`, ...chrome];
   }
   const marker = state.answering ? "answer> " : "> ";
-  return [`${marker}${state.buffer}\u2588`, ...chrome];
+  // The caret is drawn *inside* the line, not after it: with a caret that can
+  // move, a block always at the end is a lie about where the next character goes.
+  const at = Math.max(0, Math.min(cursor, state.buffer.length));
+  return [`${marker}${state.buffer.slice(0, at)}\u2588${state.buffer.slice(at)}`, ...chrome];
 }
 
 export interface TerminalSurface {
@@ -59,6 +63,7 @@ export interface TerminalSurface {
 export class Screen {
   readonly #surface: TerminalSurface;
   #live = 0;
+  #last: string[] = [];
 
   constructor(surface: TerminalSurface) {
     this.#surface = surface;
@@ -83,6 +88,19 @@ export class Screen {
    * the bytes.
    */
   draw(frame: { history: readonly string[]; viewport: readonly string[] }): string {
+    // Nothing to say, nothing said. A frame identical to the one already on
+    // screen is not drawn, which frees every key binding from having to know
+    // whether it changed anything: the decision is made once, here, by comparing
+    // what would be drawn with what already is.
+    //
+    // This is a fix for a class of bug rather than one bug. "An inert key
+    // repainted the screen" happens when that decision is spread across
+    // per-branch flags, and any of them being wrong is invisible except as a
+    // frame drawn to show the same pixels.
+    const wanted = [...frame.history, ...frame.viewport];
+    if (this.#live > 0 && sameLines(wanted, this.#last)) return "";
+    this.#last = wanted;
+
     let out = "";
 
     // Erase the live part first: up over it, then clear downward.
@@ -104,9 +122,16 @@ export class Screen {
     if (this.#live === 0) return "";
     const out = `\x1b[${this.#live}A\x1b[0J`;
     this.#live = 0;
+    this.#last = [];
     this.#surface.write(out);
     return out;
   }
+}
+
+/** Two frames are the same when every line is the same, in order. */
+function sameLines(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((line, i) => line === b[i]);
 }
 
 export interface AttachOptions {
@@ -147,6 +172,7 @@ export function attach(options: AttachOptions) {
           iface.composer.secret,
           options.status?.(),
           session.streaming || session.runningTools > 0,
+          iface.composer.cursor,
         ),
       ],
     });
