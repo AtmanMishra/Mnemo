@@ -17,23 +17,26 @@
  *     costs no colour, and survives any background.
  */
 import { fit } from "../frame/frame.ts";
+import { PLAIN, type Painter, type Role } from "../theme/theme.ts";
 
 /** What one art character draws: at mascot scale, and at wordmark scale. */
 export interface Pixel {
   wide: string;
   narrow: string;
+  /** What it is painted with — the whole reason the art reads as a figure. */
+  role?: Role;
 }
 
 export const PIXELS: Record<string, Pixel> = {
-  "#": { wide: "██", narrow: "█" }, // the body
-  u: { wide: "▀▀", narrow: "▀" }, // a raised limb, a wing up
-  v: { wide: "▄▄", narrow: "▄" }, // a thin leg, a claw held low
-  r: { wide: "▒▒", narrow: "▒" }, // detail, light — a plate, a band
-  R: { wide: "▓▓", narrow: "▓" }, // detail, heavy — a stripe
-  p: { wide: "▒▒", narrow: "▒" }, // the one highlight
-  n: { wide: "▄▄", narrow: "▄" }, // THE accent: one run per creature, never more
+  "#": { wide: "██", narrow: "█", role: "coat" }, // the body
+  u: { wide: "▀▀", narrow: "▀", role: "coat" }, // a raised limb, a wing up
+  v: { wide: "▄▄", narrow: "▄", role: "coat" }, // a thin leg, a claw held low
+  r: { wide: "▒▒", narrow: "▒", role: "detail" }, // detail, light — a plate, a band
+  R: { wide: "▓▓", narrow: "▓", role: "detail" }, // detail, heavy — a stripe
+  p: { wide: "▒▒", narrow: "▒", role: "accent" }, // the one highlight
+  n: { wide: "▄▄", narrow: "▄", role: "accent" }, // THE accent: one run per creature
   O: { wide: "  ", narrow: " " }, // an eye: a hole, never a drawn shape
-  _: { wide: "██", narrow: "█" }, // what a blink fills the hole with
+  _: { wide: "██", narrow: "█", role: "coat" }, // what a blink fills the hole with
 };
 
 /**
@@ -61,17 +64,26 @@ export type Frame = keyof Omit<typeof KARKINOS, "name">;
  * the figure that nobody asked for, and it would be found by looking rather than
  * by any check.
  */
-export function paint(art: readonly string[], scale: 1 | 2 = 2): string[] {
-  return art.map((row) =>
-    [...row]
+export function paint(art: readonly string[], scale: 1 | 2 = 2, painter: Painter = PLAIN): string[] {
+  return art.map((row) => {
+    // Consecutive marks of one role are painted as a single run: a figure is ten
+    // cells wide and a figure with an escape per cell is mostly escape.
+    const runs: Array<{ role: Role | undefined; glyphs: string }> = [];
+    for (const marker of [...row]) {
+      const pixel = PIXELS[marker];
       // An undefined mark draws as its own width in *spaces*, not as nothing.
       // The gaps between the claws are undefined marks: collapsing them to zero
       // touches the claws to the body and turns the crab into a lozenge. Silence
       // here means "nothing drawn", and nothing drawn still occupies its cell —
       // the same reason an eye is a hole rather than a shape.
-      .map((marker) => PIXELS[marker]?.[scale === 2 ? "wide" : "narrow"] ?? (scale === 2 ? "  " : " "))
-      .join(""),
-  );
+      const glyphs = pixel?.[scale === 2 ? "wide" : "narrow"] ?? (scale === 2 ? "  " : " ");
+      const role = pixel?.role;
+      const last = runs[runs.length - 1];
+      if (last && last.role === role) last.glyphs += glyphs;
+      else runs.push({ role, glyphs });
+    }
+    return runs.map((run) => (run.role ? painter.paint(run.role, run.glyphs) : run.glyphs)).join("");
+  });
 }
 
 /** The width a figure occupies, in cells. */
@@ -110,8 +122,8 @@ function widthOfString(line: string): number {
  * The figure and its tagline, centred, or nothing at all when the terminal is
  * too narrow to show it whole.
  */
-export function splash(cols: number, frame: Frame = "idle"): string[] {
-  const art = paint(KARKINOS[frame], 2);
+export function splash(cols: number, frame: Frame = "idle", painter: Painter = PLAIN): string[] {
+  const art = paint(KARKINOS[frame], 2, painter);
   if (cols < MIN_FIGURE_COLS) return [];
   return [...centre(art, cols), ...centre([TAGLINE], cols), ""];
 }

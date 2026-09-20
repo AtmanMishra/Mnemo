@@ -19,6 +19,7 @@
  *     decides the width, not us.
  */
 import { renderStatusLine } from "../status/status.ts";
+import { slice, width, PLAIN, type Painter } from "../theme/theme.ts";
 
 export interface FrameFacts {
   /** e.g. "Bun 1.3.14" — stated, never implied. */
@@ -42,28 +43,39 @@ export interface FrameOptions extends FrameFacts {
 /** Fit a line to the columns available, marking what was cut. */
 export function fit(text: string, cols: number): string {
   if (cols <= 0) return "";
-  if (text.length <= cols) return text;
-  return text.slice(0, Math.max(0, cols - 1)) + "…";
+  // Measured and cut by *visible* width: a coloured line is longer in characters
+  // than it is on screen, and counting characters would pad and truncate it
+  // wrongly — a layout bug that is really a measurement bug.
+  if (width(text) <= cols) return text;
+  return slice(text, Math.max(0, cols - 1)) + "…";
 }
 
 function pad(text: string, cols: number): string {
   const fitted = fit(text, cols);
-  return fitted.length >= cols ? fitted : fitted + " ".repeat(cols - fitted.length);
+  const visible = width(fitted);
+  return visible >= cols ? fitted : fitted + " ".repeat(cols - visible);
 }
 
 /** `▀▀▐ NAME ▌▀▀▀…▀ ` — a labelled rule that always fills the width. */
 export function rule(label: string, cols: number): string {
   const head = `▀▀▐ ${label} ▌`;
-  if (head.length >= cols) return fit(head, cols);
-  return head + "▀".repeat(cols - head.length);
+  const headWidth = width(head);
+  if (headWidth >= cols) return fit(head, cols);
+  return head + "▀".repeat(cols - headWidth);
 }
 
 /** `▚ MNEMO ──…── runtime ` — identity on the left, the runtime on the right. */
-export function banner(cols: number, runtime: string): string {
+export function banner(cols: number, runtime: string, painter: Painter = PLAIN): string {
   const head = "▚ MNEMO ";
   const tail = ` ${runtime} `;
   if (head.length + tail.length >= cols) return fit(`${head}${tail}`, cols);
-  return head + "─".repeat(cols - head.length - tail.length) + tail;
+  // The mark and wordmark carry Mnemo's own colour; the rule and the runtime are
+  // chrome and stay quiet. This is the only place the wordmark colour appears.
+  return (
+    painter.paint("wordmark", head) +
+    painter.paint("muted", "─".repeat(cols - head.length - tail.length)) +
+    painter.paint("muted", tail)
+  );
 }
 
 /** The numbered path a machine with nothing configured needs. */
