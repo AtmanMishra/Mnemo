@@ -40,6 +40,9 @@ export const DIRECTIVE = [
   "- Treat recalled items as candidates, not facts: use what fits, ignore what does not.",
   "- When you learn something durable (a convention, a command, a preference, a decision, a pitfall), store it with memory_remember. Use a short stable key; the same key again replaces the old value.",
   "- Search with memory_search before saying you do not know something about this project.",
+  "- A recalled pitfall's fix comes first: apply it before the command it is about instead of reproducing the failure.",
+  "- Open items from the last session are agreed next steps: when the user asks to continue, do them.",
+  "- Remember only what stays true. Work deferred to later, or an instruction tied to now (\"not yet\", \"until next session\"), is not a fact: the session record already carries open work.",
 ].join("\n");
 
 /** How many facts per profile go into the prompt: the newest win (audit F13). */
@@ -155,7 +158,8 @@ export function memoryExtension(host: Host) {
         label: "Remember",
         description:
           "Store a durable fact in long-term memory. scope 'project' for facts about this codebase, 'user' for the user's preferences. " +
-          "Use a short stable key; the same key again replaces the old value (kept as history).",
+          "Use a short stable key; the same key again replaces the old value (kept as history). " +
+          "Not for deferred work or the status of the current task: Mnemo records each session's open work itself.",
         parameters: Type.Object({
           scope: Type.Union([Type.Literal("project"), Type.Literal("user")]),
           key: Type.String(),
@@ -163,6 +167,7 @@ export function memoryExtension(host: Host) {
         }),
         async execute(_id, params, _signal, _update, ctx) {
           identity ??= projectIdentity(ctx.cwd);
+          if (params.key.toLowerCase() === "last session") throw new Error("\"last session\" is written by Mnemo from the session record; choose another key");
           const r = await mem.learn(params.scope, identity.id, params.key.toLowerCase(), params.value);
           if (!r) throw new Error("memory is not reachable");
           profileText = undefined;

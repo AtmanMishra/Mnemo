@@ -367,3 +367,12 @@ mt("the reflection call carries the session id, and a failed reflection is repor
   await e.idle();
   expect(texts(e.controller)).toContain("notice: Reflection failed: 400 MissingSessionID");
 });
+
+mt("the agent cannot overwrite the session record's \"last session\" fact", async () => {
+  const e = await env({ reflect: false });
+  e.faux.setResponses([call("memory_remember", { scope: "project", key: "Last Session", value: "ran the tests" }), say("ok")]);
+  await e.controller.submit("run the tests and note it");
+  await e.idle();
+  expect(texts(e.controller).join("\n")).toContain("tool memory_remember error");
+  expect(await e.memory!.profile("project", `dir:${e.cwd}`)).toEqual([]);
+});

@@ -128,21 +128,30 @@ export const SCENARIOS: Scenario[] = [
     projects: {
       app: (d) => {
         nodeProject(d, "pitfall-app");
-        write(d, "scripts/setup.sh", `#!/bin/sh\ntouch .setup-done\necho "setup complete"\n`);
+        // A real (if small) suite: a stub that only echoes "passed" makes a model audit it instead of running it.
+        write(d, "scripts/setup.sh", `#!/bin/sh\nmkdir -p test/fixtures\nprintf '[{"id":1,"email":"a@b.dev"},{"id":2,"email":"c@d.dev"}]' > test/fixtures/users.json\necho "setup complete"\n`);
         write(
           d,
           "scripts/test.sh",
-          `#!/bin/sh\nif [ ! -f .setup-done ]; then\n  echo "error: test fixtures missing — run sh scripts/setup.sh first" >&2\n  exit 1\nfi\necho "12 tests passed"\n`,
+          `#!/bin/sh\nif [ ! -f test/fixtures/users.json ]; then\n  echo "error: test fixtures missing — run sh scripts/setup.sh first" >&2\n  exit 1\nfi\nnode --test\n`,
         );
-        write(d, ".gitignore", ".setup-done\n");
+        write(
+          d,
+          "test/users.test.mjs",
+          `import { test } from "node:test";\nimport assert from "node:assert";\nimport { readFileSync } from "node:fs";\n\n` +
+            `const users = JSON.parse(readFileSync(new URL("./fixtures/users.json", import.meta.url), "utf8"));\n\n` +
+            `test("every fixture user has an email", () => {\n  for (const u of users) assert.match(u.email, /@/);\n});\n\n` +
+            `test("ids are unique", () => {\n  assert.equal(new Set(users.map((u) => u.id)).size, users.length);\n});\n`,
+        );
+        write(d, ".gitignore", "test/fixtures/\n");
       },
     },
     sessions: [
       { project: "app", prompts: ["Run the test suite with `sh scripts/test.sh` and make it pass. Tell me the result."] },
       {
         project: "app",
-        before: (dirs) => fs.rmSync(path.join(dirs.app!, ".setup-done"), { force: true }),
-        prompts: ["Fresh checkout here. Run the tests (scripts/test.sh) and tell me the result."],
+        before: (dirs) => fs.rmSync(path.join(dirs.app!, "test", "fixtures"), { recursive: true, force: true }),
+        prompts: ["Run the tests (scripts/test.sh) and tell me the result."],
       },
     ],
     checks: [
