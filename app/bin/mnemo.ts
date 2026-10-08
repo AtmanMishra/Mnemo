@@ -19,7 +19,8 @@ import { createDemoProject, createFaux, demoScript, DEMO_PROMPT } from "../src/r
 import { MemoryService } from "@mnemo/memory";
 import { createHost, settleBackground, type Mode } from "../src/extensions/host.ts";
 import { mnemoExtensions } from "../src/extensions/index.ts";
-import { App } from "../src/ui/App.tsx";
+import { Root } from "../src/ui/Root.tsx";
+import { workspaceSource } from "../src/runtime/workspace-source.ts";
 import { runMemoryCommand } from "../src/memory-cli.ts";
 
 const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
@@ -41,6 +42,9 @@ options
   --no-verify              do not send a run that changed code back to run a check
   --dump                   render one frame (after the demo turn, with --demo) and exit
   --no-motion              no animation
+  --no-boot                skip the launch sequence
+  --inline                 the transcript in the terminal's scrollback instead of the full-screen workspace
+  --intro                  show the first-run introduction again
   -v, --version            print the version
   -h, --help               this text
 
@@ -53,6 +57,9 @@ interface Args {
   demo: boolean;
   dump: boolean;
   motion: boolean;
+  boot: boolean;
+  inline: boolean;
+  intro: boolean;
   memory: boolean;
   reflect: boolean;
   verify: boolean;
@@ -63,7 +70,7 @@ interface Args {
 }
 
 function parse(argv: string[]): Args {
-  const a: Args = { help: false, version: false, demo: false, dump: false, motion: true, memory: true, reflect: true, verify: true, mode: "default", continueRecent: false };
+  const a: Args = { help: false, version: false, demo: false, dump: false, motion: true, boot: true, inline: false, intro: false, memory: true, reflect: true, verify: true, mode: "default", continueRecent: false };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i]!;
     if (v === "doctor" && i === 0) a.command = "doctor";
@@ -72,6 +79,9 @@ function parse(argv: string[]): Args {
     else if (v === "--demo") a.demo = true;
     else if (v === "--dump") a.dump = true;
     else if (v === "--no-motion") a.motion = false;
+    else if (v === "--no-boot") a.boot = false;
+    else if (v === "--inline") a.inline = true;
+    else if (v === "--intro") a.intro = true;
     else if (v === "--no-memory") a.memory = false;
     else if (v === "--no-reflect") a.reflect = false;
     else if (v === "--no-verify") a.verify = false;
@@ -121,6 +131,31 @@ async function doctor(home: string, dir: string): Promise<number> {
   lines.push(`  skills  ${skills} in ${skillsDir(home)}`);
   console.log(lines.join("\n"));
   return usable && memsrv ? 0 : 1;
+}
+
+/** Small per-user state: whether the introduction has been seen. */
+function readState(home: string): { onboarded?: boolean } {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(home, "state.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function writeState(home: string, state: { onboarded?: boolean }): void {
+  try {
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, "state.json"), JSON.stringify(state, null, 2));
+  } catch {
+    /* a lost flag only means the introduction shows again */
+  }
+}
+
+/** What the launch sequence counts up: memories, skills, sessions. */
+async function bootStats(memory: MemoryService, runtime: Awaited<ReturnType<typeof startRuntime>>) {
+  const s = await memory.stats().catch(() => undefined);
+  if (!s) return undefined;
+  return { memories: s.nodes, skills: runtime.session.resourceLoader.getSkills().skills.length, sessions: s.episodes };
 }
 
 async function main(): Promise<number> {
@@ -212,12 +247,34 @@ async function main(): Promise<number> {
     controller.transcript.notice("Continuing the most recent session");
   }
 
+  // A terminal gets the workspace (full screen, alternate buffer) unless --inline; a dump or a pipe the inline transcript.
+  const layout = interactive && !args.inline ? "workspace" : "inline";
+  const state = readState(home);
+  const onboard = interactive && !args.demo && (args.intro || !state.onboarded);
+  const stats = memory ? await bootStats(memory, runtime) : undefined;
   instance = render(
-    React.createElement(App, { controller, version: pkg.version, home: os.homedir(), motion: args.motion && interactive, clearTerminal }),
+    React.createElement(Root, {
+      controller,
+      source: workspaceSource(controller, host, home),
+      version: pkg.version,
+      home: os.homedir(),
+      motion: args.motion && interactive,
+      layout,
+      boot: interactive && args.boot,
+      onboard,
+      stats,
+      clearTerminal,
+      onOnboarded: (choice) => {
+        writeState(home, { ...state, onboarded: true });
+        if (choice === "login") void controller.submit("/login");
+        if (choice === "demo") controller.transcript.notice("For a scripted tour with no key: quit, then run `mnemo --demo`.");
+      },
+    }),
     {
       exitOnCtrlC: false,
       patchConsole: true,
       kittyKeyboard: { mode: "auto" },
+      alternateScreen: layout === "workspace",
       ...(interactive ? {} : { stdin: silentStdin(), interactive: false }),
     },
   );

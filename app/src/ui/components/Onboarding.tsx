@@ -136,7 +136,7 @@ function Workspace(): React.ReactElement {
       <Text color={palette.faint}>└─────────────────────────────────────────────────────────┘</Text>
       <Text> </Text>
       <Text color={palette.dim}>
-        <Key k="ctrl+b" /> sidebar  <Key k="tab" /> focus  <Key k="1-5" /> files · memory · sessions · skills · logs
+        <Key k="ctrl+b" /> sidebar  <Key k="tab" /> focus  <Key k="1-5" /> panes  <Key k="pgup" /> scroll
       </Text>
     </Box>
   );
