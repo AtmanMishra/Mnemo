@@ -119,3 +119,76 @@ test("a turn's answer appears in the transcript viewport", async () => {
   expect(r.lastFrame()).toContain("The answer is forty-two.");
   r.unmount();
 });
+
+test("files the agent changed are marked, a failing tool's files flagged, sizes weighed", async () => {
+  const { decorateFiles } = await import("../src/ui/workspace/decorate.ts");
+  const { sizeBar } = await import("../src/ui/workspace/Sidebar.tsx");
+  const items = fileTree(["a.ts", "b.ts", "c.ts"], new Set());
+  const out = decorateFiles(
+    items,
+    [
+      { kind: "tool", id: "1", name: "edit", args: { path: "/p/a.ts" }, status: "done", output: "" },
+      { kind: "tool", id: "2", name: "bash", args: { command: "tsc" }, status: "error", output: "c.ts(3,1): error TS2304" },
+    ],
+    "/p",
+    (rel) => ({ "a.ts": 10, "b.ts": 10_000, "c.ts": 100 })[rel],
+  );
+  expect(out.map((i) => i.badge?.ch ?? "")).toEqual(["✎", "", "!"]);
+  expect(out[1]!.weight).toBe(1);
+  expect(out[0]!.weight).toBeLessThan(out[2]!.weight!);
+  expect(sizeBar(1)).toBe("████");
+  expect(sizeBar(0)).toBe("░░░░");
+  expect(sizeBar(0.6)).toBe("██▒░");
+});
+
+test("the memory map places each group in its own arc around the project", async () => {
+  const { layoutMap } = await import("../src/ui/workspace/MemoryMap.tsx");
+  const { nodes, cx, cy } = layoutMap(
+    [
+      { id: "h", label: "This project", kind: "head" },
+      { id: "p:pm", label: "package manager", kind: "fact", depth: 1 },
+      { id: "u:editor", label: "editor", kind: "fact", depth: 1 },
+      { id: "n:9", label: "npm test on node 22", kind: "pitfall", depth: 1 },
+      { id: "n:4", label: "fix the login bug", kind: "session", depth: 1 },
+    ],
+    100,
+    30,
+  );
+  const at = (id: string) => nodes.find((n) => n.id === id)!;
+  expect(nodes).toHaveLength(4);
+  expect(at("p:pm").x).toBeGreaterThan(cx); // project facts to the right
+  expect(at("u:editor").x).toBeLessThan(cx); // yours to the left
+  expect(at("n:9").y).toBeGreaterThan(cy); // pitfalls below
+  expect(at("n:4").y).toBeLessThan(cy); // sessions above
+});
+
+test("m in the memory pane opens the map; [ ] walk the timeline of turns", async () => {
+  const r = await mount();
+  r.e.faux.setResponses([fauxAssistantMessage(fauxText("first answer")), fauxAssistantMessage(fauxText("second answer"))]);
+  await r.e.controller.submit("one");
+  await r.e.idle();
+  await r.e.controller.submit("two");
+  await r.e.idle();
+  await wait(80);
+  r.stdin.write(KEY.tab);
+  await wait();
+  r.stdin.write("2");
+  await wait(80);
+  r.stdin.write("m");
+  await wait(120);
+  expect(r.lastFrame()).toContain("MEMORY MAP");
+  expect(r.lastFrame()).toContain("package manager");
+  r.stdin.write(KEY.esc);
+  await wait();
+  expect(r.lastFrame()).toContain("TRANSCRIPT");
+  r.stdin.write("[");
+  await wait();
+  r.stdin.write("[");
+  await wait(120);
+  expect(r.lastFrame()).toContain("turn 1/2");
+  expect(r.lastFrame()).toContain("first answer");
+  r.stdin.write(KEY.esc);
+  await wait();
+  expect(r.lastFrame()).not.toContain("turn 1/2");
+  r.unmount();
+});

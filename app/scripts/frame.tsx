@@ -84,12 +84,13 @@ else if (screen === "workspace") {
   await controller.session.waitForIdle();
   await settleBackground(host);
   const [focus, pane, sel] = (arg ?? "composer").split(":");
+  const map = argv.includes("--map");
   el = (
     <Workspace
       controller={controller}
       source={workspaceSource(controller, host, home)}
       motion={false}
-      initial={{ focus: focus as Focus, pane: (pane as Pane) ?? "files", selected: sel ? Number(sel) : undefined, openDirs: ["src"] }}
+      initial={{ focus: focus as Focus, pane: (pane as Pane) ?? "files", selected: sel ? Number(sel) : undefined, openDirs: ["src"], map }}
     />
   );
 } else if (screen === "shell") {

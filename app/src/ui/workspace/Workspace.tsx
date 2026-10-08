@@ -28,12 +28,17 @@ import { Bar, PreviewView, Viewport } from "./Main.tsx";
 import { PixelArt } from "../components/PixelArt.tsx";
 import { mne } from "../pixel.ts";
 import { PANE_ICON, Sidebar } from "./Sidebar.tsx";
+import { MemoryMap, layoutMap } from "./MemoryMap.tsx";
+import { turns as turnsOf } from "../activity.ts";
+import { outcomeColor, Strip } from "../components/Strip.tsx";
+import { decorateFiles } from "./decorate.ts";
 
 export type Focus = "composer" | "sidebar" | "main";
 
 const SIDEBAR_MIN_COLUMNS = 84;
 const SIDEBAR_WIDTH = 34;
 const TRANSCRIPT_BLOCKS = 80;
+const TIMELINE_MAX = 24;
 
 function Header({ controller, columns, brand, mood }: { controller: Controller; columns: number; brand: boolean; mood: MneMood }): React.ReactElement {
   const chrome = useSyncExternalStore(controller.subscribe, controller.snapshot);
@@ -103,7 +108,7 @@ export interface WorkspaceProps {
   source: WorkspaceSource;
   motion: boolean;
   /** Where to start (tests and snapshots). */
-  initial?: { focus?: Focus; pane?: Pane; openDirs?: string[]; selected?: number };
+  initial?: { focus?: Focus; pane?: Pane; openDirs?: string[]; selected?: number; map?: boolean };
   /** The space it has (default: the whole terminal). */
   width?: number;
   height?: number;
@@ -137,11 +142,17 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   const [preview, setPreview] = useState<Preview | undefined>();
   const [back, setBack] = useState(0);
   const [previewBack, setPreviewBack] = useState(0);
+  /** The memory map is open in the main area, and which node is selected. */
+  const [map, setMap] = useState<number | undefined>(initial?.map ? 0 : undefined);
+  /** A turn picked on the timeline: the transcript shows from there. */
+  const [turnSel, setTurnSel] = useState<number | undefined>(undefined);
   const contentHeight = useRef(0);
 
   // The rows of each pane: files from the tree, the rest from the source.
   const files = useMemo(() => source.files(), [source]);
-  const items: Item[] = pane === "files" ? fileTree(files, openDirs) : (loaded[pane] ?? []);
+  const tree = useMemo(() => fileTree(files, openDirs), [files, openDirs]);
+  const decorated = useMemo(() => decorateFiles(tree, [...snap.committed, ...snap.live], cwd, source.fileSize), [tree, snap.committed, snap.live]);
+  const items: Item[] = pane === "files" ? decorated : (loaded[pane] ?? []);
   const sel = Math.min(selected[pane], Math.max(0, items.length - 1));
   const current = items[sel];
 
@@ -181,6 +192,9 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   const showSidebar = sidebar && !compact && columns >= 60;
   const mainWidth = columns - (showSidebar ? SIDEBAR_WIDTH : 0);
 
+  const transcriptBlocks = snap.committed.filter((b) => b.kind !== "welcome");
+  const turnList = useMemo(() => turnsOf([...transcriptBlocks, ...snap.live], snap.working !== null), [snap.committed, snap.live, snap.working]);
+  const mapNodes = useMemo(() => (map === undefined ? [] : layoutMap(loaded.memory ?? [], mainWidth - 2, mainHeight).nodes), [map !== undefined, loaded.memory, mainWidth, mainHeight]);
   const move = (delta: number) => setSelected((s) => ({ ...s, [pane]: Math.max(0, Math.min(items.length - 1, sel + delta)) }));
   const nextFocus = (from: Focus): Focus => (from === "composer" ? (showSidebar ? "sidebar" : "main") : from === "sidebar" ? "main" : "composer");
 
@@ -197,8 +211,30 @@ export function Workspace({ controller, source, motion, initial, width, height, 
       if (focus === "composer") return;
       if (key.tab) return setFocus(nextFocus(focus));
       if (key.escape) {
+        if (focus === "main" && map !== undefined) return setMap(undefined);
         if (focus === "main" && preview) return setPreview(undefined);
+        if (focus === "main" && turnSel !== undefined) return setTurnSel(undefined);
         return setFocus("composer");
+      }
+      if (focus === "main" && map !== undefined) {
+        const n = mapNodes.length;
+        if (key.leftArrow || key.upArrow) return setMap((m) => ((m ?? 0) - 1 + Math.max(1, n)) % Math.max(1, n));
+        if (key.rightArrow || key.downArrow) return setMap((m) => ((m ?? 0) + 1) % Math.max(1, n));
+        const node = mapNodes[map];
+        if (key.return && node?.id.startsWith("n:")) {
+          setMap(undefined);
+          void source.preview("memory", node.id).then((p) => p && setPreview(p));
+        }
+        return;
+      }
+      if (focus === "main" && !preview && (input === "[" || input === "]" || key.leftArrow || key.rightArrow)) {
+        if (turnList.length === 0) return;
+        const prev = input === "[" || key.leftArrow;
+        return setTurnSel((t) => {
+          const at = t ?? turnList.length;
+          const next = prev ? Math.max(0, at - 1) : at + 1;
+          return next >= turnList.length ? undefined : next;
+        });
       }
       if (focus === "main") {
         if (key.upArrow) return preview ? setPreviewBack((b) => b + 1) : setBack((b) => b + 1);
@@ -207,6 +243,12 @@ export function Workspace({ controller, source, motion, initial, width, height, 
         return;
       }
       // The sidebar.
+      if (pane === "memory" && input === "m") {
+        if (!loaded.memory) void load("memory");
+        setPreview(undefined);
+        setMap(0);
+        return setFocus("main");
+      }
       const n = Number(input);
       if (!key.meta && n >= 1 && n <= PANES.length) return setPane(PANES[n - 1]!);
       if (key.upArrow) return move(-1);
@@ -236,7 +278,8 @@ export function Workspace({ controller, source, motion, initial, width, height, 
 
   const runningTool = snap.live.some((b) => b.kind === "tool" && b.status === "running");
   const mood: MneMood = dialog ? "waiting" : snap.working ? (runningTool ? "tool" : "thinking") : "idle";
-  const blocks = snap.committed.filter((b) => b.kind !== "welcome").slice(-TRANSCRIPT_BLOCKS);
+  const fromTurn = turnSel !== undefined ? turnList[turnSel] : undefined;
+  const blocks = fromTurn ? transcriptBlocks.slice(fromTurn.at) : transcriptBlocks.slice(-TRANSCRIPT_BLOCKS);
   const render = (b: (typeof snap.committed)[number]) => <BlockView key={b.id} block={b} cwd={cwd} expanded={chrome.expanded} />;
   const empty = blocks.length === 0 && snap.live.length === 0 && !snap.working;
 
@@ -249,14 +292,28 @@ export function Workspace({ controller, source, motion, initial, width, height, 
             <Sidebar pane={pane} items={items} selected={sel} focused={focus === "sidebar"} width={SIDEBAR_WIDTH} height={bodyHeight} />
           ) : null}
           <Box flexDirection="column" width={mainWidth} paddingLeft={showSidebar ? 1 : 0}>
-            {preview && focus !== "composer" ? (
+            {map !== undefined && focus !== "composer" ? (
+              <>
+                <Bar title="memory map" width={mainWidth - 1} focused={focus === "main"} />
+                <MemoryMap items={loaded.memory ?? []} project={cwd.split("/").filter(Boolean).at(-1) ?? cwd} width={mainWidth - 2} height={mainHeight} selected={map} />
+              </>
+            ) : preview && focus !== "composer" ? (
               <>
                 <Bar title={`${PANE_ICON[pane]} ${preview.title}`} subtitle={[preview.subtitle, preview.hint].filter(Boolean).join(" · ")} width={mainWidth - 1} focused={focus === "main"} />
                 <PreviewView preview={preview} width={mainWidth - 2} height={mainHeight} back={previewBack} />
               </>
             ) : (
               <>
-                <Bar title="transcript" subtitle={back > 0 ? `${back} rows up · PgDn to follow` : undefined} width={mainWidth - 1} focused={focus === "main"} />
+                <Bar
+                  title="transcript"
+                  subtitle={
+                    fromTurn ? `turn ${turnSel! + 1}/${turnList.length} · [ ] move · esc follow` : back > 0 ? `${back} rows up · PgDn to follow` : undefined
+                  }
+                  width={mainWidth - 1}
+                  focused={focus === "main"}
+                  extra={turnList.length ? <Strip colors={turnList.map((t) => outcomeColor(t.outcome))} max={TIMELINE_MAX} selected={turnSel} /> : undefined}
+                  extraWidth={Math.min(turnList.length, TIMELINE_MAX) + (turnList.length > TIMELINE_MAX ? 1 : 0)}
+                />
                 {empty ? (
                   <Box height={mainHeight} flexDirection="column" justifyContent="center" alignItems="center">
                     {mainHeight >= 16 ? <IdleMne /> : null}
@@ -264,9 +321,9 @@ export function Workspace({ controller, source, motion, initial, width, height, 
                     <Text color={palette.faint}>/ commands · @ files · tab sidebar · ctrl+b hide it</Text>
                   </Box>
                 ) : (
-                  <Viewport height={mainHeight} back={back} onMeasure={(h) => (contentHeight.current = h)}>
+                  <Viewport height={mainHeight} back={fromTurn ? Number.MAX_SAFE_INTEGER : back} onMeasure={(h) => (contentHeight.current = h)}>
                     {blocks.map(render)}
-                    {snap.live.map(render)}
+                    {fromTurn ? null : snap.live.map(render)}
                     {chrome.workingVisible ? <WorkingLine working={snap.working} message={dialog ? "Waiting for you…" : chrome.workingMessage} queue={snap.queue} mode={dialog ? "wait" : runningTool ? "tool" : "think"} /> : null}
                   </Viewport>
                 )}
