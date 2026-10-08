@@ -120,10 +120,10 @@ Hermes' MEMORY.md/USER.md, Mnemo's profile and pitfall fixes).
 ¹ one baseline run broke integrity (read pi's own docs outside the sandbox) and
 is not scored.
 
-All three tie at the ceiling. In each arm, Mnemo's and Hermes' reviews both
-patched the skill when signing appeared (`Updated skill relay-release: …`). The
-baseline also passes because the policy file is in the repo and the model
-reads it each time. **These tasks do not separate the arms**: a
+All three tie at the ceiling. In every arm the release skill was updated
+when signing appeared: by Mnemo's and Hermes' reviews, and by the baseline
+model editing its own skill file. The baseline also passes because the policy
+file stays in the repo and the model reads it each time. **These tasks do not separate the arms**: a
 discriminating version needs a rule that is stated once and is *not* left in
 the repo. That is the series' design, and there the baseline drops to 78–87%.
 
