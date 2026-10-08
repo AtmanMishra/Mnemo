@@ -14,6 +14,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { mnemoHome } from "../home.ts";
 import * as os from "node:os";
 
 /**
@@ -76,14 +77,30 @@ export interface AuthFile {
   defaultProvider?: ProviderId;
 }
 
-export function authDir(home = os.homedir()): string {
-  return path.join(home, ".mnemo");
+/**
+ * Where auth.json lives — the SAME home every other part of Mnemo resolves
+ * (`src/home.ts`), rather than a second opinion about where that is.
+ *
+ * These defaults used to be `os.homedir()`, so a run with `MNEMO_HOME` set
+ * moved the journal, the skill history and the tool policy and left the
+ * credentials behind: the app read and wrote the real user's `~/.mnemo/
+ * auth.json` while believing it was somewhere else. A test that pointed the
+ * app at an empty temporary home was told the machine had two providers
+ * configured, which is how this was found — the class of bug `src/home.ts`
+ * was written to prevent, in the one file that had not been converted.
+ *
+ * Both shapes are accepted: the Mnemo home itself (…/.mnemo) and a parent
+ * directory that holds one, because callers predate this fix and pass
+ * `os.homedir()` or `process.env.HOME` explicitly.
+ */
+export function authDir(home = mnemoHome()): string {
+  return path.basename(home) === ".mnemo" ? home : path.join(home, ".mnemo");
 }
-export function authFile(home = os.homedir()): string {
+export function authFile(home = mnemoHome()): string {
   return path.join(authDir(home), "auth.json");
 }
 
-export function loadAuth(home = os.homedir()): AuthFile {
+export function loadAuth(home = mnemoHome()): AuthFile {
   try {
     const raw = fs.readFileSync(authFile(home), "utf8");
     const parsed = JSON.parse(raw) as AuthFile;
@@ -92,7 +109,7 @@ export function loadAuth(home = os.homedir()): AuthFile {
   return { version: 1, providers: {} };
 }
 
-export function saveAuth(auth: AuthFile, home = os.homedir()): void {
+export function saveAuth(auth: AuthFile, home = mnemoHome()): void {
   const dir = authDir(home);
   fs.mkdirSync(dir, { recursive: true });
   const file = authFile(home);
@@ -122,18 +139,18 @@ export function saveAuth(auth: AuthFile, home = os.homedir()): void {
 export function setProviderAuth(
   provider: ProviderId,
   auth: Omit<ProviderAuth, "updated_at">,
-  home = os.homedir(),
+  home = mnemoHome(),
 ): void {
   const a = loadAuth(home);
   a.providers[provider] = { ...auth, updated_at: Date.now() };
   saveAuth(a, home);
 }
 
-export function getProviderAuth(provider: ProviderId, home = os.homedir()): ProviderAuth | null {
+export function getProviderAuth(provider: ProviderId, home = mnemoHome()): ProviderAuth | null {
   return loadAuth(home).providers[provider] ?? null;
 }
 
-export function clearProviderAuth(provider: ProviderId, home = os.homedir()): boolean {
+export function clearProviderAuth(provider: ProviderId, home = mnemoHome()): boolean {
   const a = loadAuth(home);
   if (!a.providers[provider]) return false;
   delete a.providers[provider];
@@ -141,7 +158,7 @@ export function clearProviderAuth(provider: ProviderId, home = os.homedir()): bo
   return true;
 }
 
-export function setDefaultProvider(provider: ProviderId, model?: string, home = os.homedir()): void {
+export function setDefaultProvider(provider: ProviderId, model?: string, home = mnemoHome()): void {
   const a = loadAuth(home);
   a.defaultProvider = provider;
   if (model && a.providers[provider]) a.providers[provider].defaultModel = model;
@@ -150,7 +167,7 @@ export function setDefaultProvider(provider: ProviderId, model?: string, home = 
 
 /** Resolve a provider's usable API key: env wins, then store. */
 export function resolveApiKey(provider: ProviderId, env: NodeJS.ProcessEnv = process.env,
-  home = os.homedir()):
+  home = mnemoHome()):
   { key: string; source: "env" | "store" } | null {
   const envKey = env[ENV_KEY_BY_PROVIDER[provider]];
   if (envKey) return { key: envKey, source: "env" };

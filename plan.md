@@ -143,3 +143,10 @@ NB: 4b24b4b0 (working-tree red) = AREA 10.5 schedules overlay in-flight/uncommit
 [x] pi InteractiveMode migration (92 agent tests at merge)
 [x] OpenCode/OpenRouter providers; eval 3/3 vs 0/3 on ox-alpha-free
 [x] spawn_subagent hierarchical delegation (live-verified)
+
+## AREA 13 — THE BUN REBUILD (supersedes the Go/Node surfaces above)
+
+Areas 1–12 describe the Rust + Go + Node product and are kept as the record of
+what was built. The product is being rebuilt as one Bun application with the Rust
+memory layer and the Python ipy kernel behind it. The live task list is
+**`docs/ROADMAP.md`** (stages 0–7, decisions D1–D5, the v0.1 definition).
