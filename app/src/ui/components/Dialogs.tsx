@@ -3,7 +3,7 @@
  * place of the input box, so the conversation above stays visible.
  */
 import React, { useState } from "react";
-import { Box, Text, useInput, usePaste } from "ink";
+import { Box, Text, useInput as inkUseInput, usePaste as inkUsePaste } from "ink";
 import type { Choice, Dialog } from "../../runtime/dialogs.ts";
 import { color, glyph } from "../theme.ts";
 import * as ed from "../editor.ts";
@@ -11,6 +11,14 @@ import * as ed from "../editor.ts";
 const WINDOW = 8;
 
 /** Field-by-field substring match, so a query never matches across two fields. */
+/** False for a dialog in an agent that is on screen but not focused (a split pane). */
+export const InputActive = React.createContext(true);
+
+const useInput: typeof inkUseInput = (handler, options) =>
+  inkUseInput(handler, { ...options, isActive: (options?.isActive ?? true) && React.useContext(InputActive) });
+const usePaste: typeof inkUsePaste = (handler, options) =>
+  inkUsePaste(handler, { ...options, isActive: (options?.isActive ?? true) && React.useContext(InputActive) });
+
 export function filterChoices(choices: readonly Choice[], query: string): Choice[] {
   const q = query.trim().toLowerCase();
   if (!q) return [...choices];

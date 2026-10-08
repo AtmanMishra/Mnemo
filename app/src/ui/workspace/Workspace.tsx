@@ -18,7 +18,7 @@ import { Box, Text, useBoxMetrics, useInput, useWindowSize, type DOMElement } fr
 import type { Controller } from "../../runtime/controller.ts";
 import { BlockView } from "../components/Blocks.tsx";
 import { Composer } from "../components/Composer.tsx";
-import { DialogView } from "../components/Dialogs.tsx";
+import { DialogView, InputActive } from "../components/Dialogs.tsx";
 import { MotionContext } from "../components/motion.ts";
 import { WorkingLine } from "../components/Working.tsx";
 import { gradientAt, palette } from "../theme.ts";
@@ -34,25 +34,31 @@ const SIDEBAR_MIN_COLUMNS = 84;
 const SIDEBAR_WIDTH = 34;
 const TRANSCRIPT_BLOCKS = 80;
 
-function Header({ controller, columns }: { controller: Controller; columns: number }): React.ReactElement {
+function Header({ controller, columns, brand }: { controller: Controller; columns: number; brand: boolean }): React.ReactElement {
   const chrome = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const f = chrome.footer;
   const repo = f.cwd.split("/").filter(Boolean).at(-1) ?? f.cwd;
   const right = `◆ ${f.model}  ${f.memory ? `◈ ${f.memory.nodes}` : "◈ off"}${f.cost > 0 ? `  $${f.cost.toFixed(2)}` : ""} `;
   const left = ` mnemo  ${repo}${f.branch ? ` ⎇ ${f.branch}` : ""}`;
-  const gap = Math.max(1, columns - left.length - right.length - 3);
+  const gap = Math.max(1, columns - left.length - right.length - 3 + (brand ? 0 : 9));
   return (
-    <Text>
-      <Text color={palette.magenta}>▞</Text>
-      <Text color={palette.cyan}>▚</Text>
-      <Text bold>
-        {[..." mnemo"].map((ch, i) => (
-          <Text key={i} color={gradientAt(i / 5)}>
-            {ch}
+    <Text wrap="truncate">
+      {brand ? (
+        <>
+          <Text color={palette.magenta}>▞</Text>
+          <Text color={palette.cyan}>▚</Text>
+          <Text bold>
+            {[..." mnemo"].map((ch, i) => (
+              <Text key={i} color={gradientAt(i / 5)}>
+                {ch}
+              </Text>
+            ))}
           </Text>
-        ))}
-      </Text>
-      <Text color={palette.text}>{`  ${repo}`}</Text>
+          <Text color={palette.text}>{`  ${repo}`}</Text>
+        </>
+      ) : (
+        <Text bold color={palette.text}>{` ${repo}`}</Text>
+      )}
       {f.branch ? <Text color={palette.dim}>{` ⎇ ${f.branch}`}</Text> : null}
       <Text>{" ".repeat(gap)}</Text>
       <Text color={palette.magenta}>◆ </Text>
@@ -88,16 +94,27 @@ export interface WorkspaceProps {
   motion: boolean;
   /** Where to start (tests and snapshots). */
   initial?: { focus?: Focus; pane?: Pane; openDirs?: string[]; selected?: number };
+  /** The space it has (default: the whole terminal). */
+  width?: number;
+  height?: number;
+  /** Whether it takes keys: false for the agents in a split that are not focused. */
+  active?: boolean;
+  /** A split pane: no sidebar, a one-line header. */
+  compact?: boolean;
+  /** The wordmark in the header (off inside the shell, whose tab bar has it). */
+  brand?: boolean;
 }
 
-export function Workspace({ controller, source, motion, initial }: WorkspaceProps): React.ReactElement {
+export function Workspace({ controller, source, motion, initial, width, height, active = true, compact = false, brand = true }: WorkspaceProps): React.ReactElement {
   const snap = useSyncExternalStore(controller.transcript.subscribe, controller.transcript.snapshot);
   const chrome = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const dialog = useSyncExternalStore(controller.dialogs.subscribe, controller.dialogs.current);
-  const { columns, rows } = useWindowSize();
+  const size = useWindowSize();
+  const columns = width ?? size.columns;
+  const rows = height ?? size.rows;
   const cwd = controller.runtime.cwd;
 
-  const [sidebar, setSidebar] = useState(columns >= SIDEBAR_MIN_COLUMNS);
+  const [sidebar, setSidebar] = useState(!compact && columns >= SIDEBAR_MIN_COLUMNS);
   const [focus, setFocus] = useState<Focus>(initial?.focus ?? "composer");
   const [pane, setPane] = useState<Pane>(initial?.pane ?? "files");
   const [selected, setSelected] = useState<Record<Pane, number>>(() => {
@@ -151,7 +168,7 @@ export function Workspace({ controller, source, motion, initial }: WorkspaceProp
   const body = useRef<DOMElement>(null);
   const { height: bodyHeight } = useBoxMetrics(body);
   const mainHeight = Math.max(3, bodyHeight - 1);
-  const showSidebar = sidebar && columns >= 60;
+  const showSidebar = sidebar && !compact && columns >= 60;
   const mainWidth = columns - (showSidebar ? SIDEBAR_WIDTH : 0);
 
   const move = (delta: number) => setSelected((s) => ({ ...s, [pane]: Math.max(0, Math.min(items.length - 1, sel + delta)) }));
@@ -159,7 +176,7 @@ export function Workspace({ controller, source, motion, initial }: WorkspaceProp
 
   useInput(
     (input, key) => {
-      if (key.ctrl && input === "b") {
+      if (key.ctrl && input === "b" && !compact) {
         setSidebar((v) => !v);
         if (focus === "sidebar") setFocus("composer");
         return;
@@ -181,7 +198,7 @@ export function Workspace({ controller, source, motion, initial }: WorkspaceProp
       }
       // The sidebar.
       const n = Number(input);
-      if (n >= 1 && n <= PANES.length) return setPane(PANES[n - 1]!);
+      if (!key.meta && n >= 1 && n <= PANES.length) return setPane(PANES[n - 1]!);
       if (key.upArrow) return move(-1);
       if (key.downArrow) return move(1);
       if (!current) return;
@@ -204,7 +221,7 @@ export function Workspace({ controller, source, motion, initial }: WorkspaceProp
       if (key.return || key.rightArrow) return setFocus("main");
       if (input && !key.ctrl && !key.meta) source.act(pane, current.id, input);
     },
-    { isActive: !dialog },
+    { isActive: active && !dialog },
   );
 
   const blocks = snap.committed.filter((b) => b.kind !== "welcome").slice(-TRANSCRIPT_BLOCKS);
@@ -214,7 +231,7 @@ export function Workspace({ controller, source, motion, initial }: WorkspaceProp
   return (
     <MotionContext.Provider value={motion}>
       <Box flexDirection="column" width={columns} height={rows}>
-        <Header controller={controller} columns={columns} />
+        <Header controller={controller} columns={columns} brand={brand} />
         <Box ref={body} flexDirection="row" flexGrow={1} flexShrink={1} overflow="hidden">
           {showSidebar ? (
             <Sidebar pane={pane} items={items} selected={sel} focused={focus === "sidebar"} width={SIDEBAR_WIDTH} height={bodyHeight} />
@@ -245,10 +262,14 @@ export function Workspace({ controller, source, motion, initial }: WorkspaceProp
             )}
           </Box>
         </Box>
-        {dialog ? <DialogView dialog={dialog} /> : null}
+        {dialog ? (
+          <InputActive.Provider value={active}>
+            <DialogView dialog={dialog} />
+          </InputActive.Provider>
+        ) : null}
         <Composer
           working={snap.working !== null}
-          active={!dialog && focus === "composer"}
+          active={active && !dialog && focus === "composer"}
           commands={() => controller.commands()}
           files={() => files}
           footer={chrome.footer}

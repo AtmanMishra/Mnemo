@@ -238,6 +238,8 @@ export function Composer(props: ComposerProps): React.ReactElement {
       }
       if (key.meta && input === "b") return setDraft(ed.wordLeft);
       if (key.meta && input === "f") return setDraft(ed.wordRight);
+      // alt+digit, alt+, and alt+. move between agents: they are not text.
+      if (key.meta) return;
       if (input === "?" && !draft.text) return setShowShortcuts((v) => !v);
       if (input) setDraft((d) => ed.insert(d, input));
     },

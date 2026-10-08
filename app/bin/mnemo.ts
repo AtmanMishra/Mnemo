@@ -22,6 +22,8 @@ import { mnemoExtensions } from "../src/extensions/index.ts";
 import { Root } from "../src/ui/Root.tsx";
 import { workspaceSource } from "../src/runtime/workspace-source.ts";
 import { runMemoryCommand } from "../src/memory-cli.ts";
+import { Fleet } from "../src/runtime/fleet.ts";
+import { applyTheme, type ThemeName } from "../src/ui/theme.ts";
 import { bestOf, describeBestOf } from "../src/runtime/best-of.ts";
 
 const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
@@ -143,7 +145,14 @@ async function doctor(home: string, dir: string): Promise<number> {
 }
 
 /** Small per-user state: whether the introduction has been seen. */
-function readState(home: string): { onboarded?: boolean } {
+interface State {
+  onboarded?: boolean;
+  /** Folders agents were opened in, most recent first. */
+  recent?: string[];
+  theme?: ThemeName;
+}
+
+function readState(home: string): State {
   try {
     return JSON.parse(fs.readFileSync(path.join(home, "state.json"), "utf8"));
   } catch {
@@ -151,7 +160,7 @@ function readState(home: string): { onboarded?: boolean } {
   }
 }
 
-function writeState(home: string, state: { onboarded?: boolean }): void {
+function writeState(home: string, state: State): void {
   try {
     fs.mkdirSync(home, { recursive: true });
     fs.writeFileSync(path.join(home, "state.json"), JSON.stringify(state, null, 2));
@@ -237,15 +246,21 @@ async function main(): Promise<number> {
 
   const memsrv = args.memory ? findMemsrv(home) : undefined;
   const memory = memsrv ? new MemoryService(memsrv, journal) : undefined;
-  const host = createHost({ home, agentDir: dir, modelRuntime, memory, mode: args.mode, reflect: args.reflect, verify: args.verify, escalate: args.escalate });
-  const runtime = await startRuntime({
-    cwd,
-    agentDir: dir,
-    modelRuntime,
-    continueRecent: args.continueRecent,
-    extensions: mnemoExtensions(host),
-    ...injected,
-  });
+  const runtimeModels = modelRuntime;
+  /** One agent's host and pi session in `agentCwd`; the first gets --continue and the demo's injections. */
+  const makeAgent = async (agentCwd: string, first = false) => {
+    const host = createHost({ home, agentDir: dir, modelRuntime: runtimeModels, memory, mode: args.mode, reflect: args.reflect, verify: args.verify, escalate: args.escalate });
+    const runtime = await startRuntime({
+      cwd: agentCwd,
+      agentDir: dir,
+      modelRuntime: runtimeModels,
+      continueRecent: first && args.continueRecent,
+      extensions: mnemoExtensions(host),
+      ...(first ? injected : {}),
+    });
+    return { host, runtime };
+  };
+  const { host, runtime } = await makeAgent(cwd, true);
 
   if (args.print !== undefined) {
     const session = runtime.session;
@@ -274,16 +289,31 @@ async function main(): Promise<number> {
   let exitCode = 0;
   let finished!: () => void;
   const done = new Promise<void>((r) => (finished = r));
-  const controller = new Controller(runtime, {
-    exit: (code) => {
-      exitCode = code ?? 0;
-      finished();
+  const state = readState(home);
+  applyTheme(state.theme ?? "night");
+  // Every agent of this process. The program ends when the last one closes.
+  const fleet = new Fleet(
+    async (agentCwd, exit) => {
+      const made = await makeAgent(agentCwd);
+      const c = new Controller(made.runtime, { exit, onClearScreen: clearTerminal, host: made.host });
+      await c.bind();
+      c.transcript.push({ kind: "welcome" });
+      return { controller: c, host: made.host, source: workspaceSource(c, made.host, home) };
     },
-    onClearScreen: clearTerminal,
-    host,
-  });
+    {
+      onEmpty: (code) => {
+        exitCode = code;
+        finished();
+      },
+      recent: state.recent,
+      saveRecent: (recent) => writeState(home, { ...readState(home), recent }),
+    },
+  );
+  let firstId = 0;
+  const controller = new Controller(runtime, { exit: (code) => fleet.closed(firstId, code ?? 0), onClearScreen: clearTerminal, host });
   await controller.bind();
   controller.transcript.push({ kind: "welcome" });
+  firstId = fleet.adopt(cwd, { controller, host, source: workspaceSource(controller, host, home) }).id;
   if (!memsrv && args.memory)
     controller.transcript.notice(`Memory is off: ${memsrvName()} was not found. \`mnemo doctor\` says where it looks.`, "warn");
   if (args.continueRecent && runtime.session.messages.length > 0) {
@@ -293,13 +323,12 @@ async function main(): Promise<number> {
 
   // A terminal gets the workspace (full screen, alternate buffer) unless --inline; a dump or a pipe the inline transcript.
   const layout = interactive && !args.inline ? "workspace" : "inline";
-  const state = readState(home);
   const onboard = interactive && !args.demo && (args.intro || !state.onboarded);
   const stats = memory ? await bootStats(memory, runtime) : undefined;
   instance = render(
     React.createElement(Root, {
       controller,
-      source: workspaceSource(controller, host, home),
+      fleet,
       version: pkg.version,
       home: os.homedir(),
       motion: args.motion && interactive,

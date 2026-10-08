@@ -65,13 +65,53 @@ export function sprite(rows: readonly string[], legend: Record<string, string>):
   return rows.map((r) => [...r].map((ch) => legend[ch] ?? null));
 }
 
-// ── the pixel font: 5×5, capitals and digits that the brand uses ────────────
+// ── the pixel font: 5×5, capitals, digits and a few signs ──────────────────
 
 const FONT: Record<string, string[]> = {
+  A: [".XXX.", "X...X", "XXXXX", "X...X", "X...X"],
+  B: ["XXXX.", "X...X", "XXXX.", "X...X", "XXXX."],
+  C: [".XXXX", "X....", "X....", "X....", ".XXXX"],
+  D: ["XXXX.", "X...X", "X...X", "X...X", "XXXX."],
+  E: ["XXXXX", "X....", "XXXX.", "X....", "XXXXX"],
+  F: ["XXXXX", "X....", "XXXX.", "X....", "X...."],
+  G: [".XXXX", "X....", "X..XX", "X...X", ".XXXX"],
+  H: ["X...X", "X...X", "XXXXX", "X...X", "X...X"],
+  I: ["XXXXX", "..X..", "..X..", "..X..", "XXXXX"],
+  J: ["..XXX", "....X", "....X", "X...X", ".XXX."],
+  K: ["X...X", "X..X.", "XXX..", "X..X.", "X...X"],
+  L: ["X....", "X....", "X....", "X....", "XXXXX"],
   M: ["X...X", "XX.XX", "X.X.X", "X...X", "X...X"],
   N: ["X...X", "XX..X", "X.X.X", "X..XX", "X...X"],
-  E: ["XXXXX", "X....", "XXXX.", "X....", "XXXXX"],
   O: [".XXX.", "X...X", "X...X", "X...X", ".XXX."],
+  P: ["XXXX.", "X...X", "XXXX.", "X....", "X...."],
+  Q: [".XXX.", "X...X", "X.X.X", "X..X.", ".XX.X"],
+  R: ["XXXX.", "X...X", "XXXX.", "X..X.", "X...X"],
+  S: [".XXXX", "X....", ".XXX.", "....X", "XXXX."],
+  T: ["XXXXX", "..X..", "..X..", "..X..", "..X.."],
+  U: ["X...X", "X...X", "X...X", "X...X", ".XXX."],
+  V: ["X...X", "X...X", "X...X", ".X.X.", "..X.."],
+  W: ["X...X", "X...X", "X.X.X", "XX.XX", "X...X"],
+  X: ["X...X", ".X.X.", "..X..", ".X.X.", "X...X"],
+  Y: ["X...X", ".X.X.", "..X..", "..X..", "..X.."],
+  Z: ["XXXXX", "...X.", "..X..", ".X...", "XXXXX"],
+  0: [".XXX.", "X..XX", "X.X.X", "XX..X", ".XXX."],
+  1: ["..X..", ".XX..", "..X..", "..X..", ".XXX."],
+  2: ["XXXX.", "....X", ".XXX.", "X....", "XXXXX"],
+  3: ["XXXX.", "....X", "..XX.", "....X", "XXXX."],
+  4: ["X..X.", "X..X.", "XXXXX", "...X.", "...X."],
+  5: ["XXXXX", "X....", "XXXX.", "....X", "XXXX."],
+  6: [".XXX.", "X....", "XXXX.", "X...X", ".XXX."],
+  7: ["XXXXX", "....X", "...X.", "..X..", "..X.."],
+  8: [".XXX.", "X...X", ".XXX.", "X...X", ".XXX."],
+  9: [".XXX.", "X...X", ".XXXX", "....X", ".XXX."],
+  ".": [".....", ".....", ".....", ".....", "..X.."],
+  ":": [".....", "..X..", ".....", "..X..", "....."],
+  "-": [".....", ".....", ".XXX.", ".....", "....."],
+  "!": ["..X..", "..X..", "..X..", ".....", "..X.."],
+  "?": [".XXX.", "X...X", "..XX.", ".....", "..X.."],
+  "$": [".XXXX", "X.X..", ".XXX.", "..X.X", "XXXX."],
+  "%": ["XX..X", "XX.X.", "..X..", ".X.XX", "X..XX"],
+  "/": ["....X", "...X.", "..X..", ".X...", "X...."],
   " ": [".....", ".....", ".....", ".....", "....."],
 };
 
@@ -151,6 +191,14 @@ function mergeRow(base: string, over: string): string {
 
 /** A thought forming above the head: memory amber. */
 const SPARK = [".......m.M.m......", "........MMM......."];
+
+/**
+ * Mne at icon size: 7×4 pixels, two cells tall — ears, eyes, trunk. Tinted by
+ * what the agent is doing (the hide takes the state's colour).
+ */
+export function mneMini(tint: string): Grid {
+  return sprite(["g.GGG.g", "gGEGEGg", ".gGGGg.", "...G..."], { G: tint, g: mix(tint, palette.ground, 0.45), E: palette.ground });
+}
 
 export const mne = {
   idle: sprite(MNE_IDLE, MNE_LEGEND),
