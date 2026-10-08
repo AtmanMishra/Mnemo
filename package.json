@@ -1,0 +1,5 @@
+{
+  "name": "mnemo",
+  "private": true,
+  "workspaces": ["app", "packages/*"]
+}

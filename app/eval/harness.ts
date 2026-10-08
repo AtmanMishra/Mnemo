@@ -15,7 +15,7 @@ import { fauxAssistantMessage, fauxText, type FauxProviderHandle, type FauxRespo
 import { startRuntime, createModelRuntime } from "../src/runtime/runtime.ts";
 import { Controller } from "../src/runtime/controller.ts";
 import { createFaux } from "../src/runtime/demo.ts";
-import { MemoryService } from "../src/memory/service.ts";
+import { MemoryService } from "@mnemo/memory";
 import { createHost, settleBackground, type Mode } from "../src/extensions/host.ts";
 import { mnemoExtensions } from "../src/extensions/index.ts";
 import { findMemsrv, journalPath } from "../src/runtime/paths.ts";

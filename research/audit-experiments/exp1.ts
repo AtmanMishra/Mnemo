@@ -1,7 +1,7 @@
 // Simulate what the app's memory extension does over several sessions, then inspect.
-import { MemoryService } from "../../app/src/memory/service.ts";
-import { MemoryClient } from "../../app/src/memory/client.ts";
-import { spawnMemsrv } from "../../app/src/memory/service.ts";
+import { MemoryService } from "../../packages/memory/src/index.ts";
+import { MemoryClient } from "../../packages/memory/src/index.ts";
+import { spawnMemsrv } from "../../packages/memory/src/index.ts";
 import * as os from "node:os"; import * as path from "node:path"; import * as fs from "node:fs";
 import { findMemsrv } from "../../app/src/runtime/paths.ts";
 const BIN = findMemsrv("/nonexistent") ?? (() => { throw new Error("build memsrv first: cd memory-layer && cargo build --release --bin memsrv"); })();

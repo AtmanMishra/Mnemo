@@ -14,8 +14,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
-import { MemoryService } from "../src/memory/service.ts";
-import { projectIdentity } from "../src/memory/project.ts";
+import { MemoryService, projectIdentity } from "@mnemo/memory";
 import type { SessionResult } from "./harness.ts";
 
 export interface Ctx {

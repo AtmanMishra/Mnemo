@@ -8,9 +8,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
-import { digest, parseReflection, recoveries, worthReflecting } from "../src/memory/reflect.ts";
-import { normalizeRemote, projectIdentity } from "../src/memory/project.ts";
-import { Credit } from "../src/memory/credit.ts";
+import { Credit, digest, normalizeRemote, parseReflection, projectIdentity, recoveries, worthReflecting } from "@mnemo/memory";
 import { MEMSRV, mnemoEnv, nextDialog, texts } from "./helpers.ts";
 
 const envs: Awaited<ReturnType<typeof mnemoEnv>>[] = [];

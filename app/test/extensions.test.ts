@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
 import { judge, globMatch, matchRule } from "../src/extensions/policy.ts";
-import { factsOf } from "../src/memory/service.ts";
+import { factsOf } from "@mnemo/memory";
 import { MEMSRV, mnemoEnv, nextDialog, texts } from "./helpers.ts";
 
 const envs: Awaited<ReturnType<typeof mnemoEnv>>[] = [];

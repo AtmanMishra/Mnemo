@@ -14,7 +14,7 @@ import * as path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { skillsDir } from "../runtime/paths.ts";
-import { projectIdentity } from "../memory/project.ts";
+import { projectIdentity, renderSkill, skillPath } from "@mnemo/memory";
 import type { Host } from "./host.ts";
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -23,26 +23,9 @@ export function skillFile(home: string, name: string): string {
   return path.join(skillsDir(home), name, "SKILL.md");
 }
 
-export function renderSkill(name: string, description: string, body: string): string {
-  const desc = description.replace(/\s+/g, " ").trim();
-  return `---\nname: ${name}\ndescription: ${JSON.stringify(desc)}\n---\n\n${body.trim()}\n`;
-}
-
-/**
- * Where a skill goes and how it is written. A project skill lives in the
- * repository's `.agents/skills/` (pi discovers it there, and it travels with
- * the code to teammates and other agents); a personal one in Mnemo's home.
- */
-export const saveSkill = {
-  target(home: string, projectRoot: string, scope: "project" | "user", name: string): string {
-    return scope === "project" ? path.join(projectRoot, ".agents", "skills", name, "SKILL.md") : skillFile(home, name);
-  },
-  render: renderSkill,
-  write(file: string, body: string): void {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, body);
-  },
-};
+/** Where a skill goes: the repository's `.agents/skills/`, or Mnemo's home for a personal one. */
+const target = (home: string, projectRoot: string, scope: "project" | "user", name: string) =>
+  skillPath(scope, name, { projectRoot, userSkillsDir: skillsDir(home) });
 
 export function skillsExtension(host: Host) {
   return (pi: ExtensionAPI): void => {
@@ -63,7 +46,7 @@ export function skillsExtension(host: Host) {
         }),
         async execute(_id, params, _signal, _update, ctx) {
           if (!NAME.test(params.name)) throw new Error("name must be lowercase letters, digits and dashes");
-          const file = saveSkill.target(host.home, projectIdentity(ctx.cwd).root, params.scope ?? "project", params.name);
+          const file = target(host.home, projectIdentity(ctx.cwd).root, params.scope ?? "project", params.name);
           if (fs.existsSync(file)) throw new Error(`skill ${params.name} already exists — use update_skill`);
           fs.mkdirSync(path.dirname(file), { recursive: true });
           fs.writeFileSync(file, renderSkill(params.name, params.description, params.instructions));
@@ -90,7 +73,7 @@ export function skillsExtension(host: Host) {
         }),
         async execute(_id, params, _signal, _update, ctx) {
           const root = projectIdentity(ctx.cwd).root;
-          const file = [saveSkill.target(host.home, root, "project", params.name), skillFile(host.home, params.name)].find((f) => fs.existsSync(f));
+          const file = [target(host.home, root, "project", params.name), skillFile(host.home, params.name)].find((f) => fs.existsSync(f));
           if (!file) throw new Error(`no skill ${params.name} in ${path.join(root, ".agents", "skills")} or ${skillsDir(host.home)}`);
           const old = fs.readFileSync(file, "utf8");
           const history = path.join(host.home, "skill-history", params.name);

@@ -15,7 +15,7 @@ import { Transcript } from "../ui/store.ts";
 import { Dialogs, type Choice } from "./dialogs.ts";
 import { createUiContext } from "./ui-context.ts";
 import { CYCLE, type Host, type MemoryNote, type Mode } from "../extensions/host.ts";
-import { projectIdentity } from "../memory/project.ts";
+import { projectIdentity } from "@mnemo/memory";
 
 export interface CommandInfo {
   name: string;

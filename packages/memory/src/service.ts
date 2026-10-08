@@ -22,7 +22,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { MemoryClient, type MemoryChild } from "./client.ts";
-import { redact } from "../extensions/trace.ts";
+import { redact } from "./redact.ts";
 
 export interface Hit {
   node: number;

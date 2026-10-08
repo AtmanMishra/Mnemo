@@ -9,7 +9,7 @@
  */
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { ApprovalAnswer, ApprovalRequest } from "../runtime/dialogs.ts";
-import type { MemoryService } from "../memory/service.ts";
+import type { MemoryNote, MemoryService } from "@mnemo/memory";
 import { probeInterpreter, resolveInterpreter } from "../kernel/kernel.ts";
 
 /**
@@ -24,13 +24,7 @@ export type Mode = "default" | "accept-edits" | "plan" | "yolo";
 /** shift+tab cycles these; yolo is only ever chosen explicitly. */
 export const CYCLE: Mode[] = ["default", "accept-edits", "plan"];
 
-export type MemoryNote =
-  | { kind: "recall"; items: string[] }
-  | { kind: "learned"; items: string[] }
-  | { kind: "steer"; text: string }
-  | { kind: "skill"; text: string }
-  | { kind: "session"; text: string; items: string[] }
-  | { kind: "failed"; text: string };
+export type { MemoryNote };
 
 export interface HostUi {
   approve(request: ApprovalRequest, signal?: AbortSignal): Promise<ApprovalAnswer>;

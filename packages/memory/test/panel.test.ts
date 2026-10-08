@@ -3,7 +3,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { describeNode, summarizeMemory } from "../src/memory/panel.ts";
+import { describeNode, summarizeMemory } from "../src/index.ts";
 
 const dump = (nodes: unknown[]) => ({ nodes });
 

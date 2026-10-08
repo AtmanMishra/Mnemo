@@ -16,7 +16,7 @@ import { agentDir, findMemsrv, journalPath, memsrvName, mnemoHome, pointPiAt, sk
 import { createModelRuntime, startRuntime } from "../src/runtime/runtime.ts";
 import { Controller } from "../src/runtime/controller.ts";
 import { createDemoProject, createFaux, demoScript, DEMO_PROMPT } from "../src/runtime/demo.ts";
-import { MemoryService } from "../src/memory/service.ts";
+import { MemoryService } from "@mnemo/memory";
 import { createHost, settleBackground, type Mode } from "../src/extensions/host.ts";
 import { mnemoExtensions } from "../src/extensions/index.ts";
 import { App } from "../src/ui/App.tsx";

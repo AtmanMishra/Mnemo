@@ -5,7 +5,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { MemoryService } from "../src/memory/service.ts";
+import { MemoryService } from "@mnemo/memory";
 import { findMemsrv, journalPath } from "../src/runtime/paths.ts";
 import { runSession, type EvalModel, type SessionResult } from "./harness.ts";
 import type { Ctx, Scenario } from "./scenarios.ts";

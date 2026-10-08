@@ -191,7 +191,7 @@ come first in every mode, yolo included.
 | `app/src/runtime/dialogs.ts` | the question queue shared by Mnemo and pi extensions |
 | `app/src/runtime/demo.ts` | the faux-provider script behind `--demo` and the tests |
 | `app/src/extensions/*` | Mnemo on pi: policy, memory, kernel, sub-agents, skills, trace |
-| `app/src/memory/service.ts` | profiles, recall, learning, steering over the `memsrv` protocol |
+| `packages/memory/` (`@mnemo/memory`) | the memory loop (`MemorySession`), profiles, recall, learning, steering over the `memsrv` protocol |
 
 ## 11. Testing
 
