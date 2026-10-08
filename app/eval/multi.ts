@@ -18,6 +18,7 @@
  *
  *   bun eval/multi.ts [--modes baseline,hermes,memory] [--repeat n] [--model provider/id]
  */
+import { writeScrubbed } from "./scrub.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -229,8 +230,8 @@ if (import.meta.main) {
   const out = path.join(import.meta.dir, "results", `multi-${new Date().toISOString().replace(/[:.]/g, "-")}`);
   fs.mkdirSync(out, { recursive: true });
   const md = report(results, `student ${spec}`);
-  fs.writeFileSync(path.join(out, "report.md"), md);
-  fs.writeFileSync(path.join(out, "results.json"), JSON.stringify(results, null, 2));
+  writeScrubbed(path.join(out, "report.md"), md);
+  writeScrubbed(path.join(out, "results.json"), JSON.stringify(results, null, 2));
   console.log(`\n${md}\nwritten to ${out}`);
 }
 

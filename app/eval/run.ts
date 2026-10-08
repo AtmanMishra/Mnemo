@@ -13,6 +13,7 @@
  * Needs OPENCODE_API_KEY (and opencode.ai reachable) for a real model, and a
  * built memsrv. Results: eval/results/<timestamp>/{report.md,results.json}.
  */
+import { writeScrubbed } from "./scrub.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -111,8 +112,8 @@ for (let i = 1; i <= args.repeat; i++)
     if (args.hermes) results.push(await runScenario(s, false, i, makeModel, true));
   }
 fs.mkdirSync(args.out, { recursive: true });
-fs.writeFileSync(path.join(args.out, "results.json"), JSON.stringify({ args, results }, null, 2));
+writeScrubbed(path.join(args.out, "results.json"), JSON.stringify({ args, results }, null, 2));
 const md = report(results, args);
-fs.writeFileSync(path.join(args.out, "report.md"), md);
+writeScrubbed(path.join(args.out, "report.md"), md);
 console.log(`\n${md}\nwritten to ${args.out}`);
 process.exit(0);

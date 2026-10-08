@@ -21,6 +21,7 @@
  * OPENCODE_API_KEY (or whichever key the model needs) comes from the
  * environment and is never written anywhere.
  */
+import { writeScrubbed, scrub } from "./scrub.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -174,7 +175,7 @@ async function runTask(a: Args, task: string, arm: Arm, home: string): Promise<R
 
   const built = await build(dir, image);
   if (built.code !== 0) {
-    fs.writeFileSync(path.join(logDir, "build.txt"), built.out);
+    writeScrubbed(path.join(logDir, "build.txt"), built.out);
     return { task, arm, resolved: false, passed: 0, failed: 0, agentExit: -1, agentSeconds: 0, cost: 0 };
   }
   await run(["docker", "rm", "-f", name]);
@@ -208,14 +209,14 @@ async function runTask(a: Args, task: string, arm: Arm, home: string): Promise<R
       { timeoutMs: limit },
     );
     const agentSeconds = Math.round((Date.now() - t0) / 1000);
-    fs.writeFileSync(path.join(logDir, "agent.txt"), agent.out);
+    writeScrubbed(path.join(logDir, "agent.txt"), agent.out);
     const cost = spend(home) - before;
 
     await run(["docker", "exec", name, "mkdir", "-p", "/tests"]);
     await run(["docker", "cp", `${path.join(dir, "tests")}/.`, `${name}:/tests`]);
     await run(["docker", "cp", path.join(dir, "run-tests.sh"), `${name}:/tests/run-tests.sh`]);
     const tests = await run(["docker", "exec", name, "bash", "/tests/run-tests.sh"], { timeoutMs: testLimit + 300_000 });
-    fs.writeFileSync(path.join(logDir, "tests.txt"), tests.out);
+    writeScrubbed(path.join(logDir, "tests.txt"), tests.out);
     return { task, arm, ...resolved(tests.out), agentExit: agent.code, agentSeconds, cost };
   } finally {
     await run(["docker", "rm", "-f", name]);
@@ -250,7 +251,7 @@ async function main() {
         const r = await runTask(a, task, arm, homes[arm]!).catch(
           (e): Result => (console.error(`${arm} ${task}: ${e}`), { task, arm, resolved: false, passed: 0, failed: 0, agentExit: -2, agentSeconds: 0, cost: 0 }),
         );
-        fs.appendFileSync(resultsFile, `${JSON.stringify(r)}\n`);
+        fs.appendFileSync(resultsFile, scrub(`${JSON.stringify(r)}\n`));
         console.log(`${arm.padEnd(6)} ${task.padEnd(32)} ${r.resolved ? "✓" : "✗"}  ${r.passed}/${r.passed + r.failed} tests  ${r.agentSeconds}s  $${r.cost.toFixed(4)}`);
       }
     }),

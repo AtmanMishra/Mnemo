@@ -206,7 +206,8 @@ jobs:
       # The pattern covers the credential shapes that have actually appeared
       # or plausibly will: session keys (sk-*; sk-or-v1-* for OpenRouter),
       # classic and fine-grained GitHub tokens, AWS access keys, and a
-      # generic API_KEY=long-string assignment. Fixtures that legitimately
+      # generic API_KEY=long-string assignment (oc_sk_* is OpenCode's shape: any
+          # <prefix>_sk_<token>, so a new provider's key with that shape is caught too). Fixtures that legitimately
       # hold these shapes live ONLY under agent/test/ — both files are
       # excluded here, so a fixture added anywhere else trips the gate.
       #
@@ -226,7 +227,8 @@ jobs:
           # The pattern covers the credential shapes that have actually appeared
           # or plausibly will: session keys (sk-*; sk-or-v1-* for OpenRouter),
           # classic and fine-grained GitHub tokens, AWS access keys, and a
-          # generic API_KEY=long-string assignment.
+          # generic API_KEY=long-string assignment (oc_sk_* is OpenCode's shape: any
+          # <prefix>_sk_<token>, so a new provider's key with that shape is caught too).
           #
           # Excluded paths are redaction FIXTURES: files that hold a realistic
           # key shape on purpose, because a test that proves scrubbing works
@@ -235,7 +237,7 @@ jobs:
           # gate going red for a fixture is how it trains people to ignore it.
           # audit/FINDINGS.jsonl is on the list for the same reason: the audit
           # quotes the fixture strings as evidence, and it is a record, not code.
-          GATE_PAT="(sk-[A-Za-z0-9]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy][\"']?[:=][[:space:]]*[\"']?[A-Za-z0-9_-]{20,})"
+          GATE_PAT="(sk-[A-Za-z0-9]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|[a-z]{1,8}_sk_[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy][\"']?[:=][[:space:]]*[\"']?[A-Za-z0-9_-]{20,})"
           exclude=':!agent/test/trace.test.ts :!agent/test/hooks_executor.test.ts :!agent/test/childenv.test.ts :!agent/test/hooks_engine.test.ts :!audit/FINDINGS.jsonl :!.github/workflows/ci.yml :!packages/memory/test/redact.test.ts'
           if git grep -nE "$GATE_PAT" -- $exclude; then
             echo "::error::credential-shaped string found outside the redaction fixtures"

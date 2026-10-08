@@ -19,6 +19,7 @@
  *
  *   bun eval/series.ts [--model provider/id] [--teacher provider/id] [--repeat n] [--modes a,b]
  */
+import { writeScrubbed } from "./scrub.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -252,7 +253,7 @@ if (import.meta.main) {
   const out = path.join(import.meta.dir, "results", `series-${new Date().toISOString().replace(/[:.]/g, "-")}`);
   fs.mkdirSync(out, { recursive: true });
   const report = seriesReport(results, `student ${studentSpec}${teacherSpec ? `, teacher ${teacherSpec}` : ""}`);
-  fs.writeFileSync(path.join(out, "report.md"), report);
-  fs.writeFileSync(path.join(out, "results.json"), JSON.stringify(results, null, 2));
+  writeScrubbed(path.join(out, "report.md"), report);
+  writeScrubbed(path.join(out, "results.json"), JSON.stringify(results, null, 2));
   console.log(`\n${report}\nwritten to ${out}`);
 }
