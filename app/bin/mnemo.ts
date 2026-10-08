@@ -38,6 +38,7 @@ options
   --yolo                   ask for nothing (deny rules in permissions.json still hold)
   --no-memory              run without the memory layer
   --no-reflect             do not extract facts after each run
+  --no-verify              do not send a run that changed code back to run a check
   --dump                   render one frame (after the demo turn, with --demo) and exit
   --no-motion              no animation
   -v, --version            print the version
@@ -54,6 +55,7 @@ interface Args {
   motion: boolean;
   memory: boolean;
   reflect: boolean;
+  verify: boolean;
   mode: Mode;
   continueRecent: boolean;
   print?: string;
@@ -61,7 +63,7 @@ interface Args {
 }
 
 function parse(argv: string[]): Args {
-  const a: Args = { help: false, version: false, demo: false, dump: false, motion: true, memory: true, reflect: true, mode: "default", continueRecent: false };
+  const a: Args = { help: false, version: false, demo: false, dump: false, motion: true, memory: true, reflect: true, verify: true, mode: "default", continueRecent: false };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i]!;
     if (v === "doctor" && i === 0) a.command = "doctor";
@@ -72,6 +74,7 @@ function parse(argv: string[]): Args {
     else if (v === "--no-motion") a.motion = false;
     else if (v === "--no-memory") a.memory = false;
     else if (v === "--no-reflect") a.reflect = false;
+    else if (v === "--no-verify") a.verify = false;
     else if (v === "--plan") a.mode = "plan";
     else if (v === "--yolo") a.mode = "yolo";
     else if (v === "-c" || v === "--continue") a.continueRecent = true;
@@ -154,7 +157,7 @@ async function main(): Promise<number> {
 
   const memsrv = args.memory ? findMemsrv(home) : undefined;
   const memory = memsrv ? new MemoryService(memsrv, journal) : undefined;
-  const host = createHost({ home, agentDir: dir, modelRuntime, memory, mode: args.mode, reflect: args.reflect });
+  const host = createHost({ home, agentDir: dir, modelRuntime, memory, mode: args.mode, reflect: args.reflect, verify: args.verify });
   const runtime = await startRuntime({
     cwd,
     agentDir: dir,

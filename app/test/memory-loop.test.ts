@@ -374,3 +374,48 @@ mt("the agent cannot overwrite the session record's \"last session\" fact", asyn
   expect(texts(e.controller).join("\n")).toContain("tool memory_remember error");
   expect(await e.memory!.profile("project", `dir:${e.cwd}`)).toEqual([]);
 });
+
+// ── accuracy: known fixes first, verify before done ─────────────────────────
+
+mt("a command that failed before is stopped once with its known fix, and runs if the agent insists", async () => {
+  const e = await env({ mode: "yolo" });
+  const s = await e.memory!.project(`dir:${e.cwd}`, e.cwd);
+  const pain = await e.memory!.createNode("aspect", "pain: tests need fixtures", "salience");
+  await e.memory!.fact(pain!, "failure", "bash(sh scripts/test.sh) failed: error: test fixtures missing");
+  await e.memory!.fact(pain!, "fix", "run sh scripts/setup.sh before sh scripts/test.sh");
+  await e.memory!.link(pain!, s!, "part_of");
+  e.faux.setResponses([
+    call("bash", { command: "sh scripts/test.sh" }),
+    call("bash", { command: "sh scripts/test.sh" }),
+    say("ran it"),
+  ]);
+  await e.controller.submit("run the tests");
+  await e.idle();
+  const tools = e.controller.transcript.snapshot().committed.filter((b) => b.kind === "tool") as { output: string }[];
+  expect(tools[0]!.output).toContain("Known fix: run sh scripts/setup.sh before sh scripts/test.sh");
+  // Said once: the second attempt is not stopped by memory.
+  expect(tools[1]!.output).not.toContain("Known fix");
+});
+
+mt("a run that changed code and checked nothing is sent back once to verify, with the remembered command", async () => {
+  const e = await env({ mode: "yolo", verify: true, reflect: false });
+  await e.memory!.learn("project", `dir:${e.cwd}`, "verify command", "bun test");
+  const seen: string[] = [];
+  e.faux.setResponses([
+    call("write", { path: "src/add.ts", content: "export const add = (a: number, b: number) => a + b;\n" }),
+    say("Added add."),
+    (context) => {
+      seen.push(JSON.stringify(context));
+      return call("bash", { command: "bun test" });
+    },
+    say("Checked: tests pass."),
+  ]);
+  await e.controller.submit("add an add function");
+  await e.idle();
+  expect(seen[0]).toContain("ran no check after the last change");
+  expect(seen[0]).toContain("this project's check (bun test)");
+  const tools = e.controller.transcript.snapshot().committed.filter((b) => b.kind === "tool") as { name: string }[];
+  expect(tools.map((t) => t.name)).toEqual(["write", "bash"]);
+  // Once: the verifying turn itself is not sent back again.
+  expect(e.faux.state.callCount).toBe(4);
+});

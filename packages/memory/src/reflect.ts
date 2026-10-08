@@ -114,6 +114,7 @@ facts — only DURABLE knowledge still true next week, at most 5 per run: the on
   - source "user" if the user stated it, "observed" if a tool result showed it, "inferred" if you are guessing
   - corrections from the user ("no, use X", "don't do Y", a refusal with a reason) are the most important facts
   - short stable lowercase keys ("package manager", "test command"); when a KNOWN fact is about the same thing, reuse its key so the new value replaces it
+  - when the run showed how this project checks its work (tests, typecheck, lint, build), record the exact command(s) under the key "verify command"
   - describe how things stand at the END of the run: if the run moved, renamed or replaced something, the old state is not a fact
   - never secrets, tokens, passwords or personal data; nothing about this one task's specifics
   - never what a quick look at the repository shows (a file's contents, an empty scripts object, what a module exports)

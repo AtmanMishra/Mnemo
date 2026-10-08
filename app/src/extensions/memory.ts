@@ -120,6 +120,15 @@ export function memoryExtension(host: Host) {
       }
     });
 
+    // A command that failed before, whose fix memory holds, is stopped once with the fix.
+    pi.on("tool_call", async (event, ctx) => {
+      if (event.toolName !== "bash") return undefined;
+      const reason = await sessionFor(ctx.cwd).guard(event.toolName, (event.input ?? {}) as Record<string, unknown>);
+      if (!reason) return undefined;
+      host.ui?.note({ kind: "steer", text: "pointed out a known fix before repeating a failure" });
+      return { block: true, reason };
+    });
+
     const calls = new Map<string, Record<string, unknown>>();
     pi.on("tool_execution_start", async (event, ctx) => {
       const args = (event.args ?? {}) as Record<string, unknown>;
@@ -141,14 +150,25 @@ export function memoryExtension(host: Host) {
       if (m.stopReason === "error") await s.modelError(m.errorMessage ?? "the model call failed");
     });
 
+    // A run sent back to verify is one run: its messages and tools reflect together.
+    let held: unknown[] = [];
     pi.on("agent_end", async (event, ctx) => {
       const last = [...event.messages].reverse().find((m) => (m as { role: string }).role === "assistant") as
         | { stopReason?: string }
         | undefined;
       if (!last || last.stopReason === "aborted" || !session) return;
-      if (ctx.model) reflectWith = { model: ctx.model, sessionId: ctx.sessionManager.getSessionId() };
       const s = session;
-      const run = { messages: event.messages, signals: host.signals.splice(0) };
+      const messages = [...held, ...event.messages];
+      // Changed code and checked nothing: back once, to verify, before it is called done.
+      const nudge = host.verify && host.depth === 0 && last.stopReason !== "error" ? await s.verifyNudge() : undefined;
+      if (nudge) {
+        held = messages;
+        pi.sendMessage({ customType: "mnemo-verify", content: nudge, display: true }, { triggerTurn: true });
+        return;
+      }
+      held = [];
+      if (ctx.model) reflectWith = { model: ctx.model, sessionId: ctx.sessionManager.getSessionId() };
+      const run = { messages, signals: host.signals.splice(0) };
       inBackground(host, () => s.end(run));
     });
 

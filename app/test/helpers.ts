@@ -21,6 +21,8 @@ export interface EnvOptions {
   memory?: boolean;
   mode?: Mode;
   reflect?: boolean;
+  /** Send a run that changed code and checked nothing back to verify (off by default in tests). */
+  verify?: boolean;
   /** Reuse a home (and so its journal) from an earlier env: a second session. */
   home?: string;
   cwd?: string;
@@ -35,7 +37,7 @@ export async function mnemoEnv(o: EnvOptions = {}) {
   const cwd = o.cwd ?? createDemoProject();
   const { modelRuntime, faux } = await createFaux(agentDir);
   const memory = o.memory && MEMSRV ? new MemoryService(MEMSRV, path.join(home, "memory", "journal.jsonl")) : undefined;
-  const host = createHost({ home, agentDir, modelRuntime, memory, mode: o.mode, reflect: o.reflect ?? false });
+  const host = createHost({ home, agentDir, modelRuntime, memory, mode: o.mode, reflect: o.reflect ?? false, verify: o.verify ?? false });
   const runtime = await startRuntime({
     cwd,
     agentDir,

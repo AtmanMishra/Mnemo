@@ -310,6 +310,65 @@ export const SCENARIOS: Scenario[] = [
     ],
   },
   {
+    name: "checks-its-work",
+    about: "A change in a project with tests is checked before it is called done, and the suite passes at the end.",
+    projects: {
+      app: (d) => {
+        nodeProject(d, "slug-app");
+        const pkg = JSON.parse(fs.readFileSync(path.join(d, "package.json"), "utf8"));
+        pkg.scripts = { test: "node --test" };
+        write(d, "package.json", JSON.stringify(pkg, null, 2) + "\n");
+        write(
+          d,
+          "src/slug.mjs",
+          `/** URL slugs for article titles. */\nexport function slugify(title) {\n  return title\n    .toLowerCase()\n    .normalize("NFKD")\n    .replace(/[\\u0300-\\u036f]/g, "")\n    .replace(/[^a-z0-9]+/g, "-");\n}\n`,
+        );
+        write(
+          d,
+          "test/slug.test.mjs",
+          `import { test } from "node:test";\nimport assert from "node:assert";\nimport { slugify } from "../src/slug.mjs";\n\n` +
+            `test("lower-cases and joins words", () => assert.equal(slugify("Hello World"), "hello-world"));\n` +
+            `test("drops accents", () => assert.equal(slugify("Crème Brûlée"), "creme-brulee"));\n` +
+            `test("collapses runs of separators", () => assert.equal(slugify("a -- b"), "a-b"));\n` +
+            `test("keeps digits", () => assert.equal(slugify("Top 10 Tips"), "top-10-tips"));\n`,
+        );
+      },
+    },
+    sessions: [
+      {
+        project: "app",
+        prompts: ["slugify should never start or end with a dash (\"  Hello!  \" should become \"hello\"), and should cut slugs to at most 40 characters without leaving a dash at the end. Please change it."],
+      },
+    ],
+    checks: [
+      {
+        name: "ran the tests after its last change",
+        kind: "behaviour",
+        run: (ctx) => {
+          const tools = lastSession(ctx).tools;
+          const lastEdit = tools.map((t) => t.name).lastIndexOf("edit") > tools.map((t) => t.name).lastIndexOf("write") ? tools.map((t) => t.name).lastIndexOf("edit") : tools.map((t) => t.name).lastIndexOf("write");
+          if (lastEdit < 0) return "no edit";
+          const after = tools.slice(lastEdit + 1).filter((t) => t.name === "bash").map((t) => String(t.args.command ?? ""));
+          return after.some((c) => /node --test|npm (run )?test|pnpm test|bun test/.test(c)) ? true : `commands after the last edit: ${JSON.stringify(after)}`;
+        },
+      },
+      {
+        name: "the suite passes, old behaviour and new",
+        kind: "behaviour",
+        run: async (ctx) => {
+          const dir = ctx.dirs.app!;
+          const extra =
+            `import { test } from "node:test";\nimport assert from "node:assert";\nimport { slugify } from "../src/slug.mjs";\n` +
+            `test("no edge dashes", () => assert.equal(slugify("  Hello!  "), "hello"));\n` +
+            `test("at most 40, no trailing dash", () => { const s = slugify("a".repeat(39) + " bcd"); assert.ok(s.length <= 40 && !s.endsWith("-"), s); });\n`;
+          fs.writeFileSync(path.join(dir, "test", "zz-hidden.test.mjs"), extra);
+          const r = spawnSync("node", ["--test"], { cwd: dir, encoding: "utf8" });
+          return r.status === 0 ? true : `node --test:\n${(r.stdout + r.stderr).split("\n").filter((l) => /^not ok|# (pass|fail)/.test(l)).join("\n")}`;
+        },
+      },
+    ],
+  },
+  {
     name: "projects-stay-apart",
     about: "What is remembered in one repository does not leak into another.",
     projects: { a: (d) => nodeProject(d, "isolation-a"), b: (d) => nodeProject(d, "isolation-b") },

@@ -47,6 +47,8 @@ export interface Host {
   mode: Mode;
   /** Extract durable facts after each run (costs one small model call). */
   reflect: boolean;
+  /** Send a run that changed code and checked nothing back once, to verify. */
+  verify: boolean;
   /** Absent in headless runs (`-p`). */
   ui?: HostUi;
   /** Work the extensions started and did not wait for (reflection). Tests await it. */
@@ -82,6 +84,7 @@ export interface HostOptions {
   memory?: MemoryService;
   mode?: Mode;
   reflect?: boolean;
+  verify?: boolean;
   maxDepth?: number;
   /** Injected by tests; the default probes for a Python that actually runs. */
   python?: () => string | undefined;
@@ -104,6 +107,7 @@ export function createHost(o: HostOptions): Host {
     maxDepth: o.maxDepth ?? 2,
     mode: o.mode ?? "default",
     reflect: o.reflect ?? true,
+    verify: o.verify ?? true,
     background: new Set(),
     signals: [],
   };

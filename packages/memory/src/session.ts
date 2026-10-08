@@ -99,6 +99,11 @@ export function subjectOf(args: Record<string, unknown>): string {
     .slice(0, 200);
 }
 
+/** A command that checks work: tests, types, lint, a build. */
+export const VERIFY = /\b(test|tests|vitest|jest|mocha|pytest|tox|tsc|typecheck|lint|eslint|biome|ruff|mypy|clippy|check|build|make)\b/i;
+const DOCS = /\.(md|mdx|txt|rst|adoc)$/i;
+const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
+
 const words = (s: string) => new Set(s.toLowerCase().split(/[^a-z0-9_.-]+/).filter((w) => w.length > 3));
 
 /** The failure a problem statement is about: two or more distinctive words in common, the most wins. */
@@ -129,6 +134,9 @@ export class MemorySession {
   private readonly files = new Set<string>();
   private readonly skillsRead = new Set<string>();
   private runFailed = false;
+  private nudged = false;
+  /** Pitfalls already pointed out in this session: the guard speaks once each. */
+  private readonly warned = new Set<number>();
 
   constructor(private readonly o: SessionOptions) {
     this.mem = o.memory;
@@ -164,6 +172,7 @@ export class MemorySession {
   /** A run starts: fresh run state, and the project, user and episode exist. */
   async begin(prompt: string): Promise<number | undefined> {
     this.runFailed = false;
+    this.nudged = false;
     this.pains = [];
     this.toolLog = [];
     this.files.clear();
@@ -259,6 +268,59 @@ export class MemorySession {
     if (this.project !== undefined) await this.mem.link(r.pain_node, this.project, "part_of");
     const n = r.occurrences ?? 1;
     this.note({ kind: "steer", text: n > 1 ? `has seen this failure ${n} times` : "noted the failure for next time" });
+  }
+
+  /**
+   * Before a command runs: when this exact command failed before in this
+   * project and memory holds the fix, and the fix has not been applied in
+   * this run, the reason to stop and apply it first. Said once per pitfall
+   * per session — an agent that runs the command anyway is not stopped twice.
+   */
+  async guard(tool: string, args: Record<string, unknown>): Promise<string | undefined> {
+    const command = typeof args.command === "string" ? normalize(args.command) : "";
+    if (!command || command.length < 4) return undefined;
+    try {
+      this.project ??= await this.mem.project(this.identity.id, this.identity.root);
+      const hits = await this.mem.search(command, 8, this.project);
+      for (const h of hits) {
+        if (h.area !== "Salience" || this.warned.has(h.node)) continue;
+        const fix = factValue(h.state, "fix");
+        const failure = factValue(h.state, "failure") ?? h.label.replace(/^pain: /, "");
+        if (!fix || !normalize(failure).includes(command)) continue;
+        // Already applied: a successful call in this run that the fix names.
+        if (this.toolLog.some((t) => t.ok && t.subject.length > 3 && fix.includes(t.subject))) continue;
+        this.warned.add(h.node);
+        return `Memory: \`${command}\` failed before in this project — ${failure.replace(/^\S+\(.*?\) failed: /, "").slice(0, 200)}. Known fix: ${fix}. Apply the fix first, then run it again.`;
+      }
+    } catch {
+      /* memory never breaks the loop */
+    }
+    return undefined;
+  }
+
+  /**
+   * After a run, before it is called done: when the run changed code and ran
+   * no check after its last change, what to ask the agent to do — once per
+   * run. The project's remembered verify command is named when there is one.
+   */
+  async verifyNudge(): Promise<string | undefined> {
+    if (this.nudged) return undefined;
+    let lastEdit = -1;
+    this.toolLog.forEach((t, i) => {
+      if (t.ok && /^(edit|write|multiedit)$/i.test(t.tool) && !DOCS.test(t.subject)) lastEdit = i;
+    });
+    if (lastEdit < 0) return undefined;
+    const checked = this.toolLog.slice(lastEdit + 1).some((t) => /bash|shell|ipy/i.test(t.tool) && VERIFY.test(t.subject));
+    if (checked) return undefined;
+    this.nudged = true;
+    const facts = await this.mem.profile("project", this.identity.id).catch(() => []);
+    const known = facts.find((f) => /^(verify|test|check|typecheck) command$/.test(f.key))?.value;
+    const files = [...this.files].filter((f) => !DOCS.test(f)).slice(0, 4).join(", ");
+    return (
+      `Before finishing: you changed ${files || "code"} but ran no check after the last change. ` +
+      `Run ${known ? `this project's check (${known})` : "this project's tests or typecheck, whichever it has"} and fix what fails. ` +
+      `If there is no way to check this change, say so in one line.`
+    );
   }
 
   toolStart(tool: string, args: Record<string, unknown>): void {
