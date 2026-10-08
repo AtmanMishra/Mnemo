@@ -16,7 +16,9 @@
  *                     durable facts the user stated or a tool showed (F16),
  *                     the fixes that resolved failures (F21), and — when a
  *                     reusable procedure was shown — a skill (L3)
- *   at shutdown       consolidate recurring episodes into lessons
+ *   (no lexical consolidation at shutdown: its lessons were token bags that
+ *    only added noise to recall — audit F7; lessons return when a model
+ *    writes them as sentences, Phase D)
  *
  * Everything written is attached to the project (F10, F12). Memory never
  * breaks the loop: every call is best-effort.
@@ -408,7 +410,6 @@ export function memoryExtension(host: Host) {
       if (host.depth > 0) return;
       try {
         if (episode !== undefined) await mem.log(episode, "outcome", "session ended");
-        await mem.consolidate();
       } catch {
         /* ignore */
       }

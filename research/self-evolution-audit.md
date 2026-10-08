@@ -9,6 +9,38 @@ those, it says so instead of re-deriving it.*
 
 ---
 
+## Status (updated 2026-10-08, same day)
+
+Phase A and most of Phase B are built; see the commits after `c173297`.
+
+| Finding | State |
+|---|---|
+| F1 multi-process journal | **fixed** — every request syncs under the journal lock (`memory-layer/tests/integrity_rpc.rs`) |
+| F2 stale search cache | **fixed** — any write clears it |
+| F3 recall in the system prompt | **fixed** — profiles in a stable system prompt, recall as a message (`test/memory-loop.test.ts` asserts byte-identical prefixes) |
+| F4 markers linked as feeders | **fixed** — only knowledge and the profiles are linked |
+| F5 duplicate pain markers | **fixed** — one marker per normalized failure signature, counted |
+| F6 junk gap nodes | **fixed** for tool errors (`gap: false`); recall ignores `gap:` nodes |
+| F7 token-bag lessons | **mitigated** — shutdown consolidation is off and `lesson:` nodes are not recalled until lessons are written as sentences (Phase D) |
+| F8 steering does not affect ranking | open (Phase D: trust-weighted ranking) |
+| F9 log rendering | **fixed** |
+| F10 recall across projects | **fixed** — `PartOf` + scoped search; other projects' profiles filtered |
+| F11 empty episodes | **fixed** — episode record (goal, outcome, done, decisions, open) + "last session" |
+| F12 project = path | **fixed** — git remote / repo root identity |
+| F13 profile budget and provenance | partial — 40-fact budget, `/forget`; per-fact provenance open |
+| F14 usefulness never voted | **fixed** — distinctive-reuse credit |
+| F15 weak embedder | open (Phase D) |
+| F16 ungated reflection | **fixed** — worth-it gate, `source` tag, guesses not written |
+| F17 skills only by volunteering | **partial** — candidates from reflection, saved on request or on recurrence through approval; usage logged; patch/retire loop open |
+| F18 orphan sub-agent episodes | **fixed** — child episode `PartOf` parent |
+| F19 consolidation only on shutdown | open (Phase D sleep runtime) |
+| F20 memory_steer without correction | open |
+| F21 fixes not stored | **fixed** — fix attached to the failure's marker, recalled as "pitfall … fix …" |
+| F25 secrets in memory | **fixed** — redaction before every write |
+
+Measurement: `app/eval/` runs six multi-session scenarios with and without
+memory against a real model (default `opencode-go/deepseek-v4.1-flash`).
+
 ## 0. Verdict
 
 Mnemo today **remembers** — it does not yet **evolve**. A self-evolving agent

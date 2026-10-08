@@ -185,7 +185,9 @@ export class MemoryService {
     const hits = await this.search(query, k * 4, project);
     return hits
       .filter((h) => !profileNodes.includes(h.node) && h.score > 0.05)
-      .filter((h) => !h.label.startsWith("gap:") && !h.label.startsWith("skill candidate"))
+      // gap: and lexical "lesson:" nodes are token bags with nothing to act on
+      // (audit F6, F7); candidates are not knowledge until saved.
+      .filter((h) => !/^(gap:|lesson:|skill candidate)/.test(h.label))
       .filter((h) => h.area !== "Salience" || factValue(h.state, "fix") !== undefined)
       .filter((h) => h.kind !== "TaskEpisode" || factValue(h.state, "goal") !== undefined)
       .slice(0, k);

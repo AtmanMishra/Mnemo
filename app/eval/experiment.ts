@@ -1,0 +1,77 @@
+/**
+ * One scenario, run once: build its projects in a scratch directory, run its
+ * sessions in order over one Mnemo home, then evaluate its checks.
+ */
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { MemoryService } from "../src/memory/service.ts";
+import { findMemsrv, journalPath } from "../src/runtime/paths.ts";
+import { runSession, type EvalModel, type SessionResult } from "./harness.ts";
+import type { Ctx, Scenario } from "./scenarios.ts";
+
+export interface CheckResult {
+  name: string;
+  kind: string;
+  pass: boolean;
+  detail?: string;
+}
+
+export interface RunResult {
+  scenario: string;
+  memory: boolean;
+  repeat: number;
+  checks: CheckResult[];
+  sessions: SessionResult[];
+  cost: number;
+  ms: number;
+}
+
+export async function runScenario(s: Scenario, withMemory: boolean, repeat: number, makeModel: (agentDir: string) => Promise<EvalModel>): Promise<RunResult> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `mnemo-eval-${s.name}-`));
+  const home = path.join(root, "home");
+  const dirs: Record<string, string> = {};
+  for (const [name, setup] of Object.entries(s.projects)) {
+    dirs[name] = path.join(root, name);
+    fs.mkdirSync(dirs[name]!, { recursive: true });
+    setup(dirs[name]!);
+  }
+  const model = await makeModel(path.join(home, "agent"));
+  const sessions: SessionResult[] = [];
+  const started = Date.now();
+  for (const plan of s.sessions) {
+    plan.before?.(dirs);
+    process.stdout.write(`  ${s.name} ${withMemory ? "memory  " : "baseline"} session ${sessions.length + 1}/${s.sessions.length}…`);
+    const r = await runSession({ home, cwd: dirs[plan.project]!, model, memory: withMemory }, plan.prompts);
+    sessions.push(r);
+    process.stdout.write(` ${(r.ms / 1000).toFixed(0)}s, ${r.tools.length} tools, $${r.cost.toFixed(4)}${r.errors.length ? `, ${r.errors.length} errors` : ""}\n`);
+  }
+  const memsrv = withMemory ? findMemsrv(home) : undefined;
+  const memory = memsrv ? new MemoryService(memsrv, journalPath(home)) : undefined;
+  const ctx: Ctx = {
+    dirs,
+    sessions,
+    memory,
+    read: (project, file) => {
+      try {
+        return fs.readFileSync(path.join(dirs[project]!, file), "utf8");
+      } catch {
+        return "";
+      }
+    },
+  };
+  const checks: CheckResult[] = [];
+  for (const c of s.checks) {
+    if (c.kind === "memory" && !withMemory) continue;
+    let outcome: true | string;
+    try {
+      outcome = await c.run(ctx);
+    } catch (error) {
+      outcome = `check threw: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    checks.push({ name: c.name, kind: c.kind, pass: outcome === true, detail: outcome === true ? undefined : outcome.slice(0, 600) });
+  }
+  memory?.stop();
+  return { scenario: s.name, memory: withMemory, repeat, checks, sessions, cost: sessions.reduce((n, r) => n + r.cost, 0), ms: Date.now() - started };
+}
+

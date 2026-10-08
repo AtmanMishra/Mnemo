@@ -1,0 +1,51 @@
+# Memory experiments
+
+Does memory make the *next* session better? Each scenario is a small git
+project, a few sessions a person would plausibly have, and deterministic
+checks — no model judges a model. Every scenario runs **with memory and
+without** (the baseline), so a behaviour check that passes either way is not
+credited to memory.
+
+## Run
+
+```bash
+cd app
+cargo build --release --bin memsrv --manifest-path ../memory-layer/Cargo.toml   # once
+bun eval/run.ts                                   # all scenarios, memory + baseline
+bun eval/run.ts --scenario pitfall-learned        # one scenario
+bun eval/run.ts --repeat 3                        # repeat, to see variance
+bun eval/run.ts --model opencode/deepseek-v4.1-flash
+bun eval/run.ts --faux                            # the harness only, no model
+```
+
+The default model is `opencode-go/deepseek-v4.1-flash` (override with
+`--model` or `MNEMO_EVAL_MODEL`). It needs `OPENCODE_API_KEY` in the
+environment and `opencode.ai` reachable. Results go to
+`eval/results/<timestamp>/` — `report.md` (the table, every failure with its
+evidence, what memory showed per session) and `results.json` (every
+session's prompts, answers, tool calls, tokens and cost).
+
+Sessions run in `yolo` mode (no approval prompts); dialogs that still open —
+saving a skill — are answered yes and recorded.
+
+## Scenarios
+
+| scenario | the claim | behaviour check (later session) | memory check |
+|---|---|---|---|
+| `convention-carries` | a convention stated once is followed later | uses pnpm, dev script on port 4111 | profile has the package manager |
+| `pitfall-learned` | a failure fixed once is avoided next time | runs setup before the first test run; fewer failed calls | a pitfall with its fix |
+| `correction-sticks` | a mid-session correction holds | the new export has a JSDoc | the comment rule is in a profile |
+| `picks-up-the-thread` | open work resumes from "where were we?" | phone validation is implemented | "last session" mentions the phone check |
+| `skill-from-procedure` | a procedure asked to be remembered becomes a skill | the second release is 0.1.2, logged and committed | a skill file under `.agents/skills/` |
+| `projects-stay-apart` | one repo's memory stays out of another | project b never hears of `ship-alpha` | the fact is in project a only |
+
+`test/eval.test.ts` proves the checks discriminate: a scripted agent that
+uses memory only when memory is in its prompt passes `pitfall-learned` with
+memory and fails it without.
+
+## Adding a scenario
+
+Add an entry to `SCENARIOS` in `scenarios.ts`: projects (a setup function per
+directory), sessions (project + prompts, optional `before` to change the world
+between sessions), and checks that read files, git, the transcript or memory.
+A check returns `true` or a string with the evidence of failure.
