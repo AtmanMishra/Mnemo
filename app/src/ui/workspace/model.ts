@@ -21,6 +21,10 @@ export interface Item {
   /** A directory that is open. */
   open?: boolean;
   tone?: Tone;
+  /** A mark before the label: a file the agent changed (✎), one a failing check named (!). */
+  badge?: { ch: string; tone: Tone };
+  /** A file's size as a share of the largest file listed, 0–1: drawn as a dither bar. */
+  weight?: number;
 }
 
 export interface PreviewLine {
@@ -42,6 +46,8 @@ export interface Preview {
 export interface WorkspaceSource {
   /** Every file in the project, relative paths. */
   files(): string[];
+  /** A file's size in bytes, when it can be read. */
+  fileSize?(rel: string): number | undefined;
   memory(): Promise<Item[]>;
   sessions(): Promise<Item[]>;
   skills(): Item[];

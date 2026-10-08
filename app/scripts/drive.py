@@ -5,7 +5,7 @@ Drive the real app in a pseudo-terminal and capture what the screen shows.
   python3 scripts/drive.py OUTDIR [--cols 120 --rows 34] -- STEP...
 
 Each STEP is `wait:<seconds>`, `key:<name>` (enter, esc, tab, down, up, left,
-right, ctrl-b, ctrl-c, ctrl-d, pgup, pgdn, or literal text after `text:`), or
+right, ctrl-b, ctrl-c, ctrl-d, ctrl-g, ctrl-n, ctrl-p, ctrl-s, alt-1…3, alt-, alt-., pgup, pgdn, or literal text after `text:`), or
 `shot:<name>` (the emulated screen as ANSI in OUTDIR/<name>.ansi, for
 scripts/snapshot.ts). The command after the steps defaults to the app in this
 directory. Needs `pyte` (pip install pyte).
@@ -16,6 +16,8 @@ import pyte
 KEYS = {
     "enter": "\r", "esc": "\x1b", "tab": "\t", "down": "\x1b[B", "up": "\x1b[A", "left": "\x1b[D", "right": "\x1b[C",
     "ctrl-b": "\x02", "ctrl-c": "\x03", "ctrl-d": "\x04", "pgup": "\x1b[5~", "pgdn": "\x1b[6~", "shift-tab": "\x1b[Z",
+    "ctrl-g": "\x07", "ctrl-n": "\x0e", "ctrl-p": "\x10", "ctrl-s": "\x13",
+    "alt-1": "\x1b1", "alt-2": "\x1b2", "alt-3": "\x1b3", "alt-,": "\x1b,", "alt-.": "\x1b.",
 }
 
 def to_ansi(screen):

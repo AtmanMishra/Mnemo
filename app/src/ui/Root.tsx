@@ -1,6 +1,6 @@
 /**
  * What a launch shows, in order: the boot sequence, the onboarding on a
- * first run, then the interface — the full-screen workspace, or the inline
+ * first run, then the interface — the shell of agents (full screen), or the inline
  * transcript (`--inline`, and anything that is not a terminal).
  */
 import React, { useState } from "react";
@@ -10,12 +10,13 @@ import { App } from "./App.tsx";
 import { Boot, type BootInfo } from "./components/Boot.tsx";
 import { MotionContext } from "./components/motion.ts";
 import { Onboarding, type OnboardingChoice } from "./components/Onboarding.tsx";
-import type { WorkspaceSource } from "./workspace/model.ts";
-import { Workspace } from "./workspace/Workspace.tsx";
+import type { Fleet } from "../runtime/fleet.ts";
+import { Shell } from "./Shell.tsx";
 
 export interface RootProps {
+  /** The first agent: the inline layout and the onboarding use it. */
   controller: Controller;
-  source: WorkspaceSource;
+  fleet: Fleet;
   version: string;
   home: string;
   motion: boolean;
@@ -55,7 +56,7 @@ export function Root(p: RootProps): React.ReactElement {
       </MotionContext.Provider>
     );
   return p.layout === "workspace" ? (
-    <Workspace controller={p.controller} source={p.source} motion={p.motion} />
+    <Shell fleet={p.fleet} motion={p.motion} />
   ) : (
     <App controller={p.controller} version={p.version} home={p.home} motion={p.motion} clearTerminal={p.clearTerminal} />
   );

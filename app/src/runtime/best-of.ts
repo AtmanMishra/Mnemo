@@ -28,7 +28,11 @@ export interface BestOfOptions {
   /** Where the candidates' diffs are kept. */
   keepDir: string;
   checkTimeoutMs?: number;
+  /** Each candidate's progress, for an interface to draw (candidates are 0-based here). */
+  onProgress?: (i: number, state: LaneState, info?: { size?: number; error?: string }) => void;
 }
+
+export type LaneState = "running" | "done" | "error" | "checking" | "passed" | "failed";
 
 export interface Candidate {
   i: number;
@@ -93,10 +97,13 @@ export async function bestOf(o: BestOfOptions): Promise<BestOfResult> {
         const cwd = path.join(tree, sub);
         let answer = "";
         let error: string | undefined;
+        o.onProgress?.(i, "running");
         try {
           answer = await o.run(i, cwd);
+          o.onProgress?.(i, "done");
         } catch (e) {
           error = e instanceof Error ? e.message : String(e);
+          o.onProgress?.(i, "error", { error });
         }
         let patch = "";
         try {
@@ -114,12 +121,15 @@ export async function bestOf(o: BestOfOptions): Promise<BestOfResult> {
     // side they race on shared caches and ports and fail for no fault of the change.
     const candidates: Candidate[] = [];
     for (const { cwd, ...c } of done) {
+      if (!c.error) o.onProgress?.(c.i - 1, "checking");
       let check = c.patch ? await sh(cwd, o.check, o.checkTimeoutMs ?? 600_000) : { ok: false, output: "no change" };
       // Once more before a change is rejected: the candidates' own runs can
       // leave shared tool caches half-written (seen with npx), failing the
       // first check after them.
       if (c.patch && !check.ok) check = await sh(cwd, o.check, o.checkTimeoutMs ?? 600_000);
-      candidates.push({ ...c, size: sizeOf(c.patch), passed: !c.error && check.ok, checkOutput: check.output });
+      const passed = !c.error && check.ok;
+      candidates.push({ ...c, size: sizeOf(c.patch), passed, checkOutput: check.output });
+      if (!c.error) o.onProgress?.(c.i - 1, passed ? "passed" : "failed", { size: sizeOf(c.patch) });
     }
 
     fs.mkdirSync(o.keepDir, { recursive: true });

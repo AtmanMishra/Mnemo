@@ -34,10 +34,15 @@ function readPreview(file: string, rel: string): Preview {
 export function workspaceSource(controller: Controller, host: Host | undefined, home: string): WorkspaceSource {
   const cwd = controller.runtime.cwd;
   let files: string[] | undefined;
+  const sizes = new Map<string, number | undefined>();
   const memory = host?.memory;
   const identity = projectIdentity(cwd);
   return {
     files: () => (files ??= listFiles(cwd)),
+    fileSize: (rel: string) => {
+      if (!sizes.has(rel)) sizes.set(rel, fs.statSync(path.join(cwd, rel), { throwIfNoEntry: false })?.size);
+      return sizes.get(rel);
+    },
 
     async memory(): Promise<Item[]> {
       if (!memory) return [{ id: "off", label: "memory is off", detail: "memsrv not found — mnemo doctor", tone: "muted", kind: "head" }];

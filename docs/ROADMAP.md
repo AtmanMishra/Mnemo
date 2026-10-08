@@ -219,7 +219,10 @@ frontier model's sessions teach the memory the cheap model uses.
   passing diff applied, every diff kept under `$MNEMO_HOME/best-of/`. Verified
   on clsx with DeepSeek. ▢ Taking the check from memory when `--check` is
   absent (the remembered "verify command" is prose today, not a command).
-- ▢ 3b.12 **Public benchmarks**: a SWE-bench Verified / Terminal-Bench subset as
+- ◐ 3b.12 **Public benchmarks** — Terminal-Bench subset done
+  (`research/terminal-bench-2026-10-08.md`, `app/eval/tbench.ts`): 10/10
+  oracle-valid easy/medium tasks with and without memory at ≈$0.008/task; it
+  found the shared-`/app` identity bug. Still to do: a SWE-bench Verified / Terminal-Bench subset as
   the absolute anchor (Mnemo + Flash vs Claude Code + Sonnet/Opus — expect to
   lose there), a per-repository chronological split as the learning curve, and
   accuracy per dollar as the headline. Needs a machine with Docker and the

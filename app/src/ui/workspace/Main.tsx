@@ -9,9 +9,24 @@ import type { Preview } from "./model.ts";
 import { toneColor } from "./Sidebar.tsx";
 
 /** A title bar: ── ▐ TITLE ▌ subtitle ────────── */
-export function Bar({ title, subtitle, width, focused }: { title: string; subtitle?: string; width: number; focused: boolean }): React.ReactElement {
+export function Bar({
+  title,
+  subtitle,
+  width,
+  focused,
+  extra,
+  extraWidth = 0,
+}: {
+  title: string;
+  subtitle?: string;
+  width: number;
+  focused: boolean;
+  /** Drawn after the title (the timeline strip); `extraWidth` is how many cells it takes. */
+  extra?: React.ReactNode;
+  extraWidth?: number;
+}): React.ReactElement {
   const head = ` ${title} `;
-  const rest = Math.max(0, width - head.length - (subtitle ? subtitle.length + 3 : 0) - 4);
+  const rest = Math.max(0, width - head.length - (subtitle ? subtitle.length + 3 : 0) - 4 - (extra ? extraWidth + 1 : 0));
   return (
     <Text>
       <Text color={palette.rule}>──</Text>
@@ -20,6 +35,12 @@ export function Bar({ title, subtitle, width, focused }: { title: string; subtit
         {head.toUpperCase()}
       </Text>
       <Text color={focused ? palette.magenta : palette.faint}>▌</Text>
+      {extra ? (
+        <>
+          <Text> </Text>
+          {extra}
+        </>
+      ) : null}
       {subtitle ? <Text color={palette.dim}> {subtitle} </Text> : null}
       <Text color={palette.rule}>{"─".repeat(rest)}</Text>
     </Text>

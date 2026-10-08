@@ -11,7 +11,7 @@
  *
  * Hex values; Ink's chalk downsamples to 256/16 colours and honours NO_COLOR.
  */
-export const palette = {
+const NIGHT = {
   ground: "#0E0B16",
   panel: "#16111F",
   rule: "#2B2238",
@@ -30,26 +30,159 @@ export const palette = {
   outline: "#2A2140",
   blush: "#FF8FB1",
   tusk: "#FFF1D6",
-} as const;
-
-export const color = {
-  accent: palette.magenta,
-  accent2: palette.cyan,
-  memory: palette.amber,
-  thinking: palette.violet,
-  success: palette.green,
-  warning: palette.amber,
-  error: palette.red,
-  text: palette.text,
-  muted: palette.dim,
-  subtle: palette.faint,
-  rule: palette.rule,
-  /** Backgrounds behind added and removed diff lines. */
+  /** Backgrounds behind added and removed diff lines, and a selected row. */
   addBg: "#16301F",
   removeBg: "#3A1622",
-  /** The sidebar's selected row. */
   selectBg: "#2B2238",
-} as const;
+};
+
+export type PaletteKey = keyof typeof NIGHT;
+export type ThemeName = "night" | "gameboy" | "paper";
+
+/**
+ * The palettes. Night is the identity; the others keep its roles (accent,
+ * structure, memory) in another light. Game Boy is four greens, so roles are
+ * told apart by value, not hue. Paper is light: it paints its own ground.
+ */
+export const THEMES: Record<ThemeName, { label: string; paint: boolean; colors: Record<PaletteKey, string> }> = {
+  night: { label: "Mnemo Night", paint: false, colors: NIGHT },
+  gameboy: {
+    label: "Game Boy",
+    paint: true,
+    colors: {
+      ground: "#0F380F",
+      panel: "#1E4A1E",
+      rule: "#306230",
+      text: "#E0F8D0",
+      dim: "#8BAC0F",
+      faint: "#4F7A28",
+      magenta: "#C4F04A",
+      cyan: "#9BBC0F",
+      amber: "#E0F8D0",
+      green: "#C4F04A",
+      red: "#E0F8D0",
+      violet: "#8BAC0F",
+      hide: "#8BAC0F",
+      hideShade: "#306230",
+      outline: "#0F380F",
+      blush: "#C4F04A",
+      tusk: "#E0F8D0",
+      addBg: "#306230",
+      removeBg: "#1E4A1E",
+      selectBg: "#306230",
+    },
+  },
+  paper: {
+    label: "Paper",
+    paint: true,
+    colors: {
+      ground: "#F4EEE2",
+      panel: "#EAE2D2",
+      rule: "#D8CDB8",
+      text: "#2A2433",
+      dim: "#6E6478",
+      faint: "#A79DAF",
+      magenta: "#D6336C",
+      cyan: "#0F8C8A",
+      amber: "#B86E00",
+      green: "#2F8F3A",
+      red: "#C62835",
+      violet: "#6A4BD8",
+      hide: "#7D7096",
+      hideShade: "#5C5176",
+      outline: "#2A2140",
+      blush: "#E86A94",
+      tusk: "#FFFDF7",
+      addBg: "#DDF0DC",
+      removeBg: "#F6DCE2",
+      selectBg: "#E2D7F0",
+    },
+  },
+};
+
+/** The current palette. Mutated in place by `applyTheme`, so read it at render time. */
+export const palette: Record<PaletteKey, string> = { ...NIGHT };
+
+export const color = {
+  accent: "",
+  accent2: "",
+  memory: "",
+  thinking: "",
+  success: "",
+  warning: "",
+  error: "",
+  text: "",
+  muted: "",
+  subtle: "",
+  rule: "",
+  addBg: "",
+  removeBg: "",
+  selectBg: "",
+};
+
+/** The wordmark's gradient stops, left to right: neuron to synapse. */
+export const gradient: string[] = [];
+
+let current: ThemeName = "night";
+/** Night colour → this theme's: pixel art is drawn in Night and translated. */
+let remap = new Map<string, string>();
+
+export function applyTheme(name: ThemeName): void {
+  const t = THEMES[name] ?? THEMES.night;
+  current = name in THEMES ? name : "night";
+  Object.assign(palette, t.colors);
+  Object.assign(color, {
+    accent: palette.magenta,
+    accent2: palette.cyan,
+    memory: palette.amber,
+    thinking: palette.violet,
+    success: palette.green,
+    warning: palette.amber,
+    error: palette.red,
+    text: palette.text,
+    muted: palette.dim,
+    subtle: palette.faint,
+    rule: palette.rule,
+    addBg: palette.addBg,
+    removeBg: palette.removeBg,
+    selectBg: palette.selectBg,
+  });
+  gradient.splice(0, gradient.length, palette.magenta, palette.violet, palette.cyan);
+  remap = new Map((Object.keys(NIGHT) as PaletteKey[]).map((k) => [NIGHT[k].toLowerCase(), t.colors[k]]));
+}
+applyTheme("night");
+
+const themeListeners = new Set<() => void>();
+/** Re-render on a theme change: `useSyncExternalStore(subscribeTheme, themeName)`. */
+export function subscribeTheme(fn: () => void): () => void {
+  themeListeners.add(fn);
+  return () => themeListeners.delete(fn);
+}
+/** Switch theme and tell everything drawn to draw again. */
+export function setTheme(name: ThemeName): void {
+  applyTheme(name);
+  for (const fn of themeListeners) fn();
+}
+
+export const themeName = (): ThemeName => current;
+/** Whether the interface paints its own background (light and non-Night themes). */
+export const themePaints = (): boolean => THEMES[current].paint;
+/** The background a painted theme gives a box's border (undefined for Night: the terminal's own). */
+export const ground = (): string | undefined => (THEMES[current].paint ? palette.ground : undefined);
+
+/**
+ * OSC 10/11: ask the terminal to use the theme's text and ground as its own
+ * defaults, so anything drawn without a colour still fits; OSC 110/111 put
+ * the terminal's back. Terminals that do not know them ignore them.
+ */
+export function terminalColors(): string {
+  return THEMES[current].paint ? `\x1b]10;${palette.text}\x07\x1b]11;${palette.ground}\x07` : "\x1b]110\x07\x1b]111\x07";
+}
+
+/** A colour drawn in Night, in the current theme. */
+export function themed(hex: string): string {
+  return current === "night" ? hex : (remap.get(hex.toLowerCase()) ?? hex);
+}
 
 export const glyph = {
   user: "❯",
@@ -69,9 +202,6 @@ export const glyph = {
 /** The density ramp, lightest to densest: shading, motion, progress. */
 export const dither = [" ", "░", "▒", "▓", "█"] as const;
 
-/** A pixel-ish spinner: a dot walking a 2x2 block. */
-export const spinnerFrames = ["▖", "▘", "▝", "▗"];
-
 /** What the working line says, rotated while a turn runs. Memory is the brand. */
 export const workingVerbs = [
   "Recalling",
@@ -83,9 +213,6 @@ export const workingVerbs = [
   "Remembering",
   "Considering",
 ];
-
-/** The wordmark's gradient stops, left to right: neuron to synapse. */
-export const gradient = [palette.magenta, palette.violet, palette.cyan];
 
 function hexToRgb(hex: string): [number, number, number] {
   const n = Number.parseInt(hex.slice(1), 16);

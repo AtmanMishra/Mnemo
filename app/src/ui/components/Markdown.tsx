@@ -9,7 +9,7 @@ import { Box, Text } from "ink";
 import chalk from "chalk";
 import { marked, type Token, type Tokens } from "marked";
 import { highlightCode, initTheme } from "@earendil-works/pi-coding-agent";
-import { color } from "../theme.ts";
+import { color, ground } from "../theme.ts";
 
 let themeReady = false;
 
@@ -93,7 +93,7 @@ function unescape(s: string): string {
 function CodeBlock({ code, lang }: { code: string; lang?: string }): React.ReactElement {
   const lines = highlight(code.replace(/\n$/, ""), lang || undefined);
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={color.subtle} paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" borderBackgroundColor={ground()} borderColor={color.subtle} paddingX={1}>
       {lang ? <Text color={color.muted}>{lang}</Text> : null}
       {lines.map((l, i) => (
         <Text key={i} wrap="truncate-end">
@@ -159,14 +159,14 @@ function Blocks({ tokens, depth = 0, tight = false }: { tokens: Token[]; depth?:
       }
       case "paragraph":
         el = (
-          <Text>
+          <Text color={color.text}>
             <Inline tokens={(t as Tokens.Paragraph).tokens} />
           </Text>
         );
         break;
       case "text": {
         const tt = t as Tokens.Text;
-        el = <Text>{tt.tokens ? <Inline tokens={tt.tokens} /> : unescape(tt.text)}</Text>;
+        el = <Text color={color.text}>{tt.tokens ? <Inline tokens={tt.tokens} /> : unescape(tt.text)}</Text>;
         break;
       }
       case "code":
@@ -177,7 +177,7 @@ function Blocks({ tokens, depth = 0, tight = false }: { tokens: Token[]; depth?:
         break;
       case "blockquote":
         el = (
-          <Box borderStyle="bold" borderLeft borderTop={false} borderRight={false} borderBottom={false} borderColor={color.subtle} paddingLeft={1}>
+          <Box borderStyle="bold" borderBackgroundColor={ground()} borderLeft borderTop={false} borderRight={false} borderBottom={false} borderColor={color.subtle} paddingLeft={1}>
             <Box flexDirection="column">
               <Blocks tokens={(t as Tokens.Blockquote).tokens} depth={depth} />
             </Box>
@@ -191,7 +191,7 @@ function Blocks({ tokens, depth = 0, tight = false }: { tokens: Token[]; depth?:
         el = <Table token={t as Tokens.Table} />;
         break;
       default:
-        el = <Text>{(t as { raw?: string }).raw?.trimEnd() ?? ""}</Text>;
+        el = <Text color={color.text}>{(t as { raw?: string }).raw?.trimEnd() ?? ""}</Text>;
     }
     out.push(
       <Box key={i} marginTop={i > 0 && !tight && out.length > 0 ? 1 : 0} flexDirection="column">

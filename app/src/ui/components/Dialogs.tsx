@@ -3,14 +3,22 @@
  * place of the input box, so the conversation above stays visible.
  */
 import React, { useState } from "react";
-import { Box, Text, useInput, usePaste } from "ink";
+import { Box, Text, useInput as inkUseInput, usePaste as inkUsePaste } from "ink";
 import type { Choice, Dialog } from "../../runtime/dialogs.ts";
-import { color, glyph } from "../theme.ts";
+import { color, glyph, ground } from "../theme.ts";
 import * as ed from "../editor.ts";
 
 const WINDOW = 8;
 
 /** Field-by-field substring match, so a query never matches across two fields. */
+/** False for a dialog in an agent that is on screen but not focused (a split pane). */
+export const InputActive = React.createContext(true);
+
+const useInput: typeof inkUseInput = (handler, options) =>
+  inkUseInput(handler, { ...options, isActive: (options?.isActive ?? true) && React.useContext(InputActive) });
+const usePaste: typeof inkUsePaste = (handler, options) =>
+  inkUsePaste(handler, { ...options, isActive: (options?.isActive ?? true) && React.useContext(InputActive) });
+
 export function filterChoices(choices: readonly Choice[], query: string): Choice[] {
   const q = query.trim().toLowerCase();
   if (!q) return [...choices];
@@ -19,7 +27,7 @@ export function filterChoices(choices: readonly Choice[], query: string): Choice
 
 function Frame({ tint, title, children, hint }: { tint: string; title: string; children: React.ReactNode; hint: string }) {
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={tint} paddingX={1} marginTop={1}>
+    <Box flexDirection="column" borderStyle="round" borderBackgroundColor={ground()} borderColor={tint} paddingX={1} marginTop={1}>
       <Text bold color={tint}>
         {title}
       </Text>
@@ -55,9 +63,9 @@ function SelectDialog({ dialog }: { dialog: Extract<Dialog, { kind: "select" }> 
   const labelWidth = Math.min(40, Math.max(8, ...visible.map((c) => c.label.length)));
   return (
     <Frame tint={color.accent} title={dialog.title} hint={`↑↓ move · type to filter · enter choose · esc cancel  ${items.length ? `${at + 1}/${items.length}` : ""}`}>
-      <Text>
+      <Text color={color.text}>
         <Text color={color.muted}>filter </Text>
-        {query ? <Text>{query}</Text> : <Text color={color.subtle}>type to narrow the list</Text>}
+        {query ? <Text color={color.text}>{query}</Text> : <Text color={color.subtle}>type to narrow the list</Text>}
       </Text>
       {visible.length === 0 ? <Text color={color.muted}>nothing matches</Text> : null}
       {visible.map((c, i) => {
@@ -86,12 +94,12 @@ function ConfirmDialog({ dialog }: { dialog: Extract<Dialog, { kind: "confirm" }
   });
   return (
     <Frame tint={color.warning} title={dialog.title} hint="y yes · n no · ←→ choose · enter confirm · esc no">
-      {dialog.message ? <Text>{dialog.message}</Text> : null}
+      {dialog.message ? <Text color={color.text}>{dialog.message}</Text> : null}
       <Box marginTop={1}>
         <Text inverse={yes} color={yes ? color.success : color.muted}>
           {" Yes "}
         </Text>
-        <Text> </Text>
+        <Text color={color.text}> </Text>
         <Text inverse={!yes} color={!yes ? color.error : color.muted}>
           {" No "}
         </Text>
@@ -121,7 +129,7 @@ function TextDialog({ dialog }: { dialog: Extract<Dialog, { kind: "text" }> }) {
   const after = shown.slice(draft.cursor + 1);
   return (
     <Frame tint={color.accent} title={dialog.title} hint={`enter submit · esc cancel${dialog.secret ? " · input is hidden" : ""}`}>
-      <Text>
+      <Text color={color.text}>
         <Text color={color.accent}>{glyph.user} </Text>
         {draft.text ? (
           <>
@@ -174,7 +182,7 @@ function ApprovalDialog({ dialog }: { dialog: Extract<Dialog, { kind: "approval"
   });
   const preview = r.preview.slice(0, 14);
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={color.warning} paddingX={1} marginTop={1}>
+    <Box flexDirection="column" borderStyle="round" borderBackgroundColor={ground()} borderColor={color.warning} paddingX={1} marginTop={1}>
       <Text bold color={color.warning}>
         Allow this?
       </Text>
@@ -202,7 +210,7 @@ function ApprovalDialog({ dialog }: { dialog: Extract<Dialog, { kind: "approval"
         {feedback ? (
           <>
             <Text color={color.muted}>What should Mnemo do instead? (enter to send, empty is fine)</Text>
-            <Text>
+            <Text color={color.text}>
               <Text color={color.accent}>{glyph.user} </Text>
               {feedback.text.slice(0, feedback.cursor)}
               <Text inverse>{feedback.text[feedback.cursor] ?? " "}</Text>
