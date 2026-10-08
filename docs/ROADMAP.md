@@ -264,9 +264,15 @@ frontier model's sessions teach the memory the cheap model uses.
 ### Stage 6 — Quality gates for a public alpha
 
 - ▢ 6.1 CI matrix: app (3 OS), memory-layer, harness, secrets scan, eval floor.
-- ▢ 6.2 Open audit leftovers: 12.15 (partly done), 12.16 design confirmations,
-  written into a `SECURITY.md` ("what the gate is and is not").
-- ▢ 6.3 Telemetry policy: none by default; say so.
+- ▣ 6.2 `SECURITY.md` ("what the gate is and is not", credentials, memory as
+  trusted input). ▢ Open audit leftovers: 12.15 (partly done), 12.16 design
+  confirmations.
+- ▢ 6.2a **Scrub provider keys from child processes**: commands the agent runs
+  inherit the environment, keys included (an eval's `env` call recorded one).
+  Pass bash and the kernel an environment without `*_API_KEY`/`*_TOKEN`/`AWS_*`
+  unless the user opts in per command.
+- ▣ 6.3 Telemetry policy: none, and measured (`SECURITY.md`): only a real prompt
+  opens a connection, to the configured provider.
 - ▢ 6.4 Docs for users (not agents): install, first run, commands, config, memory
   model in plain words, skills, hooks, troubleshooting.
 - ▢ 6.5 Known-issues list in the tracker; triage before the tag.

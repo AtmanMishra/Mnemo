@@ -31,5 +31,14 @@
   },
   "bin": {
     "mnemo": "bin/mnemo.ts"
-  }
+  },
+  "license": "Apache-2.0",
+  "author": "Atman Mishra",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AtmanMishra/mnemo.git",
+    "directory": "app"
+  },
+  "homepage": "https://github.com/AtmanMishra/mnemo#readme",
+  "bugs": "https://github.com/AtmanMishra/mnemo/issues"
 }

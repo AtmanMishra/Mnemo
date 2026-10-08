@@ -1,0 +1,19 @@
+name: Feature request
+description: Something Mnemo should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like instead?
+  - type: textarea
+    id: measure
+    attributes:
+      label: How would we know it worked?
+      description: For agent behaviour, a task or eval that would show it.

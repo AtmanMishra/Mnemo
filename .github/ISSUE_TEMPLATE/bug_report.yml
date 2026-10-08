@@ -1,0 +1,37 @@
+name: Bug report
+description: Something broke, looked wrong, or the agent did something it should not have
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. **Never paste API keys or private code.** Run `mnemo doctor` and paste its output below (it contains no secrets).
+        Security problems: use *Security → Report a vulnerability*, not an issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The prompt, the project (or a tiny version of it), the mode (`/mode`).
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`mnemo doctor` and `mnemo --version`"
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and terminal
+      placeholder: macOS 15 / iTerm2, Windows 11 / Windows Terminal, Ubuntu 24.04 / kitty
+  - type: input
+    id: model
+    attributes:
+      label: Provider and model
+      placeholder: opencode-go / deepseek-v4.1-flash

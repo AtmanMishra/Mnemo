@@ -2,6 +2,10 @@
 name = "memory-layer"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
+authors = ["Atman Mishra"]
+repository = "https://github.com/AtmanMishra/mnemo"
+description = "memsrv: the memory sidecar for Mnemo"
 
 [dependencies]
 hnsw_rs = "0.3.4"
