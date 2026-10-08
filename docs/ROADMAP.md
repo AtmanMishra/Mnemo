@@ -208,11 +208,17 @@ frontier model's sessions teach the memory the cheap model uses.
   frontier model found and a test confirmed outranks a cheap model's guess).
 - ▢ 3b.9 **Local embedder** (audit F15): recall precision; the lexical hash
   ranks an episode above the matching pitfall today.
-- ▢ 3b.10 **Escalation**: a step the cheap model fails to verify twice goes to a
-  stronger model; memory records the resolution. Metric: frontier calls per
-  task, falling.
-- ▢ 3b.11 **Test-time compute**: best-of-n with the project's verify command as
-  the judge — affordable at a tenth of the price.
+- ▣ 3b.10 **Escalation** (`--escalate provider/id`, `MNEMO_ESCALATE_MODEL`;
+  `src/extensions/escalate.ts`): after the project's checks fail twice in a run,
+  the rest of the run goes to the stronger model and the next run starts cheap
+  again; the episode records it, so the fix is attributed and recalled. ▢ Metric
+  in the evals: escalations per task, falling.
+- ▣ 3b.11 **Best-of-n** (`mnemo -p "<task>" --best-of N --check "<cmd>"`;
+  `src/runtime/best-of.ts`): N headless candidates in git worktrees, the check
+  as judge (run one at a time, once more before rejecting), the smallest
+  passing diff applied, every diff kept under `$MNEMO_HOME/best-of/`. Verified
+  on clsx with DeepSeek. ▢ Taking the check from memory when `--check` is
+  absent (the remembered "verify command" is prose today, not a command).
 - ▢ 3b.12 **Public benchmarks**: a SWE-bench Verified / Terminal-Bench subset as
   the absolute anchor (Mnemo + Flash vs Claude Code + Sonnet/Opus — expect to
   lose there), a per-repository chronological split as the learning curve, and
@@ -231,11 +237,14 @@ frontier model's sessions teach the memory the cheap model uses.
 
 ### Stage 5 — Packaging, install, release
 
-- ▢ 5.1 `bun build --compile` per target (linux/darwin/windows × amd64/arm64);
-  smoke test spawns the compiled binary and renders a frame.
-- ▢ 5.2 `memsrv` built per target in `release.yml` and attached; the app finds it
-  by the platform name (`memsrv.exe` on Windows).
-- ▣ 5.3 (from source) `app/scripts/install.sh`. ▢ Install paths from releases (D3): `curl -fsSL …/install.sh | sh` and `irm …/install.ps1 | iex`
+- ▣ 5.1 `bun build --compile` per target in `release.yml` (linux x64/arm64,
+  darwin arm64/x64, windows x64); each archive is smoke-tested (doctor finds
+  the sidecar, the demo runs). ▢ Pin upload/download-artifact to SHAs.
+- ▣ 5.2 `memsrv` built per target and packaged beside `mnemo`.
+- ▣ 5.3 (from source) `app/scripts/install.sh`. ▣ Release installers
+  `app/scripts/get.sh` / `get.ps1` (checksummed; published as install.sh/ps1);
+  `app/scripts/test-install.sh` verifies a clean install in Docker ubuntu:24.04.
+  ▢ Install paths from releases (D3): `curl -fsSL …/install.sh | sh` and `irm …/install.ps1 | iex`
   download the binary + `memsrv` for the platform into `~/.mnemo/bin` and put it
   on PATH; `npx @mnemo/cli` / `bunx` is a thin package that fetches the same
   binary. Each finishes by running `mnemo doctor`. `uninstall` removes exactly
