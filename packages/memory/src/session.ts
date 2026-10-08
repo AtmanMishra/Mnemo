@@ -104,6 +104,22 @@ export const VERIFY = /\b(test|tests|vitest|jest|mocha|pytest|tox|tsc|typecheck|
 const DOCS = /\.(md|mdx|txt|rst|adoc)$/i;
 const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
 
+/**
+ * Whether a command is the one a failure was about: the failure names it, or
+ * one step of the command line (split on && ; | and with a leading cd and
+ * trailing redirections dropped) is the command that failed.
+ */
+export function sameCommand(command: string, failure: string): boolean {
+  if (normalize(failure).includes(command)) return true;
+  const failed = /^\w+\((.+?)\) failed:/.exec(failure)?.[1];
+  if (!failed || failed.length < 4) return false;
+  const want = normalize(failed);
+  return command
+    .split(/&&|\|\||;|\|/)
+    .map((step) => normalize(step.replace(/\s+\d?>&?\d?\s*\S*$/, "")))
+    .some((step) => step === want);
+}
+
 const words = (s: string) => new Set(s.toLowerCase().split(/[^a-z0-9_.-]+/).filter((w) => w.length > 3));
 
 /** The failure a problem statement is about: two or more distinctive words in common, the most wins. */
@@ -286,7 +302,7 @@ export class MemorySession {
         if (h.area !== "Salience" || this.warned.has(h.node)) continue;
         const fix = factValue(h.state, "fix");
         const failure = factValue(h.state, "failure") ?? h.label.replace(/^pain: /, "");
-        if (!fix || !normalize(failure).includes(command)) continue;
+        if (!fix || !sameCommand(command, failure)) continue;
         // Already applied: a successful call in this run that the fix names.
         if (this.toolLog.some((t) => t.ok && t.subject.length > 3 && fix.includes(t.subject))) continue;
         this.warned.add(h.node);

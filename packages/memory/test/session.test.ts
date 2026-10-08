@@ -128,3 +128,18 @@ t("a fix attaches only to the failure it is about, never to an unrelated one", a
   expect(lock.label).toBe("pain: two sidecars on one journal corrupted records");
   memory.stop();
 }, 30_000);
+
+t("the guard knows a failed command inside a longer one, and stays quiet for an unrelated one", async () => {
+  const { cwd, memory } = setup();
+  const s = new MemorySession({ memory, cwd, userSkillsDir: path.join(cwd, "skills") });
+  await s.begin("run the tests");
+  await s.toolEnd("bash", { command: "npm test" }, false, "error: generated rates missing — run npm run gen first");
+  const pain = (await memory.search("generated rates missing", 5)).find((h) => h.area === "Salience")!;
+  await memory.fact(pain.node, "fix", "run npm run gen before npm test");
+
+  const later = new MemorySession({ memory, cwd, userSkillsDir: path.join(cwd, "skills") });
+  await later.begin("add a feature");
+  expect(await later.guard("bash", { command: "npm run lint" })).toBeUndefined();
+  expect(await later.guard("bash", { command: `cd ${cwd} && npm test 2>&1 | tail -20` })).toContain("Known fix: run npm run gen before npm test");
+  memory.stop();
+}, 30_000);
