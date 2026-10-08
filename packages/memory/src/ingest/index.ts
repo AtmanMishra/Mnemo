@@ -24,6 +24,8 @@ export interface IngestOptions {
   reflect?: Reflector;
   /** Default `~/.claude/projects`. */
   projectsDir?: string;
+  /** Only these transcripts (a Stop hook names its own). */
+  files?: string[];
   /** A session modified within this long is still in use (default 10 minutes). */
   settleMs?: number;
   /** Only sessions whose working directory is inside this one. */
@@ -82,7 +84,7 @@ export async function ingestClaudeCode(o: IngestOptions): Promise<IngestReport> 
   const settle = o.settleMs ?? 10 * 60_000;
   const ledger = readLedger(o.home);
   const report: IngestReport = { sessions: 0, runs: 0, unchanged: 0, active: 0 };
-  for (const file of claudeCodeSessions(o.projectsDir)) {
+  for (const file of o.files ?? claudeCodeSessions(o.projectsDir)) {
     const s = parseClaudeCode(fs.readFileSync(file, "utf8"));
     if (!s || !s.runs.length) continue;
     if (o.under && !path.resolve(s.cwd).startsWith(path.resolve(o.under))) continue;

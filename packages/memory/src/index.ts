@@ -60,3 +60,5 @@ export {
   type ReplaySession,
   type ReplayTool,
 } from "./ingest/index.ts";
+export { MCP_TOOLS, serveMcp, type McpOptions } from "./mcp.ts";
+export { contextHook, type HookInput, type HookOptions } from "./hooks.ts";

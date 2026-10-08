@@ -71,7 +71,7 @@ t("a run from another agent is learned with its provenance, and recalled for the
   const two = new MemorySession({ memory, cwd, userSkillsDir: path.join(cwd, "skills"), source: { agent: "mnemo", model: "deepseek-v4.1-flash" } });
   const r = await two.recall("run the vitest tests for me");
   expect(r.system).toContain("test command: pnpm vitest");
-  expect(r.message).toContain("pitfall: Bash failed: sh: vitest: not found");
+  expect(r.message).toContain("pitfall: Bash(pnpm vitest) failed: sh: vitest: not found");
   expect(r.message).toContain("fix: run pnpm install first");
   expect(r.message).toContain("Last session:");
   memory.stop();
@@ -100,5 +100,31 @@ t("the session record's key is reserved", async () => {
   const { cwd, memory } = setup();
   const s = new MemorySession({ memory, cwd, userSkillsDir: path.join(cwd, "skills") });
   await expect(s.remember("project", "Last Session", "x")).rejects.toThrow(/written by Mnemo/);
+  memory.stop();
+}, 30_000);
+
+t("a fix attaches only to the failure it is about, never to an unrelated one", async () => {
+  const { cwd, memory } = setup();
+  const answers = [
+    // Run 1 fails on an edit and reflects on nothing.
+    JSON.stringify({ facts: [], fixes: [], skill: null }),
+    // Run 2 fixes something else entirely.
+    JSON.stringify({ facts: [], fixes: [{ problem: "two sidecars on one journal corrupted records", fix: "sync the journal under a lock before each request" }], skill: null }),
+  ];
+  const s = new MemorySession({ memory, cwd, userSkillsDir: path.join(cwd, "skills"), reflect: async () => answers.shift()! });
+  await s.begin("edit the readme and then rebuild the docs index");
+  await s.toolEnd("Write", { file_path: "README.md" }, false, "File has been modified since read");
+  await s.toolEnd("Write", { file_path: "README.md" }, true);
+  await s.end({ messages: [{ role: "user", content: "edit the readme and then rebuild the docs index please" }] });
+  await s.begin("fix the corruption when two processes share the journal");
+  await s.toolEnd("Bash", { command: "cargo test" }, true);
+  await s.toolEnd("Bash", { command: "cargo test --release" }, true);
+  await s.end({ messages: [{ role: "user", content: "fix the corruption when two processes share the journal" }] });
+
+  const pitfalls = (await memory.search("modified since read journal lock sidecars", 10)).filter((h) => h.area === "Salience");
+  const write = pitfalls.find((h) => /modified since read/.test(h.state))!;
+  expect(factValue(write.state, "fix")).toBeUndefined();
+  const lock = pitfalls.find((h) => factValue(h.state, "fix") !== undefined)!;
+  expect(lock.label).toBe("pain: two sidecars on one journal corrupted records");
   memory.stop();
 }, 30_000);

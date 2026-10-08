@@ -99,6 +99,19 @@ export function subjectOf(args: Record<string, unknown>): string {
     .slice(0, 200);
 }
 
+const words = (s: string) => new Set(s.toLowerCase().split(/[^a-z0-9_.-]+/).filter((w) => w.length > 3));
+
+/** The failure a problem statement is about: two or more distinctive words in common, the most wins. */
+export function matchPain(problem: string, pains: readonly { node: number; text: string }[]): number | undefined {
+  const want = words(problem);
+  let best: { node: number; shared: number } | undefined;
+  for (const p of pains) {
+    const shared = [...words(p.text)].filter((w) => want.has(w)).length;
+    if (shared >= 2 && shared > (best?.shared ?? 0)) best = { node: p.node, shared };
+  }
+  return best?.node;
+}
+
 export class MemorySession {
   readonly identity: ProjectIdentity;
   private readonly mem: MemoryService;
@@ -109,7 +122,8 @@ export class MemorySession {
   private systemText: string | undefined;
   private firstRun = true;
   private readonly linked = new Set<number>();
-  private readonly painBySubject = new Map<string, number>();
+  /** This run's failure markers, with the failure text a fix is matched against. */
+  private pains: { node: number; text: string }[] = [];
   private readonly credit = new Credit();
   private toolLog: ToolEvent[] = [];
   private readonly files = new Set<string>();
@@ -150,6 +164,7 @@ export class MemorySession {
   /** A run starts: fresh run state, and the project, user and episode exist. */
   async begin(prompt: string): Promise<number | undefined> {
     this.runFailed = false;
+    this.pains = [];
     this.toolLog = [];
     this.files.clear();
     this.skillsRead.clear();
@@ -160,8 +175,22 @@ export class MemorySession {
 
   /** `begin`, plus what memory has to say about this message. */
   async recall(prompt: string): Promise<Recalled> {
-    const ep = await this.begin(prompt);
+    await this.begin(prompt);
+    const r = await this.context(prompt, { lastSession: this.firstRun });
+    this.firstRun = false;
+    return r;
+  }
+
+  /**
+   * What memory has for a message, without starting a run: for a caller that
+   * holds no session state between calls (a hook, an MCP request). Recall is
+   * linked to the episode as a feeder only when a run is in progress.
+   */
+  async context(prompt: string, o: { lastSession?: boolean } = {}): Promise<Recalled> {
     const mem = this.mem;
+    this.project ??= await mem.project(this.identity.id, this.identity.root);
+    this.userNode ??= await mem.userNode();
+    const ep = this.episodeId;
     const profiles = [this.project, this.userNode].filter((n): n is number => n !== undefined);
     const [projectFacts, userFacts, hits] = await Promise.all([
       mem.profile("project", this.identity.id),
@@ -181,8 +210,7 @@ export class MemorySession {
       hits.map((h) => ({ node: h.node, text: `${h.label} ${factsOf(h.state).map((f) => `${f.key} ${f.value}`).join(" ")}` })),
       prompt,
     );
-    const lastSession = this.firstRun ? projectFacts.find((f) => f.key === "last session")?.value : undefined;
-    this.firstRun = false;
+    const lastSession = o.lastSession ? projectFacts.find((f) => f.key === "last session")?.value : undefined;
     this.systemText ??= profileBlock(projectFacts, userFacts, this.identity.name);
     const items = [
       ...(projectFacts.length ? [`${projectFacts.length} fact${projectFacts.length === 1 ? "" : "s"} about ${this.identity.name}`] : []),
@@ -223,11 +251,11 @@ export class MemorySession {
   }
 
   /** Something failed: one marker per distinct failure, counted. */
-  async steer(failure: string, subjectKey?: string): Promise<void> {
+  async steer(failure: string): Promise<void> {
     if (this.episodeId === undefined) return;
     const r = await this.mem.steer(this.episodeId, failure);
     if (!r?.pain_node) return;
-    if (subjectKey) this.painBySubject.set(subjectKey, r.pain_node);
+    this.pains.push({ node: r.pain_node, text: failure });
     if (this.project !== undefined) await this.mem.link(r.pain_node, this.project, "part_of");
     const n = r.occurrences ?? 1;
     this.note({ kind: "steer", text: n > 1 ? `has seen this failure ${n} times` : "noted the failure for next time" });
@@ -250,7 +278,7 @@ export class MemorySession {
       await this.mem.log(this.episodeId, ok ? "tool_call" : "tool_error", `${tool}(${subject.slice(0, 120)})${ok ? "" : `: ${error?.split("\n")[0]}`}`);
       if (!ok && !refused) {
         this.runFailed = true;
-        await this.steer(`${tool} failed: ${error?.split("\n").slice(0, 3).join(" ").slice(0, 300)}`, `${tool}(${subject})`);
+        await this.steer(`${tool}(${subject.slice(0, 80)}) failed: ${error?.split("\n").slice(0, 3).join(" ").slice(0, 300)}`);
       }
     } catch {
       /* memory never breaks the loop */
@@ -331,9 +359,9 @@ export class MemorySession {
     // Fixes: attach to the failure's marker when we know it; otherwise a pitfall of its own.
     const fixed: string[] = [];
     for (const f of r.fixes) {
-      const words = f.problem.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
-      const matched = [...this.painBySubject.entries()].find(([subject]) => words.some((w) => subject.toLowerCase().includes(w)))?.[1];
-      let node = matched ?? (this.painBySubject.size === 1 ? [...this.painBySubject.values()][0] : undefined);
+      // The fix joins a failure marker only when its problem is clearly that
+      // failure; otherwise it is a pitfall of its own, in the model's words.
+      let node = matchPain(f.problem, this.pains);
       if (node === undefined) {
         node = await mem.createNode("aspect", `pain: ${f.problem.slice(0, 60)}`, "salience");
         if (node !== undefined) {
