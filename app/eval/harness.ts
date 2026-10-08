@@ -153,7 +153,7 @@ export async function runSession(o: SessionOptions, prompts: string[]): Promise<
     tools: blocks
       .filter((b): b is Extract<Block, { kind: "tool" }> => b.kind === "tool")
       .map((b) => ({ name: b.name, args: b.args, ok: b.status === "done", output: b.output.slice(0, 2000) })),
-    memory: blocks.filter((b) => b.kind === "memory").map((b) => (b.kind === "memory" ? `${b.title}: ${b.items.join(" | ")}` : "")),
+    memory: blocks.filter((b) => b.kind === "memory").map((b) => (b.kind === "memory" ? (b.items.length ? `${b.title}: ${b.items.join(" | ")}` : b.title) : "")),
     approvals,
     tokens: { input: stats.tokens.input, output: stats.tokens.output, cacheRead: stats.tokens.cacheRead },
     cost: stats.cost,
