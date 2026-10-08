@@ -100,6 +100,8 @@ const REFUSAL = /declined this call|Refused by a rule|Plan mode is read-only|The
 export function subjectOf(args: Record<string, unknown>): string {
   return String(args.command ?? args.path ?? args.file_path ?? args.pattern ?? args.query ?? args.task ?? args.name ?? "")
     .split("\n")[0]!
+    // `cd /the/project && npm test` is about `npm test`: the path only hides it.
+    .replace(/^cd\s+("[^"]*"|'[^']*'|\S+)\s*&&\s*/, "")
     .slice(0, 200);
 }
 

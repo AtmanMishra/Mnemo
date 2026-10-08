@@ -8,7 +8,7 @@ import { test, expect } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { findMemsrv, factValue, MemoryService, MemorySession, type MemoryNote, type Reflector } from "../src/index.ts";
+import { findMemsrv, factValue, MemoryService, MemorySession, subjectOf, type MemoryNote, type Reflector } from "../src/index.ts";
 
 const MEMSRV = findMemsrv("/nonexistent");
 const t = MEMSRV ? test : test.skip;
@@ -157,3 +157,9 @@ t("the guard never stops the fix itself, even when the error text quotes it", as
   expect(await later.guard("bash", { command: "sh scripts/test.sh" })).toContain("Known fix");
   memory.stop();
 }, 30_000);
+
+test("a command that starts by changing into the project is named by what it runs", () => {
+  expect(subjectOf({ command: "cd /tmp/some/long/project && npm test 2>&1 | tail" })).toBe("npm test 2>&1 | tail");
+  expect(subjectOf({ command: 'cd "/a b" && make' })).toBe("make");
+  expect(subjectOf({ command: "cd src" })).toBe("cd src");
+});
