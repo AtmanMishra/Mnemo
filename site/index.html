@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mnemo — a terminal coding agent that remembers</title>
+<meta name="description" content="Mnemo is an open-source terminal coding agent with a memory that learns your projects, several agents in one window, and a pixel interface. Bring your own model.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0E0B16">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --ground: #0E0B16; --panel: #16111F; --rule: #2B2238;
+    --text: #EDE4D3; --dim: #A398AD; --faint: #6B6178;
+    --magenta: #FF5C8A; --cyan: #3DDBD9; --amber: #FFB547; --violet: #9D7BFF; --green: #7BE07B;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; scroll-behavior: smooth; }
+  body { margin: 0; background: var(--ground); color: var(--text); font: 17px/1.6 var(--sans); }
+  a { color: var(--cyan); text-underline-offset: 3px; }
+  a:hover { color: var(--text); }
+  :focus-visible { outline: 2px solid var(--magenta); outline-offset: 3px; border-radius: 3px; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+  header.top { display: flex; align-items: center; gap: 18px; padding: 18px 0; font-family: var(--mono); font-size: 14px; }
+  header.top .brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-weight: 700; }
+  header.top .brand img { width: 24px; height: 24px; image-rendering: pixelated; }
+  header.top nav { margin-left: auto; display: flex; gap: 18px; flex-wrap: wrap; }
+  header.top nav a { color: var(--dim); text-decoration: none; }
+  header.top nav a:hover { color: var(--text); }
+
+  .hero { display: grid; grid-template-columns: 1fr 220px; gap: 40px; align-items: center; padding: 48px 0 24px; }
+  .hero img.wordmark { width: min(100%, 480px); height: auto; image-rendering: pixelated; display: block; }
+  .hero img.mne { width: 100%; height: auto; image-rendering: pixelated; }
+  .hero p.lead { font-size: 22px; line-height: 1.4; margin: 22px 0 0; max-width: 34ch; }
+  .hero p.lead em { color: var(--amber); font-style: normal; }
+  .tag { display: inline-block; font: 13px var(--mono); color: var(--amber); border: 1px solid var(--rule); background: var(--panel); border-radius: 999px; padding: 2px 12px; margin-bottom: 14px; }
+
+  .install { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 18px; margin: 28px 0 0; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; font: 13px var(--mono); }
+  .tabs button { background: var(--rule); color: var(--dim); border: 0; border-radius: 6px; padding: 5px 12px; cursor: pointer; font: inherit; }
+  .tabs button[aria-selected="true"] { background: var(--magenta); color: var(--ground); font-weight: 700; }
+  .cmd { display: flex; align-items: center; gap: 10px; background: var(--ground); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; }
+  .cmd code { font: 15px/1.5 var(--mono); color: var(--text); overflow-x: auto; white-space: nowrap; flex: 1; }
+  .cmd code::before { content: "$ "; color: var(--magenta); }
+  .cmd.ps code::before { content: "PS> "; }
+  .cmd button { font: 13px var(--mono); background: transparent; color: var(--cyan); border: 1px solid var(--rule); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  .cmd button:hover { border-color: var(--cyan); }
+  .note { font-size: 14px; color: var(--dim); margin: 12px 0 0; }
+  .note code { font-family: var(--mono); color: var(--text); }
+  .js .panel[hidden] { display: none; }
+
+  section { padding: 44px 0 8px; }
+  h2 { font: 700 13px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--magenta); margin: 0 0 14px; }
+  h3 { font-size: 20px; margin: 0 0 6px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 18px; }
+  .card p { margin: 0; color: var(--dim); font-size: 16px; }
+  .card .glyph { font: 22px var(--mono); color: var(--cyan); display: block; margin-bottom: 8px; }
+  .card:nth-child(2) .glyph { color: var(--amber); } .card:nth-child(3) .glyph { color: var(--magenta); } .card:nth-child(4) .glyph { color: var(--violet); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 15px; margin: 6px 0 12px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--rule); }
+  th { color: var(--dim); font: 600 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+  td.n { font-family: var(--mono); white-space: nowrap; }
+  td.good { color: var(--green); }
+  .fine { font-size: 14px; color: var(--dim); max-width: 74ch; }
+
+  figure { margin: 0; }
+  figure img { width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--rule); display: block; background: var(--ground); }
+  figcaption { font-size: 14px; color: var(--dim); margin-top: 8px; }
+  .shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px; }
+
+  footer { margin-top: 56px; padding: 26px 0 48px; border-top: 1px solid var(--rule); font: 14px var(--mono); color: var(--dim); display: flex; gap: 22px; flex-wrap: wrap; }
+  footer a { color: var(--dim); } footer a:hover { color: var(--text); }
+
+  @media (max-width: 720px) {
+    body { font-size: 16px; }
+    .hero { grid-template-columns: 1fr; padding-top: 24px; }
+    .hero img.mne { width: 140px; order: -1; }
+    .hero p.lead { font-size: 19px; }
+    .shots { grid-template-columns: 1fr; }
+    header.top nav { margin-left: 0; width: 100%; }
+    th, td { padding: 8px 6px; font-size: 14px; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="./"><img src="favicon.svg" alt="" width="24" height="24">mnemo</a>
+    <nav aria-label="Primary">
+      <a href="#install">install</a>
+      <a href="#measured">what we measured</a>
+      <a href="#safety">safety</a>
+      <a href="https://github.com/AtmanMishra/mnemo">github</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="hero">
+      <div>
+        <span class="tag">pre-alpha · open source · Apache-2.0</span>
+        <h1 style="margin:0"><img class="wordmark" src="wordmark.svg" alt="MNEMO" width="480" height="66"></h1>
+        <p class="lead">A terminal coding agent with a memory that <em>learns your projects</em>. Several agents in one window. Bring your own model.</p>
+      </div>
+      <img class="mne" src="mne.svg" alt="Mne, the pixel elephant: elephants never forget" width="220" height="220">
+    </div>
+
+    <div class="install" id="install">
+      <div class="tabs" role="tablist" aria-label="Operating system">
+        <button role="tab" id="tab-sh" aria-selected="true" aria-controls="panel-sh">macOS / Linux</button>
+        <button role="tab" id="tab-ps" aria-selected="false" aria-controls="panel-ps">Windows</button>
+      </div>
+      <div class="panel" id="panel-sh" role="tabpanel" aria-labelledby="tab-sh">
+        <div class="cmd"><code id="cmd-sh" data-script="install.sh">curl -fsSL https://github.com/AtmanMishra/mnemo/releases/latest/download/install.sh | sh</code><button type="button" data-copy="cmd-sh">copy</button></div>
+      </div>
+      <div class="panel" id="panel-ps" role="tabpanel" aria-labelledby="tab-ps">
+        <div class="cmd ps"><code id="cmd-ps" data-script="install.ps1">irm https://github.com/AtmanMishra/mnemo/releases/latest/download/install.ps1 | iex</code><button type="button" data-copy="cmd-ps">copy</button></div>
+      </div>
+      <p class="note">No Bun, Node or Rust needed. The installer checks the download's SHA-256 before installing, never touches your memory or settings, and upgrades in place when you run it again. <a id="read-script" href="install.sh">Read the script first.</a></p>
+      <p class="note">Then: <code>mnemo doctor</code> to see what it found, <code>mnemo --demo</code> for a scripted session that needs no API key, and <code>mnemo</code> to start. Remove it with <code>… | sh -s -- --uninstall</code> (Windows: set <code>$env:MNEMO_UNINSTALL=1</code> first).</p>
+    </div>
+
+    <section aria-labelledby="what">
+      <h2 id="what">What it is</h2>
+      <div class="grid">
+        <div class="card"><span class="glyph">◈</span><h3>It remembers</h3><p>After each run Mnemo writes down what it learned about the project and about you, recalls it next session, and keeps the fix when something failed. Memory is local, and what it holds is yours to read (<code>/memory</code>) and delete (<code>/forget</code>).</p></div>
+        <div class="card"><span class="glyph">◇</span><h3>Memory is detachable</h3><p>One command prints the hooks and MCP entry that attach the same memory to Claude Code or Codex: <code>mnemo memory setup claude-code</code>. What one agent learns, the others recall.</p></div>
+        <div class="card"><span class="glyph">▣</span><h3>Many agents, one window</h3><p>A hub of every agent and what it is doing, split view for up to four, a project switcher, and a toast when one you are not watching finishes or needs you.</p></div>
+        <div class="card"><span class="glyph">▞</span><h3>Pixels, on purpose</h3><p>Mne the elephant reacts to the work; diffs and test runs are drawn as pixels; the memory map shows what it holds. Three themes: Night, Game Boy, Paper.</p></div>
+      </div>
+    </section>
+
+    <section aria-labelledby="shots">
+      <h2 id="shots">The interface</h2>
+      <div class="shots">
+        <figure><img src="img/hub.png" alt="The hub: a card per agent with its status, its last prompt and a pixel per turn" loading="lazy"><figcaption>The hub: every agent at a glance. <code>ctrl+g</code></figcaption></figure>
+        <figure><img src="img/split.png" alt="Three agents side by side in a split view" loading="lazy"><figcaption>Split view: up to four agents side by side. <code>ctrl+s</code></figcaption></figure>
+        <figure><img src="img/memory-map.png" alt="The memory map: the project in the middle, its facts, pitfalls and sessions around it" loading="lazy"><figcaption>The memory map: what it knows about this project.</figcaption></figure>
+        <figure><img src="img/best-of.png" alt="Best-of-three as a race of lanes, the winner in green, then the exit card with Mne waving" loading="lazy"><figcaption><code>/bestof</code>: three attempts race, the smallest that passes the check wins.</figcaption></figure>
+      </div>
+    </section>
+
+    <section aria-labelledby="measured">
+      <h2 id="measured">What we measured</h2>
+      <p class="fine">All on a small, cheap model (DeepSeek v4.1 Flash), through the same agent loop with memory on and off. Small samples: read the direction, not the decimals. The raw results and what went wrong along the way are in <a href="https://github.com/AtmanMishra/mnemo/tree/main/research">research/</a>.</p>
+      <table>
+        <thead><tr><th>Test</th><th>No memory</th><th>With memory</th></tr></thead>
+        <tbody>
+          <tr><td>Six tasks in one repo, with rules the code does not reveal (3 runs)</td><td class="n">87%</td><td class="n good">100%</td></tr>
+          <tr><td>Two repos whose rules conflict (2 runs)</td><td class="n">82%</td><td class="n good">99%</td></tr>
+          <tr><td>Terminal-Bench subset: 10 easy/medium tasks, one attempt each</td><td class="n">10 / 10</td><td class="n">10 / 10</td></tr>
+        </tbody>
+      </table>
+      <p class="fine">The last row is the honest one: unrelated one-off tasks in a fresh container give memory nothing to remember, and it makes no difference there (about $0.008 a task either way). It is a subset on our own machine, not comparable to the public leaderboard. The first two are where memory is supposed to pay off. Against a simpler, global memory in the style of Hermes Agent, Mnemo matched it at one or two repos and was ahead where it keeps projects apart (a command learned in one project was offered in another) and picks up unfinished work. The comparison is written up in <a href="https://github.com/AtmanMishra/mnemo/blob/main/research/hermes-comparison.md">research/hermes-comparison.md</a>.</p>
+    </section>
+
+    <section aria-labelledby="safety">
+      <h2 id="safety">Before you run it</h2>
+      <p>Mnemo is a coding agent: it reads your files, edits them and runs shell commands as you. By default it asks before every edit and command; <code>yolo</code> and headless <code>-p</code> ask for nothing, so use those in a container or a throwaway checkout. The permission gate filters what runs; it is not a sandbox.</p>
+      <p>Your prompts and the files the model reads go to the provider you chose, and nothing else leaves your machine: there is no telemetry and no update check (we measured it). Commands the agent runs inherit your environment, provider keys included, which a prompt injection could try to read; <a href="https://github.com/AtmanMishra/mnemo/blob/main/SECURITY.md">SECURITY.md</a> says what to do about that today. It is pre-alpha software: expect rough edges and <a href="https://github.com/AtmanMishra/mnemo/issues">tell us about them</a>.</p>
+    </section>
+  </main>
+
+  <footer>
+    <span>Apache-2.0</span>
+    <a href="https://github.com/AtmanMishra/mnemo">source</a>
+    <a href="https://github.com/AtmanMishra/mnemo/releases">releases</a>
+    <a href="https://github.com/AtmanMishra/mnemo/blob/main/SECURITY.md">security</a>
+    <a href="https://github.com/AtmanMishra/mnemo/blob/main/docs/ROADMAP.md">roadmap</a>
+    <a href="https://github.com/AtmanMishra/mnemo/blob/main/CONTRIBUTING.md">contribute</a>
+  </footer>
+</div>
+
+<script>
+(function () {
+  document.documentElement.classList.add("js");
+  // The one-liner names the address this page is served from, so it is right on
+  // any domain; opened as a file, or if anything is odd, the GitHub URL stays.
+  var served = /^https?:$/.test(location.protocol) && location.hostname !== "localhost" ? location.origin : "";
+  document.querySelectorAll("code[data-script]").forEach(function (el) {
+    var name = el.getAttribute("data-script");
+    if (served) el.textContent = el.textContent.replace(/https:\/\/\S+/, served + "/" + name);
+  });
+  var read = document.getElementById("read-script");
+  if (read && served) read.href = served + "/install.sh";
+
+  var tabs = [["tab-sh", "panel-sh"], ["tab-ps", "panel-ps"]];
+  function show(id) {
+    tabs.forEach(function (t) {
+      var on = t[0] === id;
+      document.getElementById(t[0]).setAttribute("aria-selected", on ? "true" : "false");
+      document.getElementById(t[1]).hidden = !on;
+    });
+  }
+  tabs.forEach(function (t) { document.getElementById(t[0]).addEventListener("click", function () { show(t[0]); }); });
+  show(/win/i.test(navigator.platform || navigator.userAgent) ? "tab-ps" : "tab-sh");
+
+  document.querySelectorAll("button[data-copy]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var text = document.getElementById(b.getAttribute("data-copy")).textContent;
+      var done = function () { b.textContent = "copied"; setTimeout(function () { b.textContent = "copy"; }, 1500); };
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, function () {});
+    });
+  });
+})();
+</script>
+</body>
+</html>
