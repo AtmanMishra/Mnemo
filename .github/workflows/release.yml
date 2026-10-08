@@ -1,28 +1,36 @@
 name: release
 
-# A tag is the trigger: v0.1.0, v0.2.0-rc.1, … The tag is cut from main,
-# which the ci workflow has already tested; this workflow produces and
-# publishes the artifacts. Runnable by hand with an existing tag, which is how
-# a build is dry-run before anyone commits to a release.
+# A tag is the trigger: v0.1.0, v0.2.0-rc.1, … Cut it from main with
+# scripts/release.sh (docs/RELEASING.md), which bumps the versions and tags.
 #
-# What ships, per platform: one archive holding `mnemo` (Bun-compiled, no Bun
-# or Node needed) and `memsrv` (the Rust memory sidecar), beside each other —
-# the place mnemo looks for its sidecar first. Plus SHA256SUMS, and the two
-# installers, so `…/releases/latest/download/install.sh` always matches.
+# Run by hand (Actions → release → Run workflow) it is a DRY RUN: all five
+# platforms are built, smoke-tested and attested, the archives are kept as the
+# run's artifacts, and nothing is published. Set `tag` and `publish` to publish
+# a tag that already exists.
+#
+# What ships, per platform: one archive holding `mnemo` (Bun-compiled, no Bun or
+# Node needed) and `memsrv` (the Rust memory sidecar), side by side — the place
+# mnemo looks for its sidecar first. Plus SHA256SUMS, the two installers, and a
+# Homebrew formula and a Scoop manifest generated from those checksums.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "existing tag to release, e.g. v0.1.0"
-        required: true
+        description: "existing tag to build, e.g. v0.1.0 (empty: build this branch, dry run)"
+        required: false
+      publish:
+        description: "publish a GitHub release for `tag` (it must be on main)"
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 env:
-  TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
+  # Empty on a dry run.
+  TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag || '' }}
 
 jobs:
   build:
@@ -34,31 +42,42 @@ jobs:
           - { platform: linux-x64, os: ubuntu-22.04, bun: bun-linux-x64, rust: x86_64-unknown-linux-gnu, ext: "" }
           - { platform: linux-arm64, os: ubuntu-22.04-arm, bun: bun-linux-arm64, rust: aarch64-unknown-linux-gnu, ext: "" }
           - { platform: darwin-arm64, os: macos-14, bun: bun-darwin-arm64, rust: aarch64-apple-darwin, ext: "" }
-          - { platform: darwin-x64, os: macos-13, bun: bun-darwin-x64, rust: x86_64-apple-darwin, ext: "" }
+          # Native Intel runner: the binary is built and smoke-tested on the CPU it ships for.
+          - { platform: darwin-x64, os: macos-15-intel, bun: bun-darwin-x64, rust: x86_64-apple-darwin, ext: "" }
           - { platform: windows-x64, os: windows-latest, bun: bun-windows-x64, rust: x86_64-pc-windows-msvc, ext: ".exe" }
     name: build (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write # build provenance
+      attestations: write
     steps:
       # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ inputs.tag || github.ref }}
       # oven-sh/setup-bun v2.2.0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: "1.4.2"
 
       # The version a binary reports is package.json's: the tag must agree.
-      - name: the tag matches the version
+      - name: the tag matches the versions
+        if: ${{ env.TAG != '' }}
         shell: bash
         run: |
-          v=$(node -p "require('./app/package.json').version" 2>/dev/null || bun -e "console.log(require('./app/package.json').version)")
-          [ "v$v" = "${TAG%%-*}" ] || [ "v$v" = "$TAG" ] || { echo "::error::tag $TAG but app/package.json says $v"; exit 1; }
+          want="${TAG#v}"; want="${want%%-*}"
+          for f in app/package.json packages/memory/package.json; do
+            v=$(bun -e "console.log(require('./$f').version)")
+            [ "${v%%-*}" = "$want" ] || { echo "::error::tag $TAG but $f says $v"; exit 1; }
+          done
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' memory-layer/Cargo.toml | head -1)
+          [ "${v%%-*}" = "$want" ] || { echo "::error::tag $TAG but memory-layer/Cargo.toml says $v"; exit 1; }
 
       - name: memsrv
         shell: bash
         working-directory: memory-layer
-        run: cargo build --release --locked --bin memsrv --target ${{ matrix.rust }} || cargo build --release --bin memsrv --target ${{ matrix.rust }}
+        run: cargo build --release --locked --bin memsrv --target ${{ matrix.rust }}
 
       - name: mnemo
         shell: bash
@@ -93,33 +112,58 @@ jobs:
           grep -q "✓ memory" doctor.txt || { echo "::error::mnemo did not find memsrv beside it"; exit 1; }
           stage/mnemo${{ matrix.ext }} --demo --dump | grep -q "retries"
 
-      # Pinned by major version, not a commit: pin to a reviewed SHA before the first release.
-      - uses: actions/upload-artifact@v4
+      # Private repositories need an Enterprise plan for attestations; public ones do not.
+      # actions/attest-build-provenance v4.2.2
+      - name: attest the archive
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: out/*
+
+      # actions/upload-artifact v4.6.2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: mnemo-${{ matrix.platform }}
           path: out/*
 
   publish:
     needs: build
+    # Only a tag publishes; a dry run stops after the build.
+    if: ${{ github.ref_type == 'tag' || (inputs.publish && inputs.tag != '') }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ env.TAG }}
-      # Pinned by major version, not a commit: pin to a reviewed SHA before the first release.
-      - uses: actions/download-artifact@v4
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      # oven-sh/setup-bun v2.2.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: "1.4.2"
+
+      # A release is cut from main, which the ci workflow has already tested.
+      - name: the tag is on main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$TAG" origin/main || { echo "::error::$TAG is not on main: merge first, then tag"; exit 1; }
+
+      # actions/download-artifact v4.3.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: dist
           merge-multiple: true
-      - name: checksums and installers
+
+      - name: checksums, installers and package manifests
         run: |
           set -euo pipefail
           cp app/scripts/get.sh dist/install.sh
           cp app/scripts/get.ps1 dist/install.ps1
-          cd dist
-          sha256sum mnemo-* > SHA256SUMS
-          cat SHA256SUMS
+          (cd dist && sha256sum mnemo-* > SHA256SUMS && cat SHA256SUMS)
+          bun app/scripts/manifests.ts "$TAG" dist
+
       # No third-party release action: the runner has gh.
       - name: publish
         env:
@@ -128,4 +172,28 @@ jobs:
           set -euo pipefail
           prerelease=""
           case "$TAG" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "$TAG" dist/* --title "Mnemo $TAG" --generate-notes $prerelease || gh release upload "$TAG" dist/* --clobber
+          notes="--generate-notes"
+          [ -f "docs/releases/$TAG.md" ] && notes="--notes-file docs/releases/$TAG.md"
+          gh release create "$TAG" dist/* --title "Mnemo $TAG" $notes $prerelease || gh release upload "$TAG" dist/* --clobber
+
+      # Optional: keep a Homebrew tap and a Scoop bucket current. Set the
+      # TAP_TOKEN secret (a fine-grained token with contents:write on those two
+      # repos) and the repos exist; otherwise this step is skipped. A failure
+      # here never fails the release: the manifests are attached to it anyway.
+      - name: update the Homebrew tap and Scoop bucket
+        if: ${{ !contains(env.TAG, '-') }}
+        continue-on-error: true
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          [ -n "$TAP_TOKEN" ] || { echo "TAP_TOKEN not set: skipping"; exit 0; }
+          owner="${GITHUB_REPOSITORY_OWNER}"
+          push() { # repo, source file, path in repo
+            git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/${owner}/$1.git" "tmp-$1"
+            mkdir -p "tmp-$1/$(dirname "$3")" && cp "$2" "tmp-$1/$3"
+            git -C "tmp-$1" -c user.name="mnemo release" -c user.email="actions@users.noreply.github.com" add -A
+            git -C "tmp-$1" -c user.name="mnemo release" -c user.email="actions@users.noreply.github.com" commit -m "mnemo $TAG" || return 0
+            git -C "tmp-$1" push
+          }
+          push homebrew-mnemo dist/mnemo.rb Formula/mnemo.rb
+          push scoop-mnemo dist/mnemo.json bucket/mnemo.json
