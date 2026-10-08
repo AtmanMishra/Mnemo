@@ -7,7 +7,7 @@ import type { Block } from "../store.ts";
 import { color, glyph } from "../theme.ts";
 import { formatDuration, toolBody, toolSummary, toolTitle } from "../format.ts";
 import { Markdown } from "./Markdown.tsx";
-import { Spinner } from "./Spinner.tsx";
+import { Pulse } from "./Pulse.tsx";
 import { Welcome, type WelcomeInfo } from "./Welcome.tsx";
 
 export interface BlockProps {
@@ -40,7 +40,7 @@ function ToolView({ block, cwd, expanded }: { block: Extract<Block, { kind: "too
     ) : block.status === "error" ? (
       <Text color={color.error}>{glyph.fail}</Text>
     ) : (
-      <Spinner />
+      <Pulse mode="tool" width={2} />
     );
   const summary = toolSummary(block);
   return (
@@ -91,8 +91,11 @@ function ThinkingView({ block, expanded }: { block: Extract<Block, { kind: "thin
     const last = block.text.trim().split("\n").at(-1) ?? "";
     return (
       <Gutter mark={glyph.thinking} tint={color.accent}>
-        <Text color={color.muted} italic>
-          Thinking…
+        <Text>
+          <Text color={color.muted} italic>
+            Thinking{" "}
+          </Text>
+          <Pulse mode="think" width={10} />
         </Text>
         {last ? (
           <Text color={color.subtle} italic wrap="truncate-end">

@@ -178,9 +178,6 @@ export const glyph = {
 /** The density ramp, lightest to densest: shading, motion, progress. */
 export const dither = [" ", "░", "▒", "▓", "█"] as const;
 
-/** A pixel-ish spinner: a dot walking a 2x2 block. */
-export const spinnerFrames = ["▖", "▘", "▝", "▗"];
-
 /** What the working line says, rotated while a turn runs. Memory is the brand. */
 export const workingVerbs = [
   "Recalling",

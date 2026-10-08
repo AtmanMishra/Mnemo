@@ -1,5 +1,6 @@
 /**
- * The line that says the agent is busy: spinner, a shimmering verb, how long,
+ * The line that says the agent is busy: a pulse of pixels (scanning while a
+ * tool runs, flickering neurons while it thinks), a shimmering verb, how long,
  * how much it has written, and how to stop it. Then whatever is queued.
  */
 import React from "react";
@@ -8,7 +9,8 @@ import type { Working as WorkingState } from "../store.ts";
 import { color, glyph, mix, workingVerbs } from "../theme.ts";
 import { formatDuration, formatTokens } from "../format.ts";
 import { MotionContext } from "./motion.ts";
-import { Spinner } from "./Spinner.tsx";
+import { Pulse, type PulseMode } from "./Pulse.tsx";
+import { MneFace } from "./MneBadge.tsx";
 
 function Shimmer({ text, frame, motion }: { text: string; frame: number; motion: boolean }): React.ReactElement {
   if (!motion) return <Text color={color.accent}>{text}</Text>;
@@ -32,9 +34,11 @@ export function WorkingLine({
   working,
   message,
   queue,
+  mode = "think",
   now = Date.now,
 }: {
   working: WorkingState | null;
+  mode?: PulseMode;
   message?: string;
   queue: readonly string[];
   now?: () => number;
@@ -48,16 +52,21 @@ export function WorkingLine({
     <Box flexDirection="column" marginTop={1}>
       {working ? (
         <Box flexDirection="row">
-          <Box width={2}>
-            <Spinner />
+          <Box width={11} flexShrink={0}>
+            <MneFace mood={mode === "tool" ? "tool" : mode === "wait" ? "waiting" : "thinking"} />
           </Box>
-          <Shimmer text={verb} frame={frame} motion={motion} />
-          <Text color={color.muted}>
-            {" "}
-            ({formatDuration(elapsed)}
-            {working.tokens > 0 ? ` · ↓ ${formatTokens(working.tokens)} tokens` : ""} ·{" "}
-            <Text color={color.accent}>esc</Text> to interrupt)
-          </Text>
+          <Box flexDirection="column">
+            <Box flexDirection="row">
+              <Box width={7}>
+                <Pulse mode={mode} width={6} />
+              </Box>
+              <Shimmer text={verb} frame={frame} motion={motion} />
+            </Box>
+            <Text color={color.muted}>
+              {formatDuration(elapsed)}
+              {working.tokens > 0 ? ` · ↓ ${formatTokens(working.tokens)} tokens` : ""} · <Text color={color.accent}>esc</Text> to interrupt
+            </Text>
+          </Box>
         </Box>
       ) : null}
       {queue.map((q, i) => (

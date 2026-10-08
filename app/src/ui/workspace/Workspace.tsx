@@ -21,6 +21,7 @@ import { Composer } from "../components/Composer.tsx";
 import { DialogView, InputActive } from "../components/Dialogs.tsx";
 import { MotionContext } from "../components/motion.ts";
 import { WorkingLine } from "../components/Working.tsx";
+import { MneBadge, type MneMood } from "../components/MneBadge.tsx";
 import { gradientAt, palette } from "../theme.ts";
 import { fileTree, PANES, type Item, type Pane, type Preview, type WorkspaceSource } from "./model.ts";
 import { Bar, PreviewView, Viewport } from "./Main.tsx";
@@ -34,38 +35,47 @@ const SIDEBAR_MIN_COLUMNS = 84;
 const SIDEBAR_WIDTH = 34;
 const TRANSCRIPT_BLOCKS = 80;
 
-function Header({ controller, columns, brand }: { controller: Controller; columns: number; brand: boolean }): React.ReactElement {
+function Header({ controller, columns, brand, mood }: { controller: Controller; columns: number; brand: boolean; mood: MneMood }): React.ReactElement {
   const chrome = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const f = chrome.footer;
   const repo = f.cwd.split("/").filter(Boolean).at(-1) ?? f.cwd;
-  const right = `◆ ${f.model}  ${f.memory ? `◈ ${f.memory.nodes}` : "◈ off"}${f.cost > 0 ? `  $${f.cost.toFixed(2)}` : ""} `;
-  const left = ` mnemo  ${repo}${f.branch ? ` ⎇ ${f.branch}` : ""}`;
-  const gap = Math.max(1, columns - left.length - right.length - 3 + (brand ? 0 : 9));
+  // The right side gives way first: the model name is cut, then the branch goes.
+  const narrow = columns < 70;
   return (
-    <Text wrap="truncate">
-      {brand ? (
-        <>
-          <Text color={palette.magenta}>▞</Text>
-          <Text color={palette.cyan}>▚</Text>
-          <Text bold>
-            {[..." mnemo"].map((ch, i) => (
-              <Text key={i} color={gradientAt(i / 5)}>
-                {ch}
+    <Box width={columns}>
+      <Box flexShrink={0}>
+        <Text>
+          {brand ? (
+            <>
+              <Text color={palette.magenta}>▞</Text>
+              <Text color={palette.cyan}>▚</Text>
+              <Text bold>
+                {[..." mnemo"].map((ch, i) => (
+                  <Text key={i} color={gradientAt(i / 5)}>
+                    {ch}
+                  </Text>
+                ))}
               </Text>
-            ))}
-          </Text>
-          <Text color={palette.text}>{`  ${repo}`}</Text>
-        </>
-      ) : (
-        <Text bold color={palette.text}>{` ${repo}`}</Text>
-      )}
-      {f.branch ? <Text color={palette.dim}>{` ⎇ ${f.branch}`}</Text> : null}
-      <Text>{" ".repeat(gap)}</Text>
-      <Text color={palette.magenta}>◆ </Text>
-      <Text color={palette.text}>{f.model}</Text>
-      <Text color={f.memory ? palette.amber : palette.faint}>{`  ${f.memory ? `◈ ${f.memory.nodes}` : "◈ off"}`}</Text>
-      {f.cost > 0 ? <Text color={palette.dim}>{`  $${f.cost.toFixed(2)}`}</Text> : null}
-    </Text>
+              <Text color={palette.text}>{`  ${repo}`}</Text>
+            </>
+          ) : (
+            <Text bold color={palette.text}>{` ${repo}`}</Text>
+          )}
+          <Text> </Text>
+          <MneBadge mood={mood} activity={chrome.activity} />
+        </Text>
+      </Box>
+      <Box flexGrow={1} flexShrink={1} justifyContent="flex-end" overflow="hidden">
+        <Text wrap="truncate-start">
+          {f.branch && !narrow ? <Text color={palette.dim}>{`⎇ ${f.branch}  `}</Text> : null}
+          <Text color={palette.magenta}>◆ </Text>
+          <Text color={palette.text}>{f.model}</Text>
+          <Text color={f.memory ? palette.amber : palette.faint}>{`  ${f.memory ? `◈ ${f.memory.nodes}` : "◈ off"}`}</Text>
+          {f.cost > 0 ? <Text color={palette.dim}>{`  $${f.cost.toFixed(2)}`}</Text> : null}
+          <Text> </Text>
+        </Text>
+      </Box>
+    </Box>
   );
 }
 
@@ -224,6 +234,8 @@ export function Workspace({ controller, source, motion, initial, width, height, 
     { isActive: active && !dialog },
   );
 
+  const runningTool = snap.live.some((b) => b.kind === "tool" && b.status === "running");
+  const mood: MneMood = dialog ? "waiting" : snap.working ? (runningTool ? "tool" : "thinking") : "idle";
   const blocks = snap.committed.filter((b) => b.kind !== "welcome").slice(-TRANSCRIPT_BLOCKS);
   const render = (b: (typeof snap.committed)[number]) => <BlockView key={b.id} block={b} cwd={cwd} expanded={chrome.expanded} />;
   const empty = blocks.length === 0 && snap.live.length === 0 && !snap.working;
@@ -231,7 +243,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   return (
     <MotionContext.Provider value={motion}>
       <Box flexDirection="column" width={columns} height={rows}>
-        <Header controller={controller} columns={columns} brand={brand} />
+        <Header controller={controller} columns={columns} brand={brand} mood={mood} />
         <Box ref={body} flexDirection="row" flexGrow={1} flexShrink={1} overflow="hidden">
           {showSidebar ? (
             <Sidebar pane={pane} items={items} selected={sel} focused={focus === "sidebar"} width={SIDEBAR_WIDTH} height={bodyHeight} />
@@ -255,7 +267,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
                   <Viewport height={mainHeight} back={back} onMeasure={(h) => (contentHeight.current = h)}>
                     {blocks.map(render)}
                     {snap.live.map(render)}
-                    {chrome.workingVisible ? <WorkingLine working={snap.working} message={dialog ? "Waiting for you…" : chrome.workingMessage} queue={snap.queue} /> : null}
+                    {chrome.workingVisible ? <WorkingLine working={snap.working} message={dialog ? "Waiting for you…" : chrome.workingMessage} queue={snap.queue} mode={dialog ? "wait" : runningTool ? "tool" : "think"} /> : null}
                   </Viewport>
                 )}
               </>

@@ -193,11 +193,14 @@ function mergeRow(base: string, over: string): string {
 const SPARK = [".......m.M.m......", "........MMM......."];
 
 /**
- * Mne at icon size: 7×4 pixels, two cells tall — ears, eyes, trunk. Tinted by
+ * Mne at icon size: 9×4 pixels, two cells tall — ears, eyes, trunk. Tinted by
  * what the agent is doing (the hide takes the state's colour).
  */
-export function mneMini(tint: string): Grid {
-  return sprite(["g.GGG.g", "gGEGEGg", ".gGGGg.", "...G..."], { G: tint, g: mix(tint, palette.ground, 0.45), E: palette.ground });
+export function mneMini(tint: string, look: "ahead" | "left" | "right" | "down" | "blink" = "ahead"): Grid {
+  // 9×4: the head in the middle, an ear as a 2×2 block on each side, the trunk below.
+  const eyes = { ahead: "ggGEGEGgg", left: "ggEGEGGgg", right: "ggGGEGEgg", down: "ggGGGGGgg", blink: "ggGGGGGgg" }[look];
+  const chin = look === "down" ? "gg.EGE.gg" : "gg.GGG.gg";
+  return sprite(["..GGGGG..", eyes, chin, "....G...."], { G: tint, g: mix(tint, palette.ground, 0.45), E: palette.ground });
 }
 
 export const mne = {

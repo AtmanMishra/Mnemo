@@ -15,7 +15,8 @@ import { Transcript } from "../ui/store.ts";
 import { Dialogs, type Choice } from "./dialogs.ts";
 import { createUiContext } from "./ui-context.ts";
 import { CYCLE, type Host, type MemoryNote, type Mode } from "../extensions/host.ts";
-import { projectIdentity } from "@mnemo/memory";
+import { projectIdentity, VERIFY } from "@mnemo/memory";
+import { testCounts, type TestCounts } from "../ui/activity.ts";
 
 export interface CommandInfo {
   name: string;
@@ -35,8 +36,27 @@ export interface Footer {
   memory: { nodes: number } | null;
 }
 
+/**
+ * Something worth showing as it happens, beyond the transcript: memory
+ * recalled or learned, a skill saved, a run escalated, a check passed or
+ * failed. The interface reacts to the latest one (Mne's pose, a toast).
+ */
+export interface Activity {
+  seq: number;
+  kind: "recall" | "learned" | "skill" | "escalated" | "check";
+  text: string;
+  /** For a check: whether it passed. */
+  ok?: boolean;
+  /** Items recalled or learned; for a check, the test counts when the output had them. */
+  count?: number;
+  tests?: TestCounts;
+  at: number;
+}
+
 export interface Chrome {
   footer: Footer;
+  /** The latest activity, if any. */
+  activity?: Activity;
   statuses: readonly [string, string][];
   workingMessage?: string;
   workingVisible: boolean;
@@ -96,6 +116,12 @@ class Cancelled extends Error {
   constructor() {
     super("cancelled");
   }
+}
+
+/** The text of a tool result (pi's `{ content: [{ type: "text", text }] }`), or "". */
+function resultText(result: unknown): string {
+  const content = (result as { content?: { type?: string; text?: string }[] } | undefined)?.content;
+  return Array.isArray(content) ? content.map((c) => (c.type === "text" ? (c.text ?? "") : "")).join("\n") : typeof result === "string" ? result : "";
 }
 
 function errorText(error: unknown): string {
@@ -230,8 +256,20 @@ export class Controller {
       shutdownHandler: () => this.quit(),
       onError: (e) => this.transcript.notice(`extension ${e.extensionPath}: ${e.error}`, "error"),
     });
+    const commands = new Map<string, string>();
     this.unsubscribe = session.subscribe((event) => {
       this.transcript.apply(event);
+      if (event.type === "tool_execution_start") {
+        const command = (event.args as { command?: unknown } | undefined)?.command;
+        if (event.toolName === "bash" && typeof command === "string" && VERIFY.test(command)) commands.set(event.toolCallId, command);
+      }
+      if (event.type === "tool_execution_end" && commands.has(event.toolCallId)) {
+        const command = commands.get(event.toolCallId)!;
+        commands.delete(event.toolCallId);
+        const tests = testCounts(resultText(event.result));
+        const ok = !event.isError && (tests ? tests.failed === 0 : true);
+        this.emit({ kind: "check", ok, text: command, tests });
+      }
       if (
         event.type === "message_end" ||
         event.type === "agent_settled" ||
@@ -314,20 +352,29 @@ export class Controller {
     }
   }
 
+  private activitySeq = 0;
+  private emit(a: Omit<Activity, "seq" | "at">): void {
+    this.update({ activity: { ...a, seq: ++this.activitySeq, at: (this.options.now ?? Date.now)() } });
+  }
+
   private note(n: MemoryNote): void {
     switch (n.kind) {
       case "recall":
         this.transcript.memory("Recalled", n.items, { afterNextUser: true });
+        this.emit({ kind: "recall", text: n.items[0] ?? "", count: n.items.length });
         break;
       case "learned":
         this.transcript.memory(`Learned ${n.items.length === 1 ? "a fact" : `${n.items.length} facts`}`, n.items);
+        this.emit({ kind: "learned", text: n.items[0] ?? "", count: n.items.length });
         void this.refreshMemory();
         break;
       case "steer":
         this.transcript.memory(`Memory ${n.text}`);
+        if (/^escalated/.test(n.text)) this.emit({ kind: "escalated", text: n.text });
         break;
       case "skill":
         this.transcript.memory(n.text[0]!.toUpperCase() + n.text.slice(1));
+        this.emit({ kind: "skill", text: n.text });
         break;
       case "session":
         this.transcript.memory(n.text, n.items);
