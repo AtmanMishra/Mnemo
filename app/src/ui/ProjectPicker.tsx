@@ -12,7 +12,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Box, Text, useInput } from "ink";
 import { projectCandidates, type FleetSnapshot } from "../runtime/fleet.ts";
-import { palette } from "./theme.ts";
+import { palette, ground } from "./theme.ts";
 
 const tilde = (p: string) => (p.startsWith(os.homedir()) ? `~${p.slice(os.homedir().length)}` : p);
 const expand = (p: string) => (p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p);
@@ -72,7 +72,7 @@ export function ProjectPicker(p: ProjectPickerProps): React.ReactElement {
       marginLeft={Math.max(0, Math.floor((p.width - w) / 2))}
       width={w}
       flexDirection="column"
-      borderStyle="round"
+      borderStyle="round" borderBackgroundColor={ground()}
       borderColor={palette.magenta}
       backgroundColor={palette.panel}
       paddingX={1}

@@ -12,7 +12,7 @@
  *   waiting   amber, looking at you
  */
 import React, { useEffect, useState } from "react";
-import { Text, useAnimation } from "ink";
+import { Box, Text, useAnimation } from "ink";
 import type { Activity } from "../../runtime/controller.ts";
 import { mneMini } from "../pixel.ts";
 import { palette } from "../theme.ts";
@@ -73,9 +73,17 @@ export function MneBadge({ mood, activity }: { mood: MneMood; activity?: Activit
 }
 
 /** Mne at icon size, two rows, posed by mood. */
-export function MneFace({ mood }: { mood: MneMood }): React.ReactElement {
+export function MneFace({ mood, escalated = false }: { mood: MneMood; escalated?: boolean }): React.ReactElement {
   const motion = React.useContext(MotionContext);
   const { frame } = useAnimation({ interval: 140, isActive: motion });
   const look = mood === "tool" ? "down" : mood === "thinking" && motion ? (["left", "ahead", "right", "ahead"] as const)[Math.floor(frame / 5) % 4]! : frame % 30 === 29 ? "blink" : "ahead";
-  return <PixelArt grid={mneMini(moodColor(mood), look)} />;
+  const face = <PixelArt grid={mneMini(escalated ? palette.violet : moodColor(mood), look)} />;
+  if (!escalated) return face;
+  // On the stronger model: a spark above the head, flickering.
+  return (
+    <Box flexDirection="row">
+      {face}
+      <Text color={frame % 4 < 2 ? palette.amber : palette.violet}>⚡</Text>
+    </Box>
+  );
 }

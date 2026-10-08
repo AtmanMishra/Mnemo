@@ -31,10 +31,37 @@ export interface Spawned {
 /** Build one agent in `cwd`; `exit` is what its controller calls when it quits. */
 export type Spawn = (cwd: string, exit: (code?: number) => void) => Promise<Spawned>;
 
+/** What this run of the program did, across every agent: the exit card. */
+export interface FleetSummary {
+  agents: number;
+  turns: number;
+  /** Files edited or written. */
+  files: number;
+  /** Facts learned. */
+  learned: number;
+  cost: number;
+  startedAt: number;
+}
+
 export interface FleetSnapshot {
   agents: readonly Agent[];
   /** Folders opened before, most recent first. */
   recent: readonly string[];
+  summary: FleetSummary;
+}
+
+/** One agent's share of the summary, read from its transcript and footer. */
+export function agentSummary(a: Pick<Agent, "controller">): Omit<FleetSummary, "agents" | "startedAt"> {
+  const blocks = a.controller.transcript.snapshot().committed;
+  const files = new Set<string>();
+  let turns = 0;
+  let learned = 0;
+  for (const b of blocks) {
+    if (b.kind === "user") turns++;
+    if (b.kind === "tool" && (b.name === "edit" || b.name === "write") && b.status === "done") files.add(String(b.args.path ?? b.args.file_path ?? ""));
+    if (b.kind === "memory" && /^Learned/.test(b.title)) learned += b.items.length;
+  }
+  return { turns, files: files.size, learned, cost: a.controller.snapshot().footer.cost };
 }
 
 const RECENT_MAX = 20;
@@ -45,6 +72,8 @@ export class Fleet {
   private nextId = 1;
   private listeners = new Set<() => void>();
   private snap: FleetSnapshot;
+  /** What closed agents did. */
+  private done: FleetSummary;
 
   constructor(
     private readonly spawn: Spawn,
@@ -54,10 +83,12 @@ export class Fleet {
       recent?: string[];
       /** Persist the recent list (state.json). */
       saveRecent?: (recent: string[]) => void;
+      now?: () => number;
     },
   ) {
     this.recent = (o.recent ?? []).slice(0, RECENT_MAX);
-    this.snap = { agents: [], recent: this.recent };
+    this.done = { agents: 0, turns: 0, files: 0, learned: 0, cost: 0, startedAt: (o.now ?? Date.now)() };
+    this.snap = { agents: [], recent: this.recent, summary: this.done };
   }
 
   subscribe = (fn: () => void): (() => void) => {
@@ -68,7 +99,7 @@ export class Fleet {
   snapshot = (): FleetSnapshot => this.snap;
 
   private changed(): void {
-    this.snap = { agents: [...this.agents], recent: [...this.recent] };
+    this.snap = { agents: [...this.agents], recent: [...this.recent], summary: this.summary() };
     for (const fn of this.listeners) fn();
   }
 
@@ -99,11 +130,27 @@ export class Fleet {
     await this.agents.find((a) => a.id === id)?.controller.quit();
   }
 
+  /** Everything done so far: closed agents and open ones. */
+  summary(): FleetSummary {
+    const s = { ...this.done };
+    for (const a of this.agents) {
+      const x = agentSummary(a);
+      s.agents++;
+      s.turns += x.turns;
+      s.files += x.files;
+      s.learned += x.learned;
+      s.cost += x.cost;
+    }
+    return s;
+  }
+
   /** The exit callback each controller was given. */
   closed(id: number, code = 0): void {
-    const before = this.agents.length;
+    const leaving = this.agents.find((a) => a.id === id);
+    if (!leaving) return;
+    const x = agentSummary(leaving);
+    this.done = { ...this.done, agents: this.done.agents + 1, turns: this.done.turns + x.turns, files: this.done.files + x.files, learned: this.done.learned + x.learned, cost: this.done.cost + x.cost };
     this.agents = this.agents.filter((a) => a.id !== id);
-    if (this.agents.length === before) return;
     this.changed();
     if (this.agents.length === 0) this.o.onEmpty(code);
   }
@@ -130,7 +177,7 @@ export class Fleet {
  * ones first, then the siblings of the current project (other checkouts next
  * to it), each once.
  */
-export function projectCandidates(snap: FleetSnapshot, current: string | undefined): string[] {
+export function projectCandidates(snap: Pick<FleetSnapshot, "agents" | "recent">, current: string | undefined): string[] {
   const out: string[] = [];
   const add = (p: string) => {
     if (!out.includes(p) && fs.existsSync(p)) out.push(p);

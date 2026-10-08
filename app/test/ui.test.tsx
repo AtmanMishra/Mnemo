@@ -67,7 +67,7 @@ test("typing and enter sends the message and empties the box", async () => {
 test("the footer shows model, thinking, context, cost and branch", () => {
   const c = composer();
   const f = c.lastFrame()!;
-  for (const s of ["demo-model", "think:medium", "12% context", "$0.04", "main", "? for shortcuts"]) expect(f).toContain(s);
+  for (const s of ["demo-model", "think:medium", "▓░░░░░░░ 12%", "◉ $0.040", "main", "? for shortcuts"]) expect(f).toContain(s);
 });
 
 test("/ opens the command menu, filtered by name, and enter runs the highlighted one", async () => {

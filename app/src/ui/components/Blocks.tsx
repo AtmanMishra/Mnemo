@@ -76,7 +76,7 @@ function DiffStrip({ lines }: { lines: { tone?: string }[] }) {
   const changed = lines.filter((l) => l.tone === "add" || l.tone === "remove").slice(0, 48);
   if (changed.length === 0) return null;
   return (
-    <Text>
+    <Text color={color.text}>
       {"  "}
       {changed.map((l, i) => (
         <Text key={i} color={l.tone === "add" ? palette.green : palette.red}>
@@ -142,7 +142,7 @@ function ToolView({ block, cwd, expanded }: { block: Extract<Block, { kind: "too
         </Box>
         <Text wrap="truncate-end">
           <Text backgroundColor={tile.bg} color={palette.ground} bold>{` ${tile.ch} `}</Text>
-          <Text> </Text>
+          <Text color={color.text}> </Text>
           <Text bold>{name}</Text>
           {arg ? <Text color={color.muted}>({arg})</Text> : null}
           {block.durationMs !== undefined && block.durationMs >= 1000 ? (
@@ -186,7 +186,7 @@ function ThinkingView({ block, expanded }: { block: Extract<Block, { kind: "thin
     const last = block.text.trim().split("\n").at(-1) ?? "";
     return (
       <Gutter mark={glyph.thinking} tint={color.accent}>
-        <Text>
+        <Text color={color.text}>
           <Text color={color.muted} italic>
             Thinking{" "}
           </Text>
@@ -229,7 +229,7 @@ export function BlockView({ block, cwd, expanded, welcome }: BlockProps): React.
     case "assistant":
       return (
         <Gutter mark={glyph.assistant} tint={color.accent}>
-          {block.done ? <Markdown text={block.text} /> : <Text>{block.text}</Text>}
+          {block.done ? <Markdown text={block.text} /> : <Text color={color.text}>{block.text}</Text>}
         </Gutter>
       );
     case "thinking":

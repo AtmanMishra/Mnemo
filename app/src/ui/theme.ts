@@ -152,9 +152,33 @@ export function applyTheme(name: ThemeName): void {
 }
 applyTheme("night");
 
+const themeListeners = new Set<() => void>();
+/** Re-render on a theme change: `useSyncExternalStore(subscribeTheme, themeName)`. */
+export function subscribeTheme(fn: () => void): () => void {
+  themeListeners.add(fn);
+  return () => themeListeners.delete(fn);
+}
+/** Switch theme and tell everything drawn to draw again. */
+export function setTheme(name: ThemeName): void {
+  applyTheme(name);
+  for (const fn of themeListeners) fn();
+}
+
 export const themeName = (): ThemeName => current;
 /** Whether the interface paints its own background (light and non-Night themes). */
 export const themePaints = (): boolean => THEMES[current].paint;
+/** The background a painted theme gives a box's border (undefined for Night: the terminal's own). */
+export const ground = (): string | undefined => (THEMES[current].paint ? palette.ground : undefined);
+
+/**
+ * OSC 10/11: ask the terminal to use the theme's text and ground as its own
+ * defaults, so anything drawn without a colour still fits; OSC 110/111 put
+ * the terminal's back. Terminals that do not know them ignore them.
+ */
+export function terminalColors(): string {
+  return THEMES[current].paint ? `\x1b]10;${palette.text}\x07\x1b]11;${palette.ground}\x07` : "\x1b]110\x07\x1b]111\x07";
+}
+
 /** A colour drawn in Night, in the current theme. */
 export function themed(hex: string): string {
   return current === "night" ? hex : (remap.get(hex.toLowerCase()) ?? hex);

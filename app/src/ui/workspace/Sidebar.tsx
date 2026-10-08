@@ -9,7 +9,7 @@
  */
 import React from "react";
 import { Box, Text } from "ink";
-import { color, palette } from "../theme.ts";
+import { color, palette, ground } from "../theme.ts";
 import { PANES, windowFor, type Item, type Pane, type Tone } from "./model.ts";
 import { PixelArt } from "../components/PixelArt.tsx";
 import { mneMini, sprite, type Grid } from "../pixel.ts";
@@ -41,7 +41,11 @@ export const toneColor = (t: Tone | undefined): string =>
                 ? palette.red
                 : palette.text;
 
-function Tabs({ pane, focused }: { pane: Pane; focused: boolean }): React.ReactElement {
+/** The frames of a pixel dropping into the memory tab, then the count it brought. */
+const DROP = ["˙", "·", "▪", "◈"];
+
+function Tabs({ pane, focused, learned }: { pane: Pane; focused: boolean; learned?: { count: number; age: number } }): React.ReactElement {
+  const drop = learned ? DROP[Math.min(DROP.length - 1, Math.floor(learned.age / 120))] : undefined;
   return (
     <Text>
       {PANES.map((p, i) => {
@@ -49,9 +53,10 @@ function Tabs({ pane, focused }: { pane: Pane; focused: boolean }): React.ReactE
         const on = p === pane;
         return (
           <Text key={p}>
-            <Text color={palette.ground} backgroundColor={on ? (focused ? tile : palette.dim) : palette.rule} bold={on}>
-              {on ? ` ${PANE_ICON[p]} ${p.toUpperCase()} ` : ` ${PANE_ICON[p]} `}
+            <Text color={palette.ground} backgroundColor={on ? (focused ? tile : palette.dim) : p === "memory" && drop ? palette.amber : palette.rule} bold={on}>
+              {on ? ` ${PANE_ICON[p]} ${p.toUpperCase()} ` : p === "memory" && drop ? ` ${drop} ` : ` ${PANE_ICON[p]} `}
             </Text>
+            {p === "memory" && drop === "◈" && learned ? <Text color={palette.amber}>{`+${learned.count}`}</Text> : null}
             {i < PANES.length - 1 ? <Text> </Text> : null}
           </Text>
         );
@@ -138,7 +143,10 @@ export function Sidebar({
   focused,
   width,
   height,
+  learned,
 }: {
+  /** Something was just learned: the memory tab shows it arriving. */
+  learned?: { count: number; age: number };
   pane: Pane;
   items: Item[];
   selected: number;
@@ -150,8 +158,8 @@ export function Sidebar({
   const { start, end } = windowFor(items.length, selected, listHeight);
   const sel = items[selected];
   return (
-    <Box flexDirection="column" width={width} height={height} borderStyle="single" borderTop={false} borderBottom={false} borderLeft={false} borderColor={focused ? palette.magenta : palette.rule}>
-      <Tabs pane={pane} focused={focused} />
+    <Box flexDirection="column" width={width} height={height} borderStyle="single" borderBackgroundColor={ground()} borderTop={false} borderBottom={false} borderLeft={false} borderColor={focused ? palette.magenta : palette.rule}>
+      <Tabs pane={pane} focused={focused} learned={learned} />
       <Text color={palette.rule}>{"─".repeat(Math.max(0, width - 1))}</Text>
       <Box flexDirection="column" height={listHeight} overflow="hidden">
         {items.length === 0 || (items.length === 1 && items[0]!.kind === "head" && items[0]!.tone === "muted" && items[0]!.id !== "off") ? (

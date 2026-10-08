@@ -5,7 +5,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useInput, usePaste } from "ink";
 import type { CommandInfo, Footer as FooterData } from "../../runtime/controller.ts";
-import { color, glyph } from "../theme.ts";
+import { color, glyph, ground } from "../theme.ts";
 import * as ed from "../editor.ts";
 import { matchFiles, subsequence } from "../files.ts";
 import { Footer } from "./Footer.tsx";
@@ -286,11 +286,11 @@ export function Composer(props: ComposerProps): React.ReactElement {
   const start = Math.max(0, Math.min(menuIndex - MENU + 1, suggestions.length - MENU));
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Box borderStyle="round" borderColor={props.active ? color.accent : color.subtle} paddingX={1} flexDirection="column">
+      <Box borderStyle="round" borderBackgroundColor={ground()} borderColor={props.active ? color.accent : color.subtle} paddingX={1} flexDirection="column">
         {draft.text ? (
           rendered
         ) : (
-          <Text>
+          <Text color={color.text}>
             <Text color={color.accent}>{`${glyph.user} `}</Text>
             {props.active ? <Text inverse> </Text> : null}
             <Text color={color.subtle}>{placeholder}</Text>

@@ -23,8 +23,10 @@ import { Root } from "../src/ui/Root.tsx";
 import { workspaceSource } from "../src/runtime/workspace-source.ts";
 import { runMemoryCommand } from "../src/memory-cli.ts";
 import { Fleet } from "../src/runtime/fleet.ts";
-import { applyTheme, type ThemeName } from "../src/ui/theme.ts";
+import { exitLine } from "../src/ui/ExitCard.tsx";
+import { applyTheme, themePaints, type ThemeName } from "../src/ui/theme.ts";
 import { bestOf, describeBestOf } from "../src/runtime/best-of.ts";
+import { selfCommand } from "../src/runtime/self.ts";
 
 const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
 
@@ -183,8 +185,7 @@ async function runBestOf(args: Args, home: string): Promise<number> {
     console.error('mnemo: --best-of takes 2–8 and needs -p "<task>" and --check "<command that passes when the task is done>"');
     return 2;
   }
-  const exe = process.execPath;
-  const self = /bun(\.exe)?$/.test(path.basename(exe)) ? [exe, path.resolve(import.meta.dir, "mnemo.ts")] : [exe];
+  const self = selfCommand();
   const pass = [
     ...(args.mode !== "default" ? [`--${args.mode}`] : []),
     ...(args.memory ? [] : ["--no-memory"]),
@@ -291,11 +292,12 @@ async function main(): Promise<number> {
   const done = new Promise<void>((r) => (finished = r));
   const state = readState(home);
   applyTheme(state.theme ?? "night");
+  const saveTheme = (theme: ThemeName) => writeState(home, { ...readState(home), theme });
   // Every agent of this process. The program ends when the last one closes.
   const fleet = new Fleet(
     async (agentCwd, exit) => {
       const made = await makeAgent(agentCwd);
-      const c = new Controller(made.runtime, { exit, onClearScreen: clearTerminal, host: made.host });
+      const c = new Controller(made.runtime, { exit, onClearScreen: clearTerminal, host: made.host, onTheme: saveTheme });
       await c.bind();
       c.transcript.push({ kind: "welcome" });
       return { controller: c, host: made.host, source: workspaceSource(c, made.host, home) };
@@ -303,14 +305,15 @@ async function main(): Promise<number> {
     {
       onEmpty: (code) => {
         exitCode = code;
-        finished();
+        // The exit card shows for a moment before the screen goes.
+        setTimeout(finished, interactive && layout === "workspace" && args.motion ? 1400 : 0);
       },
       recent: state.recent,
       saveRecent: (recent) => writeState(home, { ...readState(home), recent }),
     },
   );
   let firstId = 0;
-  const controller = new Controller(runtime, { exit: (code) => fleet.closed(firstId, code ?? 0), onClearScreen: clearTerminal, host });
+  const controller = new Controller(runtime, { exit: (code) => fleet.closed(firstId, code ?? 0), onClearScreen: clearTerminal, host, onTheme: saveTheme });
   await controller.bind();
   controller.transcript.push({ kind: "welcome" });
   firstId = fleet.adopt(cwd, { controller, host, source: workspaceSource(controller, host, home) }).id;
@@ -367,6 +370,9 @@ async function main(): Promise<number> {
   await done;
   memory?.stop();
   instance.unmount();
+  // A painted theme changed the terminal's default colours: give them back.
+  if (interactive && themePaints()) process.stdout.write("\x1b]110\x07\x1b]111\x07");
+  if (interactive && layout === "workspace") process.stdout.write(`${exitLine(fleet.snapshot().summary)}\n`);
   await instance.waitUntilExit().catch(() => {});
   return exitCode;
 }

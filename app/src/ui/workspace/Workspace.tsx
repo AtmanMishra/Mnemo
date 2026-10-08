@@ -14,14 +14,15 @@
  * PgDn scroll the main area from anywhere.
  */
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Box, Text, useBoxMetrics, useInput, useWindowSize, type DOMElement } from "ink";
+import { Box, Text, useAnimation, useBoxMetrics, useInput, useWindowSize, type DOMElement } from "ink";
 import type { Controller } from "../../runtime/controller.ts";
 import { BlockView } from "../components/Blocks.tsx";
 import { Composer } from "../components/Composer.tsx";
 import { DialogView, InputActive } from "../components/Dialogs.tsx";
 import { MotionContext } from "../components/motion.ts";
 import { WorkingLine } from "../components/Working.tsx";
-import { MneBadge, type MneMood } from "../components/MneBadge.tsx";
+import { RaceView } from "../components/Race.tsx";
+import { MneBadge, useFresh, type MneMood } from "../components/MneBadge.tsx";
 import { gradientAt, palette } from "../theme.ts";
 import { fileTree, PANES, type Item, type Pane, type Preview, type WorkspaceSource } from "./model.ts";
 import { Bar, PreviewView, Viewport } from "./Main.tsx";
@@ -277,11 +278,16 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   );
 
   const runningTool = snap.live.some((b) => b.kind === "tool" && b.status === "running");
+  // Something learned: the memory tab animates it in for a few seconds.
+  const learnedFresh = useFresh(chrome.activity?.kind === "learned" ? chrome.activity : undefined);
+  const { frame: dropFrame } = useAnimation({ interval: 120, isActive: motion && learnedFresh });
+  const dropAge = motion ? dropFrame * 120 : 1000;
+  const escalated = snap.working !== null && chrome.activity?.kind === "escalated" && chrome.activity.at >= snap.working.since;
   const mood: MneMood = dialog ? "waiting" : snap.working ? (runningTool ? "tool" : "thinking") : "idle";
   const fromTurn = turnSel !== undefined ? turnList[turnSel] : undefined;
   const blocks = fromTurn ? transcriptBlocks.slice(fromTurn.at) : transcriptBlocks.slice(-TRANSCRIPT_BLOCKS);
   const render = (b: (typeof snap.committed)[number]) => <BlockView key={b.id} block={b} cwd={cwd} expanded={chrome.expanded} />;
-  const empty = blocks.length === 0 && snap.live.length === 0 && !snap.working;
+  const empty = blocks.length === 0 && snap.live.length === 0 && !snap.working && !chrome.race;
 
   return (
     <MotionContext.Provider value={motion}>
@@ -289,7 +295,15 @@ export function Workspace({ controller, source, motion, initial, width, height, 
         <Header controller={controller} columns={columns} brand={brand} mood={mood} />
         <Box ref={body} flexDirection="row" flexGrow={1} flexShrink={1} overflow="hidden">
           {showSidebar ? (
-            <Sidebar pane={pane} items={items} selected={sel} focused={focus === "sidebar"} width={SIDEBAR_WIDTH} height={bodyHeight} />
+            <Sidebar
+              pane={pane}
+              items={items}
+              selected={sel}
+              focused={focus === "sidebar"}
+              width={SIDEBAR_WIDTH}
+              height={bodyHeight}
+              learned={learnedFresh && chrome.activity ? { count: chrome.activity.count ?? 1, age: dropAge } : undefined}
+            />
           ) : null}
           <Box flexDirection="column" width={mainWidth} paddingLeft={showSidebar ? 1 : 0}>
             {map !== undefined && focus !== "composer" ? (
@@ -324,7 +338,14 @@ export function Workspace({ controller, source, motion, initial, width, height, 
                   <Viewport height={mainHeight} back={fromTurn ? Number.MAX_SAFE_INTEGER : back} onMeasure={(h) => (contentHeight.current = h)}>
                     {blocks.map(render)}
                     {fromTurn ? null : snap.live.map(render)}
-                    {chrome.workingVisible ? <WorkingLine working={snap.working} message={dialog ? "Waiting for you…" : chrome.workingMessage} queue={snap.queue} mode={dialog ? "wait" : runningTool ? "tool" : "think"} /> : null}
+                    {chrome.race && !fromTurn ? <RaceView race={chrome.race} width={mainWidth - 2} /> : null}
+                    {chrome.workingVisible ? <WorkingLine
+                        working={snap.working}
+                        message={dialog ? "Waiting for you…" : chrome.workingMessage}
+                        queue={snap.queue}
+                        mode={dialog ? "wait" : runningTool ? "tool" : "think"}
+                        escalated={escalated}
+                      /> : null}
                   </Viewport>
                 )}
               </>

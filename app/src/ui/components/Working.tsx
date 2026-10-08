@@ -35,8 +35,11 @@ export function WorkingLine({
   message,
   queue,
   mode = "think",
+  escalated = false,
   now = Date.now,
 }: {
+  /** The run moved to the stronger model: Mne goes violet with a spark. */
+  escalated?: boolean;
   working: WorkingState | null;
   mode?: PulseMode;
   message?: string;
@@ -53,7 +56,7 @@ export function WorkingLine({
       {working ? (
         <Box flexDirection="row">
           <Box width={11} flexShrink={0}>
-            <MneFace mood={mode === "tool" ? "tool" : mode === "wait" ? "waiting" : "thinking"} />
+            <MneFace mood={mode === "tool" ? "tool" : mode === "wait" ? "waiting" : "thinking"} escalated={escalated} />
           </Box>
           <Box flexDirection="column">
             <Box flexDirection="row">

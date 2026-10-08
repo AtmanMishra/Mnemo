@@ -4,7 +4,7 @@
  */
 import React from "react";
 import { Box, Text } from "ink";
-import { color, gradientAt } from "../theme.ts";
+import { color, gradientAt, ground } from "../theme.ts";
 
 export interface WelcomeInfo {
   version: string;
@@ -34,7 +34,7 @@ function GradientLine({ text }: { text: string }): React.ReactElement {
 export function Welcome({ info }: { info: WelcomeInfo }): React.ReactElement {
   const wide = info.columns >= 40;
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={color.accent} paddingX={2} paddingY={0}>
+    <Box flexDirection="column" borderStyle="round" borderBackgroundColor={ground()} borderColor={color.accent} paddingX={2} paddingY={0}>
       {wide ? (
         <Box flexDirection="row" marginTop={1}>
           <Box flexDirection="column">

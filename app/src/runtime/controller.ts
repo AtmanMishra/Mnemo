@@ -17,6 +17,9 @@ import { createUiContext } from "./ui-context.ts";
 import { CYCLE, type Host, type MemoryNote, type Mode } from "../extensions/host.ts";
 import { projectIdentity, VERIFY } from "@mnemo/memory";
 import { testCounts, type TestCounts } from "../ui/activity.ts";
+import { setTheme, themeName, THEMES, type ThemeName } from "../ui/theme.ts";
+import { bestOf, describeBestOf, type CandidateRunner, type LaneState } from "./best-of.ts";
+import { selfCommand } from "./self.ts";
 
 export interface CommandInfo {
   name: string;
@@ -53,8 +56,21 @@ export interface Activity {
   at: number;
 }
 
+/** A best-of-n run in progress or just finished: one lane per candidate. */
+export interface Race {
+  n: number;
+  check: string;
+  task: string;
+  startedAt: number;
+  lanes: { state: LaneState; startedAt: number; endedAt?: number; size?: number }[];
+  /** 1-based, once the check has picked one. */
+  winner?: number;
+  done: boolean;
+}
+
 export interface Chrome {
   footer: Footer;
+  race?: Race;
   /** The latest activity, if any. */
   activity?: Activity;
   statuses: readonly [string, string][];
@@ -80,6 +96,8 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "remember", description: "tell Mnemo something to keep: /remember we deploy with fly" },
   { name: "forget", description: "retire a remembered fact: /forget package manager" },
   { name: "mode", description: "how much Mnemo may do without asking (default, accept-edits, plan, yolo)" },
+  { name: "theme", description: "the look: Mnemo Night, Game Boy, Paper" },
+  { name: "bestof", description: 'race N attempts at a task, keep the smallest that passes: /bestof 3 "npm test" <task>' },
   { name: "plan", description: "toggle plan mode (read-only)" },
   { name: "skills", description: "the skills Mnemo can load" },
   { name: "reload", description: "reload skills, prompts and extensions" },
@@ -143,7 +161,16 @@ export class Controller {
 
   constructor(
     readonly runtime: AgentSessionRuntime,
-    private readonly options: { exit: (code?: number) => void; onClearScreen?: () => void; now?: () => number; host?: Host },
+    private readonly options: {
+      exit: (code?: number) => void;
+      onClearScreen?: () => void;
+      now?: () => number;
+      host?: Host;
+      /** Persist a theme the user picked. */
+      onTheme?: (name: ThemeName) => void;
+      /** How a best-of candidate runs (tests inject one; the default is this program, headless). */
+      bestOfRunner?: CandidateRunner;
+    },
   ) {
     this.transcript = new Transcript({ now: options.now });
     this.branch = gitBranch(runtime.cwd);
@@ -321,6 +348,8 @@ export class Controller {
   async submit(text: string, mode: "auto" | "steer" = "auto"): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) return;
+    // A finished race has said its piece in the transcript.
+    if (this.chrome.race?.done) this.update({ race: undefined });
     if (trimmed.startsWith("/")) {
       const [name = "", ...rest] = trimmed.slice(1).split(/\s+/);
       if (await this.builtin(name, rest.join(" "))) return;
@@ -349,6 +378,50 @@ export class Controller {
       await this.runtime.dispose();
     } finally {
       this.options.exit(code);
+    }
+  }
+
+  /**
+   * Best-of-n from the interface: N headless candidates in worktrees, the
+   * check as judge, the smallest passing change applied here. The race is
+   * drawn from `chrome.race`; the result lands in the transcript.
+   */
+  async raceBestOf(n: number, check: string, task: string): Promise<void> {
+    if (n < 2 || n > 8) return void this.transcript.notice("Best-of takes 2 to 8 attempts.", "warn");
+    if (this.chrome.race && !this.chrome.race.done) return void this.transcript.notice("A race is already running.", "warn");
+    const now = this.options.now ?? Date.now;
+    const race: Race = { n, check, task, startedAt: now(), lanes: Array.from({ length: n }, () => ({ state: "running" as LaneState, startedAt: now() })), done: false };
+    const set = (patch: Partial<Race>) => this.update({ race: { ...this.chrome.race!, ...patch } });
+    this.update({ race });
+    this.transcript.memory(`Racing ${n} attempts`, [task, `judge: ${check}`]);
+    const mode = this.options.host?.mode ?? "default";
+    const runner: CandidateRunner =
+      this.options.bestOfRunner ??
+      (async (_i, cwd) => {
+        const p = Bun.spawn([...selfCommand(), "-p", task, "--cwd", cwd, "--no-reflect", ...(mode !== "default" ? [`--${mode}`] : [])], { cwd, stdout: "pipe", stderr: "pipe" });
+        const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+        if (code !== 0) throw new Error(err.trim().split("\n").at(-1) || `exit ${code}`);
+        return out.trim();
+      });
+    try {
+      const home = this.options.host?.home ?? path.join(this.runtime.cwd, ".mnemo");
+      const result = await bestOf({
+        n,
+        cwd: this.runtime.cwd,
+        check,
+        run: runner,
+        keepDir: path.join(home, "best-of", new Date(now()).toISOString().replace(/[:.]/g, "-")),
+        onProgress: (i, state, info) => {
+          const lanes = this.chrome.race!.lanes.map((l, j) => (j === i ? { ...l, state, size: info?.size ?? l.size, endedAt: state === "running" ? undefined : now() } : l));
+          set({ lanes });
+        },
+      });
+      set({ winner: result.winner?.i, done: true });
+      this.transcript.memory(result.winner ? `Best of ${n}: candidate ${result.winner.i} applied` : `Best of ${n}: no candidate passed`, describeBestOf(result).split("\n").filter(Boolean).slice(0, 12));
+      this.emit({ kind: "check", ok: !!result.winner, text: check });
+    } catch (e) {
+      set({ done: true });
+      this.transcript.notice(`Best-of failed: ${errorText(e)}`, "error");
     }
   }
 
@@ -507,6 +580,30 @@ export class Controller {
         if (pick) {
           this.setMode(pick);
           this.transcript.notice(`Mode: ${pick}`);
+        }
+        return true;
+      }
+      case "bestof": {
+        const m = /^(\d+)\s+(?:"([^"]+)"|'([^']+)')\s+([\s\S]+)$/.exec(arg.trim());
+        if (!m) {
+          this.transcript.notice('Usage: /bestof <2–8> "<check command>" <task> — e.g. /bestof 3 "npm test" add retries to fetch', "warn");
+          return true;
+        }
+        void this.raceBestOf(Number(m[1]), (m[2] ?? m[3])!, m[4]!.trim());
+        return true;
+      }
+      case "theme": {
+        const names = Object.keys(THEMES) as ThemeName[];
+        const pick =
+          (names.find((n) => n === arg) as ThemeName | undefined) ??
+          ((await this.dialogs.select(
+            "Theme",
+            names.map((n) => ({ value: n, label: THEMES[n].label, description: n === themeName() ? "current" : undefined })),
+          )) as ThemeName | undefined);
+        if (pick) {
+          setTheme(pick);
+          this.options.onTheme?.(pick);
+          this.transcript.notice(`Theme: ${THEMES[pick].label}`);
         }
         return true;
       }

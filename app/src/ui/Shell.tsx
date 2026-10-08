@@ -17,10 +17,12 @@ import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react
 import { Box, Text, useInput, useWindowSize } from "ink";
 import type { Agent, Fleet } from "../runtime/fleet.ts";
 import { MotionContext } from "./components/motion.ts";
-import { palette, gradientAt } from "./theme.ts";
+import { palette, gradientAt, subscribeTheme, terminalColors, themeName, themePaints, ground } from "./theme.ts";
 import { Workspace } from "./workspace/Workspace.tsx";
 import { ProjectPicker } from "./ProjectPicker.tsx";
 import { Hub, agentState, type AgentState } from "./Hub.tsx";
+import { Toasts, useToasts } from "./Toasts.tsx";
+import { ExitCard } from "./ExitCard.tsx";
 
 export type Screen = "agent" | "split" | "hub";
 
@@ -34,8 +36,8 @@ export interface ShellProps {
 const SPLIT_MAX = 4;
 
 /** Re-render when any agent's transcript, chrome or dialogs change. */
-function useAgentStates(agents: readonly Agent[]): Map<number, AgentState> {
-  const [, bump] = useState(0);
+function useAgentStates(agents: readonly Agent[]): { states: Map<number, AgentState>; version: number } {
+  const [version, bump] = useState(0);
   useEffect(() => {
     let queued = false;
     const kick = () => {
@@ -49,7 +51,7 @@ function useAgentStates(agents: readonly Agent[]): Map<number, AgentState> {
     const offs = agents.flatMap((a) => [a.controller.transcript.subscribe(kick), a.controller.subscribe(kick), a.controller.dialogs.subscribe(kick)]);
     return () => offs.forEach((off) => off());
   }, [agents]);
-  return new Map(agents.map((a) => [a.id, agentState(a)]));
+  return { states: new Map(agents.map((a) => [a.id, agentState(a)])), version };
 }
 
 /** Columns × rows for n panes. */
@@ -108,8 +110,14 @@ function FleetBar({
 
 export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElement {
   const snap = useSyncExternalStore(fleet.subscribe, fleet.snapshot);
+  // A theme change re-draws everything; light themes paint their own ground.
+  const theme = useSyncExternalStore(subscribeTheme, themeName);
+  // In a real terminal, its own default colours follow the theme too.
+  useEffect(() => {
+    if (motion && process.stdout.isTTY) process.stdout.write(terminalColors());
+  }, [theme]);
   const agents = snap.agents;
-  const states = useAgentStates(agents);
+  const { states, version } = useAgentStates(agents);
   const { columns, rows } = useWindowSize();
   const [screen, setScreen] = useState<Screen>(initial?.screen ?? "agent");
   const [activeId, setActiveId] = useState<number | undefined>(agents[0]?.id);
@@ -171,14 +179,23 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
     { isActive: !picker },
   );
 
+  // What happens in an agent you are not looking at arrives as a toast.
+  const toasts = useToasts(agents, (id) => screen !== "hub" && (id === active?.id || (screen === "split" && split.includes(id))), version);
   const body = rows - 1 - (error ? 1 : 0);
+  // Every agent closed: the exit card, until the program ends.
+  if (agents.length === 0)
+    return (
+      <MotionContext.Provider value={motion}>
+        <ExitCard summary={snap.summary} width={columns} height={rows} />
+      </MotionContext.Provider>
+    );
   const grid = splitGrid(split.length, columns);
   const paneW = Math.floor(columns / grid.cols);
   const paneH = Math.floor(body / grid.rows);
 
   return (
     <MotionContext.Provider value={motion}>
-      <Box flexDirection="column" width={columns} height={rows}>
+      <Box flexDirection="column" width={columns} height={rows} backgroundColor={themePaints() ? palette.ground : undefined}>
         <FleetBar agents={agents} states={states} activeId={active?.id} screen={screen} columns={columns} />
         {error ? <Text color={palette.magenta}>{` ✗ ${error}`}</Text> : null}
         {screen === "hub" ? (
@@ -215,7 +232,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
                 display={shown ? "flex" : "none"}
                 width={w}
                 height={h}
-                borderStyle={framed ? "round" : undefined}
+                borderStyle={framed ? "round" : undefined} borderBackgroundColor={ground()}
                 borderColor={focused ? palette.magenta : palette.faint}
               >
                 <Workspace
@@ -232,6 +249,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
             );
           })}
         </Box>
+        <Toasts toasts={toasts} columns={columns} />
         {picker ? (
           <ProjectPicker
             fleet={snap}

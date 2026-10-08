@@ -15,7 +15,7 @@ import { turns, type Outcome } from "./activity.ts";
 import { PixelArt } from "./components/PixelArt.tsx";
 import { outcomeColor, Strip } from "./components/Strip.tsx";
 import { mne, mneMini, pixelText } from "./pixel.ts";
-import { palette } from "./theme.ts";
+import { palette, ground } from "./theme.ts";
 
 export interface AgentState {
   kind: "idle" | "working" | "waiting";
@@ -83,7 +83,7 @@ function Card({ a, n, s, on, inSplit, width }: { a: Agent; n: number; s: AgentSt
   const inner = width - 4;
   const tint = s?.kind === "waiting" ? palette.amber : s?.kind === "working" ? palette.magenta : palette.hide;
   return (
-    <Box width={width} height={CARD_H} borderStyle="round" borderColor={on ? palette.magenta : s?.kind === "waiting" ? palette.amber : palette.rule} paddingX={1} flexDirection="column">
+    <Box width={width} height={CARD_H} borderStyle="round" borderBackgroundColor={ground()} borderColor={on ? palette.magenta : s?.kind === "waiting" ? palette.amber : palette.rule} paddingX={1} flexDirection="column">
       <Box>
         <PixelArt grid={mneMini(tint)} />
         <Box flexDirection="column" marginLeft={1} width={inner - 8}>
@@ -176,7 +176,7 @@ export function Hub(p: HubProps): React.ReactElement {
           <Card key={a.id} a={a} n={i + 1} s={p.states.get(a.id)} on={i === at} inSplit={p.split.includes(a.id)} width={cardW} />
         ))}
         {p.agents.length < cols * Math.max(1, rowsOfCards) || p.agents.length === 0 ? (
-          <Box width={cardW} height={CARD_H} borderStyle="round" borderColor={palette.rule} justifyContent="center" alignItems="center">
+          <Box width={cardW} height={CARD_H} borderStyle="round" borderBackgroundColor={ground()} borderColor={palette.rule} justifyContent="center" alignItems="center">
             <Text color={palette.faint}>+ n new agent · ^p a project</Text>
           </Box>
         ) : null}
