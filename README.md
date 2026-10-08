@@ -4,6 +4,14 @@ A terminal-native agentic coding and harness assistant whose memory works like a
 
 ## Quickstart
 
+> **Status: mid-rebuild.** Mnemo is being moved to a single Bun application
+> (`app/`) with the Rust memory layer and a Python execution kernel behind it.
+> Until that lands, the instructions below build the previous stack (Go
+> interface + Node agent), which is what works end to end today. What remains,
+> in order, is in [`docs/ROADMAP.md`](docs/ROADMAP.md). To try the new interface:
+> `cd app && bun install && bun bin/mnemo.ts` (or `bun bin/mnemo.ts --dump` for
+> one frame with no key).
+
 **Pre-alpha.** Grab the `mnemo` binary for your platform from
 [Releases](https://github.com/AtmanMishra/self-evolving-agent/releases) —
 linux/darwin/windows, amd64/arm64 — then build the two pieces it drives. Node
@@ -168,7 +176,8 @@ the same `--session-dir`, so what you browse is what the agent writes.
 - **memory-layer/** (Rust) — Graph memory engine: nodes (facts/state/log/context), typed edges, steering, HNSW search. Binaries: memcli (REPL), memsrv (JSON-RPC sidecar), memeval (retrieval benchmark), mempolicy (learned steering evaluation).
 - **harness-engine/** (TypeScript, zero deps) — Dynamic tool-plugin system: createHarness() writes bundles that agents build for themselves at runtime.
 - **agent/** (TypeScript on Node >=22.6) — The mnemo CLI; thin shim over pi with Mnemo's tools and extensions injected.
-- **tui-go/** (Go, Bubble Tea v2) — the terminal interface: one surface, transcript-first, overlays for palette/sessions/memory/logs/explorer, hooks + schedules digests.
+- **app/** (Bun, TypeScript) — the rebuild: interface, session, policy, memory and kernel clients. The future home of the agent and harness engine. Incomplete; see the roadmap.
+- **tui-go/** (Go, Bubble Tea v2) — *legacy.* The terminal interface that works today: one surface, transcript-first, overlays for palette/sessions/memory/logs/explorer, hooks + schedules digests. Retired once `app/` reaches parity.
 
 ## Development
 

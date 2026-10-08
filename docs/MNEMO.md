@@ -30,14 +30,19 @@ Three claims make that concrete:
 3. **Skills self-extend.** The agent builds tools for itself mid-task; they
    persist, get indexed into memory, and are recallable by purpose later.
 
-## 2. The four pieces
+## 2. The pieces
+
+**Where this is going:** one Bun application (`app/`) that is the interface *and*
+the agent, the Rust memory sidecar, and a Python kernel for execution. What is
+left to get there is `docs/ROADMAP.md`. Until then both stacks exist in the tree:
 
 | Piece | Language | What it owns |
 |---|---|---|
-| `agent/` | TypeScript (Node >= 22.18, no build step) | The agent process. Wraps the `pi` coding-agent framework, registers Mnemo's tools, hosts the memory client, the Python kernel, hooks and schedules. |
-| `memory-layer/` | Rust | The brain. An append-only journal, a graph store, retrieval, steering, consolidation — and `memsrv`, the JSON-RPC sidecar every other process talks to. |
-| `tui-go/` | Go (Bubble Tea v2) | The interface: one surface, transcript-first, overlays for everything else. |
-| `harness-engine/` | TypeScript, zero deps | Loads and validates tool bundles the agent writes for itself. |
+| `app/` | Bun / TypeScript | **The target.** Interface, session, policy gate, memory and kernel clients, a pi RPC adapter. Interface partly built; agent not yet ported. |
+| `memory-layer/` | Rust | The brain. An append-only journal, a graph store, retrieval, steering, consolidation — and `memsrv`, the JSON-RPC sidecar every other process talks to. Stays. |
+| `agent/` | TypeScript (Node >= 22.18, no build step) | *Legacy, ported into `app/` per the roadmap.* The agent process. Wraps the `pi` coding-agent framework, registers Mnemo's tools, hosts the memory client, the Python kernel, hooks and schedules. |
+| `tui-go/` | Go (Bubble Tea v2) | *Legacy.* The interface that works today. Sections 4–5 below describe it. |
+| `harness-engine/` | TypeScript, zero deps | *Legacy, ported.* Loads and validates tool bundles the agent writes for itself. |
 
 They are separate processes talking **line-delimited JSON over stdio** — the
 same shape four times (pi's RPC, `memsrv`, the Python kernel bridge, MCP). No
@@ -224,6 +229,7 @@ while nobody is watching).
 |---|---|
 | **`docs/MNEMO.md`** (this) | you want to understand or run Mnemo |
 | **`docs/MNEMO-INTERNALS.md`** | you are changing it: memory internals, kernel, protocols, extension points, failure modes |
+| **`docs/ROADMAP.md`** | you want to know what is left before users can have it, and in what order |
 | `DESIGN.md` | you are touching how it looks: palette, glyphs, mascot, keys, motion |
 | `AGENTS.md` | you are an agent working in this repo (conventions + binding invariants) |
 | `plan.md` / `STATUS.md` | you want the work tracker / the outcome log with evidence |

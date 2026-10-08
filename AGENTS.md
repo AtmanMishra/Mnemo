@@ -1,4 +1,22 @@
-# Mnemo TUI — Go Rebuild Handover
+# Mnemo — agent contract
+
+> **Direction (2026-10-08): Bun is the program.** The interface, agent loop,
+> tools, harness engine, hooks and schedules are being rebuilt as one Bun
+> application in `app/`; memory stays in Rust (`memory-layer/`, `memsrv`); code
+> execution is the Python ipy kernel. `tui-go/`, `agent/` (Node) and
+> `harness-engine/` are **legacy**: they still run and still carry the only copy
+> of most behavior, so read them as the specification and port their tests, but
+> do not add features to them. Everything left to ship is in
+> **`docs/ROADMAP.md`** — start there. State of the Bun branch and its
+> conventions: `docs/HANDOFF.md`. Target layout: `docs/REBUILD.md`,
+> `docs/PLAN-monorepo.md`.
+>
+> Working in `app/`: `cd app && bun install && bun test ./test && bunx tsc --noEmit`.
+> Everything must be verifiable without an API key (`bun bin/mnemo.ts --dump`).
+> The sections below this note describe the Go interface (`tui-go/`) as built;
+> they remain accurate for that code and for the invariants it taught us.
+
+# Mnemo TUI — Go Rebuild Handover (legacy, superseded by `app/`)
 
 ## What's been built
 

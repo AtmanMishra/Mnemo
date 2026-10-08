@@ -358,7 +358,12 @@ forced rather than dying quietly (issue #11a).
 
 ---
 
-## 4. The interface (`tui-go/`)
+## 4. The interface (`tui-go/`, legacy)
+
+> This section describes the Go interface. Its replacement is `app/` (Bun); the
+> rules below (one owner for layout, re-arm the backend, one command list) are
+> design lessons that carry over, the package map does not. See `docs/ROADMAP.md`
+> Stage 1 and `docs/REBUILD.md`.
 
 One Elm-style loop, one root model, sub-models that own their state. Package
 map: `theme` (palette/glyphs/styles — nothing else names a colour), `brand`

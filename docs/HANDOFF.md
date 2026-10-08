@@ -1,5 +1,10 @@
 # Handoff — Mnemo, branch `rebuild/bun-app`
 
+> **2026-10-08:** the task list for the whole rebuild is now `docs/ROADMAP.md`;
+> the "work list" below is its Stage 1. One correction to the numbers that follow:
+> measured on Bun 1.4.2, `bun test` is 201 pass / 1 fail (`app.test.ts` hardcodes
+> `Bun 1.3.14`) — roadmap item 0.1.
+
 Written at the end of a session that landed items 0 and 1 of the feature list and
 reverted an attempt at item 2. Everything below was measured, not remembered.
 
