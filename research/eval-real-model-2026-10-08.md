@@ -58,3 +58,34 @@ apply it to the script. Left strict on purpose.
 - Notes "Memory noted the failure for next time:" carry no detail in the eval
   report (cosmetic).
 - Variance: two repeats per scenario; more are cheap (~$0.06 per full run).
+
+## Round 4 — memory for every agent, the guard, the learning curve
+
+Scenario suite (seven scenarios, repeat 2, $0.13): memory still separates on
+the pitfall (setup first 2/2 vs 0/2; never hits the error 2/2 vs 0/2) and the
+package manager (2/2 vs 1/2). Both baseline runs of picks-up-the-thread went
+looking through the filesystem for this repository and were flagged by the
+integrity check and excluded — the check doing its job. checks-its-work is
+2/2 either way: DeepSeek ran the tests unprompted, so verify-before-done made
+no measurable difference on this task.
+
+Learning curve (`eval/series.ts`, six tasks, repeat 2; teacher deepseek-v4-pro):
+
+| | baseline | memory | teacher → student |
+|---|---|---|---|
+| first run, all tasks | 83% | 88% | 92% |
+| after the guard fix, all tasks | — | 92% | 88% |
+| after the guard fix, tasks 4–6 | — | 97% | 93% |
+| cost per series | $0.020 | $0.018–0.022 | $0.031–0.034 |
+
+What it does and does not show:
+- Every lost point in every mode was the build-step pitfall. The house rules
+  (cents, exports, changelog) were kept even without memory, because the code
+  from earlier tasks shows them — the series needs rules the code does not
+  reveal before it can measure more than the pitfall.
+- The guard fix (a failed command recognised inside `cd … && npm test 2>&1 |
+  tail`) took build errors on tasks 3–6 with memory from 4 of 8 to 1 of 8.
+  Task 2 still hits it: the first session's lesson is not yet always a
+  pitfall with a fix (sometimes only a project fact the guard does not read).
+- Memory vs teacher swapped places between runs: at two repeats the gap
+  between them is noise. Both stay above the baseline.
