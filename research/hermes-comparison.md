@@ -48,4 +48,94 @@ curator are not part of the arm. Its background review runs after every
 session (Hermes reviews every 10 user turns and flushes on exit; these eval
 sessions are one prompt long) — the generous reading.
 
-Results: see below (filled in from the runs).
+All runs: `opencode-go/deepseek-v4.1-flash`, one machine, 2026-10-08. Raw
+reports and transcripts summaries are in `app/eval/results/` under the named
+directories. Small samples: read the differences as direction, not effect size.
+
+### Learning-curve series (one repo, 7 rules per task, 3 repeats)
+
+`series-2026-10-08T08-46-34-618Z`. Six tasks in one repo; each is scored on
+seven points, among them rules stated once and never visible in the code.
+
+| | no memory | Hermes-style | Mnemo |
+|---|---|---|---|
+| score, all tasks | 87% | 100% | 100% |
+| score, tasks 4–6 | 86% | 100% | 100% |
+| cost per series | $0.024 | $0.020 | $0.019 |
+
+Both memories hold everything at one repo, and both cost less than none (fewer
+rediscovery steps).
+
+### Two repos, conflicting rules (2 repeats)
+
+`multi-2026-10-08T09-26-27-729Z`. Sessions alternate between `till` and
+`ledger`, whose rules contradict each other (reply format, build step, history).
+
+| | no memory | Hermes-style | Mnemo |
+|---|---|---|---|
+| all sessions | 82% | 100% | 99% |
+| after both rule sets were stated | 78% | 100% | 99% |
+| cost per run | $0.041 | $0.027 | $0.031 |
+
+Mnemo's one miss is a history rule in one ledger session. Hermes was **not**
+hurt by two repos: everything fits its 2,200 characters at this size. Whether
+its shared, capped memory degrades at many repos — the reason Mnemo scopes per
+project — is a hypothesis this run does not test.
+
+### Scenario suite (7 scenarios, 2 repeats)
+
+`2026-10-08T08-20-57-241Z`, re-scored after two check fixes (negation-aware
+package-manager check; fixture errors matched only at line start).
+
+- **projects-stay-apart**: the other project's command is not suggested —
+  Mnemo 2/2, Hermes 0/2, no memory 2/2. Hermes' memory is global, so a
+  command learned in project A was offered in project B both times.
+- **picks-up-the-thread**: "where were we" resumes the open work — Mnemo 2/2,
+  Hermes 1/2. Mnemo keeps open items per session; Hermes only if the
+  review happened to write them down.
+- The other scenarios (convention, pitfall, correction, skill from a
+  procedure, checks its work) tie after the fixes.
+
+The no-memory arm is not fully memoryless: `create_skill` exists in all arms,
+so the model can write itself a skill file and read it later. Both
+picks-up-the-thread baseline runs read outside their sandbox (integrity 0/2)
+looking for the prior session.
+
+### Knowledge: do the skills and facts evolve? (3 repeats)
+
+`2026-10-08T09-23-49-927Z`. procedure-evolves releases a package three times;
+before the second release a policy file adds a signing step the first
+release's skill did not have. Checks read what each arm stored (skills,
+Hermes' MEMORY.md/USER.md, Mnemo's profile and pitfall fixes).
+
+| check | Mnemo | Hermes-style | no memory |
+|---|---|---|---|
+| second release went out despite the new rule | 3/3 | 3/3 | 3/3 |
+| third release follows the corrected procedure | 3/3 | 3/3 | 3/3 |
+| what was learned includes the signing step | 3/3 | 3/3 | 3/3 |
+| the release procedure is a skill | 3/3 | 3/3 | 3/3 |
+| skill-from-procedure: later release followed it | 3/3 | 3/3 | 3/3 |
+| correction-sticks: later session follows the correction | 3/3 | 3/3 | 2/2 ¹ |
+
+¹ one baseline run broke integrity (read pi's own docs outside the sandbox) and
+is not scored.
+
+All three tie at the ceiling. In each arm, Mnemo's and Hermes' reviews both
+patched the skill when signing appeared (`Updated skill relay-release: …`). The
+baseline also passes because the policy file is in the repo and the model
+reads it each time. **These tasks do not separate the arms**: a
+discriminating version needs a rule that is stated once and is *not* left in
+the repo. That is the series' design, and there the baseline drops to 78–87%.
+
+### What this says
+
+- At one or two repos, a well-run Hermes-style memory matches Mnemo on
+  accuracy, and both clearly beat no memory (+13 to +18 points) at lower cost.
+- Mnemo's measured edge is structural: project scoping (2/2 vs 0/2) and
+  session continuity (2/2 vs 1/2). Those are the failure modes you get with
+  more than one project, or with work that spans sessions.
+- The arm is the *generous* reading of Hermes (reviews every session, a model
+  that calls the memory tool). The weaknesses its own docs report (small
+  models skip the tool, the caps evict project detail) are not exercised.
+- Not measured yet: many repos (capacity), a long horizon (staleness and the
+  curator), and a public benchmark.
