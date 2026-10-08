@@ -30,6 +30,8 @@ pub struct SearchKey {
     /// The hard area filter (empty = every area).
     pub areas: Vec<Area>,
     pub k: usize,
+    /// The project the search is scoped to (audit F10); part of the key.
+    pub scope: Option<NodeId>,
 }
 
 /// Case/whitespace normalization — enough to collapse queries the underlying
@@ -91,6 +93,13 @@ impl<V> SearchCache<V> {
             self.map.remove(k);
         }
         self.order.retain(|k| !doomed.contains(k));
+    }
+
+    /// Drop everything. Any write can change ranking — a new node can outrank
+    /// every cached hit without touching any of them — so writes clear.
+    pub fn clear(&mut self) {
+        self.map.clear();
+        self.order.clear();
     }
 
     pub fn len(&self) -> usize {

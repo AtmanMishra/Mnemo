@@ -35,8 +35,52 @@ impl Ids {
 const BLAME_PENALTY: f32 = -0.10;
 const SWITCH_THRESHOLD: f32 = 0.2;
 
+/// How a caller wants a failure handled.
+#[derive(Debug, Clone, Copy)]
+pub struct SteerOpts {
+    /// Create a `gap:` node when nothing was implicated. A tool error is not a
+    /// knowledge gap (audit F6), so the agent turns this off for those.
+    pub gap: bool,
+    /// Reuse the pain marker of an identical earlier failure (same normalized
+    /// signature) and count the recurrence, instead of a new node each time
+    /// (audit F5). Off by default so the original planner is unchanged.
+    pub dedupe_pain: bool,
+}
+
+impl Default for SteerOpts {
+    fn default() -> Self { Self { gap: true, dedupe_pain: false } }
+}
+
+/// A failure's identity across sessions: lowercase, digits collapsed, quotes
+/// and whitespace normalized, capped. "line 42" and "line 57" are one failure.
+pub fn failure_signature(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut last_digit = false;
+    let mut last_space = false;
+    for c in text.chars() {
+        if c.is_ascii_digit() {
+            if !last_digit { out.push('#'); }
+            last_digit = true;
+            last_space = false;
+            continue;
+        }
+        last_digit = false;
+        let c = if c == '"' || c == '`' || c == '\'' { ' ' } else { c };
+        if c.is_whitespace() {
+            if !last_space && !out.is_empty() { out.push(' '); }
+            last_space = true;
+            continue;
+        }
+        last_space = false;
+        out.extend(c.to_lowercase());
+    }
+    out.trim().chars().take(160).collect()
+}
+
 #[derive(Debug, Default)]
 pub struct SteerNotes {
+    /// How often this failure has now been seen, when pain markers are deduplicated.
+    pub occurrences: Option<u32>,
     pub pain_node: Option<NodeId>,
     pub blamed_feeders: Vec<(EdgeId, NodeId)>,
     pub superseded_on: Option<NodeId>,
@@ -62,6 +106,18 @@ pub fn steer(
     correction: Option<&Correction>,
     now: Millis,
 ) -> Result<(Vec<Op>, SteerNotes), String> {
+    steer_with(store, episode, failure_detail, correction, SteerOpts::default(), now)
+}
+
+/// `steer` with explicit options (see `SteerOpts`).
+pub fn steer_with(
+    store: &StoreData,
+    episode: NodeId,
+    failure_detail: &str,
+    correction: Option<&Correction>,
+    opts: SteerOpts,
+    now: Millis,
+) -> Result<(Vec<Op>, SteerNotes), String> {
     let ep = store.nodes.get(&episode)
         .ok_or_else(|| format!("episode node {episode} missing"))?;
     if ep.kind != NodeKind::TaskEpisode {
@@ -78,13 +134,52 @@ pub fn steer(
     // 0/1b. pain marker FIRST, before any executive decision below. Amygdala
     // logic: capture that it hurt, cheaply and unconditionally; deciding what
     // to do about it is the rest of this function.
-    let pain = ids.node();
-    ops.push(Op::CreateNode { id: pain, kind: NodeKind::Aspect,
-        label: format!("pain: {}", truncate(failure_detail, 60)), at: now });
-    ops.push(Op::SetArea { node: pain, area: Area::Salience, at: now });
-    let pfid = ids.fact();
-    ops.push(Op::AddFact { node: pain, fact_id: pfid, key: "failure".into(),
-        value: failure_detail.into(), at: now });
+    let signature = failure_signature(failure_detail);
+    let earlier = if opts.dedupe_pain {
+        store.nodes.values()
+            .filter(|n| !n.deleted && n.area == Area::Salience)
+            .find(|n| n.active_facts().any(|f| f.key == "signature" && f.value == signature))
+    } else {
+        None
+    };
+    let pain = match earlier {
+        Some(n) => {
+            // The same failure again: one marker, a higher count, and a log
+            // line naming the episode — recurrence is the signal, not volume.
+            let count = n.active_facts().find(|f| f.key == "occurrences")
+                .and_then(|f| f.value.parse::<u32>().ok()).unwrap_or(1) + 1;
+            let fid = ids.fact();
+            match n.active_facts().find(|f| f.key == "occurrences") {
+                Some(f) => ops.push(Op::SupersedeFact { node: n.id, old_fact: f.id,
+                    new_key: "occurrences".into(), new_value: count.to_string(), new_fact_id: fid, at: now }),
+                None => ops.push(Op::AddFact { node: n.id, fact_id: fid,
+                    key: "occurrences".into(), value: count.to_string(), at: now }),
+            }
+            ops.push(Op::CommitLog { node: n.id, kind: "recurred".into(),
+                detail: format!("in episode #{episode}"), at: now });
+            notes.occurrences = Some(count);
+            n.id
+        }
+        None => {
+            let pain = ids.node();
+            ops.push(Op::CreateNode { id: pain, kind: NodeKind::Aspect,
+                label: format!("pain: {}", truncate(failure_detail, 60)), at: now });
+            ops.push(Op::SetArea { node: pain, area: Area::Salience, at: now });
+            let pfid = ids.fact();
+            ops.push(Op::AddFact { node: pain, fact_id: pfid, key: "failure".into(),
+                value: failure_detail.into(), at: now });
+            if opts.dedupe_pain {
+                let sfid = ids.fact();
+                ops.push(Op::AddFact { node: pain, fact_id: sfid, key: "signature".into(),
+                    value: signature.clone(), at: now });
+                let ofid = ids.fact();
+                ops.push(Op::AddFact { node: pain, fact_id: ofid, key: "occurrences".into(),
+                    value: "1".into(), at: now });
+                notes.occurrences = Some(1);
+            }
+            pain
+        }
+    };
     let peid = ids.edge();
     // episode CITES the marker: DerivedFrom keeps it out of feeders_of(), so a
     // pain marker can never become a blame target for the next failure.
@@ -140,7 +235,7 @@ pub fn steer(
     }
 
     // 5. nothing implicated -> knowledge gap
-    if implicated.is_empty() && correction.is_none() {
+    if implicated.is_empty() && correction.is_none() && opts.gap {
         let mut focus: Vec<String> = q_tokens.iter().take(8).cloned().collect();
         focus.sort(); // deterministic labels regardless of HashSet order
         focus.truncate(4);

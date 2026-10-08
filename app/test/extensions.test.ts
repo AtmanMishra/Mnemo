@@ -7,8 +7,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
 import { judge, globMatch, matchRule } from "../src/extensions/policy.ts";
-import { digest, parseFacts } from "../src/extensions/memory.ts";
-import { factsOf } from "../src/memory/service.ts";
+import { factsOf, projectIdentity } from "@mnemo/memory";
 import { MEMSRV, mnemoEnv, nextDialog, texts } from "./helpers.ts";
 
 const envs: Awaited<ReturnType<typeof mnemoEnv>>[] = [];
@@ -122,25 +121,6 @@ test("shift+tab cycles default → accept edits → plan, and the footer says so
 
 // ── memory ───────────────────────────────────────────────────────────────────
 
-test("the reflection answer is parsed defensively", () => {
-  expect(parseFacts('Sure! {"facts":[{"scope":"project","key":"Test Command","value":"bun test"}]}')).toEqual([
-    { scope: "project", key: "test command", value: "bun test" },
-  ]);
-  expect(parseFacts("no json here")).toEqual([]);
-  expect(parseFacts('{"facts":[{"scope":"team","key":"x","value":"y"}]}')).toEqual([]);
-});
-
-test("a run is condensed for reflection: asks, answers, tools and failures", () => {
-  const d = digest([
-    { role: "user", content: "we use pnpm here" },
-    { role: "assistant", content: [{ type: "text", text: "Noted." }, { type: "toolCall", name: "bash", arguments: { command: "pnpm i" } }] },
-    { role: "toolResult", toolName: "bash", isError: true, content: [{ type: "text", text: "not found" }] },
-  ]);
-  expect(d).toContain("USER: we use pnpm here");
-  expect(d).toContain("TOOL bash(pnpm i)");
-  expect(d).toContain("TOOL FAILED (bash): not found");
-});
-
 test("facts are read back from a node's state", () => {
   expect(factsOf("[Entity/Spatial] project x #1\nfacts:\n  - package manager: pnpm\n  - port: 4111\nrecent log:\n  [1] created")).toEqual([
     { key: "package manager", value: "pnpm" },
@@ -153,7 +133,11 @@ memoryTest("what one session learns, the next session knows — and a changed fa
   const one = await env({ memory: true, reflect: true });
   one.faux.setResponses([
     say("Got it — pnpm from now on."),
-    fauxAssistantMessage(fauxText('{"facts":[{"scope":"project","key":"package manager","value":"pnpm"},{"scope":"user","key":"tone","value":"terse answers"}]}')),
+    fauxAssistantMessage(
+      fauxText(
+        '{"facts":[{"scope":"project","key":"package manager","value":"pnpm","source":"user"},{"scope":"user","key":"tone","value":"terse answers","source":"user"}]}',
+      ),
+    ),
   ]);
   await one.controller.submit("in this repo we always use pnpm, never npm");
   await one.idle();
@@ -169,18 +153,21 @@ memoryTest("what one session learns, the next session knows — and a changed fa
     seen = JSON.stringify(context);
     return say("Run `pnpm install`.");
   };
-  two.faux.setResponses([capture, fauxAssistantMessage(fauxText('{"facts":[{"scope":"project","key":"package manager","value":"bun"}]}'))]);
-  await two.controller.submit("how do I install the dependencies?");
+  two.faux.setResponses([
+    capture,
+    fauxAssistantMessage(fauxText('{"facts":[{"scope":"project","key":"package manager","value":"bun","source":"user"}]}')),
+  ]);
+  await two.controller.submit("we moved to bun last week — how do I install the dependencies?");
   await two.idle();
   expect(seen).toContain("package manager: pnpm");
   expect(seen).toContain("tone: terse answers");
   const t = texts(two.controller);
   // The recall line sits right under the message it was for.
-  const at = t.findIndex((x) => x === "user: how do I install the dependencies?");
+  const at = t.findIndex((x) => x === "user: we moved to bun last week — how do I install the dependencies?");
   expect(t[at + 1]).toStartWith("◈ Recalled");
 
   // The second reflection changed the fact: one current value, not two.
-  const profile = await two.memory!.profile("project", two.cwd);
+  const profile = await two.memory!.profile("project", projectIdentity(two.cwd).id);
   expect(profile.filter((f) => f.key === "package manager")).toEqual([{ key: "package manager", value: "bun" }]);
 });
 
@@ -255,7 +242,7 @@ test("a sub-agent works on its own and its answer comes back as the tool result"
 
 // ── skills ───────────────────────────────────────────────────────────────────
 
-test("a skill Mnemo writes is a file on disk and loadable after the run", async () => {
+test("a skill Mnemo writes is a file in the repository and loadable after the run", async () => {
   const e = await env({ mode: "yolo" });
   e.faux.setResponses([
     call("create_skill", { name: "release-notes", description: "Write release notes from git log", instructions: "1. git log\n2. group by type" }),
@@ -264,9 +251,22 @@ test("a skill Mnemo writes is a file on disk and loadable after the run", async 
   await e.controller.submit("remember how we write release notes");
   await e.idle();
   await new Promise((r) => setTimeout(r, 50));
-  const file = path.join(e.home, "agent", "skills", "release-notes", "SKILL.md");
+  const file = path.join(e.cwd, ".agents", "skills", "release-notes", "SKILL.md");
   expect(fs.readFileSync(file, "utf8")).toContain("description: \"Write release notes from git log\"");
+  expect(fs.existsSync(path.join(e.home, "agent", "skills", "release-notes"))).toBe(false);
   expect(e.controller.commands().some((c) => c.name === "skill:release-notes")).toBe(true);
+});
+
+test("a personal skill goes to Mnemo's home", async () => {
+  const e = await env({ mode: "yolo" });
+  e.faux.setResponses([
+    call("create_skill", { name: "my-style", description: "How I like commits", instructions: "short subject", scope: "user" }),
+    say("saved"),
+  ]);
+  await e.controller.submit("remember my commit style everywhere");
+  await e.idle();
+  expect(fs.existsSync(path.join(e.home, "agent", "skills", "my-style", "SKILL.md"))).toBe(true);
+  expect(fs.existsSync(path.join(e.cwd, ".agents", "skills", "my-style"))).toBe(false);
 });
 
 test("tool calls are traced, with secrets redacted", async () => {

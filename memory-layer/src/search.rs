@@ -76,6 +76,9 @@ fn expand(
 /// Search filters. `Default` = unfiltered, which is what most callers want.
 #[derive(Debug, Clone, Default)]
 pub struct SearchOpts {
+    /// Nodes that belong to another project (audit F10): never returned and
+    /// never reached by expansion. Computed per request from `PartOf` edges.
+    pub exclude: std::collections::HashSet<NodeId>,
     pub kind: Option<NodeKind>,
     /// Restrict to these brain areas. Empty = every area.
     pub areas: Vec<Area>,
@@ -318,7 +321,8 @@ fn passes_filter(store: &StoreData, id: NodeId, opts: &SearchOpts) -> bool {
     store.nodes.get(&id)
         .map(|n| !n.deleted
             && opts.kind.map_or(true, |k| n.kind == k)
-            && (opts.areas.is_empty() || opts.areas.contains(&n.area)))
+            && (opts.areas.is_empty() || opts.areas.contains(&n.area))
+            && !opts.exclude.contains(&id))
         .unwrap_or(false)
 }
 
@@ -379,4 +383,21 @@ pub fn search_ann(
         })
         .collect();
     expand(store, seeds, k, now, opts)
+}
+
+/// Nodes outside `scope`: those attached (`PartOf`, live) to some project but
+/// not to this one. Nodes attached to nothing — the user profile, anything
+/// written before scoping existed — stay visible everywhere.
+pub fn out_of_scope(store: &StoreData, scope: NodeId, now: Millis) -> std::collections::HashSet<NodeId> {
+    let mut attached: HashMap<NodeId, bool> = HashMap::new();
+    for e in store.edges.values() {
+        if e.kind != EdgeKind::PartOf || !e.alive_at(now) { continue; }
+        let here = e.dst == scope;
+        let entry = attached.entry(e.src).or_insert(false);
+        *entry = *entry || here;
+    }
+    attached.into_iter()
+        .filter(|(id, here)| !*here && *id != scope)
+        .map(|(id, _)| id)
+        .collect()
 }

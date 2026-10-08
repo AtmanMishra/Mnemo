@@ -2,35 +2,75 @@
  * Every colour and glyph the interface uses. Nothing else names a colour, so a
  * palette change is one edit and `DESIGN.md` §2 stays true.
  *
+ * The identity is "a memory palace, rendered in pixels": real pixels (two per
+ * cell, drawn with a half block and a background colour), ASCII for structure
+ * (bracketed tabs, box rules, dither ramps), and a node-and-wire motif for
+ * memory. The palette is "Mnemo Night" — a deep ink ground, parchment text,
+ * and three signal colours: neuron magenta (the agent), synapse cyan
+ * (structure, links), memory amber (anything memory did).
+ *
  * Hex values; Ink's chalk downsamples to 256/16 colours and honours NO_COLOR.
  */
+export const palette = {
+  ground: "#0E0B16",
+  panel: "#16111F",
+  rule: "#2B2238",
+  text: "#EDE4D3",
+  dim: "#8A7F94",
+  faint: "#4A4157",
+  magenta: "#FF5C8A",
+  cyan: "#3DDBD9",
+  amber: "#FFB547",
+  green: "#7BE07B",
+  red: "#FF4F5E",
+  violet: "#9D7BFF",
+  /** Mascot greys and its one warm note. */
+  hide: "#A99CC4",
+  hideShade: "#7A6D96",
+  outline: "#2A2140",
+  blush: "#FF8FB1",
+  tusk: "#FFF1D6",
+} as const;
+
 export const color = {
-  accent: "#B794F6",
-  accent2: "#7DD3FC",
-  success: "#86EFAC",
-  warning: "#FCD34D",
-  error: "#FCA5A5",
-  muted: "#8B8B96",
-  subtle: "#4A4A55",
+  accent: palette.magenta,
+  accent2: palette.cyan,
+  memory: palette.amber,
+  thinking: palette.violet,
+  success: palette.green,
+  warning: palette.amber,
+  error: palette.red,
+  text: palette.text,
+  muted: palette.dim,
+  subtle: palette.faint,
+  rule: palette.rule,
   /** Backgrounds behind added and removed diff lines. */
-  addBg: "#1C3326",
-  removeBg: "#3A1E24",
+  addBg: "#16301F",
+  removeBg: "#3A1622",
+  /** The sidebar's selected row. */
+  selectBg: "#2B2238",
 } as const;
 
 export const glyph = {
   user: "❯",
-  assistant: "●",
-  thinking: "✻",
-  tool: "◆",
-  result: "⎿",
+  assistant: "◆",
+  thinking: "◇",
+  tool: "▣",
+  result: "└",
   memory: "◈",
   notice: "▸",
   ok: "✓",
   fail: "✗",
   queued: "↳",
+  node: "◆",
+  wire: "─",
 } as const;
 
-export const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+/** The density ramp, lightest to densest: shading, motion, progress. */
+export const dither = [" ", "░", "▒", "▓", "█"] as const;
+
+/** A pixel-ish spinner: a dot walking a 2x2 block. */
+export const spinnerFrames = ["▖", "▘", "▝", "▗"];
 
 /** What the working line says, rotated while a turn runs. Memory is the brand. */
 export const workingVerbs = [
@@ -44,8 +84,8 @@ export const workingVerbs = [
   "Considering",
 ];
 
-/** The wordmark's gradient stops, left to right. */
-export const gradient = [color.accent, "#A5A8F8", "#93BCFA", color.accent2];
+/** The wordmark's gradient stops, left to right: neuron to synapse. */
+export const gradient = [palette.magenta, palette.violet, palette.cyan];
 
 function hexToRgb(hex: string): [number, number, number] {
   const n = Number.parseInt(hex.slice(1), 16);

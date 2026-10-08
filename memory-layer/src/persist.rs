@@ -13,7 +13,7 @@
 use crate::model::Op;
 use crate::store::StoreData;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::path::Path;
 
 /// Cap on how much of a damaged raw line is copied into the quarantine
@@ -65,6 +65,57 @@ impl Journal {
     /// Read every op ever written (oldest first). Corrupt lines are
     /// skipped and quarantined to `<journal>.corrupt` (see module docs);
     /// this errors only on genuine I/O failure.
+    /// The lock file guarding this journal. A process that serves requests
+    /// (memsrv) holds it exclusively for the whole request — read the tail
+    /// other writers appended, then mutate, then append — so ids are always
+    /// allocated from the true latest state. `append` alone only keeps lines
+    /// whole; it cannot stop two stale stores handing out the same node id.
+    pub fn lock_file(path: impl AsRef<Path>) -> std::io::Result<File> {
+        let mut lock_path = path.as_ref().to_path_buf();
+        lock_path.set_extension("lock");
+        if let Some(dir) = lock_path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        OpenOptions::new().read(true).write(true).create(true).open(lock_path)
+    }
+
+    /// Append while the CALLER holds the lock from `lock_file` (taking it
+    /// again here would deadlock: flock is per open file description).
+    pub fn append_held(&mut self, op: &Op) -> std::io::Result<()> {
+        serde_json::to_writer(&mut self.writer, op)?;
+        self.writer.write_all(b"\n")?;
+        self.writer.flush()
+    }
+
+    /// Ops appended after byte `offset`, and the offset just past the last
+    /// complete line. The caller holds the lock. A journal shorter than
+    /// `offset` was replaced underneath us; that is reported, not guessed at.
+    pub fn read_from(path: impl AsRef<Path>, offset: u64) -> std::io::Result<(LoadReport, u64)> {
+        let path = path.as_ref();
+        let mut report = LoadReport::default();
+        if !path.exists() {
+            return Ok((report, 0));
+        }
+        let mut file = File::open(path)?;
+        let len = file.metadata()?.len();
+        if len < offset {
+            return Err(std::io::Error::other(format!(
+                "journal shrank from {offset} to {len} bytes while open; restart to reload it"
+            )));
+        }
+        file.seek(SeekFrom::Start(offset))?;
+        let mut reader = BufReader::new(file);
+        let mut consumed = offset;
+        loop {
+            let mut raw: Vec<u8> = Vec::new();
+            let read = reader.read_until(b'\n', &mut raw)?;
+            if read == 0 || raw.last() != Some(&b'\n') { break; } // EOF or a partial line
+            consumed += read as u64;
+            parse_line(path, &raw, &mut report);
+        }
+        Ok((report, consumed))
+    }
+
     pub fn read_all(path: impl AsRef<Path>) -> std::io::Result<Vec<Op>> {
         Ok(Self::read_all_reported(path)?.ops)
     }
@@ -96,24 +147,29 @@ impl Journal {
             if read == 0 { break; } // clean EOF
             // a final line without '\n' (torn by a crash mid-append) is still
             // a candidate line — parse it; quarantine if it does not parse
-            let line = match std::str::from_utf8(&raw) {
-                Ok(s) => s.trim().to_string(),
-                Err(_) => {
-                    quarantine(path, "invalid utf-8", &raw);
-                    report.skipped += 1;
-                    continue;
-                }
-            };
-            if line.is_empty() { continue; } // blank padding is not corruption
-            match serde_json::from_str::<Op>(&line) {
-                Ok(op) => report.ops.push(op),
-                Err(e) => {
-                    quarantine(path, &e.to_string(), &raw);
-                    report.skipped += 1;
-                }
-            }
+            parse_line(path, &raw, &mut report);
         }
         Ok(report)
+    }
+}
+
+/// One journal line into the report: an op, or a quarantined line.
+fn parse_line(path: &Path, raw: &[u8], report: &mut LoadReport) {
+    let line = match std::str::from_utf8(raw) {
+        Ok(s) => s.trim().to_string(),
+        Err(_) => {
+            quarantine(path, "invalid utf-8", raw);
+            report.skipped += 1;
+            return;
+        }
+    };
+    if line.is_empty() { return; } // blank padding is not corruption
+    match serde_json::from_str::<Op>(&line) {
+        Ok(op) => report.ops.push(op),
+        Err(e) => {
+            quarantine(path, &e.to_string(), raw);
+            report.skipped += 1;
+        }
     }
 }
 

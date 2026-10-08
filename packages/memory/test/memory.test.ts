@@ -17,8 +17,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { MemoryClient, type MemoryChild } from "../src/memory/client.ts";
-import { findMemsrv } from "../src/runtime/paths.ts";
+import { MemoryClient, type MemoryChild } from "../src/index.ts";
+import { findMemsrv } from "../src/index.ts";
 
 /** A reply the fake sidecar can send: an object (framed for you) or raw text. */
 type FakeReply = { ok: boolean; result?: unknown; error?: string } | string;
@@ -163,10 +163,10 @@ test("a sidecar that dies mid-request resolves the callers instead of stranding 
 // ---------------------------------------------------------------------------
 // Against the real binary.
 
-// URL resolution is relative to this file's DIRECTORY (app/test/), so two hops
-// reach the repository root — three landed on C:\, and the integration tests
-// skipped themselves against a path that could not exist.
-const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+// URL resolution is relative to this file's DIRECTORY (packages/memory/test/),
+// so three hops reach the repository root. A wrong count lands somewhere that
+// cannot hold memsrv, and the integration tests skip instead of failing.
+const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 // Whichever build exists (release first), the same lookup the app uses.
 const MEMSRV = process.env.MNEMO_MEMSRV_BIN ?? findMemsrv("/nonexistent") ?? path.join(
   REPO_ROOT,

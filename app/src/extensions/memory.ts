@@ -1,169 +1,96 @@
 /**
- * The memory loop, as a pi extension.
- *
- *   before each run   inject the project and user profiles, plus what search
- *                     finds for this message; link what was recalled to the
- *                     episode, so a later failure can blame it
- *   during the run    log every tool call into the episode; a failed call or a
- *                     failed turn *steers* the graph (pain marker, blame,
- *                     correction or gap) — once per distinct failure
- *   after the run     a clean run reinforces what fed it; then a small model
- *                     call reads the exchange and writes the durable facts it
- *                     contains onto the profiles (a changed fact supersedes)
- *   at shutdown       consolidate recurring episodes into lessons
- *
- * Memory never breaks the loop: every call is best-effort and a dead sidecar
- * means "no memory", not a failed turn.
+ * The memory loop, as a pi extension: pi's events mapped onto one
+ * `MemorySession` from @mnemo/memory, which holds the loop itself (and is
+ * what other agents attach to). This file owns only what is pi's: the tools'
+ * schemas, the event shapes, the model call for reflection, the approval
+ * dialog for saving a skill, and running reflection in the background.
  */
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { Hit, MemoryService, ProfileFact, Scope } from "../memory/service.ts";
+import { describeSessionHits, MemorySession, SessionIndex, textOf, type Reflector } from "@mnemo/memory";
+import { sessionIndexPath, sessionSources, skillsDir } from "../runtime/paths.ts";
 import { inBackground, type Host } from "./host.ts";
 
-export const DIRECTIVE = [
-  "",
-  "## Memory",
-  "You have a persistent memory that outlives this conversation. What it holds about this project and this user is below, with anything else that matched the message.",
-  "- Treat recalled items as candidates, not facts: use what fits, ignore what does not.",
-  "- When you learn something durable (a convention, a command, a preference, a decision, a pitfall), store it with memory_remember. Use a short stable key; writing the same key again replaces the old value.",
-  "- Search with memory_search before saying you do not know something about this project.",
-].join("\n");
-
-function factLines(facts: ProfileFact[]): string {
-  return facts.map((f) => `- ${f.key}: ${f.value}`).join("\n");
-}
-
-export function memoryBlock(project: ProfileFact[], user: ProfileFact[], hits: Hit[]): string {
-  const parts = [DIRECTIVE];
-  if (project.length) parts.push("", "### This project", factLines(project));
-  if (user.length) parts.push("", "### This user", factLines(user));
-  if (hits.length) {
-    parts.push("", "### Recalled for this message");
-    for (const h of hits) {
-      const facts = h.state
-        .split("\n")
-        .filter((l) => /^\s+- /.test(l))
-        .slice(0, 5)
-        .join("\n");
-      parts.push(`- ${h.label} [${h.area}]${facts ? `\n${facts}` : ""}`);
-    }
-  }
-  return parts.join("\n");
-}
-
-type Msg = { role: string; content?: unknown; toolName?: string; isError?: boolean; stopReason?: string };
-
-function text(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return (content as { type: string; text?: string }[])
-    .filter((c) => c.type === "text")
-    .map((c) => c.text ?? "")
-    .join("\n");
-}
-
-/** One run, condensed for the reflection call: what was asked, done, answered, and what failed. */
-export function digest(messages: readonly unknown[], max = 6000): string {
-  const out: string[] = [];
-  for (const raw of messages) {
-    const m = raw as Msg;
-    if (m.role === "user") out.push(`USER: ${text(m.content).slice(0, 1200)}`);
-    else if (m.role === "assistant") {
-      const t = text(m.content).trim();
-      if (t) out.push(`ASSISTANT: ${t.slice(0, 1200)}`);
-      for (const c of (Array.isArray(m.content) ? m.content : []) as { type: string; name?: string; arguments?: Record<string, unknown> }[]) {
-        if (c.type === "toolCall") {
-          const a = c.arguments ?? {};
-          out.push(`TOOL ${c.name}(${String(a.command ?? a.path ?? a.pattern ?? "").slice(0, 160)})`);
-        }
-      }
-    } else if (m.role === "toolResult" && m.isError) out.push(`TOOL FAILED (${m.toolName}): ${text(m.content).slice(0, 300)}`);
-  }
-  const all = out.join("\n");
-  return all.length > max ? `${all.slice(0, max)}\n…` : all;
-}
-
-export const REFLECT_PROMPT = `You maintain the long-term memory of a coding agent called Mnemo.
-Read the exchange and extract only DURABLE facts that will still be true and useful in future sessions:
-- scope "user": the user's preferences and working style (true in every project)
-- scope "project": this codebase — stack, commands, conventions, structure, decisions, pitfalls
-Skip anything transient, specific to this one task, or a guess. Prefer the user's own statements.
-Use short, stable, lowercase keys ("package manager", "test command", "comment style") so that a
-changed fact replaces the old one. If a fact below is now wrong, emit the same key with the new value.
-Answer with JSON only: {"facts":[{"scope":"project"|"user","key":"...","value":"..."}]} — an empty list when nothing is durable.`;
-
-export interface LearnedFact {
-  scope: Scope;
-  key: string;
-  value: string;
-}
-
-/** Parse the reflection answer; anything malformed is "nothing learned". */
-export function parseFacts(answer: string): LearnedFact[] {
-  const start = answer.indexOf("{");
-  const end = answer.lastIndexOf("}");
-  if (start < 0 || end <= start) return [];
-  try {
-    const parsed = JSON.parse(answer.slice(start, end + 1)) as { facts?: unknown };
-    if (!Array.isArray(parsed.facts)) return [];
-    return parsed.facts
-      .filter((f): f is LearnedFact => {
-        const x = f as Partial<LearnedFact>;
-        return (x.scope === "project" || x.scope === "user") && typeof x.key === "string" && typeof x.value === "string";
-      })
-      .map((f) => ({ scope: f.scope, key: f.key.trim().toLowerCase().slice(0, 60), value: f.value.trim().slice(0, 300) }))
-      .filter((f) => f.key && f.value)
-      .slice(0, 6);
-  } catch {
-    return [];
-  }
-}
+export { describeHit, DIRECTIVE, profileBlock, recallMessage } from "@mnemo/memory";
 
 export function memoryExtension(host: Host) {
   return (pi: ExtensionAPI): void => {
     const mem = host.memory;
     if (!mem) return;
-    let episode: number | undefined;
-    let creating: Promise<number | undefined> | undefined;
-    const linked = new Set<number>();
-    const steered = new Set<string>();
-    let runFailed = false;
-
-    const ensureEpisode = (label: string): Promise<number | undefined> => {
-      if (episode !== undefined) return Promise.resolve(episode);
-      creating ??= mem.episode(`task: ${label.replace(/\s+/g, " ").slice(0, 80)}`).then((id) => (episode = id));
-      return creating;
+    let session: MemorySession | undefined;
+    // Set when a run ends: the reflection call goes to that run's model, routed
+    // by its session id (OpenCode refuses a call without one).
+    let reflectWith: { model: NonNullable<Parameters<Host["modelRuntime"]["completeSimple"]>[0]>; sessionId: string } | undefined;
+    const reflector: Reflector = async (system, user) => {
+      if (!reflectWith) throw new Error("no model for reflection");
+      const answer = await host.modelRuntime.completeSimple(
+        reflectWith.model,
+        { systemPrompt: system, messages: [{ role: "user", content: user, timestamp: Date.now() }] },
+        { sessionId: reflectWith.sessionId },
+      );
+      if (answer.stopReason === "error") throw new Error(answer.errorMessage ?? "no answer");
+      return textOf(answer.content);
     };
-
-    const steer = async (failure: string) => {
-      const sig = failure.slice(0, 200);
-      if (episode === undefined || steered.has(sig)) return;
-      steered.add(sig);
-      const r = await mem.steer(episode, failure);
-      if (r && host.ui) {
-        const blamed = r.blamed_feeders?.length ?? 0;
-        host.ui.note({
-          kind: "steer",
-          text: blamed ? `noted the failure; ${blamed} recalled item${blamed === 1 ? "" : "s"} lost weight` : "noted the failure for next time",
-        });
-      }
+    const sessionFor = (cwd: string, model?: string): MemorySession =>
+      (session ??= new MemorySession({
+        memory: mem,
+        cwd,
+        userSkillsDir: skillsDir(host.home),
+        source: { agent: "mnemo", model },
+        parentEpisode: host.parentEpisode,
+        // A sub-agent's work is part of its parent's run, which reflects on the whole.
+        reflect: host.reflect && host.depth === 0 ? reflector : undefined,
+        notify: (note) => host.ui?.note(note),
+        approveSkill: async (offer) => {
+          if (!host.ui) return false;
+          const answer = await host.ui.approve({
+            tool: "Save skill",
+            subject: offer.file,
+            preview: offer.body.split("\n").map((text) => ({ text: `+ ${text}`, tone: "add" as const })),
+            reason: offer.reason,
+          });
+          return answer.kind !== "no";
+        },
+        skillsChanged: () => host.ui?.resourcesChanged(),
+      }));
+    host.onModelChanged = async (model, reason) => {
+      await session?.modelChanged(model, reason);
     };
 
     pi.registerTool(
       defineTool({
         name: "memory_search",
         label: "Memory search",
-        description: "Search Mnemo's long-term memory (projects, preferences, past episodes, lessons, skills).",
+        description: "Search Mnemo's long-term memory for this project and user: conventions, past sessions, pitfalls and their fixes, lessons, skills.",
         parameters: Type.Object({
           query: Type.String({ description: "What to look for, in plain words" }),
           k: Type.Optional(Type.Number({ description: "How many results (default 5)" })),
         }),
-        async execute(_id, params) {
-          const hits = await mem.search(params.query, params.k ?? 5);
-          const body = hits.length
-            ? hits.map((h) => `- ${h.label} [${h.area}, ${h.kind}]\n${h.state.split("\n").filter((l) => /^\s+- /.test(l)).join("\n")}`).join("\n")
-            : "Nothing in memory matches.";
-          return { content: [{ type: "text", text: body }], details: { hits: hits.map((h) => h.label) } };
+        async execute(_id, params, _signal, _update, ctx) {
+          const body = await sessionFor(ctx.cwd).search(params.query, params.k ?? 5);
+          return { content: [{ type: "text", text: body }], details: {} };
+        },
+      }),
+    );
+
+    let index: SessionIndex | undefined;
+    pi.registerTool(
+      defineTool({
+        name: "session_search",
+        label: "Session search",
+        description:
+          "Search what was actually said and run in past sessions of this project — yours and other agents' (Claude Code). " +
+          "Use it when the user refers to earlier work. all_projects: search every project.",
+        parameters: Type.Object({
+          query: Type.String({ description: "Words from what you are looking for" }),
+          k: Type.Optional(Type.Number({ description: "How many passages (default 8)" })),
+          all_projects: Type.Optional(Type.Boolean()),
+        }),
+        async execute(_id, params, _signal, _update, ctx) {
+          index ??= new SessionIndex(sessionIndexPath(host.home), sessionSources(host.home));
+          const root = sessionFor(ctx.cwd).identity.root;
+          const hits = index.search(params.query, { k: params.k ?? 8, under: params.all_projects ? undefined : root });
+          return { content: [{ type: "text", text: describeSessionHits(hits) }], details: { hits: hits.length } };
         },
       }),
     );
@@ -174,16 +101,15 @@ export function memoryExtension(host: Host) {
         label: "Remember",
         description:
           "Store a durable fact in long-term memory. scope 'project' for facts about this codebase, 'user' for the user's preferences. " +
-          "Use a short stable key; the same key again replaces the old value (kept as history).",
+          "Use a short stable key; the same key again replaces the old value (kept as history). " +
+          "Not for deferred work or the status of the current task: Mnemo records each session's open work itself.",
         parameters: Type.Object({
           scope: Type.Union([Type.Literal("project"), Type.Literal("user")]),
           key: Type.String(),
           value: Type.String(),
         }),
         async execute(_id, params, _signal, _update, ctx) {
-          const r = await mem.learn(params.scope, ctx.cwd, params.key.toLowerCase(), params.value);
-          if (!r) throw new Error("memory is not reachable");
-          host.ui?.note({ kind: "learned", items: [`${params.scope} · ${params.key}: ${params.value}`] });
+          const r = await sessionFor(ctx.cwd).remember(params.scope, params.key, params.value);
           return {
             content: [{ type: "text", text: r.superseded ? `Updated ${params.key} (the old value is kept as history).` : `Remembered ${params.key}.` }],
             details: r,
@@ -198,106 +124,82 @@ export function memoryExtension(host: Host) {
         label: "Memory steer",
         description: "Tell memory that something it supplied was wrong or that an approach failed, so it is trusted less next time.",
         parameters: Type.Object({ failure: Type.String({ description: "What went wrong and why" }) }),
-        async execute(_id, params) {
-          await steer(params.failure);
+        async execute(_id, params, _signal, _update, ctx) {
+          await sessionFor(ctx.cwd).steer(params.failure);
           return { content: [{ type: "text", text: "Recorded." }], details: {} };
         },
       }),
     );
 
     pi.on("before_agent_start", async (event, ctx) => {
-      runFailed = false;
       try {
-        const [project, user, hits] = await Promise.all([
-          mem.profile("project", ctx.cwd),
-          mem.profile("user", ctx.cwd),
-          mem.recall(event.prompt, ctx.cwd),
-        ]);
-        const ep = await ensureEpisode(event.prompt);
-        if (ep !== undefined)
-          for (const h of hits)
-            if (!linked.has(h.node)) {
-              linked.add(h.node);
-              await mem.link(h.node, ep);
-            }
-        const items = [
-          ...(project.length ? [`${project.length} fact${project.length === 1 ? "" : "s"} about this project`] : []),
-          ...(user.length ? [`${user.length} preference${user.length === 1 ? "" : "s"}`] : []),
-          ...hits.map((h) => h.label),
-        ];
-        if (items.length) host.ui?.note({ kind: "recall", items });
-        return { systemPrompt: event.systemPrompt + memoryBlock(project, user, hits) };
+        const s = sessionFor(ctx.cwd, ctx.model?.id);
+        const r = await s.recall(event.prompt);
+        host.episode = s.episode;
+        return {
+          systemPrompt: event.systemPrompt + r.system,
+          ...(r.message ? { message: { customType: "mnemo-recall", content: r.message, display: false } } : {}),
+        };
       } catch {
         return undefined;
       }
     });
 
-    pi.on("tool_execution_end", async (event) => {
-      if (episode === undefined) return;
-      try {
-        await mem.log(episode, "tool_call", `${event.toolName}: ${event.isError ? "error" : "ok"}`);
-        if (event.isError) {
-          runFailed = true;
-          const why = text((event.result as { content?: unknown })?.content).slice(0, 300);
-          // A refusal by the user or a rule is a decision, not a failure to learn from.
-          if (!/declined this call|Refused by a rule|Plan mode is read-only/.test(why)) await steer(`${event.toolName} failed: ${why}`);
-        }
-      } catch {
-        /* memory never breaks the loop */
-      }
+    // A command that failed before, whose fix memory holds, is stopped once with the fix.
+    pi.on("tool_call", async (event, ctx) => {
+      if (event.toolName !== "bash") return undefined;
+      const reason = await sessionFor(ctx.cwd).guard(event.toolName, (event.input ?? {}) as Record<string, unknown>);
+      if (!reason) return undefined;
+      host.ui?.note({ kind: "steer", text: "pointed out a known fix before repeating a failure" });
+      return { block: true, reason };
     });
 
-    pi.on("turn_end", async (event) => {
-      const m = event.message as Msg & { errorMessage?: string };
-      if (m.stopReason === "error") {
-        runFailed = true;
-        await steer(m.errorMessage ?? "the model call failed").catch(() => {});
-      }
+    const calls = new Map<string, Record<string, unknown>>();
+    pi.on("tool_execution_start", async (event, ctx) => {
+      const args = (event.args ?? {}) as Record<string, unknown>;
+      calls.set(event.toolCallId, args);
+      sessionFor(ctx.cwd).toolStart(event.toolName, args);
     });
 
+    pi.on("tool_execution_end", async (event, ctx) => {
+      const args = calls.get(event.toolCallId) ?? {};
+      calls.delete(event.toolCallId);
+      const error = event.isError ? textOf((event.result as { content?: unknown })?.content) : undefined;
+      await sessionFor(ctx.cwd).toolEnd(event.toolName, args, !event.isError, error);
+    });
+
+    pi.on("turn_end", async (event, ctx) => {
+      const m = event.message as { stopReason?: string; errorMessage?: string; content?: unknown };
+      const s = sessionFor(ctx.cwd);
+      s.text(textOf(m.content));
+      if (m.stopReason === "error") await s.modelError(m.errorMessage ?? "the model call failed");
+    });
+
+    // A run sent back to verify is one run: its messages and tools reflect together.
+    let held: unknown[] = [];
     pi.on("agent_end", async (event, ctx) => {
-      const last = [...event.messages].reverse().find((m) => (m as Msg).role === "assistant") as Msg | undefined;
-      if (!last || last.stopReason === "aborted" || last.stopReason === "error") return;
-      const ep = episode;
-      const model = ctx.model;
-      inBackground(host, async () => {
-        if (ep !== undefined && !runFailed) await mem.good(ep, "run completed without errors");
-        // A sub-agent's work is part of its parent's run, which reflects on the whole.
-        if (!host.reflect || !model || host.depth > 0) return;
-        const exchange = digest(event.messages);
-        if (exchange.length < 40) return;
-        const [project, user] = await Promise.all([mem.profile("project", ctx.cwd), mem.profile("user", ctx.cwd)]);
-        const known = [...project.map((f) => `project · ${f.key}: ${f.value}`), ...user.map((f) => `user · ${f.key}: ${f.value}`)];
-        const answer = await host.modelRuntime.completeSimple(model, {
-          systemPrompt: REFLECT_PROMPT,
-          messages: [
-            {
-              role: "user",
-              content: `Already known:\n${known.join("\n") || "(nothing yet)"}\n\nExchange:\n${exchange}`,
-              timestamp: Date.now(),
-            },
-          ],
-        });
-        const facts = parseFacts(text(answer.content));
-        const existing = new Map<string, string>([
-          ...project.map((f): [string, string] => [`project:${f.key}`, f.value]),
-          ...user.map((f): [string, string] => [`user:${f.key}`, f.value]),
-        ]);
-        const fresh = facts.filter((f) => existing.get(`${f.scope}:${f.key}`) !== f.value);
-        for (const f of fresh) await mem.learn(f.scope, ctx.cwd, f.key, f.value);
-        if (ep !== undefined) for (const f of fresh) await mem.fact(ep, `learned ${f.key}`, f.value);
-        if (fresh.length) host.ui?.note({ kind: "learned", items: fresh.map((f) => `${f.scope} · ${f.key}: ${f.value}`) });
-      });
+      const last = [...event.messages].reverse().find((m) => (m as { role: string }).role === "assistant") as
+        | { stopReason?: string }
+        | undefined;
+      if (!last || last.stopReason === "aborted" || !session) return;
+      const s = session;
+      const messages = [...held, ...event.messages];
+      // Changed code and checked nothing: back once, to verify, before it is called done.
+      const nudge = host.verify && host.depth === 0 && last.stopReason !== "error" ? await s.verifyNudge() : undefined;
+      if (nudge) {
+        held = messages;
+        pi.sendMessage({ customType: "mnemo-verify", content: nudge, display: true }, { triggerTurn: true });
+        return;
+      }
+      held = [];
+      if (ctx.model) reflectWith = { model: ctx.model, sessionId: ctx.sessionManager.getSessionId() };
+      const run = { messages, signals: host.signals.splice(0) };
+      inBackground(host, () => s.end(run));
     });
 
     pi.on("session_shutdown", async () => {
       if (host.depth > 0) return;
-      try {
-        if (episode !== undefined) await mem.log(episode, "outcome", "session ended");
-        await mem.consolidate();
-      } catch {
-        /* ignore */
-      }
+      await session?.close();
     });
   };
 }

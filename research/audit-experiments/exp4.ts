@@ -1,0 +1,15 @@
+import { MemoryClient } from "../../packages/memory/src/index.ts";
+import { spawnMemsrv } from "../../packages/memory/src/index.ts";
+import * as os from "node:os"; import * as path from "node:path"; import * as fs from "node:fs";
+import { findMemsrv } from "../../app/src/runtime/paths.ts";
+const BIN = findMemsrv("/nonexistent") ?? (() => { throw new Error("build memsrv first: cd memory-layer && cargo build --release --bin memsrv"); })();
+const journal = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "audit4-")), "j.jsonl");
+const c = new MemoryClient({ binaryPath: BIN, journalPath: journal, spawn: spawnMemsrv });
+await c.request("remember", { summary: "the billing service listens on port 8081" });
+const q = { query: "which port does billing use", k: 3 };
+const before = await c.request("search", q);
+console.log("first :", (before.result as any).cache, (before.result as any).results.map((r: any) => r.label));
+await c.request("remember", { summary: "billing port changed: billing now uses port 9090 (port 8081 is retired)" });
+const after = await c.request("search", q);
+console.log("second:", (after.result as any).cache, (after.result as any).results.map((r: any) => r.label));
+c.stop();

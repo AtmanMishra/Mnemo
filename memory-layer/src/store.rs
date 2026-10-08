@@ -226,7 +226,7 @@ impl StoreData {
             .filter(|l| !FACT_LOG_KINDS.contains(&l.kind.as_str()))
             .rev().take(5).collect::<Vec<_>>().iter().rev()
         {
-            s.push_str(&format!("  [{}] {}: {}\\n", l.at, l.kind, l.detail));
+            s.push_str(&format!("  [{}] {}: {}\n", l.at, l.kind, l.detail));
         }
         s.push_str(&format!("context chunks: {}\n", n.context.len()));
         for c in &n.context {

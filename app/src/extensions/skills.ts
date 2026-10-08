@@ -4,7 +4,8 @@
  * pi already discovers and loads `SKILL.md` files; these tools let the agent
  * add to that set when it notices a procedure worth keeping, and improve one
  * that failed. A skill is a file a person can read and edit, under
- * `$MNEMO_HOME/agent/skills/<name>/SKILL.md`, and also a node in memory
+ * the repository's `.agents/skills/<name>/SKILL.md` (or, for a personal one,
+ * `$MNEMO_HOME/agent/skills/`), and also a node in memory
  * (Procedural), so a later session can recall that it exists and why.
  * Every update keeps the previous body under `$MNEMO_HOME/skill-history/`.
  */
@@ -13,6 +14,7 @@ import * as path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { skillsDir } from "../runtime/paths.ts";
+import { projectIdentity, renderSkill, skillPath } from "@mnemo/memory";
 import type { Host } from "./host.ts";
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -21,10 +23,9 @@ export function skillFile(home: string, name: string): string {
   return path.join(skillsDir(home), name, "SKILL.md");
 }
 
-export function renderSkill(name: string, description: string, body: string): string {
-  const desc = description.replace(/\s+/g, " ").trim();
-  return `---\nname: ${name}\ndescription: ${JSON.stringify(desc)}\n---\n\n${body.trim()}\n`;
-}
+/** Where a skill goes: the repository's `.agents/skills/`, or Mnemo's home for a personal one. */
+const target = (home: string, projectRoot: string, scope: "project" | "user", name: string) =>
+  skillPath(scope, name, { projectRoot, userSkillsDir: skillsDir(home) });
 
 export function skillsExtension(host: Host) {
   return (pi: ExtensionAPI): void => {
@@ -35,15 +36,17 @@ export function skillsExtension(host: Host) {
         description:
           "Save a reusable procedure as a skill (a SKILL.md other sessions can load). Use it when you worked out a multi-step " +
           "procedure this project or user will need again. name: lowercase-with-dashes. description: when to use it (this is how it is found). " +
-          "instructions: the steps, commands and pitfalls, in Markdown.",
+          "instructions: the steps, commands and pitfalls, in Markdown. scope: project (default; saved in the repository's " +
+          ".agents/skills) or user (a personal skill for every project).",
         parameters: Type.Object({
           name: Type.String(),
           description: Type.String(),
           instructions: Type.String(),
+          scope: Type.Optional(Type.Union([Type.Literal("project"), Type.Literal("user")])),
         }),
-        async execute(_id, params) {
+        async execute(_id, params, _signal, _update, ctx) {
           if (!NAME.test(params.name)) throw new Error("name must be lowercase letters, digits and dashes");
-          const file = skillFile(host.home, params.name);
+          const file = target(host.home, projectIdentity(ctx.cwd).root, params.scope ?? "project", params.name);
           if (fs.existsSync(file)) throw new Error(`skill ${params.name} already exists — use update_skill`);
           fs.mkdirSync(path.dirname(file), { recursive: true });
           fs.writeFileSync(file, renderSkill(params.name, params.description, params.instructions));
@@ -68,9 +71,10 @@ export function skillsExtension(host: Host) {
           reason: Type.String({ description: "What went wrong with the old version" }),
           description: Type.Optional(Type.String()),
         }),
-        async execute(_id, params) {
-          const file = skillFile(host.home, params.name);
-          if (!fs.existsSync(file)) throw new Error(`no skill ${params.name} under ${skillsDir(host.home)}`);
+        async execute(_id, params, _signal, _update, ctx) {
+          const root = projectIdentity(ctx.cwd).root;
+          const file = [target(host.home, root, "project", params.name), skillFile(host.home, params.name)].find((f) => fs.existsSync(f));
+          if (!file) throw new Error(`no skill ${params.name} in ${path.join(root, ".agents", "skills")} or ${skillsDir(host.home)}`);
           const old = fs.readFileSync(file, "utf8");
           const history = path.join(host.home, "skill-history", params.name);
           fs.mkdirSync(history, { recursive: true });

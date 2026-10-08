@@ -13,13 +13,22 @@ A terminal-native agentic coding and harness assistant whose memory works like a
 > [`DESIGN.md`](DESIGN.md).
 >
 > ```bash
-> app/scripts/install.sh      # builds mnemo + memsrv into ~/.mnemo/bin (needs bun, cargo)
+> # from a release (once v0.1 is tagged) — nothing else needed
+> curl -fsSL https://github.com/AtmanMishra/self-evolving-agent/releases/latest/download/install.sh | sh
+> irm https://github.com/AtmanMishra/self-evolving-agent/releases/latest/download/install.ps1 | iex   # Windows
+>
+> # from this checkout (needs bun and cargo)
+> app/scripts/install.sh
+>
 > mnemo doctor                # what is installed and reachable
-> mnemo                       # /login adds a provider (API key or subscription)
+> mnemo                       # the launch, a first-run introduction, then the workspace
 > mnemo --demo                # a scripted session in a scratch project — no key needed
+> mnemo memory setup claude-code   # attach the same memory to Claude Code (or: codex)
 > ```
 >
 > Or without installing: `cd app && bun install && bun bin/mnemo.ts`.
+> `app/scripts/test-install.sh` installs a locally built release in a clean
+> container and runs a turn — the first-run check.
 >
 > ![Mnemo asking before an edit](docs/screenshots/approval.png)
 > ![What Mnemo learned](docs/screenshots/memory.png)

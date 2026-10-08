@@ -10,7 +10,7 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { startRuntime } from "../src/runtime/runtime.ts";
 import { Controller } from "../src/runtime/controller.ts";
 import { createDemoProject, createFaux } from "../src/runtime/demo.ts";
-import { MemoryService } from "../src/memory/service.ts";
+import { MemoryService } from "@mnemo/memory";
 import { createHost, settleBackground, type Mode } from "../src/extensions/host.ts";
 import { mnemoExtensions } from "../src/extensions/index.ts";
 import { findMemsrv } from "../src/runtime/paths.ts";
@@ -21,10 +21,14 @@ export interface EnvOptions {
   memory?: boolean;
   mode?: Mode;
   reflect?: boolean;
+  /** Send a run that changed code and checked nothing back to verify (off by default in tests). */
+  verify?: boolean;
   /** Reuse a home (and so its journal) from an earlier env: a second session. */
   home?: string;
   cwd?: string;
   persistent?: boolean;
+  /** `provider/id` to escalate to; registers a second faux model, `mnemo-demo/demo-strong`. */
+  escalate?: string;
 }
 
 export async function mnemoEnv(o: EnvOptions = {}) {
@@ -33,9 +37,9 @@ export async function mnemoEnv(o: EnvOptions = {}) {
   fs.mkdirSync(agentDir, { recursive: true });
   process.env.PI_CODING_AGENT_DIR = agentDir;
   const cwd = o.cwd ?? createDemoProject();
-  const { modelRuntime, faux } = await createFaux(agentDir);
+  const { modelRuntime, faux } = await createFaux(agentDir, { strong: !!o.escalate });
   const memory = o.memory && MEMSRV ? new MemoryService(MEMSRV, path.join(home, "memory", "journal.jsonl")) : undefined;
-  const host = createHost({ home, agentDir, modelRuntime, memory, mode: o.mode, reflect: o.reflect ?? false });
+  const host = createHost({ home, agentDir, modelRuntime, memory, mode: o.mode, reflect: o.reflect ?? false, verify: o.verify ?? false, escalate: o.escalate });
   const runtime = await startRuntime({
     cwd,
     agentDir,

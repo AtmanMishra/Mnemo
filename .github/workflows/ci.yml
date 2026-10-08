@@ -142,14 +142,21 @@ jobs:
       - name: build memsrv
         working-directory: memory-layer
         run: cargo build --release --bin memsrv
+      # One Bun workspace (app + packages/*), one lockfile at the root.
       - name: bun install
-        working-directory: app
         run: bun install --frozen-lockfile
       - name: typecheck
         working-directory: app
         run: bunx tsc --noEmit
       - name: bun test
         working-directory: app
+        run: bun test ./test
+      # @mnemo/memory stands alone: other agents attach to it without the app.
+      - name: memory package typecheck
+        working-directory: packages/memory
+        run: bunx tsc --noEmit
+      - name: memory package test
+        working-directory: packages/memory
         run: bun test ./test
       - name: compiled binary renders a frame
         working-directory: app

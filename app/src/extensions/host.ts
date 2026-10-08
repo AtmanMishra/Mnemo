@@ -9,7 +9,7 @@
  */
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { ApprovalAnswer, ApprovalRequest } from "../runtime/dialogs.ts";
-import type { MemoryService } from "../memory/service.ts";
+import type { MemoryNote, MemoryService } from "@mnemo/memory";
 import { probeInterpreter, resolveInterpreter } from "../kernel/kernel.ts";
 
 /**
@@ -24,11 +24,7 @@ export type Mode = "default" | "accept-edits" | "plan" | "yolo";
 /** shift+tab cycles these; yolo is only ever chosen explicitly. */
 export const CYCLE: Mode[] = ["default", "accept-edits", "plan"];
 
-export type MemoryNote =
-  | { kind: "recall"; items: string[] }
-  | { kind: "learned"; items: string[] }
-  | { kind: "steer"; text: string }
-  | { kind: "skill"; text: string };
+export type { MemoryNote };
 
 export interface HostUi {
   approve(request: ApprovalRequest, signal?: AbortSignal): Promise<ApprovalAnswer>;
@@ -51,10 +47,28 @@ export interface Host {
   mode: Mode;
   /** Extract durable facts after each run (costs one small model call). */
   reflect: boolean;
+  /** Send a run that changed code and checked nothing back once, to verify. */
+  verify: boolean;
+  /** `provider/id` of a stronger model a run moves to when its checks keep failing. */
+  escalate?: string;
+  /** Every escalation this session made, oldest first. */
+  escalations: { from: string; to: string; reason: string }[];
+  /** Set by the memory extension: the session record learns the model changed. */
+  onModelChanged?: (model: string, reason: string) => Promise<void>;
   /** Absent in headless runs (`-p`). */
   ui?: HostUi;
   /** Work the extensions started and did not wait for (reflection). Tests await it. */
   background: Set<Promise<unknown>>;
+  /**
+   * Things the user told Mnemo outside the chat during this run — a refusal in
+   * the approval dialog and what to do instead. The memory loop reads and
+   * clears them after each run: they are the user's own words about how to work.
+   */
+  signals: string[];
+  /** The episode this session is recording, once there is one. */
+  episode?: number;
+  /** For a sub-agent: the episode of the session that spawned it. */
+  parentEpisode?: number;
 }
 
 /** Run something after the fact without letting it fail the turn, and keep track of it. */
@@ -76,6 +90,8 @@ export interface HostOptions {
   memory?: MemoryService;
   mode?: Mode;
   reflect?: boolean;
+  verify?: boolean;
+  escalate?: string;
   maxDepth?: number;
   /** Injected by tests; the default probes for a Python that actually runs. */
   python?: () => string | undefined;
@@ -98,6 +114,10 @@ export function createHost(o: HostOptions): Host {
     maxDepth: o.maxDepth ?? 2,
     mode: o.mode ?? "default",
     reflect: o.reflect ?? true,
+    verify: o.verify ?? true,
+    escalate: o.escalate,
+    escalations: [],
     background: new Set(),
+    signals: [],
   };
 }

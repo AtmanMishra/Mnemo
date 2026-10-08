@@ -1,89 +1,131 @@
 name: release
 
-# A tag is the trigger: v0.1.0-prealpha, v0.2.0, … The tag is cut from main,
-# which the ci workflow has already run all four suites against; this workflow
-# is about producing and publishing the artifact, not about re-testing it.
+# A tag is the trigger: v0.1.0, v0.2.0-rc.1, … The tag is cut from main,
+# which the ci workflow has already tested; this workflow produces and
+# publishes the artifacts. Runnable by hand with an existing tag, which is how
+# a build is dry-run before anyone commits to a release.
 #
-# It is also runnable by hand with a tag that already exists, which is how a
-# build gets dry-run before anyone commits to a release.
+# What ships, per platform: one archive holding `mnemo` (Bun-compiled, no Bun
+# or Node needed) and `memsrv` (the Rust memory sidecar), beside each other —
+# the place mnemo looks for its sidecar first. Plus SHA256SUMS, and the two
+# installers, so `…/releases/latest/download/install.sh` always matches.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "existing tag to release, e.g. v0.1.0-prealpha"
+        description: "existing tag to release, e.g. v0.1.0"
         required: true
 
-# gh release create writes a release and its assets; nothing else here needs
-# to write anything.
 permissions:
   contents: write
 
+env:
+  TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
+
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    env:
-      TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu-22.04: an older glibc, so the binaries run on more distributions.
+          - { platform: linux-x64, os: ubuntu-22.04, bun: bun-linux-x64, rust: x86_64-unknown-linux-gnu, ext: "" }
+          - { platform: linux-arm64, os: ubuntu-22.04-arm, bun: bun-linux-arm64, rust: aarch64-unknown-linux-gnu, ext: "" }
+          - { platform: darwin-arm64, os: macos-14, bun: bun-darwin-arm64, rust: aarch64-apple-darwin, ext: "" }
+          - { platform: darwin-x64, os: macos-13, bun: bun-darwin-x64, rust: x86_64-apple-darwin, ext: "" }
+          - { platform: windows-x64, os: windows-latest, bun: bun-windows-x64, rust: x86_64-pc-windows-msvc, ext: ".exe" }
+    name: build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
     steps:
       # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      # actions/setup-go v5
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version: "1.27"
+          ref: ${{ env.TAG }}
+      # oven-sh/setup-bun v2.2.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: "1.4.2"
 
-      # One static binary per platform. CGO off so nothing depends on a libc
-      # the tester happens to have; -trimpath so the paths in a crash report
-      # are the same for everyone. The version is injected rather than
-      # committed, so the binary can always say which tag it came from.
-      - name: build every platform
-        working-directory: tui-go
+      # The version a binary reports is package.json's: the tag must agree.
+      - name: the tag matches the version
+        shell: bash
+        run: |
+          v=$(node -p "require('./app/package.json').version" 2>/dev/null || bun -e "console.log(require('./app/package.json').version)")
+          [ "v$v" = "${TAG%%-*}" ] || [ "v$v" = "$TAG" ] || { echo "::error::tag $TAG but app/package.json says $v"; exit 1; }
+
+      - name: memsrv
+        shell: bash
+        working-directory: memory-layer
+        run: cargo build --release --locked --bin memsrv --target ${{ matrix.rust }} || cargo build --release --bin memsrv --target ${{ matrix.rust }}
+
+      - name: mnemo
+        shell: bash
+        run: |
+          bun install --frozen-lockfile
+          cd app && bun scripts/build.ts ${{ matrix.bun }}
+
+      - name: package
+        shell: bash
         run: |
           set -euo pipefail
-          mkdir -p ../dist
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
-            os="${target%%/*}"
-            arch="${target##*/}"
-            ext=""
-            [ "$os" = "windows" ] && ext=".exe"
-            out="../dist/mnemo-${TAG}-${os}-${arch}${ext}"
-            echo "building $out"
-            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
-              -ldflags "-s -w -X main.version=${TAG}" -o "$out" ./cmd/mnemo
-          done
-          ls -l ../dist
+          mkdir -p stage out
+          cp app/dist/mnemo-${{ matrix.bun }}${{ matrix.ext }} stage/mnemo${{ matrix.ext }}
+          cp memory-layer/target/${{ matrix.rust }}/release/memsrv${{ matrix.ext }} stage/memsrv${{ matrix.ext }}
+          if [ "${{ matrix.ext }}" = ".exe" ]; then
+            (cd stage && 7z a ../out/mnemo-${{ matrix.platform }}.zip mnemo.exe memsrv.exe >/dev/null)
+          else
+            tar -czf out/mnemo-${{ matrix.platform }}.tar.gz -C stage mnemo memsrv
+          fi
+          ls -l out
 
-      # The binary has to answer --version on a machine with no Go, no Node
-      # and no config — that is the whole point of the flag.
-      - name: the binaries answer for themselves
+      # On a machine with nothing installed, the binary answers, finds its
+      # sidecar beside it, and runs a whole scripted turn.
+      - name: the archive works on its own
+        shell: bash
         run: |
           set -euo pipefail
-          chmod +x dist/mnemo-${TAG}-linux-amd64
-          got="$(dist/mnemo-${TAG}-linux-amd64 --version)"
+          export MNEMO_HOME="$RUNNER_TEMP/mnemo-home"
+          got=$(stage/mnemo${{ matrix.ext }} --version)
           echo "$got"
-          case "$got" in
-            *"${TAG}"*) ;;
-            *) echo "::error::--version does not name the tag (${TAG})"; exit 1 ;;
-          esac
+          stage/mnemo${{ matrix.ext }} doctor | tee doctor.txt
+          grep -q "✓ memory" doctor.txt || { echo "::error::mnemo did not find memsrv beside it"; exit 1; }
+          stage/mnemo${{ matrix.ext }} --demo --dump | grep -q "retries"
 
-      - name: checksums
+      # Pinned by major version, not a commit: pin to a reviewed SHA before the first release.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mnemo-${{ matrix.platform }}
+          path: out/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.TAG }}
+      # Pinned by major version, not a commit: pin to a reviewed SHA before the first release.
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums and installers
         run: |
           set -euo pipefail
+          cp app/scripts/get.sh dist/install.sh
+          cp app/scripts/get.ps1 dist/install.ps1
           cd dist
           sha256sum mnemo-* > SHA256SUMS
           cat SHA256SUMS
-
-      # No third-party release action: the runner already has gh, and a
-      # supply-chain hop is not worth the convenience of one fewer step.
+      # No third-party release action: the runner has gh.
       - name: publish
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" dist/* \
-            --title "Mnemo $TAG" \
-            --notes-file .github/release-notes.md \
-            --verify-tag
-          gh release view "$TAG" --json tagName,isDraft,assets \
-            --jq '{tag: .tagName, draft: .isDraft, assets: [.assets[].name]}'
+          prerelease=""
+          case "$TAG" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$TAG" dist/* --title "Mnemo $TAG" --generate-notes $prerelease || gh release upload "$TAG" dist/* --clobber

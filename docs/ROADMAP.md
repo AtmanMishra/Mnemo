@@ -133,6 +133,11 @@ the new stack with a key; the memory eval pins do not move.
 
 ### Stage 3 — Make the memory self-evolve (the point of the project)
 
+> **Read first:** `research/self-evolution-audit.md` (2026-10-08) — measured
+> defects in the sidecar and the prototype (two are data-integrity bugs) and
+> the five loops this stage has to close, in phases A–E. It supersedes the
+> ordering below where they disagree.
+
 The memory layer stores and retrieves. What is missing is the loop that makes it
 *learn from sessions*. Design is `research/memory-runtime-design.md`; today only
 J0 exists. Build in its own phases, report-only first.
@@ -170,6 +175,57 @@ J0 exists. Build in its own phases, report-only first.
   model. Grow it to a task set with repeated sessions where the *second* run is
   the measurement, and publish the number with its method.
 
+### Stage 3b — Memory for every agent; frontier accuracy on a cheap model
+
+*Added 2026-10-08.* The target: Mnemo on a low-tier model (DeepSeek v4.1 Flash,
+$0.15/M in) reaching frontier-agent accuracy **on familiar work** — the same
+repositories, the same person, the same kinds of task — at a fraction of the
+cost, with the gap closing over time. Memory cannot make a cheap model out-reason
+a frontier one on a task it has never seen; it can make it stop rediscovering
+what is already known. And because the memory attaches to *other* agents too, a
+frontier model's sessions teach the memory the cheap model uses.
+
+- ▣ 3b.1 **`@mnemo/memory` package** (`packages/memory`): the loop as
+  `MemorySession` (begin/recall/context, toolStart/toolEnd, text, end, close),
+  model calls and approval injected; Mnemo drives it from a pi extension.
+- ▣ 3b.2 **Provenance**: episodes record agent and model; profile logs record
+  who taught each fact; fixes record where they came from.
+- ▣ 3b.3 **Claude Code, after the fact**: `mnemo memory ingest` replays saved
+  sessions (`~/.claude/projects`) through the loop, once each (ledger), with
+  redaction before anything reaches the reflection model.
+- ▣ 3b.4 **Claude Code, live**: `mnemo memory hook` — SessionStart (profiles,
+  last session; survives compaction), UserPromptSubmit (recall), Stop (async
+  ingest of the run that ended). `mnemo memory setup claude-code` prints it.
+- ▣ 3b.5 **MCP** (`mnemo memory mcp`): memory_recall / memory_search /
+  memory_remember for Codex, Cursor, opencode. `mnemo memory setup codex`.
+- ▣ 3b.6 **Recall into action**: the pitfall guard (a command that failed before
+  is stopped once with its known fix) and verify-before-done (a run that changed
+  code and checked nothing goes back once to run the project's check).
+- ▣ 3b.7 **Benchmarks, local**: `app/eval/run.ts` (seven two-session scenarios,
+  memory vs none) and `app/eval/series.ts` (six tasks in one repo with unwritten
+  rules: the learning curve; `--teacher` for teacher→student).
+- ▢ 3b.8 **Trust-weighted recall** (audit F8): rank by provenance (a fix a
+  frontier model found and a test confirmed outranks a cheap model's guess).
+- ▢ 3b.9 **Local embedder** (audit F15): recall precision; the lexical hash
+  ranks an episode above the matching pitfall today.
+- ▣ 3b.10 **Escalation** (`--escalate provider/id`, `MNEMO_ESCALATE_MODEL`;
+  `src/extensions/escalate.ts`): after the project's checks fail twice in a run,
+  the rest of the run goes to the stronger model and the next run starts cheap
+  again; the episode records it, so the fix is attributed and recalled. ▢ Metric
+  in the evals: escalations per task, falling.
+- ▣ 3b.11 **Best-of-n** (`mnemo -p "<task>" --best-of N --check "<cmd>"`;
+  `src/runtime/best-of.ts`): N headless candidates in git worktrees, the check
+  as judge (run one at a time, once more before rejecting), the smallest
+  passing diff applied, every diff kept under `$MNEMO_HOME/best-of/`. Verified
+  on clsx with DeepSeek. ▢ Taking the check from memory when `--check` is
+  absent (the remembered "verify command" is prose today, not a command).
+- ▢ 3b.12 **Public benchmarks**: a SWE-bench Verified / Terminal-Bench subset as
+  the absolute anchor (Mnemo + Flash vs Claude Code + Sonnet/Opus — expect to
+  lose there), a per-repository chronological split as the learning curve, and
+  accuracy per dollar as the headline. Needs a machine with Docker and the
+  datasets; the local series is the rehearsal.
+- ▢ 3b.13 **Codex and opencode transcripts** for `ingest`, like Claude Code's.
+
 ### Stage 4 — Execution
 
 - ▢ 4.1 Per-call timeout on the in-kernel channel (audit #6) and a cell timeout
@@ -181,11 +237,14 @@ J0 exists. Build in its own phases, report-only first.
 
 ### Stage 5 — Packaging, install, release
 
-- ▢ 5.1 `bun build --compile` per target (linux/darwin/windows × amd64/arm64);
-  smoke test spawns the compiled binary and renders a frame.
-- ▢ 5.2 `memsrv` built per target in `release.yml` and attached; the app finds it
-  by the platform name (`memsrv.exe` on Windows).
-- ▣ 5.3 (from source) `app/scripts/install.sh`. ▢ Install paths from releases (D3): `curl -fsSL …/install.sh | sh` and `irm …/install.ps1 | iex`
+- ▣ 5.1 `bun build --compile` per target in `release.yml` (linux x64/arm64,
+  darwin arm64/x64, windows x64); each archive is smoke-tested (doctor finds
+  the sidecar, the demo runs). ▢ Pin upload/download-artifact to SHAs.
+- ▣ 5.2 `memsrv` built per target and packaged beside `mnemo`.
+- ▣ 5.3 (from source) `app/scripts/install.sh`. ▣ Release installers
+  `app/scripts/get.sh` / `get.ps1` (checksummed; published as install.sh/ps1);
+  `app/scripts/test-install.sh` verifies a clean install in Docker ubuntu:24.04.
+  ▢ Install paths from releases (D3): `curl -fsSL …/install.sh | sh` and `irm …/install.ps1 | iex`
   download the binary + `memsrv` for the platform into `~/.mnemo/bin` and put it
   on PATH; `npx @mnemo/cli` / `bunx` is a thin package that fetches the same
   binary. Each finishes by running `mnemo doctor`. `uninstall` removes exactly

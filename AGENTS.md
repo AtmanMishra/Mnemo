@@ -18,7 +18,9 @@
 > added as pi inline extensions in `src/extensions/` (policy, memory, kernel,
 > agents, skills, trace), which share one `Host` (`src/extensions/host.ts`) —
 > never globals. The memory semantics (profiles, recall, learning, steering)
-> live in `src/memory/service.ts`.
+> live in `packages/memory` (`@mnemo/memory`): `MemorySession` is the loop any
+> agent drives, `service.ts` the semantics over the sidecar. `app/` drives it
+> from a pi extension; `cd packages/memory && bun test ./test` tests it alone.
 >
 > Working in `app/`: `cd app && bun install && bun test ./test && bunx tsc --noEmit`.
 > Everything must be verifiable without an API key: tests run real pi sessions
