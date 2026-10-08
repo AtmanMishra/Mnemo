@@ -8,7 +8,8 @@
 import { test, expect } from "bun:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
 import { createFaux } from "../src/runtime/demo.ts";
-import { runScenario } from "../eval/experiment.ts";
+import * as path from "node:path";
+import { contamination, runScenario } from "../eval/experiment.ts";
 import { SCENARIOS } from "../eval/scenarios.ts";
 import type { EvalModel } from "../eval/harness.ts";
 import { MEMSRV } from "./helpers.ts";
@@ -64,7 +65,20 @@ t("with memory, the remembered fix is applied first and every check passes", asy
 
 t("without memory, the same agent rediscovers the failure and the behaviour checks fail", async () => {
   const r = await runScenario(scenario, false, 1, scripted);
-  expect(r.checks.every((c) => c.kind === "behaviour")).toBe(true);
-  expect(r.checks.every((c) => !c.pass)).toBe(true);
+  const behaviour = r.checks.filter((c) => c.kind === "behaviour");
+  expect(r.checks.filter((c) => c.kind !== "behaviour").map((c) => [c.kind, c.pass])).toEqual([["integrity", true]]);
+  expect(behaviour.length).toBeGreaterThan(0);
+  expect(behaviour.every((c) => !c.pass)).toBe(true);
   expect(r.sessions[1]!.tools.filter((x) => !x.ok)).toHaveLength(1);
 }, 60_000);
+
+test("a run that reads the experiment's source or another run's files is flagged", () => {
+  const tool = (args: Record<string, unknown>, output = "") => ({ name: "bash", args, ok: true, output });
+  const session = (tools: ReturnType<typeof tool>[]) => ({ tools }) as unknown as Parameters<typeof contamination>[1][number];
+  const root = "/tmp/mnemo-eval-x-abc";
+  const repo = path.resolve(import.meta.dir, "../..");
+  expect(contamination(root, [session([tool({ command: `ls ${root}/app` })])])).toBeUndefined();
+  expect(contamination(root, [session([tool({ path: `${repo}/app/eval/scenarios.ts` })])])).toContain("scenarios.ts");
+  expect(contamination(root, [session([tool({ command: "cat /tmp/mnemo-eval-x-zzz/home/journal.jsonl" })])])).toContain("mnemo-eval-x-zzz");
+  expect(contamination(root, [session([tool({ command: "grep -r example.org /" }, "/srv/app/eval/scenarios.ts: ...")])])).toBeDefined();
+});

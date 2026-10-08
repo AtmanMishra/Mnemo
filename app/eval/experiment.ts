@@ -27,6 +27,25 @@ export interface RunResult {
   ms: number;
 }
 
+/** This repository: the scenarios, and so the answers, live in it. */
+const REPO = path.resolve(import.meta.dir, "../..");
+
+/**
+ * The agent has the whole filesystem (no sandbox), and a baseline session
+ * once answered by reading eval/scenarios.ts. A run that looked at this
+ * repository or at another run's directory does not count as evidence.
+ */
+export function contamination(root: string, sessions: SessionResult[]): string | undefined {
+  for (const s of sessions)
+    for (const t of s.tools) {
+      const args = JSON.stringify(t.args);
+      if (args.includes(REPO) || /eval\/scenarios/.test(t.output)) return `${t.name} ${args.slice(0, 200)}`;
+      const other = /\/mnemo-eval-[\w-]+/.exec(args)?.[0];
+      if (other && !root.includes(other)) return `${t.name} ${args.slice(0, 200)}`;
+    }
+  return undefined;
+}
+
 export async function runScenario(s: Scenario, withMemory: boolean, repeat: number, makeModel: (agentDir: string) => Promise<EvalModel>): Promise<RunResult> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `mnemo-eval-${s.name}-`));
   const home = path.join(root, "home");
@@ -60,7 +79,8 @@ export async function runScenario(s: Scenario, withMemory: boolean, repeat: numb
       }
     },
   };
-  const checks: CheckResult[] = [];
+  const leak = contamination(root, sessions);
+  const checks: CheckResult[] = [{ name: "the agent stayed out of the experiment's source and other runs", kind: "integrity", pass: !leak, detail: leak }];
   for (const c of s.checks) {
     if (c.kind === "memory" && !withMemory) continue;
     let outcome: true | string;
@@ -72,6 +92,8 @@ export async function runScenario(s: Scenario, withMemory: boolean, repeat: numb
     checks.push({ name: c.name, kind: c.kind, pass: outcome === true, detail: outcome === true ? undefined : outcome.slice(0, 600) });
   }
   memory?.stop();
+  // Everything worth keeping is in the result; a leftover directory is one more thing a later run can read.
+  fs.rmSync(root, { recursive: true, force: true });
   return { scenario: s.name, memory: withMemory, repeat, checks, sessions, cost: sessions.reduce((n, r) => n + r.cost, 0), ms: Date.now() - started };
 }
 

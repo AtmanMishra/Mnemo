@@ -64,7 +64,9 @@ function report(results: RunResult[], args: Args): string {
     for (const key of names) {
       const [kind, name] = key.split("\u0000") as [string, string];
       const tally = (memory: boolean) => {
-        const runs = results.filter((r) => r.scenario === s && r.memory === memory);
+        // A contaminated run is evidence of nothing but its contamination.
+        const clean = (r: RunResult) => kind === "integrity" || r.checks.every((c) => c.kind !== "integrity" || c.pass);
+        const runs = results.filter((r) => r.scenario === s && r.memory === memory && clean(r));
         const hits = runs.flatMap((r) => r.checks.filter((c) => c.name === name));
         if (!hits.length) return "—";
         return `${hits.filter((c) => c.pass).length}/${hits.length}`;
