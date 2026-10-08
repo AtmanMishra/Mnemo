@@ -29,8 +29,12 @@ The Go interface's design is archived at `docs/archive/DESIGN-go-tui.md`.
 
 ## 2. Palette, pixels and glyphs
 
-One file owns colour: `app/src/ui/theme.ts` ("Mnemo Night"). Truecolor hex;
-chalk downsamples, `NO_COLOR` turns it off. Pixels: `app/src/ui/pixel.ts`
+One file owns colour: `app/src/ui/theme.ts`. Three themes, switched live with
+`/theme` and remembered: **Mnemo Night** (the identity, below), **Game Boy**
+(four greens: roles told apart by value) and **Paper** (light). A theme changes
+the palette in place; pixel art is drawn in Night and translated, and painted
+themes also set the terminal's default colours (OSC 10/11, restored on exit).
+Truecolor hex; chalk downsamples, `NO_COLOR` turns it off. Pixels: `app/src/ui/pixel.ts`
 (grids → cells → merged runs, a 5×5 pixel font with a drop shadow for the
 wordmark, Mne's sprites, noise that resolves into an image).
 
@@ -53,7 +57,10 @@ wordmark, Mne's sprites, noise that resolves into an image).
 | `◈` | memory: recalled, learned, the footer's node count |
 | `▐ NAME ▌` | a pill: the active pane, a panel title |
 | `░ ▒ ▓ █` | the dither ramp: shading and motion |
-| `▤ ◈ ▣ ◇ ≡` | the sidebar panes: files, memory, sessions, skills, logs |
+| `▤ ◈ ▣ ◇ ≡` | the sidebar panes as coloured tiles: files, memory, sessions, skills, logs |
+| ` $ ` ` ◉ ` ` ✎ ` ` + ` ` ⌕ ` ` λ ` ` ◈ ` ` ⚇ ` | tool tiles: shell, read, edit, write, search, python, memory, sub-agent |
+| `▀` per item | a strip of pixels: a turn's outcome, a changed line, a test |
+| `✎` / `!` in the file tree | a file this session changed / one a failing tool named |
 
 ## 3. A launch, and the screen
 
@@ -145,11 +152,18 @@ never flips the layout mid-stream.
 
 | What | How | Why |
 |---|---|---|
-| working spinner | braille frames `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`, 80 ms | the agent is busy |
+| pulse | a pixel scanner sweeping while a tool runs; violet neurons flickering while the model thinks; one amber pixel breathing while it waits for you (there is no spinner) | what kind of work, at a glance |
+| Mne | at icon size beside the working line: eyes glancing while thinking, down at the work for a tool, amber when waiting, violet with a spark after escalation | the agent has a face |
+| reactions | the header's light and a label for a few seconds: `✓ 12 passed`, `✗ 1 failed`, `✦ recalled 3`, `◈ +2 learned`, `⚡ escalated` | what just happened |
+| dither-in | a new block's mark resolves `░ ▒ ▓` → mark | new things arrive, they do not pop |
+| drop | something learned falls into the memory tab as a pixel and shows `+n` | learning is visible |
+| toasts | other agents' events slide in at the top right and dissolve | nothing off screen goes unseen |
 | shimmer | a brighter band sweeps across the working verb, 120 ms/step | alive, without blinking |
 | verb | rotates through memory verbs (*Recalling, Connecting, Consolidating, Thinking, Reasoning, Weaving…*) every few seconds | brand voice |
 | elapsed + tokens | counts up every second while working | proves progress, not a hang |
-| tool spinner | each running tool spins its own glyph | parallel tool calls stay legible |
+| tool scanner | each running tool scans its own two cells | parallel tool calls stay legible |
+| race | `/bestof`: a lane per candidate; the winner keeps its colour, the rest dissolve | test-time compute you can watch |
+| exit card | Mne waves over what the run did; one line stays in the scrollback | a session ends, it does not vanish |
 
 Nothing animates in `--dump`, in tests, or when stdout is not a TTY.
 
@@ -172,11 +186,33 @@ Nothing animates in `--dump`, in tests, or when stdout is not a TTY.
 | `ctrl+l` | clear the screen (the session is kept) | |
 | `?` on an empty input | shortcuts panel | |
 
+### Agents (the shell)
+
+One process runs several agents — each its own project, session and
+controller, sharing memory and credentials. Screens: **agent** (one workspace,
+the default), **split** (up to four side by side, the focused one framed in
+magenta), **hub** (a card per agent: what it does, its prompt, a pixel per
+turn; recent projects below).
+
+| Key | Does |
+|---|---|
+| `ctrl+g` | hub (again: back) |
+| `ctrl+s` | split / single |
+| `ctrl+p` | switch project: open agents, recent folders, siblings, or a typed path; `tab` opens a new agent there |
+| `ctrl+n` | another agent on this project, in parallel |
+| `alt+1`…`alt+9` | go to agent N |
+| `alt+,` / `alt+.` | previous / next agent |
+| in the hub | arrows choose, `enter` open, `s` in/out of the split, `x` close, `n` new |
+| in the workspace | `m` in the memory pane opens the memory map; `[` `]` step through turns on the timeline |
+
+Closing an agent (`ctrl+d`, `/quit`) closes that agent; closing the last one
+ends the program.
+
 ## 7. Commands
 
 Built in: `/help`, `/model`, `/login`, `/logout`, `/new`, `/resume`, `/compact`,
 `/thinking`, `/cost`, `/clear`, `/memory [words]`, `/remember key: value`, `/mode`,
-`/plan`, `/skills`, `/reload`, `/quit`. Everything pi knows —
+`/plan`, `/skills`, `/reload`, `/quit`, `/theme`, `/bestof N "<check>" <task>`. Everything pi knows —
 extension commands, prompt templates (`/name`), skills (`/skill:name`) — is
 merged into the same menu with its source shown, and runs through pi.
 
