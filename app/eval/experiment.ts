@@ -20,6 +20,8 @@ export interface CheckResult {
 export interface RunResult {
   scenario: string;
   memory: boolean;
+  /** "mnemo" (memory on), "baseline" (none) or "hermes" (a Hermes-Agent-style memory, eval/hermes.ts). */
+  arm: Arm;
   repeat: number;
   checks: CheckResult[];
   sessions: SessionResult[];
@@ -46,7 +48,10 @@ export function contamination(root: string, sessions: SessionResult[]): string |
   return undefined;
 }
 
-export async function runScenario(s: Scenario, withMemory: boolean, repeat: number, makeModel: (agentDir: string) => Promise<EvalModel>): Promise<RunResult> {
+export type Arm = "mnemo" | "baseline" | "hermes";
+
+export async function runScenario(s: Scenario, withMemory: boolean, repeat: number, makeModel: (agentDir: string) => Promise<EvalModel>, hermes = false): Promise<RunResult> {
+  const arm: Arm = withMemory ? "mnemo" : hermes ? "hermes" : "baseline";
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `mnemo-eval-${s.name}-`));
   const home = path.join(root, "home");
   const dirs: Record<string, string> = {};
@@ -60,8 +65,8 @@ export async function runScenario(s: Scenario, withMemory: boolean, repeat: numb
   const started = Date.now();
   for (const plan of s.sessions) {
     plan.before?.(dirs);
-    process.stdout.write(`  ${s.name} ${withMemory ? "memory  " : "baseline"} session ${sessions.length + 1}/${s.sessions.length}…`);
-    const r = await runSession({ home, cwd: dirs[plan.project]!, model, memory: withMemory }, plan.prompts);
+    process.stdout.write(`  ${s.name} ${arm.padEnd(8)} session ${sessions.length + 1}/${s.sessions.length}…`);
+    const r = await runSession({ home, cwd: dirs[plan.project]!, model, memory: withMemory, hermes }, plan.prompts);
     sessions.push(r);
     process.stdout.write(` ${(r.ms / 1000).toFixed(0)}s, ${r.tools.length} tools, $${r.cost.toFixed(4)}${r.errors.length ? `, ${r.errors.length} errors` : ""}\n`);
   }
@@ -94,6 +99,6 @@ export async function runScenario(s: Scenario, withMemory: boolean, repeat: numb
   memory?.stop();
   // Everything worth keeping is in the result; a leftover directory is one more thing a later run can read.
   fs.rmSync(root, { recursive: true, force: true });
-  return { scenario: s.name, memory: withMemory, repeat, checks, sessions, cost: sessions.reduce((n, r) => n + r.cost, 0), ms: Date.now() - started };
+  return { scenario: s.name, memory: withMemory, arm, repeat, checks, sessions, cost: sessions.reduce((n, r) => n + r.cost, 0), ms: Date.now() - started };
 }
 
