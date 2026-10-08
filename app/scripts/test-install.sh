@@ -35,4 +35,17 @@ docker run --rm -v "$REL:/release:ro" "$IMAGE" sh -c '
   grep -q "retries" /tmp/demo.txt && echo "✓ a scripted turn ran" || { cat /tmp/demo.txt; exit 1; }
   grep -E "Learned|Session done|failed" /tmp/demo.txt || true
   echo "--- again (upgrade in place)"; sh /release/install.sh > /dev/null && echo "✓ reinstall"
+  echo "--- memory written by the demo is kept by an uninstall"
+  mkdir -p "$HOME/.mnemo/memory" && echo keep > "$HOME/.mnemo/memory/journal.jsonl"
+  sh /release/install.sh --uninstall > /dev/null
+  [ ! -e "$HOME/.mnemo/bin/mnemo" ] && [ ! -e "$HOME/.mnemo/bin/memsrv" ] && [ ! -e "$HOME/.local/bin/mnemo" ] && echo "✓ binaries and link removed"
+  [ "$(cat "$HOME/.mnemo/memory/journal.jsonl")" = keep ] && echo "✓ memory untouched"
+  echo "--- no curl or wget: say so before doing anything"
+  if MNEMO_RELEASE_BASE= sh /release/install.sh --version v9.9.9 >/tmp/out 2>/tmp/err; then echo "unexpected success"; exit 1; fi
+  grep -q "needs curl or wget" /tmp/err && ! grep -q downloading /tmp/out && echo "✓ clear error, nothing started"
+  echo "--- a release that does not exist (curl answers 404) fails cleanly"
+  printf "#!/bin/sh\nexit 22\n" > /usr/local/bin/curl && chmod +x /usr/local/bin/curl
+  if MNEMO_RELEASE_BASE= sh /release/install.sh --version v9.9.9 >/dev/null 2>/tmp/err; then echo "unexpected success"; exit 1; fi
+  grep -q "could not download" /tmp/err && echo "✓ clear error"
+  [ ! -e "$HOME/.mnemo/bin/mnemo" ] && echo "✓ nothing installed"
 '

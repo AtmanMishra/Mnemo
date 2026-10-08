@@ -112,6 +112,40 @@ jobs:
           grep -q "✓ memory" doctor.txt || { echo "::error::mnemo did not find memsrv beside it"; exit 1; }
           stage/mnemo${{ matrix.ext }} --demo --dump | grep -q "retries"
 
+      # The one-liner's own script, run against this very archive: install,
+      # upgrade in place, uninstall. SHA256SUMS is made here only for the test.
+      - name: the installer installs it
+        if: ${{ matrix.ext == '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd out && if command -v sha256sum >/dev/null; then sha256sum mnemo-* > SHA256SUMS; else shasum -a 256 mnemo-* > SHA256SUMS; fi)
+          export HOME="$RUNNER_TEMP/home" MNEMO_HOME="$RUNNER_TEMP/home/.mnemo" MNEMO_RELEASE_BASE="file://$PWD/out"
+          mkdir -p "$HOME"
+          sh app/scripts/get.sh
+          "$MNEMO_HOME/bin/mnemo" --version
+          sh app/scripts/get.sh # upgrade in place
+          sh app/scripts/get.sh --uninstall
+          test ! -e "$MNEMO_HOME/bin/mnemo"
+          rm out/SHA256SUMS
+
+      - name: the installer installs it (Windows)
+        if: ${{ matrix.ext == '.exe' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $sum = (Get-FileHash -Algorithm SHA256 out/mnemo-windows-x64.zip).Hash.ToLower()
+          "$sum  mnemo-windows-x64.zip" | Set-Content -Encoding ascii out/SHA256SUMS
+          $env:MNEMO_HOME = Join-Path $env:RUNNER_TEMP "mnemo-home"
+          $env:MNEMO_RELEASE_BASE = (Resolve-Path out).Path
+          & ./app/scripts/get.ps1
+          & (Join-Path $env:MNEMO_HOME "bin/mnemo.exe") --version
+          & ./app/scripts/get.ps1 # upgrade in place
+          $env:MNEMO_UNINSTALL = "1"
+          & ./app/scripts/get.ps1
+          if (Test-Path (Join-Path $env:MNEMO_HOME "bin/mnemo.exe")) { throw "mnemo.exe is still installed after the uninstall" }
+          Remove-Item out/SHA256SUMS
+
       # Private repositories need an Enterprise plan for attestations; public ones do not.
       # actions/attest-build-provenance v4.2.2
       - name: attest the archive
