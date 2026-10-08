@@ -98,7 +98,9 @@ export const SCENARIOS: Scenario[] = [
         run: (ctx) => {
           const t = allText(lastSession(ctx)).toLowerCase();
           if (!t.includes("pnpm")) return "pnpm never mentioned in session 2";
-          if (/\bnpm install\b|\bnpm i\b|\byarn install\b|\byarn add\b/.test(t)) return "session 2 suggested npm/yarn";
+          // "do not use npm install" is the convention kept, not broken: only an unnegated mention counts.
+          const suggested = t.split("\n").filter((l) => /\bnpm install\b|\bnpm i\b|\byarn install\b|\byarn add\b/.test(l) && !/\b(not|never|don'?t|instead of|avoid|rather than)\b/.test(l));
+          if (suggested.length) return `session 2 suggested npm/yarn: ${suggested[0]!.trim().slice(0, 120)}`;
           return true;
         },
       },
@@ -173,7 +175,8 @@ export const SCENARIOS: Scenario[] = [
         name: "later session never hits the missing-fixtures error",
         kind: "behaviour",
         run: (ctx) => {
-          const hit = ctx.sessions.map((s) => s.tools.filter((t) => t.output.includes("test fixtures missing")).length);
+          // The error as a run prints it, at a line start — not a script or a skill quoting it.
+          const hit = ctx.sessions.map((s) => s.tools.filter((t) => /^error: test fixtures missing/m.test(t.output)).length);
           return hit[1] === 0 ? true : `missing-fixtures errors per session: ${hit.join(", ")}`;
         },
       },
