@@ -87,19 +87,25 @@ function Card({ a, n, s, on, inSplit, width }: { a: Agent; n: number; s: AgentSt
       <Box>
         <PixelArt grid={mneMini(tint)} />
         <Box flexDirection="column" marginLeft={1} width={inner - 8}>
-          <Text>
+          <Text wrap="truncate-end">
             <Text color={palette.dim}>{`${n} `}</Text>
             <Text bold color={palette.text}>
               {clip(a.name, inner - 22)}
             </Text>
             <Text color={palette.cyan}>{inSplit ? " ◫" : ""}</Text>
           </Text>
-          <Text color={palette.faint}>{clip(`${tilde(a.cwd)}${s?.branch ? ` ⎇ ${s.branch}` : ""}`, inner - 9)}</Text>
+          <Text color={palette.faint} wrap="truncate-end">
+            {clip(`${tilde(a.cwd)}${s?.branch ? ` ⎇ ${s.branch}` : ""}`, inner - 11)}
+          </Text>
         </Box>
         <Text color={s?.tone ?? palette.faint}>{s?.glyph ?? "·"}</Text>
       </Box>
-      <Text color={s?.kind === "waiting" ? palette.amber : s?.kind === "working" ? palette.magenta : palette.dim}>{clip(s?.label ?? "", inner)}</Text>
-      <Text color={palette.dim}>{s?.lastPrompt ? clip(`“${s.lastPrompt.replace(/\s+/g, " ")}”`, inner) : " "}</Text>
+      <Text color={s?.kind === "waiting" ? palette.amber : s?.kind === "working" ? palette.magenta : palette.dim} wrap="truncate-end">
+        {clip(s?.label ?? "", inner)}
+      </Text>
+      <Text color={palette.dim} wrap="truncate-end">
+        {s?.lastPrompt ? clip(`“${s.lastPrompt.replace(/\s+/g, " ")}”`, inner) : " "}
+      </Text>
       <Box>
         <Strip colors={(s?.outcomes ?? []).map(outcomeColor)} max={Math.max(4, inner - 12)} />
         <Box flexGrow={1} />
