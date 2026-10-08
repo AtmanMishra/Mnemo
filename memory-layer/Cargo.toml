@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Atman Mishra"]
-repository = "https://github.com/AtmanMishra/mnemo"
+repository = "https://github.com/AtmanMishra/Mnemo"
 description = "memsrv: the memory sidecar for Mnemo"
 
 [dependencies]

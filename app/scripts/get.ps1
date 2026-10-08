@@ -3,13 +3,13 @@
   Install Mnemo on Windows: mnemo.exe and memsrv.exe into $env:MNEMO_HOME\bin
   (default ~\.mnemo\bin), added to the user PATH. No Bun, Node, Rust or Python needed.
 
-    irm https://github.com/AtmanMishra/mnemo/releases/latest/download/install.ps1 | iex
+    irm https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.ps1 | iex
 
   Environment (set before running):
     MNEMO_VERSION       a tag (v0.1.0) instead of the latest release
     MNEMO_HOME          where Mnemo lives (default ~\.mnemo)
     MNEMO_RELEASE_BASE  a mirror, or a local folder, holding the archive
-    MNEMO_REPO          owner/name of the GitHub repository (default AtmanMishra/mnemo)
+    MNEMO_REPO          owner/name of the GitHub repository (default AtmanMishra/Mnemo)
     MNEMO_UNINSTALL=1   remove the binaries and the PATH entry (memory and sessions stay)
 
   Running it again upgrades in place; memory, sessions and settings are never
@@ -21,7 +21,7 @@
 #>
 function Install-Mnemo {
   $ErrorActionPreference = "Stop"
-  $Repo = if ($env:MNEMO_REPO) { $env:MNEMO_REPO } else { "AtmanMishra/mnemo" }
+  $Repo = if ($env:MNEMO_REPO) { $env:MNEMO_REPO } else { "AtmanMishra/Mnemo" }
   $HomeDir = if ($env:MNEMO_HOME) { $env:MNEMO_HOME } else { Join-Path $HOME ".mnemo" }
   $BinDir = Join-Path $HomeDir "bin"
 

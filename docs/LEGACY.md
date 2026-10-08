@@ -23,8 +23,8 @@ A terminal-native agentic coding and harness assistant whose memory works like a
 >
 > ```bash
 > # from a release (once v0.1 is tagged) — nothing else needed
-> curl -fsSL https://github.com/AtmanMishra/mnemo/releases/latest/download/install.sh | sh
-> irm https://github.com/AtmanMishra/mnemo/releases/latest/download/install.ps1 | iex   # Windows
+> curl -fsSL https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.sh | sh
+> irm https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.ps1 | iex   # Windows
 >
 > # from this checkout (needs bun and cargo)
 > app/scripts/install.sh
@@ -45,7 +45,7 @@ A terminal-native agentic coding and harness assistant whose memory works like a
 > The instructions below build the previous stack (Go interface + Node agent).
 
 **Pre-alpha.** Grab the `mnemo` binary for your platform from
-[Releases](https://github.com/AtmanMishra/mnemo/releases) —
+[Releases](https://github.com/AtmanMishra/Mnemo/releases) —
 linux/darwin/windows, amd64/arm64 — then build the two pieces it drives. Node
 >= 22.18 is required (the first version that runs `.ts` files with no flag —
 "no build step" is only true from there); Rust is
@@ -53,7 +53,7 @@ needed only for the memory sidecar, and Go only if you would rather build the
 interface than download it.
 
 ```bash
-git clone https://github.com/AtmanMishra/mnemo
+git clone https://github.com/AtmanMishra/Mnemo
 cd mnemo
 
 ./scripts/install.sh              # macOS / Linux
@@ -84,7 +84,7 @@ The installers check your toolchain before touching anything, say what they are
 doing, and take `--dry-run` (`-DryRun` on Windows) to say it without doing it.
 
 `mnemo --version` says which build you are running. Bugs and rough edges belong
-in [the issue tracker](https://github.com/AtmanMishra/mnemo/issues)
+in [the issue tracker](https://github.com/AtmanMishra/Mnemo/issues)
 — the known gaps are filed there rather than described as future work.
 
 On first launch, `mnemo` runs a colourful pixel-themed onboarding wizard inside the TUI: pick a provider, paste an API key, and pick a default model. Credentials are saved to `~/.mnemo/auth.json` (chmod 600), never in the repo. That wizard lives in the Go TUI itself (tui-go/). One unified surface — the transcript IS the application; everything else (palette, sessions, memory, logs, explorer) floats as an overlay dismissed with esc.

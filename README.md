@@ -2,7 +2,7 @@
 
 # Mnemo
 
-[![ci](https://github.com/AtmanMishra/mnemo/actions/workflows/ci.yml/badge.svg)](https://github.com/AtmanMishra/mnemo/actions/workflows/ci.yml)
+[![ci](https://github.com/AtmanMishra/Mnemo/actions/workflows/ci.yml/badge.svg)](https://github.com/AtmanMishra/Mnemo/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 **A terminal coding agent with a memory that learns your projects.** Several
@@ -21,13 +21,13 @@ goes further than the same model without it.
 macOS and Linux:
 
 ```bash
-curl -fsSL https://github.com/AtmanMishra/mnemo/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://github.com/AtmanMishra/mnemo/releases/latest/download/install.ps1 | iex
+irm https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.ps1 | iex
 ```
 
 No Bun, Node or Rust is needed: the installer downloads one archive holding
@@ -54,7 +54,7 @@ uses credentials it finds in your environment (`ANTHROPIC_API_KEY`,
 Needs [Bun](https://bun.sh) 1.4+ and a Rust toolchain.
 
 ```bash
-git clone https://github.com/AtmanMishra/mnemo && cd mnemo
+git clone https://github.com/AtmanMishra/Mnemo && cd mnemo
 bun install
 (cd memory-layer && cargo build --release --bin memsrv)
 cd app && bun bin/mnemo.ts --demo
@@ -127,7 +127,7 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Maintainers cutting a release:
 ## Status
 
 Pre-alpha. It works, it has tests, and it has rough edges; file what you find in
-[the issue tracker](https://github.com/AtmanMishra/mnemo/issues). What is left,
+[the issue tracker](https://github.com/AtmanMishra/Mnemo/issues). What is left,
 in order, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License

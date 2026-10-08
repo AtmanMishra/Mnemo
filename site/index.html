@@ -95,7 +95,7 @@
       <a href="#install">install</a>
       <a href="#measured">what we measured</a>
       <a href="#safety">safety</a>
-      <a href="https://github.com/AtmanMishra/mnemo">github</a>
+      <a href="https://github.com/AtmanMishra/Mnemo">github</a>
     </nav>
   </header>
 
@@ -115,10 +115,10 @@
         <button role="tab" id="tab-ps" aria-selected="false" aria-controls="panel-ps">Windows</button>
       </div>
       <div class="panel" id="panel-sh" role="tabpanel" aria-labelledby="tab-sh">
-        <div class="cmd"><code id="cmd-sh" data-script="install.sh">curl -fsSL https://github.com/AtmanMishra/mnemo/releases/latest/download/install.sh | sh</code><button type="button" data-copy="cmd-sh">copy</button></div>
+        <div class="cmd"><code id="cmd-sh" data-script="install.sh">curl -fsSL https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.sh | sh</code><button type="button" data-copy="cmd-sh">copy</button></div>
       </div>
       <div class="panel" id="panel-ps" role="tabpanel" aria-labelledby="tab-ps">
-        <div class="cmd ps"><code id="cmd-ps" data-script="install.ps1">irm https://github.com/AtmanMishra/mnemo/releases/latest/download/install.ps1 | iex</code><button type="button" data-copy="cmd-ps">copy</button></div>
+        <div class="cmd ps"><code id="cmd-ps" data-script="install.ps1">irm https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.ps1 | iex</code><button type="button" data-copy="cmd-ps">copy</button></div>
       </div>
       <p class="note">No Bun, Node or Rust needed. The installer checks the download's SHA-256 before installing, never touches your memory or settings, and upgrades in place when you run it again. <a id="read-script" href="install.sh">Read the script first.</a></p>
       <p class="note">Then: <code>mnemo doctor</code> to see what it found, <code>mnemo --demo</code> for a scripted session that needs no API key, and <code>mnemo</code> to start. Remove it with <code>… | sh -s -- --uninstall</code> (Windows: set <code>$env:MNEMO_UNINSTALL=1</code> first).</p>
@@ -146,7 +146,7 @@
 
     <section aria-labelledby="measured">
       <h2 id="measured">What we measured</h2>
-      <p class="fine">All on a small, cheap model (DeepSeek v4.1 Flash), through the same agent loop with memory on and off. Small samples: read the direction, not the decimals. The raw results and what went wrong along the way are in <a href="https://github.com/AtmanMishra/mnemo/tree/main/research">research/</a>.</p>
+      <p class="fine">All on a small, cheap model (DeepSeek v4.1 Flash), through the same agent loop with memory on and off. Small samples: read the direction, not the decimals. The raw results and what went wrong along the way are in <a href="https://github.com/AtmanMishra/Mnemo/tree/main/research">research/</a>.</p>
       <table>
         <thead><tr><th>Test</th><th>No memory</th><th>With memory</th></tr></thead>
         <tbody>
@@ -155,23 +155,23 @@
           <tr><td>Terminal-Bench subset: 10 easy/medium tasks, one attempt each</td><td class="n">10 / 10</td><td class="n">10 / 10</td></tr>
         </tbody>
       </table>
-      <p class="fine">The last row is the honest one: unrelated one-off tasks in a fresh container give memory nothing to remember, and it makes no difference there (about $0.008 a task either way). It is a subset on our own machine, not comparable to the public leaderboard. The first two are where memory is supposed to pay off. Against a simpler, global memory in the style of Hermes Agent, Mnemo matched it at one or two repos and was ahead where it keeps projects apart (a command learned in one project was offered in another) and picks up unfinished work. The comparison is written up in <a href="https://github.com/AtmanMishra/mnemo/blob/main/research/hermes-comparison.md">research/hermes-comparison.md</a>.</p>
+      <p class="fine">The last row is the honest one: unrelated one-off tasks in a fresh container give memory nothing to remember, and it makes no difference there (about $0.008 a task either way). It is a subset on our own machine, not comparable to the public leaderboard. The first two are where memory is supposed to pay off. Against a simpler, global memory in the style of Hermes Agent, Mnemo matched it at one or two repos and was ahead where it keeps projects apart (a command learned in one project was offered in another) and picks up unfinished work. The comparison is written up in <a href="https://github.com/AtmanMishra/Mnemo/blob/main/research/hermes-comparison.md">research/hermes-comparison.md</a>.</p>
     </section>
 
     <section aria-labelledby="safety">
       <h2 id="safety">Before you run it</h2>
       <p>Mnemo is a coding agent: it reads your files, edits them and runs shell commands as you. By default it asks before every edit and command; <code>yolo</code> and headless <code>-p</code> ask for nothing, so use those in a container or a throwaway checkout. The permission gate filters what runs; it is not a sandbox.</p>
-      <p>Your prompts and the files the model reads go to the provider you chose, and nothing else leaves your machine: there is no telemetry and no update check (we measured it). Commands the agent runs inherit your environment, provider keys included, which a prompt injection could try to read; <a href="https://github.com/AtmanMishra/mnemo/blob/main/SECURITY.md">SECURITY.md</a> says what to do about that today. It is pre-alpha software: expect rough edges and <a href="https://github.com/AtmanMishra/mnemo/issues">tell us about them</a>.</p>
+      <p>Your prompts and the files the model reads go to the provider you chose, and nothing else leaves your machine: there is no telemetry and no update check (we measured it). Commands the agent runs inherit your environment, provider keys included, which a prompt injection could try to read; <a href="https://github.com/AtmanMishra/Mnemo/blob/main/SECURITY.md">SECURITY.md</a> says what to do about that today. It is pre-alpha software: expect rough edges and <a href="https://github.com/AtmanMishra/Mnemo/issues">tell us about them</a>.</p>
     </section>
   </main>
 
   <footer>
     <span>Apache-2.0</span>
-    <a href="https://github.com/AtmanMishra/mnemo">source</a>
-    <a href="https://github.com/AtmanMishra/mnemo/releases">releases</a>
-    <a href="https://github.com/AtmanMishra/mnemo/blob/main/SECURITY.md">security</a>
-    <a href="https://github.com/AtmanMishra/mnemo/blob/main/docs/ROADMAP.md">roadmap</a>
-    <a href="https://github.com/AtmanMishra/mnemo/blob/main/CONTRIBUTING.md">contribute</a>
+    <a href="https://github.com/AtmanMishra/Mnemo">source</a>
+    <a href="https://github.com/AtmanMishra/Mnemo/releases">releases</a>
+    <a href="https://github.com/AtmanMishra/Mnemo/blob/main/SECURITY.md">security</a>
+    <a href="https://github.com/AtmanMishra/Mnemo/blob/main/docs/ROADMAP.md">roadmap</a>
+    <a href="https://github.com/AtmanMishra/Mnemo/blob/main/CONTRIBUTING.md">contribute</a>
   </footer>
 </div>
 

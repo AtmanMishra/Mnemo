@@ -38,7 +38,7 @@ test("the Homebrew formula pins each platform's own archive and hash", () => {
 test("the Scoop manifest carries the Windows archive, and a version Scoop can auto-update", () => {
   const m = JSON.parse(scoop("v1.2.3", parseSums(SUMS)));
   expect(m.version).toBe("1.2.3");
-  expect(m.architecture["64bit"]).toEqual({ url: "https://github.com/AtmanMishra/mnemo/releases/download/v1.2.3/mnemo-windows-x64.zip", hash: h("e") });
+  expect(m.architecture["64bit"]).toEqual({ url: "https://github.com/AtmanMishra/Mnemo/releases/download/v1.2.3/mnemo-windows-x64.zip", hash: h("e") });
   expect(m.autoupdate.architecture["64bit"].url).toContain("/v$version/");
   expect(m.bin).toEqual(["mnemo.exe"]);
 });

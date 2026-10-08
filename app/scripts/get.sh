@@ -3,7 +3,7 @@
 # machine, into $MNEMO_HOME/bin (default ~/.mnemo/bin), linked onto PATH. Nothing
 # else is needed: no Bun, Node, Rust or Python.
 #
-#   curl -fsSL https://github.com/AtmanMishra/mnemo/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.sh | sh
 #
 # Options (after `sh -s --` when piped):
 #   --version <tag>   install that release (v0.1.0) instead of the latest
@@ -15,7 +15,7 @@
 #   MNEMO_HOME           where Mnemo lives (default ~/.mnemo)
 #   MNEMO_LINK_DIR       where the `mnemo` link goes (default ~/.local/bin)
 #   MNEMO_RELEASE_BASE   where the archives are (a mirror, or file:///dir for a local test)
-#   MNEMO_REPO           owner/name of the GitHub repository (default AtmanMishra/mnemo)
+#   MNEMO_REPO           owner/name of the GitHub repository (default AtmanMishra/Mnemo)
 #   MNEMO_UNINSTALL=1    same as --uninstall
 #
 # Running it again upgrades in place. Your memory, sessions and settings in
@@ -27,7 +27,7 @@
 set -eu
 
 main() {
-  REPO=${MNEMO_REPO:-AtmanMishra/mnemo}
+  REPO=${MNEMO_REPO:-AtmanMishra/Mnemo}
   HOME_DIR=${MNEMO_HOME:-"$HOME/.mnemo"}
   BIN_DIR="$HOME_DIR/bin"
   LINK_DIR=${MNEMO_LINK_DIR:-"$HOME/.local/bin"}

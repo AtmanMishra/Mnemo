@@ -13,7 +13,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-export const REPO = "AtmanMishra/mnemo";
+export const REPO = "AtmanMishra/Mnemo";
 const HOME = `https://github.com/${REPO}`;
 const DESCRIPTION = "A terminal coding agent with a memory that learns";
 

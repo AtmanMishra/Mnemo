@@ -78,4 +78,4 @@ Each release ships `SHA256SUMS`; the install scripts check it before
 installing. Release archives are built by GitHub Actions from the tagged
 commit and carry a build-provenance attestation:
 
-    gh attestation verify mnemo-linux-x64.tar.gz --repo AtmanMishra/mnemo
+    gh attestation verify mnemo-linux-x64.tar.gz --repo AtmanMishra/Mnemo

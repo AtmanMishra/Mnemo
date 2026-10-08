@@ -17,7 +17,7 @@ that release. Nothing else is published by hand.
 
 Every archive carries a build-provenance attestation (public repository only):
 
-    gh attestation verify mnemo-linux-x64.tar.gz --repo AtmanMishra/mnemo
+    gh attestation verify mnemo-linux-x64.tar.gz --repo AtmanMishra/Mnemo
 
 ## Cutting a release
 
@@ -49,7 +49,7 @@ Every archive carries a build-provenance attestation (public repository only):
    tags (`v0.2.0-rc.1`) are marked as pre-releases and do not update the tap.
 7. **Check it from a clean machine:**
 
-       curl -fsSL https://github.com/AtmanMishra/mnemo/releases/latest/download/install.sh | sh
+       curl -fsSL https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.sh | sh
        mnemo doctor && mnemo --demo
 
 A bad release is fixed by a new version, not by moving the tag. If one must be

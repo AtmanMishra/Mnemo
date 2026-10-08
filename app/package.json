@@ -36,9 +36,9 @@
   "author": "Atman Mishra",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AtmanMishra/mnemo.git",
+    "url": "git+https://github.com/AtmanMishra/Mnemo.git",
     "directory": "app"
   },
-  "homepage": "https://github.com/AtmanMishra/mnemo#readme",
-  "bugs": "https://github.com/AtmanMishra/mnemo/issues"
+  "homepage": "https://github.com/AtmanMishra/Mnemo#readme",
+  "bugs": "https://github.com/AtmanMishra/Mnemo/issues"
 }
