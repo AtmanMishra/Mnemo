@@ -1,0 +1,15 @@
+import { MemoryService } from "../../app/src/memory/service.ts";
+import * as os from "node:os"; import * as path from "node:path"; import * as fs from "node:fs";
+import { findMemsrv } from "../../app/src/runtime/paths.ts";
+const BIN = findMemsrv("/nonexistent") ?? (() => { throw new Error("build memsrv first: cd memory-layer && cargo build --release --bin memsrv"); })();
+const journal = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "audit2-")), "j.jsonl");
+const a = new MemoryService(BIN, journal), b = new MemoryService(BIN, journal);
+await a.ping(); await b.ping();
+await a.learn("project", "/p", "package manager", "pnpm");
+console.log("B sees A's write without restart:", JSON.stringify(await b.profile("project", "/p")));
+await b.learn("project", "/p", "test command", "vitest");
+const c = new MemoryService(BIN, journal);
+console.log("fresh C sees:", JSON.stringify(await c.profile("project", "/p")));
+const dump = await (c as any).client.request("dump");
+console.log("C nodes:", JSON.stringify((dump.result as any).nodes.map((n: any) => [n.id, n.label])));
+a.stop(); b.stop(); c.stop();

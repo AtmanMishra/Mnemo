@@ -133,6 +133,11 @@ the new stack with a key; the memory eval pins do not move.
 
 ### Stage 3 — Make the memory self-evolve (the point of the project)
 
+> **Read first:** `research/self-evolution-audit.md` (2026-10-08) — measured
+> defects in the sidecar and the prototype (two are data-integrity bugs) and
+> the five loops this stage has to close, in phases A–E. It supersedes the
+> ordering below where they disagree.
+
 The memory layer stores and retrieves. What is missing is the loop that makes it
 *learn from sessions*. Design is `research/memory-runtime-design.md`; today only
 J0 exists. Build in its own phases, report-only first.
