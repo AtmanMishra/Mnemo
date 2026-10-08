@@ -28,7 +28,8 @@ export type MemoryNote =
   | { kind: "recall"; items: string[] }
   | { kind: "learned"; items: string[] }
   | { kind: "steer"; text: string }
-  | { kind: "skill"; text: string };
+  | { kind: "skill"; text: string }
+  | { kind: "session"; text: string; items: string[] };
 
 export interface HostUi {
   approve(request: ApprovalRequest, signal?: AbortSignal): Promise<ApprovalAnswer>;
@@ -55,6 +56,16 @@ export interface Host {
   ui?: HostUi;
   /** Work the extensions started and did not wait for (reflection). Tests await it. */
   background: Set<Promise<unknown>>;
+  /**
+   * Things the user told Mnemo outside the chat during this run — a refusal in
+   * the approval dialog and what to do instead. The memory loop reads and
+   * clears them after each run: they are the user's own words about how to work.
+   */
+  signals: string[];
+  /** The episode this session is recording, once there is one. */
+  episode?: number;
+  /** For a sub-agent: the episode of the session that spawned it. */
+  parentEpisode?: number;
 }
 
 /** Run something after the fact without letting it fail the turn, and keep track of it. */
@@ -99,5 +110,6 @@ export function createHost(o: HostOptions): Host {
     mode: o.mode ?? "default",
     reflect: o.reflect ?? true,
     background: new Set(),
+    signals: [],
   };
 }

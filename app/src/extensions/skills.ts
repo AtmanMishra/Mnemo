@@ -26,6 +26,22 @@ export function renderSkill(name: string, description: string, body: string): st
   return `---\nname: ${name}\ndescription: ${JSON.stringify(desc)}\n---\n\n${body.trim()}\n`;
 }
 
+/**
+ * Where a skill goes and how it is written. A project skill lives in the
+ * repository's `.agents/skills/` (pi discovers it there, and it travels with
+ * the code to teammates and other agents); a personal one in Mnemo's home.
+ */
+export const saveSkill = {
+  target(home: string, projectRoot: string, scope: "project" | "user", name: string): string {
+    return scope === "project" ? path.join(projectRoot, ".agents", "skills", name, "SKILL.md") : skillFile(home, name);
+  },
+  render: renderSkill,
+  write(file: string, body: string): void {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, body);
+  },
+};
+
 export function skillsExtension(host: Host) {
   return (pi: ExtensionAPI): void => {
     pi.registerTool(

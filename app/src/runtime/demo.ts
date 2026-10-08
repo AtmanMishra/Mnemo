@@ -64,9 +64,18 @@ export const DEMO_PROMPT = "add a retry to the fetch helper";
 /** What the reflection step "extracts" from the demo turn (the faux model's 4th answer). */
 export const DEMO_REFLECTION = JSON.stringify({
   facts: [
-    { scope: "project", key: "language", value: "TypeScript" },
-    { scope: "project", key: "http helper", value: "getJson (src/fetch.ts) retries 5xx up to 3 times with backoff; 4xx fail fast" },
+    { scope: "project", key: "language", value: "TypeScript", source: "observed" },
+    { scope: "project", key: "http helper", value: "getJson (src/fetch.ts) retries 5xx up to 3 times with backoff; 4xx fail fast", source: "observed" },
   ],
+  episode: {
+    goal: "add retries to the fetch helper",
+    outcome: "done",
+    done: "getJson in src/fetch.ts now retries server errors three times with exponential backoff",
+    decisions: ["retry only 5xx so client errors still fail fast"],
+    open: ["no test covers the retry path yet"],
+  },
+  fixes: [],
+  skill: null,
 });
 
 /** One turn: think, read the file, edit it, explain — then the reflection call. */

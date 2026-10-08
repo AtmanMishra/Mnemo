@@ -15,6 +15,7 @@ import { Transcript } from "../ui/store.ts";
 import { Dialogs, type Choice } from "./dialogs.ts";
 import { createUiContext } from "./ui-context.ts";
 import { CYCLE, type Host, type MemoryNote, type Mode } from "../extensions/host.ts";
+import { projectIdentity } from "../memory/project.ts";
 
 export interface CommandInfo {
   name: string;
@@ -57,6 +58,7 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "clear", description: "clear the screen (the session is kept)" },
   { name: "memory", description: "what Mnemo remembers · /memory <words> searches it" },
   { name: "remember", description: "tell Mnemo something to keep: /remember we deploy with fly" },
+  { name: "forget", description: "retire a remembered fact: /forget package manager" },
   { name: "mode", description: "how much Mnemo may do without asking (default, accept-edits, plan, yolo)" },
   { name: "plan", description: "toggle plan mode (read-only)" },
   { name: "skills", description: "the skills Mnemo can load" },
@@ -322,6 +324,9 @@ export class Controller {
       case "skill":
         this.transcript.memory(n.text[0]!.toUpperCase() + n.text.slice(1));
         break;
+      case "session":
+        this.transcript.memory(n.text, n.items);
+        break;
     }
   }
 
@@ -417,8 +422,20 @@ export class Controller {
         }
         const key = arg.split(/[:=]/)[0]!.trim().toLowerCase().slice(0, 40);
         const value = arg.includes(":") || arg.includes("=") ? arg.slice(arg.search(/[:=]/) + 1).trim() : arg;
-        await mem.learn("project", this.runtime.cwd, arg.includes(":") || arg.includes("=") ? key : `note ${Date.now().toString(36)}`, value);
+        await mem.learn("project", this.projectId, arg.includes(":") || arg.includes("=") ? key : `note ${Date.now().toString(36)}`, value);
         this.transcript.memory("Remembered", [value]);
+        void this.refreshMemory();
+        return true;
+      }
+      case "forget": {
+        const mem = this.options.host?.memory;
+        if (!mem) return this.memoryOff(), true;
+        if (!arg) {
+          this.transcript.notice("Usage: /forget <key> — the key as /memory shows it, e.g. /forget package manager", "warn");
+          return true;
+        }
+        const ok = (await mem.forget("project", this.projectId, arg)) || (await mem.forget("user", this.projectId, arg));
+        this.transcript.memory(ok ? `Forgot "${arg}"` : `Nothing called "${arg}" in this project's or your profile`, ok ? ["kept as history, never recalled again"] : []);
         void this.refreshMemory();
         return true;
       }
@@ -468,6 +485,13 @@ export class Controller {
     }
   }
 
+  private projectIdCache: string | undefined;
+
+  /** This folder's project identity (git remote, else repo root, else the folder). */
+  private get projectId(): string {
+    return (this.projectIdCache ??= projectIdentity(this.runtime.cwd).id);
+  }
+
   private memoryOff(): void {
     this.transcript.notice("Memory is off: the memsrv sidecar was not found. `mnemo doctor` says where it looks.", "warn");
   }
@@ -475,16 +499,16 @@ export class Controller {
   private async showMemory(query: string): Promise<void> {
     const mem = this.options.host?.memory;
     if (!mem) return this.memoryOff();
-    const cwd = this.runtime.cwd;
+    const id = this.projectId;
     if (query) {
-      const hits = await mem.search(query, 6);
+      const hits = await mem.search(query, 6, await mem.project(id));
       this.transcript.memory(
         hits.length ? `Memory for "${query}"` : `Nothing in memory matches "${query}"`,
         hits.map((h) => `${h.label} [${h.area}]`),
       );
       return;
     }
-    const [stats, project, user] = await Promise.all([mem.stats(), mem.profile("project", cwd), mem.profile("user", cwd)]);
+    const [stats, project, user] = await Promise.all([mem.stats(), mem.profile("project", id), mem.profile("user", id)]);
     const areas = stats ? Object.entries(stats.byArea).map(([a, n]) => `${a.toLowerCase()} ${n}`).join(" · ") : "";
     const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
     this.transcript.memory(`Memory · ${plural(stats?.nodes ?? 0, "node")} · ${plural(stats?.episodes ?? 0, "episode")}${areas ? ` · ${areas}` : ""}`, [

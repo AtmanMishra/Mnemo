@@ -42,7 +42,14 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
         }),
         async execute(_id, params, signal, onUpdate, ctx) {
           if (!ctx.model) throw new Error("no model is selected");
-          const child: Host = { ...host, depth: host.depth + 1, background: host.background };
+          const child: Host = {
+            ...host,
+            depth: host.depth + 1,
+            background: host.background,
+            signals: host.signals,
+            episode: undefined,
+            parentEpisode: host.episode,
+          };
           const services = await createAgentSessionServices({
             cwd: ctx.cwd,
             agentDir: host.agentDir,

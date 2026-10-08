@@ -170,6 +170,8 @@ export function policyExtension(host: Host) {
         else if (EDIT.has(event.toolName)) host.mode = "accept-edits";
         return undefined;
       }
+      const what = `${verdict.ask.tool}(${verdict.ask.subject})`;
+      host.signals.push(answer.feedback ? `The user refused ${what} and said: "${answer.feedback}"` : `The user refused ${what}.`);
       return {
         block: true,
         reason: answer.feedback

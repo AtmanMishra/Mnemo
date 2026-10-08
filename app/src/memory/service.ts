@@ -1,19 +1,19 @@
 /**
  * What Mnemo means by "memory", over the sidecar's protocol.
  *
- * The graph has two standing nodes per person and project, and everything else
- * is episodes, lessons and skills:
- *
- *   - **project profile** (`project <cwd>`, Spatial): facts about one codebase —
- *     its package manager, test command, conventions, decisions, pitfalls.
+ * Standing nodes:
+ *   - **project profile** (`project <identity>`, Spatial): facts about one
+ *     codebase — package manager, test command, conventions, decisions.
  *   - **user profile** (`user preferences`, Semantic): how this person works,
- *     true in every project.
+ *     true in every project. The only memory that is global by design.
  *
- * Facts on a profile are key → value, and memsrv keeps one current value per
- * key: writing "package manager = bun" over "package manager = npm" supersedes
- * the old one (kept as history) instead of leaving two to contradict each
- * other. The profiles are small and always relevant, so they are injected into
- * every turn; search adds whatever else matches the message.
+ * Everything written during a session is attached to its project with
+ * `PartOf`, and recall searches with that project as scope (audit F10), so
+ * one repo's memories never leak into another.
+ *
+ * Facts are key → value with one current value per key: a new value under an
+ * existing key supersedes the old one (kept as history). Every value is
+ * redacted before it is written (audit F25).
  *
  * Every call degrades: a dead sidecar answers `{ ok: false }` through the
  * client, and every method here turns that into "nothing", never a throw.
@@ -22,6 +22,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { MemoryClient, type MemoryChild } from "./client.ts";
+import { redact } from "../extensions/trace.ts";
 
 export interface Hit {
   node: number;
@@ -39,11 +40,16 @@ export interface ProfileFact {
 
 export type Scope = "project" | "user";
 
-const USER_LABEL = "user preferences";
-const projectLabel = (cwd: string) => `project ${cwd}`;
+export const USER_LABEL = "user preferences";
+export const projectLabel = (projectId: string) => `project ${projectId}`;
+
+/** Values written by `forget`: still history, never an answer. */
+const FORGOTTEN = "(forgotten)";
+/** Bookkeeping keys that are not knowledge and are not shown to the model. */
+const INTERNAL = new Set(["signature", "occurrences", "path", "failure"]);
 
 /** The `facts:` section of a node's derived state, as key/value pairs. */
-export function factsOf(state: string): ProfileFact[] {
+export function factsOf(state: string, options: { internal?: boolean } = {}): ProfileFact[] {
   const out: ProfileFact[] = [];
   let inFacts = false;
   for (const line of state.split("\n")) {
@@ -51,22 +57,31 @@ export function factsOf(state: string): ProfileFact[] {
       inFacts = true;
       continue;
     }
-    if (inFacts) {
-      const m = /^\s+- ([^:]+): (.*)$/.exec(line);
-      if (m) out.push({ key: m[1]!.trim(), value: m[2]!.trim() });
-      else if (!/^\s/.test(line)) inFacts = false;
-    }
+    if (!inFacts) continue;
+    const m = /^\s+- ([^:]+): (.*)$/.exec(line);
+    if (m) {
+      const fact = { key: m[1]!.trim(), value: m[2]!.trim() };
+      if (fact.value === FORGOTTEN) continue;
+      if (!options.internal && INTERNAL.has(fact.key)) continue;
+      out.push(fact);
+    } else if (!/^\s/.test(line)) inFacts = false;
   }
   return out;
+}
+
+export function factValue(state: string, key: string): string | undefined {
+  return factsOf(state, { internal: true }).find((f) => f.key === key)?.value;
 }
 
 export function spawnMemsrv(binary: string, args: string[]): MemoryChild {
   return spawn(binary, args, { stdio: ["pipe", "pipe", "ignore"] }) as unknown as MemoryChild;
 }
 
+export type EdgeKind = "supplies_context" | "part_of" | "derived_from" | "activated_with";
+
 export class MemoryService {
   private readonly client: MemoryClient;
-  private nodes = new Map<string, number>();
+  private labels = new Map<string, number>();
 
   constructor(
     readonly binary: string,
@@ -86,90 +101,133 @@ export class MemoryService {
     return (await this.call("ping")) !== undefined;
   }
 
-  /** A standing node by label, created on first use. */
-  private async standing(label: string, kind: string, area: string): Promise<number | undefined> {
-    const known = this.nodes.get(label);
+  /** A node's id by exact label, from the sidecar (cached once found). */
+  async findLabel(label: string): Promise<number | undefined> {
+    const known = this.labels.get(label);
     if (known !== undefined) return known;
     const dump = await this.call<{ nodes: { id: number; label: string }[] }>("dump");
     const found = dump?.nodes.find((n) => n.label === label);
-    if (found) {
-      this.nodes.set(label, found.id);
-      return found.id;
-    }
+    if (found) this.labels.set(label, found.id);
+    return found?.id;
+  }
+
+  /** A standing node by label, created on first use. */
+  private async standing(label: string, kind: string, area: string): Promise<number | undefined> {
+    const found = await this.findLabel(label);
+    if (found !== undefined) return found;
     const created = await this.call<{ node: number }>("create_node", { kind, label, area });
-    if (created) this.nodes.set(label, created.node);
+    if (created) this.labels.set(label, created.node);
     return created?.node;
   }
 
-  profileNode(scope: Scope, cwd: string): Promise<number | undefined> {
-    return scope === "user" ? this.standing(USER_LABEL, "entity", "semantic") : this.standing(projectLabel(cwd), "entity", "spatial");
+  /** The project node for an identity; its root path is recorded once. */
+  async project(projectId: string, root?: string): Promise<number | undefined> {
+    const known = this.labels.has(projectLabel(projectId));
+    const node = await this.standing(projectLabel(projectId), "entity", "spatial");
+    if (node !== undefined && !known && root) {
+      const st = await this.state(node);
+      if (!factValue(st, "path")) await this.call("fact", { node, key: "path", value: root });
+    }
+    return node;
   }
 
-  async profile(scope: Scope, cwd: string): Promise<ProfileFact[]> {
-    const node = await this.profileNode(scope, cwd);
-    if (node === undefined) return [];
-    const st = await this.call<{ state: string }>("state", { node });
-    return st ? factsOf(st.state) : [];
+  userNode(): Promise<number | undefined> {
+    return this.standing(USER_LABEL, "entity", "semantic");
+  }
+
+  profileNode(scope: Scope, projectId: string): Promise<number | undefined> {
+    return scope === "user" ? this.userNode() : this.project(projectId);
+  }
+
+  async state(node: number): Promise<string> {
+    return (await this.call<{ state: string }>("state", { node }))?.state ?? "";
+  }
+
+  async profile(scope: Scope, projectId: string): Promise<ProfileFact[]> {
+    const node = await this.profileNode(scope, projectId);
+    return node === undefined ? [] : factsOf(await this.state(node));
   }
 
   /** Write one profile fact; a key that already has a value is superseded. */
-  async learn(scope: Scope, cwd: string, key: string, value: string): Promise<{ superseded: boolean } | undefined> {
-    const node = await this.profileNode(scope, cwd);
+  async learn(scope: Scope, projectId: string, key: string, value: string): Promise<{ superseded: boolean } | undefined> {
+    const node = await this.profileNode(scope, projectId);
     if (node === undefined) return undefined;
-    const r = await this.call<{ fact: number; superseded: number | null }>("fact", { node, key, value });
+    const r = await this.call<{ fact: number; superseded: number | null }>("fact", { node, key, value: redact(value) });
     return r ? { superseded: r.superseded !== null } : undefined;
   }
 
-  async search(query: string, k = 5): Promise<Hit[]> {
-    const r = await this.call<{ results: Hit[] }>("search", { query, k });
-    return r?.results ?? [];
+  /** Retire a profile fact: kept as history, never recalled again. */
+  async forget(scope: Scope, projectId: string, key: string): Promise<boolean> {
+    const facts = await this.profile(scope, projectId);
+    if (!facts.some((f) => f.key === key)) return false;
+    return (await this.learn(scope, projectId, key, FORGOTTEN)) !== undefined;
   }
 
   /**
-   * What to recall for a message: search hits that are not the profiles
-   * (those are injected whole) and not bare episodes with nothing learned.
+   * Search, optionally within one project. Another project's profile node is
+   * not attached to anything — it *is* a project — so the sidecar's scope
+   * cannot exclude it; it is dropped here.
    */
-  async recall(query: string, cwd: string, k = 4): Promise<Hit[]> {
+  async search(query: string, k = 5, scope?: number): Promise<Hit[]> {
+    const r = await this.call<{ results: Hit[] }>("search", { query, k, scope });
+    const hits = r?.results ?? [];
+    return scope === undefined ? hits : hits.filter((h) => h.node === scope || !h.label.startsWith("project "));
+  }
+
+  /**
+   * What to recall for a message, within one project: knowledge (lessons,
+   * skills, remembered notes), pitfalls that have a known fix, and past
+   * episodes that have a record. Never the profiles (injected whole), never
+   * unresolved pain or gap markers (they say *that* it hurt, not what to do).
+   */
+  async recall(query: string, project: number | undefined, profileNodes: number[], k = 5): Promise<Hit[]> {
     if (query.trim().split(/\s+/).length < 2) return [];
-    const skip = new Set([USER_LABEL, projectLabel(cwd)]);
-    const hits = await this.search(query, k * 3);
+    const hits = await this.search(query, k * 4, project);
     return hits
-      .filter((h) => !skip.has(h.label) && h.score > 0.05)
-      .filter((h) => h.kind !== "TaskEpisode" || /facts:\n\s+-/.test(h.state))
+      .filter((h) => !profileNodes.includes(h.node) && h.score > 0.05)
+      .filter((h) => !h.label.startsWith("gap:") && !h.label.startsWith("skill candidate"))
+      .filter((h) => h.area !== "Salience" || factValue(h.state, "fix") !== undefined)
+      .filter((h) => h.kind !== "TaskEpisode" || factValue(h.state, "goal") !== undefined)
       .slice(0, k);
   }
 
   async episode(label: string): Promise<number | undefined> {
-    return (await this.call<{ episode: number }>("episode", { label }))?.episode;
+    return (await this.call<{ episode: number }>("episode", { label: redact(label) }))?.episode;
   }
 
   async log(node: number, kind: string, detail: string): Promise<void> {
-    await this.call("commit_log", { node, kind, detail });
+    await this.call("commit_log", { node, kind, detail: redact(detail) });
   }
 
   async fact(node: number, key: string, value: string): Promise<void> {
-    await this.call("fact", { node, key, value });
+    await this.call("fact", { node, key, value: redact(value) });
   }
 
-  /** Mark `src` as having supplied context to `dst` (so steering can blame it). */
-  async link(src: number, dst: number): Promise<void> {
-    await this.call("link", { src, dst });
+  async link(src: number, dst: number, kind: EdgeKind = "supplies_context"): Promise<void> {
+    await this.call("link", { src, dst, kind });
   }
 
-  async steer(episode: number, failure: string): Promise<{ pain_node?: number; blamed_feeders?: number[]; gap_node?: number } | undefined> {
-    return this.call("steer", { episode, failure });
+  /** A failure: one marker per distinct failure (counted), no gap node for tool errors. */
+  async steer(episode: number, failure: string): Promise<{ pain_node?: number; occurrences?: number; blamed_feeders?: [number, number][] } | undefined> {
+    return this.call("steer", { episode, failure: redact(failure), dedupe: true, gap: false });
   }
 
   async good(episode: number, detail: string): Promise<void> {
     await this.call("good", { episode, detail });
   }
 
+  async markUseful(node: number, useful = true): Promise<void> {
+    await this.call("mark_useful", { node, useful });
+  }
+
   async remember(summary: string, label?: string): Promise<number | undefined> {
-    return (await this.call<{ node: number }>("remember", { summary, label }))?.node;
+    return (await this.call<{ node: number }>("remember", { summary: redact(summary), label: label && redact(label) }))?.node;
   }
 
   async createNode(kind: string, label: string, area?: string): Promise<number | undefined> {
-    return (await this.call<{ node: number }>("create_node", { kind, label, area }))?.node;
+    const node = (await this.call<{ node: number }>("create_node", { kind, label: redact(label), area }))?.node;
+    if (node !== undefined) this.labels.set(label, node);
+    return node;
   }
 
   async consolidate(): Promise<string[]> {
