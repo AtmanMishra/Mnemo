@@ -7,6 +7,7 @@ import { test, expect } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 import { buildRepo, score, TASKS } from "../eval/series.ts";
 import type { SessionResult } from "../eval/harness.ts";
 
@@ -19,7 +20,9 @@ const REFERENCE = [
   `export function roundToNickel(c) { return Math.round(c / 5) * 5; }`,
 ];
 
-const session = (output = "") => ({ tools: [{ name: "bash", args: {}, ok: true, output }] }) as unknown as SessionResult;
+const session = (output = "", answer = "Done.\nChanged: src/money.mjs, CHANGELOG.md") =>
+  ({ tools: [{ name: "bash", args: {}, ok: true, output }], answers: [answer] }) as unknown as SessionResult;
+const docs = (dir: string) => spawnSync("node", ["scripts/gen.mjs"], { cwd: dir }) && spawnSync("node", ["scripts/docs.mjs"], { cwd: dir });
 const changelog = (dir: string, n: number) =>
   fs.writeFileSync(path.join(dir, "CHANGELOG.md"), `# Changelog\n\n## Unreleased\n\n${Array.from({ length: n }, (_, i) => `- change ${i}`).join("\n")}\n\n## 0.1.0\n`);
 
@@ -30,14 +33,25 @@ test("a reference solution scores 5/5 on every task, cumulatively", () => {
     fs.writeFileSync(path.join(dir, "src", `f${i}.mjs`), REFERENCE[i]!);
     fs.appendFileSync(path.join(dir, "src", "index.mjs"), `export * from "./f${i}.mjs";\n`);
     changelog(dir, i + 1);
-    expect([i, score(dir, i, session(), i)]).toEqual([i, { feature: true, earlier: true, cents: true, changelog: true, gen: true }]);
+    docs(dir);
+    expect([i, score(dir, i, session(), i)]).toEqual([i, { feature: true, earlier: true, cents: true, changelog: true, gen: true, docs: true, reply: true }]);
   }
 });
 
-test("each rule is scored on its own: no feature, a float, no export, no changelog line, the build error", () => {
+test("each rule is scored on its own: no feature, a float, no export, no changelog line, the build error, stale docs, no Changed: line", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "series-bad-"));
   buildRepo(dir);
-  expect(score(dir, 1, session("error: generated rates missing — run npm run gen first"), 0)).toEqual({ feature: false, earlier: false, cents: false, changelog: false, gen: false });
+  expect(score(dir, 1, session("> till@0.1.0 test\nerror: generated rates missing — run npm run gen first", "Done."), 0)).toEqual({
+    feature: false,
+    earlier: false,
+    cents: false,
+    changelog: false,
+    gen: false,
+    docs: false,
+    reply: false,
+  });
+  // Reading the check script is not hitting the error.
+  expect(score(dir, 1, session(`console.error("error: generated rates missing — run npm run gen first");`), 0).gen).toBe(true);
   // Correct on round numbers, a float otherwise; exported.
   fs.writeFileSync(path.join(dir, "src", "tax.mjs"), `import { TAX } from "./generated/rates.mjs";\nexport function addTax(c, k) { return c * (1 + TAX[k]); }`);
   fs.appendFileSync(path.join(dir, "src", "index.mjs"), `export * from "./tax.mjs";\n`);
