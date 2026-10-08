@@ -14,6 +14,7 @@ import type { AuthPrompt, AuthEvent } from "@earendil-works/pi-ai";
 import { Transcript } from "../ui/store.ts";
 import { Dialogs, type Choice } from "./dialogs.ts";
 import { createUiContext } from "./ui-context.ts";
+import { CYCLE, type Host, type MemoryNote, type Mode } from "../extensions/host.ts";
 
 export interface CommandInfo {
   name: string;
@@ -28,6 +29,9 @@ export interface Footer {
   cost: number;
   cwd: string;
   branch?: string;
+  mode: Mode;
+  /** null when the memory sidecar is not installed. */
+  memory: { nodes: number } | null;
 }
 
 export interface Chrome {
@@ -51,6 +55,12 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "compact", description: "summarise the conversation to free context" },
   { name: "cost", description: "tokens and spend for this session" },
   { name: "clear", description: "clear the screen (the session is kept)" },
+  { name: "memory", description: "what Mnemo remembers · /memory <words> searches it" },
+  { name: "remember", description: "tell Mnemo something to keep: /remember we deploy with fly" },
+  { name: "mode", description: "how much Mnemo may do without asking (default, accept-edits, plan, yolo)" },
+  { name: "plan", description: "toggle plan mode (read-only)" },
+  { name: "skills", description: "the skills Mnemo can load" },
+  { name: "reload", description: "reload skills, prompts and extensions" },
   { name: "quit", description: "leave Mnemo" },
 ];
 
@@ -61,7 +71,7 @@ export const HELP_TEXT = [
   "",
   "Keys",
   "  enter send (queues while Mnemo works) · alt+enter newline · esc interrupt",
-  "  ↑/↓ history · tab accept suggestion · @ mention a file · shift+tab thinking level",
+  "  ↑/↓ history · tab accept suggestion · @ mention a file · shift+tab mode · ctrl+t thinking level",
   "  ctrl+o expand output · ctrl+l clear screen · ctrl+c twice / ctrl+d quit",
 ].join("\n");
 
@@ -100,13 +110,26 @@ export class Controller {
   private draftSeq = 0;
   private statuses = new Map<string, string>();
   private branch: string | undefined;
+  private memoryNodes: number | null = null;
+  private needsReload = false;
 
   constructor(
     readonly runtime: AgentSessionRuntime,
-    private readonly options: { exit: (code?: number) => void; onClearScreen?: () => void; now?: () => number },
+    private readonly options: { exit: (code?: number) => void; onClearScreen?: () => void; now?: () => number; host?: Host },
   ) {
     this.transcript = new Transcript({ now: options.now });
     this.branch = gitBranch(runtime.cwd);
+    const host = options.host;
+    if (host) {
+      host.ui = {
+        approve: (request, signal) => this.dialogs.approval(request, signal),
+        note: (n) => this.note(n),
+        resourcesChanged: () => {
+          this.needsReload = true;
+        },
+      };
+      void this.refreshMemory();
+    }
     this.chrome = { footer: this.readFooter(), statuses: [], workingVisible: true, expanded: false };
   }
 
@@ -159,6 +182,8 @@ export class Controller {
       cost,
       cwd: this.runtime.cwd,
       branch: this.branch,
+      mode: this.options.host?.mode ?? "default",
+      memory: this.memoryNodes === null ? null : { nodes: this.memoryNodes },
     };
   }
 
@@ -212,6 +237,7 @@ export class Controller {
         event.type === "compaction_end"
       )
         this.refreshFooter();
+      if (event.type === "agent_settled") void this.afterRun();
     });
     this.refreshFooter();
   }
@@ -281,6 +307,60 @@ export class Controller {
     }
   }
 
+  private note(n: MemoryNote): void {
+    switch (n.kind) {
+      case "recall":
+        this.transcript.memory("Recalled", n.items, { afterNextUser: true });
+        break;
+      case "learned":
+        this.transcript.memory(`Learned ${n.items.length === 1 ? "a fact" : `${n.items.length} facts`}`, n.items);
+        void this.refreshMemory();
+        break;
+      case "steer":
+        this.transcript.memory(`Memory ${n.text}`);
+        break;
+      case "skill":
+        this.transcript.memory(n.text[0]!.toUpperCase() + n.text.slice(1));
+        break;
+    }
+  }
+
+  private async refreshMemory(): Promise<void> {
+    const stats = await this.options.host?.memory?.stats();
+    this.memoryNodes = stats ? stats.nodes : null;
+    this.refreshFooter();
+  }
+
+  /** Once a run settles: pick up skills written during it, refresh the counts. */
+  private async afterRun(): Promise<void> {
+    if (this.needsReload) {
+      this.needsReload = false;
+      try {
+        await this.runtime.session.reload();
+      } catch (error) {
+        this.transcript.notice(`could not reload skills: ${errorText(error)}`, "warn");
+      }
+    }
+    void this.refreshMemory();
+  }
+
+  get mode(): Mode {
+    return this.options.host?.mode ?? "default";
+  }
+
+  setMode(mode: Mode): void {
+    const host = this.options.host;
+    if (!host) return;
+    host.mode = mode;
+    this.refreshFooter();
+  }
+
+  /** shift+tab: default → accept edits → plan → default. */
+  cycleMode(): void {
+    const i = CYCLE.indexOf(this.mode);
+    this.setMode(CYCLE[(i + 1) % CYCLE.length]!);
+  }
+
   cycleThinking(): void {
     const level = this.runtime.session.cycleThinkingLevel();
     if (level) this.refreshFooter();
@@ -325,6 +405,56 @@ export class Controller {
           this.transcript.notice(errorText(error), "error");
         }
         return true;
+      case "memory":
+        await this.showMemory(arg);
+        return true;
+      case "remember": {
+        const mem = this.options.host?.memory;
+        if (!mem) return this.memoryOff(), true;
+        if (!arg) {
+          this.transcript.notice("Usage: /remember <something true about this project>", "warn");
+          return true;
+        }
+        const key = arg.split(/[:=]/)[0]!.trim().toLowerCase().slice(0, 40);
+        const value = arg.includes(":") || arg.includes("=") ? arg.slice(arg.search(/[:=]/) + 1).trim() : arg;
+        await mem.learn("project", this.runtime.cwd, arg.includes(":") || arg.includes("=") ? key : `note ${Date.now().toString(36)}`, value);
+        this.transcript.memory("Remembered", [value]);
+        void this.refreshMemory();
+        return true;
+      }
+      case "mode": {
+        const modes: Mode[] = ["default", "accept-edits", "plan", "yolo"];
+        const pick =
+          (modes.find((m) => m === arg) as Mode | undefined) ??
+          ((await this.dialogs.select("Mode", [
+            { value: "default", label: "default", description: "ask before edits and commands" },
+            { value: "accept-edits", label: "accept edits", description: "edit project files freely, ask before commands" },
+            { value: "plan", label: "plan", description: "read-only: nothing is changed" },
+            { value: "yolo", label: "yolo", description: "ask for nothing (deny rules still hold)" },
+          ])) as Mode | undefined);
+        if (pick) {
+          this.setMode(pick);
+          this.transcript.notice(`Mode: ${pick}`);
+        }
+        return true;
+      }
+      case "plan":
+        this.setMode(this.mode === "plan" ? "default" : "plan");
+        this.transcript.notice(this.mode === "plan" ? "Plan mode: Mnemo reads and proposes, and changes nothing" : "Plan mode off");
+        return true;
+      case "skills": {
+        const skills = this.runtime.session.resourceLoader.getSkills().skills;
+        this.transcript.notice(
+          skills.length
+            ? ["Skills", ...skills.map((k) => `  /skill:${k.name.padEnd(24)} ${k.description ?? ""}`)].join("\n")
+            : "No skills yet. Mnemo writes one when it works out a procedure worth keeping, or add SKILL.md files under ~/.mnemo/agent/skills.",
+        );
+        return true;
+      }
+      case "reload":
+        await this.runtime.session.reload();
+        this.transcript.notice("Reloaded skills, prompts and extensions");
+        return true;
       case "cost": {
         const st = this.runtime.session.getSessionStats();
         this.transcript.notice(
@@ -336,6 +466,31 @@ export class Controller {
       default:
         return false;
     }
+  }
+
+  private memoryOff(): void {
+    this.transcript.notice("Memory is off: the memsrv sidecar was not found. `mnemo doctor` says where it looks.", "warn");
+  }
+
+  private async showMemory(query: string): Promise<void> {
+    const mem = this.options.host?.memory;
+    if (!mem) return this.memoryOff();
+    const cwd = this.runtime.cwd;
+    if (query) {
+      const hits = await mem.search(query, 6);
+      this.transcript.memory(
+        hits.length ? `Memory for "${query}"` : `Nothing in memory matches "${query}"`,
+        hits.map((h) => `${h.label} [${h.area}]`),
+      );
+      return;
+    }
+    const [stats, project, user] = await Promise.all([mem.stats(), mem.profile("project", cwd), mem.profile("user", cwd)]);
+    const areas = stats ? Object.entries(stats.byArea).map(([a, n]) => `${a.toLowerCase()} ${n}`).join(" · ") : "";
+    const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+    this.transcript.memory(`Memory · ${plural(stats?.nodes ?? 0, "node")} · ${plural(stats?.episodes ?? 0, "episode")}${areas ? ` · ${areas}` : ""}`, [
+      ...(project.length ? ["This project:", ...project.map((f) => `· ${f.key}: ${f.value}`)] : ["Nothing about this project yet."]),
+      ...(user.length ? ["You:", ...user.map((f) => `· ${f.key}: ${f.value}`)] : []),
+    ]);
   }
 
   private async chooseModel(arg: string): Promise<void> {

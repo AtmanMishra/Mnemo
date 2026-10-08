@@ -14,6 +14,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readMemory, type MemoryReader } from "../src/memory/read.ts";
 import { MemoryClient, type MemoryChild } from "../src/memory/client.ts";
+import { findMemsrv } from "../src/runtime/paths.ts";
 
 const answer = (response: { ok: boolean; result?: unknown; error?: string }): MemoryReader => ({
   request: async () => response,
@@ -45,7 +46,8 @@ test("a failure with no reason still says something actionable", async () => {
 // Against the real binary.
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
-const MEMSRV = process.env.MNEMO_MEMSRV_BIN ?? path.join(
+// Whichever build exists (release first), the same lookup the app uses.
+const MEMSRV = process.env.MNEMO_MEMSRV_BIN ?? findMemsrv("/nonexistent") ?? path.join(
   REPO_ROOT,
   "memory-layer",
   "target",

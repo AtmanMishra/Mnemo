@@ -26,7 +26,8 @@ export type Block =
       details?: unknown;
       durationMs?: number;
     }
-  | { kind: "notice"; id: string; tone: Tone; text: string };
+  | { kind: "notice"; id: string; tone: Tone; text: string }
+  | { kind: "memory"; id: string; title: string; items: string[] };
 
 export interface Working {
   since: number;
@@ -76,6 +77,8 @@ export class Transcript {
   private assistantSeq = 0;
   private listeners = new Set<() => void>();
   private snap: Snapshot;
+  /** What memory recalled for a message, held until that message is on screen. */
+  private pendingRecall: Block | undefined;
   private readonly now: () => number;
 
   constructor(options: { now?: () => number } = {}) {
@@ -127,6 +130,20 @@ export class Transcript {
 
   notice(text: string, tone: Tone = "info"): void {
     this.push({ kind: "notice", tone, text });
+  }
+
+  /**
+   * A line from the memory loop. Recall happens before the user's message is
+   * echoed, so it waits and appears right under that message instead of above it.
+   */
+  memory(title: string, items: string[] = [], options: { afterNextUser?: boolean } = {}): void {
+    const block: Block = { kind: "memory", id: this.nextId("m"), title, items };
+    if (options.afterNextUser) {
+      this.pendingRecall = block;
+      return;
+    }
+    this.live.push(block);
+    this.changed();
   }
 
   /** Forget everything on screen; the session itself is untouched. */
@@ -199,6 +216,10 @@ export class Transcript {
         if (m.role === "user") {
           const text = textOf(m.content);
           if (text) this.live.push({ kind: "user", id: this.nextId("u"), text });
+          if (this.pendingRecall) {
+            this.live.push(this.pendingRecall);
+            this.pendingRecall = undefined;
+          }
         } else if (m.role === "assistant") {
           this.finishMessage();
           if (m.stopReason === "aborted") this.live.push({ kind: "notice", id: this.nextId("n"), tone: "warn", text: "Interrupted" });

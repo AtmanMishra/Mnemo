@@ -4,21 +4,25 @@ A terminal-native agentic coding and harness assistant whose memory works like a
 
 ## Quickstart
 
-> **Status: mid-rebuild.** Mnemo is becoming a single Bun application (`app/`):
-> an Ink interface on the [pi](https://github.com/earendil-works/pi) agent SDK,
-> with the Rust memory layer and a Python execution kernel behind it. The new
-> interface runs today; Mnemo's own agent behaviour (approval gate, memory recall,
-> kernel, subagents) is still being moved over from `agent/`. What remains, in
-> order: [`docs/ROADMAP.md`](docs/ROADMAP.md). Interface spec: [`DESIGN.md`](DESIGN.md).
+> **Status: working prototype (Bun rebuild).** `app/` is the new Mnemo: an Ink
+> interface on the [pi](https://github.com/earendil-works/pi) agent SDK, the Rust
+> memory sidecar, and a Python kernel. It remembers across sessions — after each
+> run it writes what it learned about the project and about you, injects that into
+> every later turn, steers its memory when something fails, and can write skills
+> for itself. What is left: [`docs/ROADMAP.md`](docs/ROADMAP.md). Interface spec:
+> [`DESIGN.md`](DESIGN.md).
 >
 > ```bash
-> cd app && bun install
-> bun bin/mnemo.ts            # start; /login adds a provider (API key or subscription)
-> bun bin/mnemo.ts --demo     # a scripted session in a scratch project — no key needed
-> bun run build               # → dist/mnemo, one self-contained binary
+> app/scripts/install.sh      # builds mnemo + memsrv into ~/.mnemo/bin (needs bun, cargo)
+> mnemo doctor                # what is installed and reachable
+> mnemo                       # /login adds a provider (API key or subscription)
+> mnemo --demo                # a scripted session in a scratch project — no key needed
 > ```
 >
-> ![Mnemo running a scripted turn](docs/screenshots/turn.png)
+> Or without installing: `cd app && bun install && bun bin/mnemo.ts`.
+>
+> ![Mnemo asking before an edit](docs/screenshots/approval.png)
+> ![What Mnemo learned](docs/screenshots/memory.png)
 >
 > The instructions below build the previous stack (Go interface + Node agent).
 

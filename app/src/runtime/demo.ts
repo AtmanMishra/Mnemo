@@ -61,7 +61,15 @@ export function createDemoProject(): string {
 
 export const DEMO_PROMPT = "add a retry to the fetch helper";
 
-/** One turn: think, read the file, edit it, explain. */
+/** What the reflection step "extracts" from the demo turn (the faux model's 4th answer). */
+export const DEMO_REFLECTION = JSON.stringify({
+  facts: [
+    { scope: "project", key: "language", value: "TypeScript" },
+    { scope: "project", key: "http helper", value: "getJson (src/fetch.ts) retries 5xx up to 3 times with backoff; 4xx fail fast" },
+  ],
+});
+
+/** One turn: think, read the file, edit it, explain — then the reflection call. */
 export function demoScript(): FauxResponseStep[] {
   return [
     fauxAssistantMessage(
@@ -91,5 +99,6 @@ export function demoScript(): FauxResponseStep[] {
         ].join("\n"),
       ),
     ),
+    fauxAssistantMessage(fauxText(DEMO_REFLECTION)),
   ];
 }

@@ -137,6 +137,18 @@ export function BlockView({ block, cwd, expanded, welcome }: BlockProps): React.
       return <ThinkingView block={block} expanded={expanded} />;
     case "tool":
       return <ToolView block={block} cwd={cwd} expanded={expanded} />;
+    case "memory":
+      return (
+        <Gutter mark={glyph.memory} tint={color.accent}>
+          <Text color={color.accent}>{block.title}</Text>
+          {block.items.slice(0, 8).map((item, i) => (
+            <Box key={i} paddingLeft={2}>
+              <Text color={color.muted}>{item}</Text>
+            </Box>
+          ))}
+          {block.items.length > 8 ? <Text color={color.subtle}>{`  … +${block.items.length - 8} more`}</Text> : null}
+        </Gutter>
+      );
     case "notice": {
       const tint = block.tone === "error" ? color.error : block.tone === "warn" ? color.warning : color.muted;
       return (

@@ -28,10 +28,31 @@ export function Footer({
     );
   if (data.cost > 0) parts.push(<Text key="$">${data.cost.toFixed(2)}</Text>);
   if (data.branch) parts.push(<Text key="b">⎇ {data.branch}</Text>);
+  parts.push(
+    data.memory ? (
+      <Text key="mem" color={color.accent}>
+        ◈ {data.memory.nodes}
+      </Text>
+    ) : (
+      <Text key="mem" color={color.subtle}>
+        ◈ off
+      </Text>
+    ),
+  );
+  const mode =
+    data.mode === "accept-edits" ? (
+      <Text color={color.success}>⏵⏵ accept edits </Text>
+    ) : data.mode === "plan" ? (
+      <Text color={color.accent2}>⏸ plan mode </Text>
+    ) : data.mode === "yolo" ? (
+      <Text color={color.error}>⚠ yolo </Text>
+    ) : null;
   return (
     <Box flexDirection="row" justifyContent="space-between" paddingX={1}>
       <Box flexShrink={1}>
         <Text color={color.muted} wrap="truncate-end">
+          {mode}
+          {mode ? <Text color={color.subtle}>(shift+tab) · </Text> : null}
           {hint}
           {statuses.length > 0 ? <Text color={color.subtle}>{"  " + statuses.map(([, v]) => v).join(" · ")}</Text> : null}
         </Text>

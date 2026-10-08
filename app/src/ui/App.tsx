@@ -58,7 +58,7 @@ export function App({ controller, version, home, motion, clearTerminal }: AppPro
       </Static>
       <Box flexDirection="column" width={columns}>
         {snap.live.map(render)}
-        {chrome.workingVisible ? <WorkingLine working={snap.working} message={chrome.workingMessage} queue={snap.queue} /> : null}
+        {chrome.workingVisible ? <WorkingLine working={snap.working} message={dialog ? "Waiting for you…" : chrome.workingMessage} queue={snap.queue} /> : null}
         {dialog ? <DialogView dialog={dialog} /> : null}
         <Composer
           working={snap.working !== null}
@@ -78,6 +78,7 @@ export function App({ controller, version, home, motion, clearTerminal }: AppPro
             controller.transcript.clear();
           }}
           onCycleThinking={() => controller.cycleThinking()}
+          onCycleMode={() => controller.cycleMode()}
         />
       </Box>
     </MotionContext.Provider>

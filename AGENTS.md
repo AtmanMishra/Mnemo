@@ -15,7 +15,10 @@
 > (`createAgentSessionRuntime`) — no RPC, no child process. Layout: `src/ui/`
 > (components, pure `store.ts` / `editor.ts` / `format.ts`), `src/runtime/`
 > (`controller.ts` is the only caller of the pi session). Mnemo's behaviour is
-> added as pi inline extensions (Stage 2 of the roadmap).
+> added as pi inline extensions in `src/extensions/` (policy, memory, kernel,
+> agents, skills, trace), which share one `Host` (`src/extensions/host.ts`) —
+> never globals. The memory semantics (profiles, recall, learning, steering)
+> live in `src/memory/service.ts`.
 >
 > Working in `app/`: `cd app && bun install && bun test ./test && bunx tsc --noEmit`.
 > Everything must be verifiable without an API key: tests run real pi sessions

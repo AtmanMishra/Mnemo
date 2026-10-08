@@ -12,9 +12,26 @@ export interface Choice {
   description?: string;
 }
 
+/** A tool call waiting for the user's yes or no. */
+export interface ApprovalRequest {
+  /** "Bash", "Edit", "Python"… */
+  tool: string;
+  /** The command, the path — what the call is about, on one line. */
+  subject: string;
+  /** Lines shown under it: the diff, the code, the content. */
+  preview: { text: string; tone?: "add" | "remove" | "muted" }[];
+  /** What "don't ask again" would cover, when that is offerable. */
+  always?: string;
+  /** Why it is being asked (the gate's reason). */
+  reason?: string;
+}
+
+export type ApprovalAnswer = { kind: "yes" } | { kind: "always" } | { kind: "no"; feedback?: string };
+
 export type Dialog =
   | { id: number; kind: "select"; title: string; choices: Choice[]; resolve: (value: string | undefined) => void }
   | { id: number; kind: "confirm"; title: string; message: string; resolve: (ok: boolean) => void }
+  | { id: number; kind: "approval"; request: ApprovalRequest; resolve: (answer: ApprovalAnswer) => void }
   | {
       id: number;
       kind: "text";
@@ -25,6 +42,7 @@ export type Dialog =
     };
 
 type Request =
+  | Omit<Extract<Dialog, { kind: "approval" }>, "id" | "resolve">
   | Omit<Extract<Dialog, { kind: "select" }>, "id" | "resolve">
   | Omit<Extract<Dialog, { kind: "confirm" }>, "id" | "resolve">
   | Omit<Extract<Dialog, { kind: "text" }>, "id" | "resolve">;
@@ -78,10 +96,15 @@ export class Dialogs {
     return this.open({ kind: "text", title, placeholder: options.placeholder, secret: options.secret }, options.signal, undefined);
   }
 
+  approval(request: ApprovalRequest, signal?: AbortSignal): Promise<ApprovalAnswer> {
+    return this.open({ kind: "approval", request }, signal, { kind: "no" } as ApprovalAnswer);
+  }
+
   /** Cancel everything (shutdown). */
   cancelAll(): void {
     for (const d of [...this.queue]) {
       if (d.kind === "confirm") d.resolve(false);
+      else if (d.kind === "approval") d.resolve({ kind: "no" });
       else d.resolve(undefined);
     }
   }

@@ -1,0 +1,90 @@
+/**
+ * Skills Mnemo writes for itself.
+ *
+ * pi already discovers and loads `SKILL.md` files; these tools let the agent
+ * add to that set when it notices a procedure worth keeping, and improve one
+ * that failed. A skill is a file a person can read and edit, under
+ * `$MNEMO_HOME/agent/skills/<name>/SKILL.md`, and also a node in memory
+ * (Procedural), so a later session can recall that it exists and why.
+ * Every update keeps the previous body under `$MNEMO_HOME/skill-history/`.
+ */
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { Type } from "@earendil-works/pi-ai";
+import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { skillsDir } from "../runtime/paths.ts";
+import type { Host } from "./host.ts";
+
+const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+export function skillFile(home: string, name: string): string {
+  return path.join(skillsDir(home), name, "SKILL.md");
+}
+
+export function renderSkill(name: string, description: string, body: string): string {
+  const desc = description.replace(/\s+/g, " ").trim();
+  return `---\nname: ${name}\ndescription: ${JSON.stringify(desc)}\n---\n\n${body.trim()}\n`;
+}
+
+export function skillsExtension(host: Host) {
+  return (pi: ExtensionAPI): void => {
+    pi.registerTool(
+      defineTool({
+        name: "create_skill",
+        label: "Create skill",
+        description:
+          "Save a reusable procedure as a skill (a SKILL.md other sessions can load). Use it when you worked out a multi-step " +
+          "procedure this project or user will need again. name: lowercase-with-dashes. description: when to use it (this is how it is found). " +
+          "instructions: the steps, commands and pitfalls, in Markdown.",
+        parameters: Type.Object({
+          name: Type.String(),
+          description: Type.String(),
+          instructions: Type.String(),
+        }),
+        async execute(_id, params) {
+          if (!NAME.test(params.name)) throw new Error("name must be lowercase letters, digits and dashes");
+          const file = skillFile(host.home, params.name);
+          if (fs.existsSync(file)) throw new Error(`skill ${params.name} already exists — use update_skill`);
+          fs.mkdirSync(path.dirname(file), { recursive: true });
+          fs.writeFileSync(file, renderSkill(params.name, params.description, params.instructions));
+          const node = await host.memory?.createNode("harness", `skill ${params.name}`, "procedural");
+          if (node !== undefined) await host.memory?.fact(node, "use when", params.description);
+          host.ui?.note({ kind: "skill", text: `created skill ${params.name}` });
+          host.ui?.resourcesChanged();
+          return { content: [{ type: "text", text: `Saved skill ${params.name} at ${file}. It is available as /skill:${params.name} from the next message.` }], details: { file } };
+        },
+      }),
+    );
+
+    pi.registerTool(
+      defineTool({
+        name: "update_skill",
+        label: "Update skill",
+        description:
+          "Improve an existing skill after it proved wrong or incomplete. Give the full new instructions and the reason; the old version is kept as history.",
+        parameters: Type.Object({
+          name: Type.String(),
+          instructions: Type.String(),
+          reason: Type.String({ description: "What went wrong with the old version" }),
+          description: Type.Optional(Type.String()),
+        }),
+        async execute(_id, params) {
+          const file = skillFile(host.home, params.name);
+          if (!fs.existsSync(file)) throw new Error(`no skill ${params.name} under ${skillsDir(host.home)}`);
+          const old = fs.readFileSync(file, "utf8");
+          const history = path.join(host.home, "skill-history", params.name);
+          fs.mkdirSync(history, { recursive: true });
+          fs.writeFileSync(path.join(history, `${new Date().toISOString().replace(/[:.]/g, "-")}.md`), old);
+          const description = params.description ?? /description:\s*(.*)/.exec(old)?.[1]?.replace(/^"|"$/g, "") ?? params.name;
+          fs.writeFileSync(file, renderSkill(params.name, description, params.instructions));
+          const hits = await host.memory?.search(`skill ${params.name}`, 3);
+          const node = hits?.find((h) => h.label === `skill ${params.name}`)?.node;
+          if (node !== undefined) await host.memory?.fact(node, "last change", params.reason);
+          host.ui?.note({ kind: "skill", text: `updated skill ${params.name}: ${params.reason}` });
+          host.ui?.resourcesChanged();
+          return { content: [{ type: "text", text: `Updated ${params.name}; the previous version is in ${history}.` }], details: { file } };
+        },
+      }),
+    );
+  };
+}

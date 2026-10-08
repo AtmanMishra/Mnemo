@@ -27,18 +27,15 @@ steers it on failure, stores different kinds of facts, and writes and patches it
 own skills. The interface is the table stakes; the memory is the reason to exist.
 Both have to ship.
 
-## Where things actually stand (updated 2026-10-08, after the Ink rebuild)
+## Where things actually stand (updated 2026-10-08, prototype)
 
 | Area | State |
 |---|---|
-| `app/` | Ink + React interface on pi 1.1.0's in-process SDK (≈2.9k lines in `src/ui`, `src/runtime`, `bin`). 80 tests pass, 3 skipped (they need a built `memsrv`), `tsc` clean. A real turn — streaming, thinking, tools, diffs, queue, interrupt, `/login`, `/model`, `/new`, `/resume` — is tested against pi's faux provider with no key. |
-| What a user can do | everything in Stage 1 below marked ▣; run it with `cd app && bun bin/mnemo.ts`, or `--demo` for a scripted session with no key. |
-| Binary | `bun run build` → `dist/mnemo`, one ≈96 MB file that runs with no Bun or Node installed. |
-| The agent's Mnemo behaviour | **not ported yet.** pi's own tools run; Mnemo's approval gate, memory recall, kernel, tracing and subagents still live only in `agent/` (Node). That is Stage 2. `app/src/policy`, `app/src/memory` and `app/src/kernel` (with their tests) are the starting material. |
-| Memory layer | solid and self-contained: journal, areas, routed search, steering, consolidation, `recall_brief`/`remember`, eval gate (73/77/0.743). The *self-improvement runtime* (`research/memory-runtime-design.md`, jobs J0–J11) is designed, with only J0 consolidation built. |
-| Kernel | works; no per-call timeout, no resource bounds, not a sandbox. |
-| Install | `scripts/install.sh|ps1` and `release.yml` still target the Go binary + Node agent (Stage 5). |
-| CI | an `app` job (3 OS: install, `tsc`, tests, compiled binary renders a frame) is added; it has not run yet. |
+| `app/` | **A working prototype.** Ink interface on pi 1.1's in-process SDK, with Mnemo's behaviour as six pi extensions (policy, memory, kernel, sub-agents, skills, trace). 103 tests pass, none skipped, `tsc` clean — including a cross-session test where what one session learns is in the next session's prompt. |
+| Memory loop | profiles (project, user) injected every turn; search recall linked to the episode as feeders; tool/turn failures steer; clean runs reinforce; a reflection call after each run writes durable facts (a changed fact supersedes); consolidation at shutdown. |
+| Install | `app/scripts/install.sh` builds `mnemo` + `memsrv` into `~/.mnemo/bin` and runs `mnemo doctor` (verified). No release pipeline for the Bun binary yet. |
+| Not verified | a turn against a real provider (everything here ran on pi's faux model); Windows and macOS (CI job added, not run). |
+| Legacy | `agent/`, `harness-engine/`, `tui-go/` still in the tree, no longer used by `app/`. |
 
 ## Decisions (answered 2026-10-08)
 
@@ -95,7 +92,7 @@ pi-ai's faux provider, so none needs a key.
 - ▣ 1.7 Sessions: `/new`, `/resume` (pi's session list), `/compact`.
 - ▢ 1.8 `ctrl+o` expand/collapse for thinking and tool output already printed
   (today it applies to blocks printed after the toggle).
-- ▢ 1.9 Memory blocks (`◈`) once the memory extension exists (2.3).
+- ▣ 1.9 Memory blocks (`◈ Recalled`, `◈ Learned`, `◈ Memory noted the failure`).
 - ▣ 1.9a First run with no credentials says `/login` (pi reports a placeholder
   model, so "has a model" means "its provider has auth").
 - ▢ 1.10 A visual pass in three real terminals (iTerm2/Ghostty, Windows
@@ -106,25 +103,28 @@ pi-ai's faux provider, so none needs a key.
 `agent/` (Node) is the specification; its tests travel with each module. pi's
 built-in tools replace Mnemo's own file and shell tools (D2).
 
-- ▢ 2.1 **Paths and settings**: `$MNEMO_HOME/agent` as pi's agent dir (auth,
-  settings, sessions, skills, prompts); import keys from the legacy
-  `~/.mnemo/auth.json` once.
-- ▢ 2.2 **Policy extension**: permissions rules (first-match), plan mode as rules,
+- ▣ 2.1 **Paths and settings**: `$MNEMO_HOME/agent` as pi's agent dir (auth,
+  settings, sessions, skills, prompts); memsrv/journal/python discovery.
+  ▢ importing keys from the legacy `~/.mnemo/auth.json` is not done.
+- ▣ 2.2 **Policy extension**: permissions rules (first-match), plan mode as rules,
   approval through `ctx.ui.confirm`, grants store, bash-token matching, path
-  containment *(audit 12.5, 12.6 — port the tests, not just the code)*.
-- ▢ 2.3 **Memory extension**: memsrv client, `session_start` episode,
+  containment *(audit 12.5, 12.6 — port the tests, not just the code)*. Built as
+  modes (default / accept-edits / plan / yolo) + `permissions.json` rules +
+  per-project grants + an approval dialog with feedback.
+- ▣ 2.3 **Memory extension**: memsrv client, `session_start` episode,
   `before_agent_start` recall + directive, `tool_execution_end` log,
   `turn_end`, `session_shutdown` consolidate; the three memory tools.
-- ▢ 2.4 **Kernel tool** (`ipy_run`) + in-kernel `tools.*` through the same gate;
+- ▣ 2.4 **Kernel tool** (`ipy_run`) + in-kernel `tools.*` through the same gate;
   `ipy_bridge.py` embedded in the binary and written out on first use.
-- ▢ 2.5 **Tracing** on `pi-telemetry`: a `TelemetryContext` adapter writing the
-  redacted JSONL spans `mnemo traces` reads.
-- ▢ 2.6 **Subagents**: `spawn_subagent` as an in-process child session (no
+- ▣ 2.5 **Tracing**: redacted JSONL records per tool call and turn in
+  `~/.mnemo/logs`. ▢ a `pi-telemetry` adapter and `mnemo traces` are not done.
+- ▣ 2.6 **Subagents**: `spawn_subagent` as an in-process child session (no
   second process), depth cap, shared journal, model override that fails loudly.
-- ▢ 2.7 **Skills**: pi discovers and loads them; port `create_skill`,
-  `patch_skill` (evidence-gated, with history), `retire_skill`.
-- ▢ 2.8 Subcommands: `doctor`, `consolidate`, `traces` (`-p` one-shot, `-c`,
-  `--version`, `--demo`, `--dump` exist).
+- ▣ 2.7 **Skills**: pi discovers and loads them; `create_skill` and
+  `update_skill` (with history, reloaded after the run) are built.
+  ▢ evidence-gating and `retire_skill` are not.
+- ▣ 2.8 Subcommands: `doctor`, `-p`, `-c`, `--plan`, `--yolo`, `--no-memory`,
+  `--demo`, `--dump`. ▢ `consolidate` and `traces` subcommands are not done.
 - ▢ 2.9 *(v0.2)* hooks, schedules, MCP (`pi-mcp`), harness engine, `init`, `pr`.
 
 *Verify (stage):* each extension tested against a faux-provider session; the
@@ -137,10 +137,12 @@ The memory layer stores and retrieves. What is missing is the loop that makes it
 *learn from sessions*. Design is `research/memory-runtime-design.md`; today only
 J0 exists. Build in its own phases, report-only first.
 
-- ▢ 3.1 **Session → memory capture** audit: what does a finished session actually
+- ▣ 3.1 **Session → memory capture** audit: what does a finished session actually
   write today (episode, log lines, outcome)? Write down the gaps, then close them
   — facts extracted from the transcript, preferences, constraints, repo facts
   (Spatial), decisions (Executive), pain (Salience), each routed to its area.
+  Built as a reflection call after each run writing key/value facts onto a
+  project profile and a user profile.
 - ▢ 3.2 **P0 `mnemo memory status`**: empty episodes, open gaps, contradicting
   same-key facts, dead edges, counts by area. No model, no writes.
 - ▢ 3.3 **No-model jobs** J2 merge, J5 salience review, J6 edge maintenance, J9
@@ -152,7 +154,7 @@ J0 exists. Build in its own phases, report-only first.
 - ▢ 3.6 **Skill loop (J11)**: lessons + pain markers + the skills the session
   actually loaded → a `patch_skill` proposal with evidence ids; applied only
   under the §5.1 rules.
-- ▢ 3.7 **Steering from real outcomes**: wire `steer`/`reinforce` to the turn's
+- ▣ 3.7 **Steering from real outcomes**: wire `steer`/`reinforce` to the turn's
   actual result (tool failure, user correction, test red→green), not only to
   explicit calls.
 - ▢ 3.8 **Usefulness feedback** from the interface (thumbs on a recalled item)
@@ -183,7 +185,7 @@ J0 exists. Build in its own phases, report-only first.
   smoke test spawns the compiled binary and renders a frame.
 - ▢ 5.2 `memsrv` built per target in `release.yml` and attached; the app finds it
   by the platform name (`memsrv.exe` on Windows).
-- ▢ 5.3 Install paths (D3): `curl -fsSL …/install.sh | sh` and `irm …/install.ps1 | iex`
+- ▣ 5.3 (from source) `app/scripts/install.sh`. ▢ Install paths from releases (D3): `curl -fsSL …/install.sh | sh` and `irm …/install.ps1 | iex`
   download the binary + `memsrv` for the platform into `~/.mnemo/bin` and put it
   on PATH; `npx @mnemo/cli` / `bunx` is a thin package that fetches the same
   binary. Each finishes by running `mnemo doctor`. `uninstall` removes exactly

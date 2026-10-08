@@ -28,7 +28,7 @@ function composer(overrides: Partial<ComposerProps> = {}) {
     active: true,
     commands: () => COMMANDS,
     files: () => ["src/fetch.ts", "src/net/retry.ts", "README.md"],
-    footer: { model: "demo-model", thinking: "medium", contextPercent: 12, cost: 0.04, cwd: "/x", branch: "main" },
+    footer: { model: "demo-model", thinking: "medium", contextPercent: 12, cost: 0.04, cwd: "/x", branch: "main", mode: "default", memory: { nodes: 7 } },
     statuses: [],
     onSubmit: (t, m) => calls.submit.push([t, m]),
     onInterrupt: () => calls.interrupt++,
@@ -37,6 +37,7 @@ function composer(overrides: Partial<ComposerProps> = {}) {
     onToggleExpanded: () => calls.expanded++,
     onClear: () => {},
     onCycleThinking: () => {},
+    onCycleMode: () => {},
     ...overrides,
   };
   const r = render(

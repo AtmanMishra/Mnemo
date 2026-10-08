@@ -79,7 +79,8 @@ One file owns them: `app/src/ui/theme.ts`. Truecolor hex; chalk downsamples to
 
 Real frames (the binary in a pseudo-terminal): a finished turn
 (`docs/screenshots/turn.png`), mid-turn (`working.png`), the slash menu
-(`slash.png`) and first-run `/login` (`login.png`).
+(`slash.png`), first-run `/login` (`login.png`), an approval (`approval.png`) and
+what memory learned (`memory.png`).
 
 The slash menu, `@file` suggestions and every dialog open **in place of or
 directly under the input box** — never as a full-screen takeover — so the
@@ -96,7 +97,7 @@ conversation stays visible above.
 | edit/write | a coloured diff, line numbers in muted, `+` lines green, `−` lines red |
 | bash | the command in the header, output in the result, non-zero exit in red |
 | notice | `▸ ` muted text; warnings amber, errors red |
-| memory | `◈ recalled 3 memories` / `◈ remembered: <fact>` in lavender |
+| memory | `◈ Recalled` under your message (profile facts, matching memories), `◈ Learned 2 facts` after a run, `◈ Memory noted the failure` when steering ran — lavender |
 
 Markdown renders only for finished text; the live block streams as plain
 wrapped text and is re-rendered when it completes, so a half-open code fence
@@ -127,7 +128,8 @@ Nothing animates in `--dump`, in tests, or when stdout is not a TTY.
 | `←` `→` `home` `end` `ctrl+a` `ctrl+e` | move the cursor | — |
 | `ctrl+u` `ctrl+k` `ctrl+w` `alt+backspace` | delete to start / end / word | — |
 | `tab` | accept the highlighted suggestion | — |
-| `shift+tab` | cycle thinking level | — |
+| `shift+tab` | cycle mode: default → accept edits → plan | |
+| `ctrl+t` | cycle thinking level | |
 | `ctrl+o` | expand / collapse thinking and tool output (blocks still on screen; scrollback is the terminal's) | |
 | `ctrl+l` | clear the screen (the session is kept) | |
 | `?` on an empty input | shortcuts panel | |
@@ -135,7 +137,8 @@ Nothing animates in `--dump`, in tests, or when stdout is not a TTY.
 ## 7. Commands
 
 Built in: `/help`, `/model`, `/login`, `/logout`, `/new`, `/resume`, `/compact`,
-`/thinking`, `/cost`, `/clear`, `/quit` (`/memory` arrives with the memory extension). Everything pi knows —
+`/thinking`, `/cost`, `/clear`, `/memory [words]`, `/remember key: value`, `/mode`,
+`/plan`, `/skills`, `/reload`, `/quit`. Everything pi knows —
 extension commands, prompt templates (`/name`), skills (`/skill:name`) — is
 merged into the same menu with its source shown, and runs through pi.
 
@@ -147,13 +150,31 @@ and by pi extensions through the extension UI context (`select`, `confirm`,
 
 - **Select** — filterable list, `↑↓` to move, type to filter, `enter` choose, `esc` cancel.
 - **Confirm** — amber frame, the question, `y` / `n` / `enter` / `esc`.
-  The approval of a tool call is a Confirm with the call rendered inside.
+- **Approval** — amber frame with the call itself: the command, the code, or
+  the edit as a red/green diff. `1` yes · `2` yes and don't ask again for this
+  command pattern in this project (offered only when the call generalises
+  safely) · `3` no, and type what to do instead — those words go back to the
+  model as the reason. The working line says "Waiting for you…" meanwhile.
 - **Text** — single line, optionally masked (`•`) for keys.
 
 `/login` is pi's own login flow (every provider pi supports, API keys and
 OAuth) rendered through these three.
 
-## 9. Code map
+## 9. Modes
+
+`shift+tab` cycles, and the footer shows any mode but the default:
+
+| Mode | Footer | Reads | Edits in the project | Commands, Python |
+|---|---|---|---|---|
+| default | — | free | ask | ask (unless granted) |
+| accept edits | `⏵⏵ accept edits` green | free | free | ask |
+| plan | `⏸ plan mode` sky | free | refused | refused |
+| yolo (`/mode yolo`, `--yolo`) | `⚠ yolo` red | free | free | free |
+
+Rules in `~/.mnemo/permissions.json` (`{"rules":[{"tool":"bash","pattern":"rm -rf*","action":"deny"}]}`)
+come first in every mode, yolo included.
+
+## 10. Code map
 
 | File | Owns |
 |---|---|
@@ -169,8 +190,10 @@ OAuth) rendered through these three.
 | `app/src/runtime/ui-context.ts` | pi's extension UI context answered by the Ink interface |
 | `app/src/runtime/dialogs.ts` | the question queue shared by Mnemo and pi extensions |
 | `app/src/runtime/demo.ts` | the faux-provider script behind `--demo` and the tests |
+| `app/src/extensions/*` | Mnemo on pi: policy, memory, kernel, sub-agents, skills, trace |
+| `app/src/memory/service.ts` | profiles, recall, learning, steering over the `memsrv` protocol |
 
-## 10. Testing
+## 11. Testing
 
 `bun test` renders components with `ink-testing-library`, types real keystrokes
 into them and asserts on the frame text. The whole app runs against a real pi `AgentSession` with pi-ai's

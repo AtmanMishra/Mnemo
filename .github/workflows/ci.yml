@@ -138,6 +138,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: "1.4.2"
+      # The memory tests run against the real sidecar; without it they skip.
+      - name: build memsrv
+        working-directory: memory-layer
+        run: cargo build --release --bin memsrv
       - name: bun install
         working-directory: app
         run: bun install --frozen-lockfile

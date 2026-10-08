@@ -140,6 +140,91 @@ function TextDialog({ dialog }: { dialog: Extract<Dialog, { kind: "text" }> }) {
   );
 }
 
+function ApprovalDialog({ dialog }: { dialog: Extract<Dialog, { kind: "approval" }> }) {
+  const r = dialog.request;
+  const options = [
+    { key: "yes", label: "Yes" },
+    ...(r.always ? [{ key: "always", label: `Yes, and don't ask again for ${r.always} in this project` }] : []),
+    { key: "no", label: "No, and tell Mnemo what to do differently" },
+  ];
+  const [index, setIndex] = useState(0);
+  const [feedback, setFeedback] = useState<ed.Draft | null>(null);
+  const choose = (key: string) => {
+    if (key === "yes") return dialog.resolve({ kind: "yes" });
+    if (key === "always") return dialog.resolve({ kind: "always" });
+    setFeedback(ed.empty);
+  };
+  useInput((input, key) => {
+    if (feedback) {
+      if (key.escape) return dialog.resolve({ kind: "no" });
+      if (key.return) return dialog.resolve({ kind: "no", feedback: feedback.text.trim() || undefined });
+      if (key.backspace || key.delete) return setFeedback(ed.backspace(feedback));
+      if (key.leftArrow) return setFeedback(ed.left(feedback));
+      if (key.rightArrow) return setFeedback(ed.right(feedback));
+      if (input && !key.ctrl && !key.meta) setFeedback(ed.insert(feedback, input));
+      return;
+    }
+    if (key.escape || input === "n") return dialog.resolve({ kind: "no" });
+    if (input === "y") return dialog.resolve({ kind: "yes" });
+    if (key.upArrow) return setIndex((i) => (i - 1 + options.length) % options.length);
+    if (key.downArrow || key.tab) return setIndex((i) => (i + 1) % options.length);
+    if (key.return) return choose(options[index]!.key);
+    const n = Number(input);
+    if (n >= 1 && n <= options.length) choose(options[n - 1]!.key);
+  });
+  const preview = r.preview.slice(0, 14);
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={color.warning} paddingX={1} marginTop={1}>
+      <Text bold color={color.warning}>
+        Allow this?
+      </Text>
+      <Text wrap="truncate-end">
+        <Text bold>{r.tool}</Text>
+        <Text color={color.muted}>({r.subject})</Text>
+      </Text>
+      {preview.length > 0 ? (
+        <Box flexDirection="column" paddingLeft={2} marginTop={0}>
+          {preview.map((l, i) => (
+            <Text
+              key={i}
+              wrap="truncate-end"
+              color={l.tone === "add" ? color.success : l.tone === "remove" ? color.error : l.tone === "muted" ? color.muted : undefined}
+              backgroundColor={l.tone === "add" ? color.addBg : l.tone === "remove" ? color.removeBg : undefined}
+            >
+              {l.text || " "}
+            </Text>
+          ))}
+          {r.preview.length > preview.length ? <Text color={color.subtle}>… +{r.preview.length - preview.length} lines</Text> : null}
+        </Box>
+      ) : null}
+      {r.reason ? <Text color={color.subtle}>{r.reason}</Text> : null}
+      <Box flexDirection="column" marginTop={1}>
+        {feedback ? (
+          <>
+            <Text color={color.muted}>What should Mnemo do instead? (enter to send, empty is fine)</Text>
+            <Text>
+              <Text color={color.accent}>{glyph.user} </Text>
+              {feedback.text.slice(0, feedback.cursor)}
+              <Text inverse>{feedback.text[feedback.cursor] ?? " "}</Text>
+              {feedback.text.slice(feedback.cursor + 1)}
+            </Text>
+          </>
+        ) : (
+          options.map((o, i) => (
+            <Text key={o.key}>
+              <Text color={color.warning}>{i === index ? `${glyph.user} ` : "  "}</Text>
+              <Text color={i === index ? color.warning : undefined} bold={i === index}>
+                {i + 1}. {o.label}
+              </Text>
+            </Text>
+          ))
+        )}
+      </Box>
+      <Text color={color.subtle}>{feedback ? "esc to just say no" : "y yes · n no · ↑↓ choose · enter confirm"}</Text>
+    </Box>
+  );
+}
+
 export function DialogView({ dialog }: { dialog: Dialog }): React.ReactElement {
   // Keyed by id so a new question never inherits the last one's filter or draft.
   switch (dialog.kind) {
@@ -149,5 +234,7 @@ export function DialogView({ dialog }: { dialog: Dialog }): React.ReactElement {
       return <ConfirmDialog key={dialog.id} dialog={dialog} />;
     case "text":
       return <TextDialog key={dialog.id} dialog={dialog} />;
+    case "approval":
+      return <ApprovalDialog key={dialog.id} dialog={dialog} />;
   }
 }

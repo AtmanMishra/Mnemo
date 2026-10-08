@@ -26,6 +26,7 @@ export interface ComposerProps {
   onToggleExpanded: () => void;
   onClear: () => void;
   onCycleThinking: () => void;
+  onCycleMode: () => void;
 }
 
 type Suggestion = { value: string; label: string; detail?: string };
@@ -51,7 +52,8 @@ const SHORTCUTS: [string, string][] = [
   ["tab", "accept suggestion"],
   ["@", "mention a file"],
   ["/", "commands"],
-  ["shift+tab", "thinking level"],
+  ["shift+tab", "mode: default → accept edits → plan"],
+  ["ctrl+t", "thinking level"],
   ["ctrl+o", "expand output"],
   ["ctrl+l", "clear screen"],
   ["ctrl+c", "clear · interrupt · twice to quit"],
@@ -187,7 +189,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
         if (menuOpen && selected) return accept(selected, true);
         return submit(draft.text);
       }
-      if (key.tab && key.shift) return props.onCycleThinking();
+      if (key.tab && key.shift) return props.onCycleMode();
       if (key.tab) {
         if (menuOpen && selected) accept(selected, false);
         return;
@@ -225,6 +227,8 @@ export function Composer(props: ComposerProps): React.ReactElement {
             return props.onToggleExpanded();
           case "l":
             return props.onClear();
+          case "t":
+            return props.onCycleThinking();
           default:
             return;
         }
