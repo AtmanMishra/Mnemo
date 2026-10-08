@@ -73,8 +73,11 @@ function sizeOf(patch: string): number {
 }
 
 export async function bestOf(o: BestOfOptions): Promise<BestOfResult> {
-  const root = git(o.cwd, ["rev-parse", "--show-toplevel"]).trim();
-  const sub = path.relative(root, path.resolve(o.cwd));
+  // One spelling for both: git reports the real path, while the cwd may be a
+  // symlink (/var → /private/var on macOS) or a short name (RUNNER~1 on Windows).
+  const real = (p: string) => fs.realpathSync.native(p);
+  const root = real(git(o.cwd, ["rev-parse", "--show-toplevel"]).trim());
+  const sub = path.relative(root, real(path.resolve(o.cwd)));
   // The working tree as it is: a commit of the uncommitted changes, or HEAD.
   const base = git(root, ["stash", "create"]).trim() || git(root, ["rev-parse", "HEAD"]).trim();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-best-of-"));

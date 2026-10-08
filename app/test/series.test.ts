@@ -3,7 +3,7 @@
  * every point on every task; an untouched repo, a float answer, a missing
  * export or a missing changelog line each lose theirs.
  */
-import { test, expect } from "bun:test";
+import { test, expect, setDefaultTimeout } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -25,6 +25,9 @@ const session = (output = "", answer = "Done.\nChanged: src/money.mjs, CHANGELOG
 const docs = (dir: string) => spawnSync("node", ["scripts/gen.mjs"], { cwd: dir }) && spawnSync("node", ["scripts/docs.mjs"], { cwd: dir });
 const changelog = (dir: string, n: number) =>
   fs.writeFileSync(path.join(dir, "CHANGELOG.md"), `# Changelog\n\n## Unreleased\n\n${Array.from({ length: n }, (_, i) => `- change ${i}`).join("\n")}\n\n## 0.1.0\n`);
+
+// Building and checking every task runs node many times: ~5 s here, more on Windows.
+setDefaultTimeout(60_000);
 
 test("a reference solution scores 5/5 on every task, cumulatively", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "series-ref-"));

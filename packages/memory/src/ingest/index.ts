@@ -91,7 +91,9 @@ export async function ingestClaudeCode(o: IngestOptions): Promise<IngestReport> 
     const key = `claude-code:${s.id}`;
     const done = ledger[key] ?? 0;
     // The last run may still be going: wait for it to finish or go quiet.
-    const quiet = now - fs.statSync(file).mtimeMs > settle;
+    // settle 0 means do not wait: a file written this very millisecond (or with
+    // an mtime a fraction ahead of the clock) is still taken.
+    const quiet = settle <= 0 || now - fs.statSync(file).mtimeMs > settle;
     const complete = quiet || s.runs.at(-1)!.finished ? s.runs.length : s.runs.length - 1;
     const fresh = s.runs.slice(done, complete);
     if (!fresh.length) {

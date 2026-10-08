@@ -41,8 +41,10 @@ export function contamination(root: string, sessions: SessionResult[]): string |
   for (const s of sessions)
     for (const t of s.tools) {
       const args = JSON.stringify(t.args);
-      if (args.includes(REPO) || /eval\/scenarios/.test(t.output)) return `${t.name} ${args.slice(0, 200)}`;
-      const other = /\/mnemo-eval-[\w-]+/.exec(args)?.[0];
+      // Compare with forward slashes: JSON doubles a Windows path's backslashes.
+      const flat = args.replace(/\\\\/g, "/");
+      if (flat.includes(REPO.replace(/\\/g, "/")) || /eval[\\/]scenarios/.test(t.output)) return `${t.name} ${args.slice(0, 200)}`;
+      const other = /\/mnemo-eval-[\w-]+/.exec(flat)?.[0];
       if (other && !root.includes(other)) return `${t.name} ${args.slice(0, 200)}`;
     }
   return undefined;

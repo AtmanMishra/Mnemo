@@ -3,7 +3,7 @@
  * sidecar and a real pi session with a scripted model. Each test names the
  * finding it pins (research/self-evolution-audit.md).
  */
-import { test, expect, afterEach } from "bun:test";
+import { test, expect, afterEach, setDefaultTimeout } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -36,6 +36,9 @@ function capture(into: string[], answer: string): FauxResponseStep {
   };
 }
 const mt = MEMSRV ? test : test.skip;
+// Several of these run two or three sessions against a real sidecar: about
+// 1.5 s here, over the 5 s default on the Windows runner.
+setDefaultTimeout(30_000);
 
 // ── pure parts ───────────────────────────────────────────────────────────────
 
@@ -279,7 +282,8 @@ mt("L3: when the user asks to remember a procedure, Mnemo proposes the skill and
   const d = await nextDialog(e.controller, 5000);
   if (d.kind !== "approval") throw new Error("expected approval");
   expect(d.request.tool).toBe("Save skill");
-  expect(d.request.subject).toBe(path.join(e.cwd, ".agents", "skills", "cut-release", "SKILL.md"));
+  // The project's real path: the temp dir may be a symlink (macOS) or a short name (Windows).
+  expect(d.request.subject).toBe(path.join(fs.realpathSync.native(e.cwd), ".agents", "skills", "cut-release", "SKILL.md"));
   d.resolve({ kind: "yes" });
   await e.idle();
   expect(fs.readFileSync(path.join(e.cwd, ".agents", "skills", "cut-release", "SKILL.md"), "utf8")).toContain("git push --tags");
