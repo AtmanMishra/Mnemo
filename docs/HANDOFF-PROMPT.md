@@ -1,5 +1,9 @@
 # The prompt for the next session
 
+> **Superseded (2026-10-08).** This prompt asked for markdown rendering in the
+> old terminal kit; the kit was replaced by Ink and markdown ships. Start from
+> `docs/ROADMAP.md` instead.
+
 Paste the block below as the first message of a new session. It is written to be
 self-contained: the new session knows nothing of the conversation that produced it.
 

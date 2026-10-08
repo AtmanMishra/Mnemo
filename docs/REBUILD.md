@@ -1,5 +1,9 @@
 # The rebuild: one Bun application, memory in Rust, execution in the ipy kernel
 
+> **Updated 2026-10-08:** two decisions changed this plan. pi runs **in-process**
+> through its SDK (no RPC client, no `agent/` child), and the interface is **Ink +
+> React**, not a hand-rolled terminal kit. Current task list: `docs/ROADMAP.md`.
+
 Branch: `rebuild/bun-app`. This document is the target and the order of work.
 The old surfaces (`agent/` on Node, `tui-go/`, `harness-engine/`) stay on `main`
 and keep working until each piece has been replaced and accepted — nothing is

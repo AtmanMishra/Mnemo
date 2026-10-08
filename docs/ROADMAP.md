@@ -27,44 +27,35 @@ steers it on failure, stores different kinds of facts, and writes and patches it
 own skills. The interface is the table stakes; the memory is the reason to exist.
 Both have to ship.
 
-## Where things actually stand (measured 2026-10-08)
+## Where things actually stand (updated 2026-10-08, after the Ink rebuild)
 
 | Area | State |
 |---|---|
-| `app/` interface | 4.7k lines, 25 test files. 201 of 202 tests pass; the one failure is `test/app.test.ts` "facts come from the injected sources", which hardcodes `Bun 1.3.14` while the sandbox has 1.4.2 — `collectFacts` reads the real runtime instead of an injected one. `tsc --noEmit` is clean. |
-| What a user can do in `app/` | first-run screen, `/login`, `/model`, `/memory`, a real streamed turn through pi, the approval question, tool-call lines, a line editor with history, frame-diff repaint. |
-| What the Bun app does *not* have | markdown, code/diff rendering, tool output capture, tokens/cost, sessions, slash autocomplete, `@file`, search, overlays other than the memory panel, mouse. |
-| The agent | **not ported.** `app/` spawns pi from `agent/node_modules` and relies on `agent/` (Node) for every tool, the approval gate, memory recall, hooks, schedules, MCP, tracing and subagents (≈15k lines). |
+| `app/` | Ink + React interface on pi 1.1.0's in-process SDK (≈2.9k lines in `src/ui`, `src/runtime`, `bin`). 80 tests pass, 3 skipped (they need a built `memsrv`), `tsc` clean. A real turn — streaming, thinking, tools, diffs, queue, interrupt, `/login`, `/model`, `/new`, `/resume` — is tested against pi's faux provider with no key. |
+| What a user can do | everything in Stage 1 below marked ▣; run it with `cd app && bun bin/mnemo.ts`, or `--demo` for a scripted session with no key. |
+| Binary | `bun run build` → `dist/mnemo`, one ≈96 MB file that runs with no Bun or Node installed. |
+| The agent's Mnemo behaviour | **not ported yet.** pi's own tools run; Mnemo's approval gate, memory recall, kernel, tracing and subagents still live only in `agent/` (Node). That is Stage 2. `app/src/policy`, `app/src/memory` and `app/src/kernel` (with their tests) are the starting material. |
 | Memory layer | solid and self-contained: journal, areas, routed search, steering, consolidation, `recall_brief`/`remember`, eval gate (73/77/0.743). The *self-improvement runtime* (`research/memory-runtime-design.md`, jobs J0–J11) is designed, with only J0 consolidation built. |
 | Kernel | works; no per-call timeout, no resource bounds, not a sandbox. |
-| Install | `scripts/install.sh|ps1` and `release.yml` target the Go binary + Node agent. Nothing installs or packages the Bun app. |
-| CI | no job runs `app/`. |
+| Install | `scripts/install.sh|ps1` and `release.yml` still target the Go binary + Node agent (Stage 5). |
+| CI | an `app` job (3 OS: install, `tsc`, tests, compiled binary renders a frame) is added; it has not run yet. |
 
-## Decisions needed before the big stages
+## Decisions (answered 2026-10-08)
 
-These change the work, so they come first. Recommendation in bold.
+| # | Question | Answer |
+|---|---|---|
+| D1 | Agent loop | **pi is the loop.** Mnemo is built on pi's packages, in-process: `@earendil-works/pi-coding-agent` (SDK: `createAgentSessionRuntime`, sessions, tools, extensions, skills, prompt templates, compaction, `ModelRuntime` auth/models), which brings `pi-agent-core`, `pi-ai` and `pi-telemetry`. Pinned at **1.1.0** (was 0.84.4 over RPC). Mnemo's behaviour is added as pi inline extensions. |
+| D2 | Where tools run | **In the app process**, through the SDK. pi's built-in tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`) replace Mnemo's own file/shell tools; the approval gate and permissions become a `tool_call` extension over them. No child process, no RPC. |
+| D3 | Distribution | **A compiled binary** (`bun build --compile`, ≈90 MB, verified to start with no Node or Bun on PATH), shipped through a one-line install script and an `npx`/`bunx` package that fetches the right binary; `memsrv` alongside. |
+| D4 | Kernel | **No sandbox in v0.1.** A persistent interpreter behind the approval gate, said plainly in the README. |
+| D5 | Monorepo | **After the port.** |
+| D6 | v0.1 scope | **Simple first.** Hooks, schedules, MCP and the harness engine move to v0.2. |
+| D7 | Interface toolkit | **Ink 8 + React 19** (what Claude Code and Gemini CLI use), replacing the hand-rolled terminal kit. Spec: `DESIGN.md`. |
 
-- **D1 — Does Bun own the agent loop, or keep wrapping pi?**
-  *Keep pi as the loop for v0.1* (it already streams, retries, compacts and
-  handles providers, and `app/` already drives it over RPC). Port Mnemo's tools
-  and extensions into Bun and load them into pi from `app/`, so `agent/` can go
-  away without us writing a provider layer. Revisit owning the loop only if pi's
-  extension API blocks something the memory design needs.
-- **D2 — Are tools in-process or in pi's child?** Today they live in the pi child
-  (Node). Porting means the child becomes a Bun process running the same pi
-  entry with our extensions, **so the tool code is shared by the interactive app,
-  one-shot mode and subagents**. The alternative (tools in the app, pi as a pure
-  model client) is a rewrite of the loop and conflicts with D1.
-- **D3 — How is it distributed?** **`bun build --compile` into one binary per
-  platform plus a separately downloaded `memsrv`**; the Python kernel needs a
-  system `python3`, and `doctor` says so. The alternative is "install Bun, then
-  `bun install -g`", which is simpler to build and worse for non-JS users.
-- **D4 — Is the kernel a sandbox?** **Not for v0.1.** Ship it as a persistent
-  interpreter behind the approval gate, say so in the README, and add real
-  isolation as its own project.
-- **D5 — Monorepo restructure now or later?** `PLAN-monorepo.md` does it first;
-  `HANDOFF.md` says last. **Later — after the interface and agent are ported.**
-  Moving 4.7k lines under moving features doubles every merge.
+**pi-durable** (1.1.0) is a different harness (crash-resumable conversations on
+its own storage) and is marked experimental; `pi-coding-agent` does not use it.
+v0.1 does not adopt it. It is the candidate for "resume a turn after a crash"
+later, evaluated then against pi's own session files.
 
 ## Stages
 
@@ -73,84 +64,72 @@ Each task is one commit that leaves the branch green. `▢` open, `▣` done.
 
 ### Stage 0 — Housekeeping (a day)
 
-- ▢ 0.1 Fix `app.test.ts`: `collectFacts` takes the runtime string from its
-  injected sources, as its own doc comment claims. *Verify:* `bun test` 202/202.
-- ▢ 0.2 Delete the stale "pi is not a dependency yet" comment in
-  `src/session/pi-client.ts` (it is now in `app/package.json`) and make
-  `PI_ENTRY` resolve from the app's own `node_modules`, not `../../../agent/`.
-  *Verify:* the app starts with `agent/node_modules` absent.
-- ▢ 0.3 `app/` job in `.github/workflows/ci.yml`: bun install, `tsc`, `bun test`,
-  on ubuntu, macos, windows. *Verify:* a PR runs it red on purpose, then green.
-- ▢ 0.4 Reconcile `plan.md` (areas 1–12 describe the Rust/Go/Node products) with
-  this file: mark areas superseded, add an AREA 13 that points here.
-- ▢ 0.5 Record the D1–D5 answers at the top of this file.
+- ▣ 0.1 `app/` job in `.github/workflows/ci.yml`: bun install, `tsc`, `bun test`,
+  compiled-binary frame, on ubuntu, macos, windows. *Still to verify:* its first
+  run on a PR (Windows has never run this code).
+- ▣ 0.2 Reconcile `plan.md` with this file (AREA 13 points here).
+- ▣ 0.3 Record the decisions at the top of this file.
+- ▣ 0.4 The `Bun 1.3.14` test and the RPC pi client are gone with the old
+  terminal kit (Stage 1.0).
 
-### Stage 1 — The interface a person would tolerate (replaces `tui-go` for chat)
+### Stage 1 — The interface (Ink, on pi's session)
 
-Order is from `HANDOFF.md`; libraries from `PLAN-monorepo.md`.
+Spec: `DESIGN.md`. Everything runs against a real pi `AgentSession`; tests use
+pi-ai's faux provider, so none needs a key.
 
-- ▢ 1.1 **Markdown** (`marked` tokenizes, we render; code never reflowed; render
-  only when the block is complete). Four existing tests change by design.
-- ▢ 1.2 **Code blocks and diffs** (`cli-highlight`, `diff`).
-- ▢ 1.3 **Tool output**: capture, truncate to N lines, `… 7 more` and the key that
-  expands it; foldable thinking and tool blocks (`^e`/`^r`/`^a` as in Go).
-- ▢ 1.4 **Status bar**: tokens, cost, context % from pi's session stats; mode keys
-  on the left.
-- ▢ 1.5 **Prompt queue and steer**: `enter` queues mid-turn, `alt+enter`
-  interrupts, `esc` aborts, `^c` clears/interrupts/quits.
-- ▢ 1.6 **Slash menu and `@file` mentions**; commands merged from built-ins,
-  skills, plugin skills and pi's `get_commands`; unknown name routed to pi.
-- ▢ 1.7 **Sessions**: list, resume, rename; read pi's session store (decide
-  `bun:sqlite` index vs reading JSONL — read first, index when search needs it).
-- ▢ 1.8 **Overlays** over a dimmed transcript, one contract, dismissed by `esc`:
-  palette `^k`, sessions `^s`, memory `^m` (exists), logs `^l`, schedules `^o`,
-  explorer `^t`, help `^h`. Help renders from the keymap.
-- ▢ 1.9 **Transcript search** `^f`, `^L` clear, `^R` history search.
-- ▢ 1.10 **Onboarding scenes**: provider → key (masked) → model, versioned and
-  gated (no TTY, resuming, env set → ask nothing). `/login`, `/model`, `/logout`.
-- ▢ 1.11 Mouse: decide wheel-scroll only vs click targets (Go never shipped it).
-- ▢ 1.12 **Parity checklist** against `tui-go/DESIGN.md` — every row either
-  ported, consciously dropped (with a line saying why), or filed as an issue.
+- ▣ 1.0 Replace the hand-rolled terminal kit and the RPC client with an Ink app
+  on `createAgentSessionRuntime` (in-process, pi 1.1.0).
+- ▣ 1.1 Transcript: user, assistant (markdown + highlighted code), thinking,
+  tool calls with live status, edit diffs, bash output, notices; finished blocks
+  go to scrollback (`<Static>`).
+- ▣ 1.2 Working line: spinner, shimmering memory verbs, elapsed time, tokens,
+  `esc to interrupt`; queue shown under it.
+- ▣ 1.3 Input: multi-line editor, history, word/line deletion, paste; `enter`
+  sends or queues, `esc`/`ctrl+c` interrupt.
+- ▣ 1.4 Slash menu (built-ins + pi's extension commands, prompt templates,
+  skills) and `@file` suggestions.
+- ▣ 1.5 Dialogs (select, confirm, text) shared by Mnemo and pi extensions via
+  the extension UI context; `/login` is pi's login flow (API keys + OAuth)
+  through them; `/model`, `/logout`, `/thinking`.
+- ▣ 1.6 Footer: model, thinking level, context %, cost, git branch.
+- ▣ 1.7 Sessions: `/new`, `/resume` (pi's session list), `/compact`.
+- ▢ 1.8 `ctrl+o` expand/collapse for thinking and tool output already printed
+  (today it applies to blocks printed after the toggle).
+- ▢ 1.9 Memory blocks (`◈`) once the memory extension exists (2.3).
+- ▣ 1.9a First run with no credentials says `/login` (pi reports a placeholder
+  model, so "has a model" means "its provider has auth").
+- ▢ 1.10 A visual pass in three real terminals (iTerm2/Ghostty, Windows
+  Terminal, a 16-colour fallback) with screenshots in `docs/`.
 
-*Verify (stage):* `bun bin/mnemo.ts --dump` golden frames for first-run,
-configured, mid-turn, each overlay; a pty test drives a scripted pi stream end to
-end (the harness exists: `test/pty.test.ts`).
+### Stage 2 — Mnemo's behaviour as pi extensions
 
-### Stage 2 — Port the agent into Bun (the large one)
+`agent/` (Node) is the specification; its tests travel with each module. pi's
+built-in tools replace Mnemo's own file and shell tools (D2).
 
-Source of truth for behavior is `agent/`; its tests travel with each module.
-Order puts safety before capability.
-
-- ▢ 2.1 **Pi entry in Bun**: `bin/mnemo.ts --mode rpc` running pi's `main()` with
-  inline extensions; `--no-builtin-tools`. Node guard replaced by a Bun floor.
-- ▢ 2.2 **Policy**: permissions rules (first-match), plan mode as rules, approval
-  gate, grants store, bash-token matching, path containment. *(audit items 12.5,
-  12.6 carry over — port the tests, not just the code.)*
-- ▢ 2.3 **Tools**: `bash_exec`, `read_file`, `write_file`, `apply_edit`,
-  `glob_list`, `read_image`, `web_fetch` (SSRF filter), `web_search`;
-  `tools.json` exposure policy.
-- ▢ 2.4 **Memory extension**: sidecar client (FIFO, lazy spawn), `session_start`
-  episode, `before_agent_start` recall + directive, `tool_execution_end` log,
+- ▢ 2.1 **Paths and settings**: `$MNEMO_HOME/agent` as pi's agent dir (auth,
+  settings, sessions, skills, prompts); import keys from the legacy
+  `~/.mnemo/auth.json` once.
+- ▢ 2.2 **Policy extension**: permissions rules (first-match), plan mode as rules,
+  approval through `ctx.ui.confirm`, grants store, bash-token matching, path
+  containment *(audit 12.5, 12.6 — port the tests, not just the code)*.
+- ▢ 2.3 **Memory extension**: memsrv client, `session_start` episode,
+  `before_agent_start` recall + directive, `tool_execution_end` log,
   `turn_end`, `session_shutdown` consolidate; the three memory tools.
-- ▢ 2.5 **Tracing**: JSONL spans, nesting, redaction before write, `mnemo traces`.
-- ▢ 2.6 **Kernel tool** (`ipy_run`) + in-kernel `tools.*` through the same gate;
-  move `ipy_bridge.py` to `python/ipy/`.
-- ▢ 2.7 **Subagents**: `spawn_subagent`, depth cap, shared journal, trace parenting,
-  model override that fails loudly; interface shows the delegation tree.
-- ▢ 2.8 **Skills**: discovery, `load_skill`, `create_skill`, `patch_skill`
-  (evidence-gated, with history), `retire_skill`.
-- ▢ 2.9 **Hooks** and **schedules** (cron parser, daemon lease, triggers) — with
-  the Windows `sh -c` failures fixed rather than ported.
-- ▢ 2.10 **MCP**: server tree teardown, `mcp__server__tool` registration.
-- ▢ 2.11 **Harness engine** moved into Bun: gate, child-process execution
-  boundary, registry, watcher. Same honesty rule — it filters, it does not sandbox.
-- ▢ 2.12 Local subcommands: `auth`, `init`, `pr`, `consolidate`, `traces`,
-  `--list-models`, `--list-sessions`, one-shot `mnemo "<prompt>"`.
+- ▢ 2.4 **Kernel tool** (`ipy_run`) + in-kernel `tools.*` through the same gate;
+  `ipy_bridge.py` embedded in the binary and written out on first use.
+- ▢ 2.5 **Tracing** on `pi-telemetry`: a `TelemetryContext` adapter writing the
+  redacted JSONL spans `mnemo traces` reads.
+- ▢ 2.6 **Subagents**: `spawn_subagent` as an in-process child session (no
+  second process), depth cap, shared journal, model override that fails loudly.
+- ▢ 2.7 **Skills**: pi discovers and loads them; port `create_skill`,
+  `patch_skill` (evidence-gated, with history), `retire_skill`.
+- ▢ 2.8 Subcommands: `doctor`, `consolidate`, `traces` (`-p` one-shot, `-c`,
+  `--version`, `--demo`, `--dump` exist).
+- ▢ 2.9 *(v0.2)* hooks, schedules, MCP (`pi-mcp`), harness engine, `init`, `pr`.
 
-*Verify (stage):* the agent's existing 389 tests are ported or consciously
-dropped; a recorded-event run through the full gate; the constraint-compliance
-eval (`scripts/eval-constraint-compliance.mjs`) passes on the new stack with a
-key, and the memory eval pins do not move.
+*Verify (stage):* each extension tested against a faux-provider session; the
+constraint-compliance eval (`scripts/eval-constraint-compliance.mjs`) passes on
+the new stack with a key; the memory eval pins do not move.
 
 ### Stage 3 — Make the memory self-evolve (the point of the project)
 
@@ -204,8 +183,14 @@ J0 exists. Build in its own phases, report-only first.
   smoke test spawns the compiled binary and renders a frame.
 - ▢ 5.2 `memsrv` built per target in `release.yml` and attached; the app finds it
   by the platform name (`memsrv.exe` on Windows).
-- ▢ 5.3 Rewrite `scripts/install.sh|ps1`: Bun floor, memsrv, python check, finish
-  by rendering a frame; `uninstall` removes exactly what was written.
+- ▢ 5.3 Install paths (D3): `curl -fsSL …/install.sh | sh` and `irm …/install.ps1 | iex`
+  download the binary + `memsrv` for the platform into `~/.mnemo/bin` and put it
+  on PATH; `npx @mnemo/cli` / `bunx` is a thin package that fetches the same
+  binary. Each finishes by running `mnemo doctor`. `uninstall` removes exactly
+  what was written. The from-source script stays for contributors.
+- ▣ 5.3a Build: `app/scripts/build.ts` → `dist/mnemo` (≈96 MB; verified to run
+  the demo with an empty environment). Stubs Ink's optional devtools import,
+  which otherwise breaks `--compile`.
 - ▢ 5.4 `mnemo doctor` is the support command: runtime, provider, model, sidecar,
   kernel, home, versions.
 - ▢ 5.5 Versioning and `--version`; a release checklist; update path.
@@ -233,20 +218,17 @@ J0 exists. Build in its own phases, report-only first.
 
 ## The definition of "available to users" (v0.1 alpha)
 
-All of: Stage 0, Stage 1 (1.1–1.10), Stage 2 (2.1–2.8, 2.12), Stage 3 (3.1–3.5
-and 3.7), Stage 4 (4.1, 4.5), Stage 5 (5.1–5.4, 5.6), Stage 6 (6.1, 6.4).
+All of: Stage 0, Stage 1, Stage 2 (2.1–2.8), Stage 3 (3.1–3.5 and 3.7), Stage 4
+(4.1, 4.5), Stage 5 (5.1–5.4, 5.6), Stage 6 (6.1, 6.4).
 
-Deferred past v0.1 without shame: hooks/schedules (2.9), MCP (2.10), harness
-engine port (2.11), skill-patch loop (3.6), cadence daemon (3.11), mouse (1.11),
-the monorepo move (7.3). Those exist in the Node agent today, so v0.1 can state
-plainly that they return in v0.2 — or v0.1 can wait for them. That is a product
-call, not a technical one.
+v0.2: hooks, schedules, MCP, the harness engine, `init`/`pr` (2.9), the skill
+patch loop (3.6), the memory daemon (3.11), the monorepo move (7.3).
 
 ## Risks
 
 - **Port-and-regress.** 15k lines of Node carry audit fixes and Windows lessons.
   Porting a module without porting its tests loses them silently.
-- **Two homes for pi.** Until 0.2, `app/` runs pi out of `agent/node_modules`.
+- **pi moves fast.** 0.84 → 1.1 in weeks, and `pi-durable` is experimental. Pin exact versions, upgrade on purpose, and keep extension code on the documented SDK surface.
 - **Feature gravity.** The interface is easy to polish forever. The memory loop
   (Stage 3) is the differentiator and has the least built; schedule it in
   parallel with Stage 2, not after.

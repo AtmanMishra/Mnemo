@@ -1,5 +1,8 @@
 # The monorepo plan
 
+> **Updated 2026-10-08:** the monorepo move now happens *after* the port (D5),
+> and `@mnemo/tui` is built on Ink, not "on nothing" (D7). See `docs/ROADMAP.md`.
+
 Written after reading oh-my-pi's package table, which is the thing being asked
 for here: not its features, but its *shape*. In oh-my-pi every capability is a
 published package with a stable name — `pi-ai` (provider client), `pi-agent-core`
