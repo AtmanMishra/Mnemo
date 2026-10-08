@@ -43,6 +43,27 @@ saving a skill — are answered yes and recorded.
 uses memory only when memory is in its prompt passes `pitfall-learned` with
 memory and fails it without.
 
+| `checks-its-work` | a change is checked before it is called done | tests run after the last edit; hidden tests on old and new behaviour pass | — |
+
+## The learning curve (`series.ts`)
+
+```bash
+bun eval/series.ts                                           # baseline vs memory, six tasks
+bun eval/series.ts --teacher opencode-go/deepseek-v4-pro     # + teacher→student
+bun eval/series.ts --repeat 3 --modes memory,teacher --teacher <provider/id>
+```
+
+One small money library ("till") with rules nobody writes down — integer
+cents, every function exported from the index, a changelog line per change —
+and a build step (`npm run gen`) a fresh checkout lacks. Only the first task
+states the rules. Six tasks in a row, each scored by hidden tests written at
+check time and deleted after (5 points: the feature, every earlier feature,
+integer cents, a changelog line, no build error). `teacher` runs the first
+three tasks on the teacher model and the last three on the student, with one
+memory: what the stronger model learned is what the cheap one uses.
+`test/series.test.ts` proves the scoring: a reference solution scores 5/5 on
+every task, and each rule is lost on its own.
+
 ## Adding a scenario
 
 Add an entry to `SCENARIOS` in `scenarios.ts`: projects (a setup function per

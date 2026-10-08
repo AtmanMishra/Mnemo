@@ -175,6 +175,51 @@ J0 exists. Build in its own phases, report-only first.
   model. Grow it to a task set with repeated sessions where the *second* run is
   the measurement, and publish the number with its method.
 
+### Stage 3b — Memory for every agent; frontier accuracy on a cheap model
+
+*Added 2026-10-08.* The target: Mnemo on a low-tier model (DeepSeek v4.1 Flash,
+$0.15/M in) reaching frontier-agent accuracy **on familiar work** — the same
+repositories, the same person, the same kinds of task — at a fraction of the
+cost, with the gap closing over time. Memory cannot make a cheap model out-reason
+a frontier one on a task it has never seen; it can make it stop rediscovering
+what is already known. And because the memory attaches to *other* agents too, a
+frontier model's sessions teach the memory the cheap model uses.
+
+- ▣ 3b.1 **`@mnemo/memory` package** (`packages/memory`): the loop as
+  `MemorySession` (begin/recall/context, toolStart/toolEnd, text, end, close),
+  model calls and approval injected; Mnemo drives it from a pi extension.
+- ▣ 3b.2 **Provenance**: episodes record agent and model; profile logs record
+  who taught each fact; fixes record where they came from.
+- ▣ 3b.3 **Claude Code, after the fact**: `mnemo memory ingest` replays saved
+  sessions (`~/.claude/projects`) through the loop, once each (ledger), with
+  redaction before anything reaches the reflection model.
+- ▣ 3b.4 **Claude Code, live**: `mnemo memory hook` — SessionStart (profiles,
+  last session; survives compaction), UserPromptSubmit (recall), Stop (async
+  ingest of the run that ended). `mnemo memory setup claude-code` prints it.
+- ▣ 3b.5 **MCP** (`mnemo memory mcp`): memory_recall / memory_search /
+  memory_remember for Codex, Cursor, opencode. `mnemo memory setup codex`.
+- ▣ 3b.6 **Recall into action**: the pitfall guard (a command that failed before
+  is stopped once with its known fix) and verify-before-done (a run that changed
+  code and checked nothing goes back once to run the project's check).
+- ▣ 3b.7 **Benchmarks, local**: `app/eval/run.ts` (seven two-session scenarios,
+  memory vs none) and `app/eval/series.ts` (six tasks in one repo with unwritten
+  rules: the learning curve; `--teacher` for teacher→student).
+- ▢ 3b.8 **Trust-weighted recall** (audit F8): rank by provenance (a fix a
+  frontier model found and a test confirmed outranks a cheap model's guess).
+- ▢ 3b.9 **Local embedder** (audit F15): recall precision; the lexical hash
+  ranks an episode above the matching pitfall today.
+- ▢ 3b.10 **Escalation**: a step the cheap model fails to verify twice goes to a
+  stronger model; memory records the resolution. Metric: frontier calls per
+  task, falling.
+- ▢ 3b.11 **Test-time compute**: best-of-n with the project's verify command as
+  the judge — affordable at a tenth of the price.
+- ▢ 3b.12 **Public benchmarks**: a SWE-bench Verified / Terminal-Bench subset as
+  the absolute anchor (Mnemo + Flash vs Claude Code + Sonnet/Opus — expect to
+  lose there), a per-repository chronological split as the learning curve, and
+  accuracy per dollar as the headline. Needs a machine with Docker and the
+  datasets; the local series is the rehearsal.
+- ▢ 3b.13 **Codex and opencode transcripts** for `ingest`, like Claude Code's.
+
 ### Stage 4 — Execution
 
 - ▢ 4.1 Per-call timeout on the in-kernel channel (audit #6) and a cell timeout
