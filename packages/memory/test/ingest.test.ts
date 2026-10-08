@@ -8,7 +8,7 @@ import { test, expect } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { factValue, findMemsrv, ingestClaudeCode, MemoryService, parseClaudeCode, type Reflector } from "../src/index.ts";
+import { factValue, findMemsrv, ingestClaudeCode, MemoryService, parseClaudeCode, projectIdentity, type Reflector } from "../src/index.ts";
 
 const MEMSRV = findMemsrv("/nonexistent");
 const t = MEMSRV ? test : test.skip;
@@ -78,7 +78,7 @@ t("ingest learns a Claude Code session once, with provenance, and only what is n
   // The reflection model never saw the pasted key.
   expect(seen[0]).toContain("then: Bash(pnpm install)");
   expect(seen[0]).not.toContain(KEY);
-  const profile = await memory.profile("project", `dir:${cwd}`);
+  const profile = await memory.profile("project", projectIdentity(cwd).id);
   expect(profile).toContainEqual({ key: "test command", value: "pnpm vitest" });
   const pitfall = (await memory.search("vitest not found", 5)).find((h) => h.area === "Salience")!;
   expect(factValue(pitfall.state, "fix")).toBe("pnpm install before pnpm vitest");

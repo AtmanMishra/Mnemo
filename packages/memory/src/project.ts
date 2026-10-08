@@ -6,12 +6,20 @@
  * normalized `origin` URL (so every clone of the repo shares one memory),
  * falling back to the repository root when there is no remote, and to the
  * directory itself outside git.
+ *
+ * A path alone is also too weak the other way: `/app` or `/workspace` in one
+ * container after another are different projects at the same path (on
+ * Terminal-Bench, every task's facts were recalled into the next). So an
+ * identity built from a path carries the folder's creation time when the
+ * filesystem reports one: the same folder keeps it, a new one at that path
+ * does not.
  */
 import { spawnSync } from "node:child_process";
+import * as fs from "node:fs";
 import * as path from "node:path";
 
 export interface ProjectIdentity {
-  /** Stable key: `git:github.com/owner/repo`, `repo:/abs/root` or `dir:/abs/cwd`. */
+  /** Stable key: `git:github.com/owner/repo`, `repo:/abs/root@<born>` or `dir:/abs/cwd@<born>`. */
   id: string;
   /** Where the project's files are (the git root, or the directory). */
   root: string;
@@ -37,13 +45,26 @@ export function normalizeRemote(url: string): string {
   return u.replace(/\.git$/i, "").replace(/\/+$/, "").toLowerCase();
 }
 
+/** `@<ms>` when the folder's creation time is known, else nothing. */
+function born(dir: string): string {
+  try {
+    const t = Math.floor(fs.statSync(dir).birthtimeMs);
+    return t > 0 ? `@${t}` : "";
+  } catch {
+    return "";
+  }
+}
+
 export function projectIdentity(cwd: string): ProjectIdentity {
   const root = git(cwd, ["rev-parse", "--show-toplevel"]);
-  if (!root) return { id: `dir:${path.resolve(cwd)}`, root: path.resolve(cwd), name: path.basename(cwd) };
+  if (!root) {
+    const dir = path.resolve(cwd);
+    return { id: `dir:${dir}${born(dir)}`, root: dir, name: path.basename(cwd) };
+  }
   const remote = git(root, ["config", "--get", "remote.origin.url"]);
   if (remote) {
     const id = normalizeRemote(remote);
     return { id: `git:${id}`, root, name: id.split("/").pop() ?? path.basename(root) };
   }
-  return { id: `repo:${root}`, root, name: path.basename(root) };
+  return { id: `repo:${root}${born(root)}`, root, name: path.basename(root) };
 }
