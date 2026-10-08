@@ -1,220 +1,135 @@
+<p align="center"><img src="site/mne.svg" width="120" alt="Mne, Mnemo's pixel elephant"></p>
+
 # Mnemo
 
-A terminal-native agentic coding and harness assistant whose memory works like a brain. Small and local models can reach frontier-level performance through accumulated memory, experience, and hierarchical collaboration rather than raw model scale. Proven live: 3/3 task success WITH memory versus 0/3 WITHOUT, on a free model (ox-alpha-free via OpenCode).
+[![ci](https://github.com/AtmanMishra/mnemo/actions/workflows/ci.yml/badge.svg)](https://github.com/AtmanMishra/mnemo/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-## Quickstart
+**A terminal coding agent with a memory that learns your projects.** Several
+agents in one window, a pixel interface, and your choice of model. Open source,
+pre-alpha.
 
-> **Status: working prototype (Bun rebuild).** `app/` is the new Mnemo: an Ink
-> interface on the [pi](https://github.com/earendil-works/pi) agent SDK, the Rust
-> memory sidecar, and a Python kernel. It remembers across sessions — after each
-> run it writes what it learned about the project and about you, injects that into
-> every later turn, steers its memory when something fails, and can write skills
-> for itself. What is left: [`docs/ROADMAP.md`](docs/ROADMAP.md). Interface spec:
-> [`DESIGN.md`](DESIGN.md).
->
-> ```bash
-> # from a release (once v0.1 is tagged) — nothing else needed
-> curl -fsSL https://github.com/AtmanMishra/self-evolving-agent/releases/latest/download/install.sh | sh
-> irm https://github.com/AtmanMishra/self-evolving-agent/releases/latest/download/install.ps1 | iex   # Windows
->
-> # from this checkout (needs bun and cargo)
-> app/scripts/install.sh
->
-> mnemo doctor                # what is installed and reachable
-> mnemo                       # the launch, a first-run introduction, then the workspace
-> mnemo --demo                # a scripted session in a scratch project — no key needed
-> mnemo memory setup claude-code   # attach the same memory to Claude Code (or: codex)
-> ```
->
-> Or without installing: `cd app && bun install && bun bin/mnemo.ts`.
-> `app/scripts/test-install.sh` installs a locally built release in a clean
-> container and runs a turn — the first-run check.
->
-> ![Mnemo asking before an edit](docs/screenshots/approval.png)
-> ![What Mnemo learned](docs/screenshots/memory.png)
->
-> The instructions below build the previous stack (Go interface + Node agent).
+![The hub: every agent at a glance](site/img/hub.png)
 
-**Pre-alpha.** Grab the `mnemo` binary for your platform from
-[Releases](https://github.com/AtmanMishra/self-evolving-agent/releases) —
-linux/darwin/windows, amd64/arm64 — then build the two pieces it drives. Node
->= 22.18 is required (the first version that runs `.ts` files with no flag —
-"no build step" is only true from there); Rust is
-needed only for the memory sidecar, and Go only if you would rather build the
-interface than download it.
+After each run Mnemo writes down what it learned about the project and about
+you, recalls it in the next session, keeps the fix when something failed, and
+writes skills for itself. The bet: a small, cheap model with accumulated memory
+goes further than the same model without it.
+
+## Install
+
+macOS and Linux:
 
 ```bash
-git clone https://github.com/AtmanMishra/self-evolving-agent
-cd self-evolving-agent
-
-./scripts/install.sh              # macOS / Linux
-.\scripts\install.ps1             # Windows (PowerShell)
-
-Both are interactive onboarding, not a script that clones and hopes. They check
-your toolchain and show you a table of what they found, let you choose which
-components to install (the interface, the agent runtime, the memory sidecar, the
-harness engine), tell you exactly what they are about to run and ask, then
-install — and then **verify by rendering a frame**: `mnemo --version` and an
-offline `--dump`, reporting a failure if either does not exit 0.
-
-They are built on [gum](https://github.com/charmbracelet/gum) and bootstrap it
-themselves (`go install`, then a release download, then plain prompts), so gum is
-a nicer way to ask and never a requirement. `--yes` / `-Yes` takes the defaults
-with no questions, `--dry-run` / `-DryRun` prints every command without running
-one — which is also what happens automatically when there is no terminal, so
-nothing ever sits waiting for a keypress it will not get. Running either twice is
-safe. They create `~/.mnemo` if it is missing and never touch what is inside it.
-
-To install the pieces by hand instead:
-cd memory-layer && cargo build --bin memsrv   # the Memory pane talks to this
-cd ../agent && npm install                     # the agent the TUI drives
-cd ../tui-go && go build -o mnemo ./cmd/mnemo  # or drop the release binary here
+curl -fsSL https://github.com/AtmanMishra/mnemo/releases/latest/download/install.sh | sh
 ```
 
-The installers check your toolchain before touching anything, say what they are
-doing, and take `--dry-run` (`-DryRun` on Windows) to say it without doing it.
+Windows (PowerShell):
 
-`mnemo --version` says which build you are running. Bugs and rough edges belong
-in [the issue tracker](https://github.com/AtmanMishra/self-evolving-agent/issues)
-— the known gaps are filed there rather than described as future work.
+```powershell
+irm https://github.com/AtmanMishra/mnemo/releases/latest/download/install.ps1 | iex
+```
 
-On first launch, `mnemo` runs a colourful pixel-themed onboarding wizard inside the TUI: pick a provider, paste an API key, and pick a default model. Credentials are saved to `~/.mnemo/auth.json` (chmod 600), never in the repo. That wizard lives in the Go TUI itself (tui-go/). One unified surface — the transcript IS the application; everything else (palette, sessions, memory, logs, explorer) floats as an overlay dismissed with esc.
+No Bun, Node or Rust is needed: the installer downloads one archive holding
+`mnemo` and its memory sidecar `memsrv`, checks its SHA-256, and puts both in
+`~/.mnemo/bin`. Run it again to upgrade; add `--uninstall` (after `sh -s --`) to
+remove it. Your memory and settings are never touched. Read the script first if
+you like: [`app/scripts/get.sh`](app/scripts/get.sh).
 
-> The old Rust/ratatui TUI was archived on branch `archive/tui-rust` and is no longer part of the main system. It was fully superseded by tui-go/.
+Then:
 
-## Commands
+```bash
+mnemo doctor     # what it found: model, memory, python
+mnemo --demo     # a scripted session in a scratch project; needs no API key
+mnemo            # start in this folder
+```
 
-| Command | Purpose |
-|---------|---------|
-| `mnemo` | the TUI — one surface, transcript-first (build: `cd tui-go && go build -o mnemo ./cmd/mnemo`) |
-| `mnemo "<prompt>"` | One-shot query; how sub-agents run |
-| `mnemo auth [status\|logout <provider>]` | Credential management (status checks provider/key; logout removes a provider) |
-| `mnemo consolidate` | Distil recurring episodes into semantic lessons |
-| `mnemo traces [session-id]` | Span trees from ~/.mnemo/logs; `--json` for raw output |
-| `mnemo init [--dry-run\|--yes]` | Propose the project-memory file pi loads — `AGENTS.md`, or the one already there |
-| `mnemo pr [--base <ref>] [--dry-run] [--review]` | Open a pull request for the current branch, titled and described from its commits |
-| `mnemo --list-models` | Show available models per provider |
-| `mnemo --list-sessions` | List past sessions |
+On first run, `/login` adds a provider key and `/model` picks a model. Mnemo also
+uses credentials it finds in your environment (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `OPENCODE_API_KEY`, `AWS_*` and others): see
+[SECURITY.md](SECURITY.md).
 
-Inside a running session, use `/login` and `/model` to change provider or model.
-Any other `/name` the interface does not implement itself is sent to the agent
-verbatim — which is how the agent's own commands (`/hook`, `/schedule`,
-`/trigger`, `/now`), a prompt template, or `/skill:<name>` is reached.
+<details><summary>From source</summary>
 
-`mnemo init` reads the repository — manifests, scripts, top-level layout, CI
-workflows, existing docs — and proposes the instructions file pi loads at
-startup for this project. Creating one writes it; changing one shows the diff
-and asks, and an unanswered question is a refusal (`--yes` is you answering it
-in advance). The generated part sits between `mnemo:init` markers, so a second
-run refreshes it in place and never reorders a line you wrote; a `write_file`
-deny rule covers it like any other write.
+Needs [Bun](https://bun.sh) 1.4+ and a Rust toolchain.
 
-`mnemo pr` derives its title and body from the commits on the branch — the
-branch's first commit titles it, and the body is the log plus the real
-`git diff --stat`; no model writes a word of it. It refuses rather than guesses:
-on the base branch, with nothing committed, without an authenticated `gh`, or
-when the remote has commits the branch does not have. It never force-pushes.
-`--review` posts a summary of the diff behind its own flag — a summary, not a
-verdict, because nothing reviewed anything.
+```bash
+git clone https://github.com/AtmanMishra/mnemo && cd mnemo
+bun install
+(cd memory-layer && cargo build --release --bin memsrv)
+cd app && bun bin/mnemo.ts --demo
+```
 
-### Your own slash commands: prompt templates
+`app/scripts/install.sh` builds the binary and installs it from this checkout.
+</details>
 
-pi's prompt templates are Markdown files that become `/name` — no code, no
-registration, nothing to add to this repository:
+## What it does
 
-| Where | Scope |
-|-------|-------|
-| `~/.pi/agent/prompts/<name>.md` | global — every project |
-| `.pi/prompts/<name>.md` | this project, once the project is trusted — Mnemo asks once, records the answer in `~/.mnemo/trust.json` and says so in the transcript |
+- **Remembers.** Facts, conventions, pitfalls with their fixes, open threads and
+  skills, stored locally. `/memory` shows them, `/forget` retires one, and the
+  memory map (`m` in the memory pane) draws them.
+- **Memory for other agents.** `mnemo memory setup claude-code` prints the hooks
+  and MCP entry that give Claude Code (or Codex) the same memory; `mnemo memory
+  ingest` learns from Claude Code sessions you already have.
+- **Many agents, one window.** `ctrl+g` the hub, `ctrl+s` split view (up to
+  four), `ctrl+p` switch project, `ctrl+n` another agent on this project.
+- **Checks its work.** A run that changed code and ran nothing is sent back to
+  run the project's checks. `--escalate provider/id` finishes a run on a stronger
+  model after two failed checks; `mnemo -p "<task>" --best-of 3 --check "npm
+  test"` races three attempts in separate worktrees and applies the smallest
+  change that passes (`/bestof` does the same from the interface).
+- **A pixel interface** with Mne the elephant, three themes (`/theme`) and a
+  sidebar for files, memory, sessions, skills and logs. The spec is
+  [DESIGN.md](DESIGN.md).
 
-`review.md` is `/review`. Frontmatter takes an optional `description` and
-`argument-hint`; the body is the prompt, with pi's argument syntax (`$1`, `$@` or
-`$ARGUMENTS`, `${1:-default}`). pi expands the template before the prompt is
-sent, so `/review main` reaches the model as your review prompt with `main` in
-it — Mnemo does not reinterpret it.
+## Does the memory help?
 
-They are listed next to skills and the agent's own commands in the palette
-(`^k`) and the slash menu: the interface asks the agent for its command list and
-shows what comes back, so a template appears with its path and `prompt · user`
-provenance the next time the agent starts. A template can also be typed by name
-without ever opening the palette.
+Measured on a small model (DeepSeek v4.1 Flash), the same loop with memory on
+and off. Small samples; the write-ups say what went wrong along the way.
 
-**Which to write**: a prompt template for a repeatable *instruction* — something
-you say — and a skill for a repeatable *procedure* — steps, references, maybe
-scripts. A skill is discovered by its description, so the agent can pick it
-itself; a template is only ever chosen by you, by name. pi's own docs cover the
-frontmatter and argument syntax in full.
-
-
-## Configuration
-
-Files under `~/.mnemo/`:
-
-| File | Purpose |
-|------|---------|
-| `auth.json` | Provider credentials (chmod 600); never committed |
-| `permissions.json` | Tool allow/deny rules with glob patterns (enforced everywhere, with or without a TTY). The `ask` tier is asked in the interface: the TUI spawns the agent with `MNEMO_APPROVAL_MODE=interactive` and answers pi's dialog. A run with no UI at all fails open (automation keeps working) — except a delegated sub-agent child, which fails closed |
-| `mcp.json` | MCP servers as registered tools (named `mcp__<server>__<tool>`) |
-| `tools.json` | Which tools the agent is offered: `{"disabled": ["web_search"]}`. A `<project>/.mnemo/tools.json` is unioned with it and can only restrict, never re-enable. Takes effect on the next run — the tool list is part of the model's cached prompt prefix, not a mid-session switch |
-| `logs/<date>.jsonl` | Structured trace spans; secrets redacted before write |
-
-Environment variables:
-
-- `MNEMO_HOME` — where Mnemo keeps its per-user state, `~/.mnemo` by default: `tools.json`, `skill-history/`, and the memory sidecar and its journal
-- `MNEMO_APPROVAL_MODE=interactive` — prompt before mutating tools
-- `MNEMO_PLAN_MODE=1` — read-only phase
-- `MNEMO_LOG_LEVEL` — debug, info, warn, error, or off
-- `MNEMO_SUBAGENT_MAX_DEPTH` — how deep `spawn_subagent` may nest (default 3; 0 forbids delegation). Children inherit it, so set it on the top-level agent
-- `BRAVE_API_KEY` or `TAVILY_API_KEY` — optional; enables web_search tool
-- `PI_CODING_AGENT_SESSION_DIR` — where pi stores sessions; the sessions browser reads it, and `sessionDir` in pi's `settings.json` otherwise (see below)
-
-### Credentials: what actually works today
-
-Mnemo runs on a credential of its own **or** on one pi already holds; it no
-longer refuses to start without a key of its own. `mnemo auth status` says
-which of these your machine has.
-
-| Credential | Where it lives | Set it up with |
+| Test | No memory | Memory |
 |---|---|---|
-| API key for `anthropic`, `openai`, `openrouter`, `opencode`, `opencode-go` | `~/.mnemo/auth.json` (chmod 600), or the matching environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`) | the wizard on `mnemo`'s first launch, `/login` in the TUI, or export the variable |
-| A pi subscription — Claude Pro/Max, ChatGPT Plus/Pro, GitHub Copilot, xAI, OpenRouter, Radius | pi's own `~/.pi/agent/auth.json` | pi's CLI, which ships as a dependency: `./agent/node_modules/.bin/pi` (`agent\node_modules\.bin\pi.cmd` on Windows), then `/login` inside it. Then `MNEMO_PROVIDER=<id>` — e.g. `anthropic`, `openai-codex`, `github-copilot`, `xai` |
-| A local model server — a llama.cpp router | `LLAMA_BASE_URL` (+ optional `LLAMA_API_KEY`), or pi's `auth.json` | start the router, then `MNEMO_PROVIDER=llama.cpp`; `MNEMO_MODEL` picks which loaded model |
+| six tasks in one repo, with rules the code does not reveal (3 runs) | 87% | 100% |
+| two repos whose rules conflict (2 runs) | 82% | 99% |
+| Terminal-Bench subset: 10 easy/medium tasks, one attempt each | 10/10 | 10/10 |
 
-Mnemo passes `MNEMO_PROVIDER` straight through to pi, so any provider id pi
-knows works — including ones Mnemo cannot key itself. `MNEMO_MODEL` names the
-model; without it, Mnemo's stored default wins, then pi's own `defaultModel`
-from `~/.pi/agent/settings.json`. Anthropic's own rules for Claude Pro/Max in a
-third-party harness are in [pi's provider docs](https://github.com/earendil-works/pi-mono).
+The last row is the honest one: unrelated one-off tasks give memory nothing to
+remember. It is a subset run on our own machine, not comparable to the public
+leaderboard. Details, and a comparison with a Hermes-style memory:
+[research/](research/), [research/hermes-comparison.md](research/hermes-comparison.md),
+[research/terminal-bench-2026-10-08.md](research/terminal-bench-2026-10-08.md).
 
-### Where sessions live
+## Before you run it
 
-The sessions browser (`^s`) reads the same directory pi writes to, resolved in
-pi's order: `PI_CODING_AGENT_SESSION_DIR`, then `sessionDir` in pi's global
-`settings.json` (under `PI_CODING_AGENT_DIR` or `~/.pi/agent`), then
-`~/.pi/agent/sessions`. When one is configured, the agent Mnemo spawns is given
-the same `--session-dir`, so what you browse is what the agent writes.
+Mnemo reads your files, edits them and runs commands as you. It asks before
+every edit and command by default (`/mode`); `--yolo` and headless `-p` ask for
+nothing, so use those in a container or a throwaway checkout. The gate filters
+what runs; it is not a sandbox. Your prompts and the files the model reads go to
+the provider you chose; nothing else leaves your machine, and there is no
+telemetry. Read [SECURITY.md](SECURITY.md), which also says how to report a
+vulnerability.
 
-## What's in here
+## Repository
 
-- **memory-layer/** (Rust) — Graph memory engine: nodes (facts/state/log/context), typed edges, steering, HNSW search. Binaries: memcli (REPL), memsrv (JSON-RPC sidecar), memeval (retrieval benchmark), mempolicy (learned steering evaluation).
-- **harness-engine/** (TypeScript, zero deps) — Dynamic tool-plugin system: createHarness() writes bundles that agents build for themselves at runtime.
-- **agent/** (TypeScript on Node >=22.6) — The mnemo CLI; thin shim over pi with Mnemo's tools and extensions injected.
-- **app/** (Bun, TypeScript, Ink) — the rebuild: an Ink interface on pi's in-process SDK, plus the policy, memory and kernel clients being moved over from `agent/`. See the roadmap.
-- **tui-go/** (Go, Bubble Tea v2) — *legacy.* The terminal interface that works today: one surface, transcript-first, overlays for palette/sessions/memory/logs/explorer, hooks + schedules digests. Retired once `app/` reaches parity.
+| Path | |
+|---|---|
+| `app/` | the program: Ink interface, agent loop on the [pi](https://github.com/earendil-works/pi) SDK, extensions, evals |
+| `packages/memory/` | `@mnemo/memory`: the memory loop any agent can drive |
+| `memory-layer/` | `memsrv`, the Rust memory sidecar |
+| `site/` | the project page and installers (GitHub Pages) |
+| `docs/` | [ROADMAP](docs/ROADMAP.md), [RELEASING](docs/RELEASING.md), [the previous stack](docs/LEGACY.md) |
+| `research/` | the evals and the design papers |
+| `tui-go/`, `agent/`, `harness-engine/` | the previous stack; still run, no new features |
 
-## Development
+Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Maintainers cutting a release:
+[docs/RELEASING.md](docs/RELEASING.md).
 
-All four codebases must be green:
+## Status
 
-```bash
-cd agent && npm test && npx tsc --noEmit
-cd ../memory-layer && cargo test
-cd ../tui-go && go test ./... && go vet ./...
-cd ../harness-engine && npm test
-```
-
-Start with **`docs/MNEMO.md`** — what Mnemo is and how to run it — and go to **`docs/MNEMO-INTERNALS.md`** when you are changing it: memory model, kernel, protocols, extension points. **`DESIGN.md`** owns how it looks (palette, glyphs, mascot, keys). **`AGENTS.md`** is the contract for agents working in this repo. **`plan.md`** tracks the work, **`STATUS.md`** records outcomes with evidence, and **`research/`** holds the current design papers. Superseded architecture docs, reports and diagrams are in **`docs/archive/`**.
+Pre-alpha. It works, it has tests, and it has rough edges; file what you find in
+[the issue tracker](https://github.com/AtmanMishra/mnemo/issues). What is left,
+in order, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 
-MIT
+[Apache-2.0](LICENSE). Third-party notices: [NOTICE](NOTICE).
