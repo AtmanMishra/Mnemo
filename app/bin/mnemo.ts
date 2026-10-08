@@ -1,227 +1,166 @@
 #!/usr/bin/env bun
 /**
- * mnemo — the application entry.
- *
- * This is the program. The division of labour it establishes is the point of the
- * rebuild:
- *
- *   app/ (here)          the application: the interface, sessions, tools, policy
- *   memory-layer/ (Rust) memory: the journal, recall, consolidation — via RPC
- *   kernel/ipy_bridge.py execution: one long-lived interpreter, driven per cell
- *
- * Commands that need no model and no key come first, because they are the ones
- * that must work when everything else is broken:
- *
- *   mnemo --dump [--rows N --cols N]   render one frame and exit
- *   mnemo doctor                       can this installation work?
- *   mnemo --version | --help
+ * `mnemo` — the entry point, and the only place that touches the process:
+ * arguments, the terminal, exit codes. Everything else takes what it needs as
+ * parameters, so it can be tested without any of these.
  */
-import { collectFacts } from "../src/facts.ts";
-import { renderFrame, banner, setupSteps, statusLines } from "../src/frame/frame.ts";
-import { renderStatusLine } from "../src/status/status.ts";
-import { splash } from "../src/brand/brand.ts";
-import { startTui } from "../src/input/pty.ts";
-import { Session } from "../src/session/session.ts";
-import { PiTurnRunner } from "../src/session/pi-client.ts";
+import * as fs from "node:fs";
+import { PassThrough } from "node:stream";
+import React from "react";
+import { render } from "ink";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import pkg from "../package.json" with { type: "json" };
+import { agentDir, mnemoHome, pointPiAt } from "../src/runtime/paths.ts";
+import { startRuntime } from "../src/runtime/runtime.ts";
+import { Controller } from "../src/runtime/controller.ts";
+import { createDemoProject, createFaux, demoScript, DEMO_PROMPT } from "../src/runtime/demo.ts";
+import { App } from "../src/ui/App.tsx";
 
-export const VERSION = "0.1.0";
+const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
 
-const argv = process.argv.slice(2);
-const has = (name: string): boolean => argv.includes(name);
-const valueOf = (name: string, fallback: number): number => {
-  const i = argv.indexOf(name);
-  const raw = i >= 0 ? Number(argv[i + 1]) : Number.NaN;
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
-};
+usage
+  mnemo                    start in this folder
+  mnemo -c, --continue     continue the most recent session here
+  mnemo -p "<prompt>"      answer once and print the result (no interface)
+  mnemo --demo             a scripted session in a scratch project (no key needed)
+  mnemo --cwd <dir>        work in another folder
 
-const USAGE = [
-  "mnemo — a terminal coding agent whose memory persists",
-  "",
-  "  mnemo                              the interface",
-  "  mnemo --dump [--rows N --cols N]   render one frame and exit",
-  "  mnemo doctor                       check that this installation can work",
-  "  mnemo --version | --help",
-  "",
-  "Runs on Bun. Providers are configured with /login inside the interface, an",
-  "environment key, or a subscription the agent already holds.",
-].join("\n");
+options
+  --dump                   render one frame (after the demo turn, with --demo) and exit
+  --no-motion              no animation
+  -v, --version            print the version
+  -h, --help               this text
 
-function dump(): void {
-  const facts = collectFacts();
-  console.log(
-    renderFrame({
-      ...facts,
-      rows: valueOf("--rows", 24),
-      cols: valueOf("--cols", 100),
-    }),
-  );
+state lives in $MNEMO_HOME (default ~/.mnemo); pi's files are in $MNEMO_HOME/agent`;
+
+interface Args {
+  help: boolean;
+  version: boolean;
+  demo: boolean;
+  dump: boolean;
+  motion: boolean;
+  continueRecent: boolean;
+  print?: string;
+  cwd?: string;
 }
 
-/**
- * The health check. Exit 1 when something *required* is missing; a feature that
- * is off is a warning, because "this cannot work" and "this is partially
- * configured" are different sentences and an exit code that conflates them
- * sends people after the wrong thing.
- */
-function doctor(): number {
-  const facts = collectFacts();
-  const lines: Array<{ ok: boolean; required: boolean; name: string; detail: string; fix?: string }> = [
-    { ok: true, required: true, name: "runtime", detail: facts.runtime },
-    {
-      ok: Boolean(facts.provider),
-      required: true,
-      name: "provider",
-      detail: facts.provider ?? "none configured",
-      fix: "run mnemo and type /login (or /login <provider> <key> if you know the name)",
-    },
-    {
-      ok: Boolean(facts.model),
-      required: false,
-      name: "default model",
-      detail: facts.model ?? "none chosen",
-      fix: "run /model in Mnemo to pick one from what your key can run",
-    },
-    {
-      ok: facts.memory,
-      required: false,
-      name: "memory sidecar",
-      detail: facts.memory ? "found" : "not found",
-      fix: "build it (cd memory-layer && cargo build --bin memsrv) or point MNEMO_MEMSRV_BIN at one",
-    },
-    {
-      ok: facts.kernel,
-      required: false,
-      name: "ipy kernel",
-      detail: facts.kernel ? "interpreter found" : "no interpreter found",
-      fix: "install Python 3, or set SEA_PYTHON to an interpreter",
-    },
-    { ok: true, required: false, name: "home", detail: facts.home },
-  ];
-
-  console.log("mnemo doctor — can this installation work?");
-  for (const line of lines) {
-    const mark = line.ok ? "ok  " : line.required ? "FAIL" : "warn";
-    console.log(`  ${mark}  ${line.name.padEnd(16)} ${line.detail}`);
-    if (!line.ok && line.fix) console.log(`        fix: ${line.fix}`);
+function parse(argv: string[]): Args {
+  const a: Args = { help: false, version: false, demo: false, dump: false, motion: true, continueRecent: false };
+  for (let i = 0; i < argv.length; i++) {
+    const v = argv[i]!;
+    if (v === "-h" || v === "--help") a.help = true;
+    else if (v === "-v" || v === "--version") a.version = true;
+    else if (v === "--demo") a.demo = true;
+    else if (v === "--dump") a.dump = true;
+    else if (v === "--no-motion") a.motion = false;
+    else if (v === "-c" || v === "--continue") a.continueRecent = true;
+    else if (v === "-p" || v === "--print") a.print = argv[++i] ?? "";
+    else if (v === "--cwd") a.cwd = argv[++i];
+    else throw new Error(`unknown argument ${v} — mnemo --help lists them`);
   }
-  const failed = lines.filter((l) => l.required && !l.ok).length;
-  console.log(
-    failed > 0
-      ? "Something required is missing — the fix is printed under each line."
-      : "Mnemo can run." + (lines.some((l) => !l.ok) ? " Some optional pieces are off." : ""),
-  );
-  return failed > 0 ? 1 : 0;
+  return a;
 }
 
-async function run(): Promise<number | "interactive"> {
-  const bun = (globalThis as { Bun?: { version: string } }).Bun;
-  if (!bun) {
-    console.error(
-      [
-        "mnemo is a Bun program, and this is not Bun.",
-        "",
-        "  bun upgrade            # or: curl -fsSL https://bun.sh/install | bash",
-      ].join("\n"),
-    );
-    return 1;
-  }
-  if (has("--version") || has("-v")) {
-    console.log(`mnemo ${VERSION} — bun ${bun.version}`);
-    return 0;
-  }
-  if (has("--help") || has("-h")) {
-    console.log(USAGE);
-    return 0;
-  }
-  if (has("--dump")) {
-    dump();
-    return 0;
-  }
-  if (argv[0] === "doctor") return doctor();
-
-  if (argv.length === 0 || argv[0] === "chat" || argv[0] === "run") {
-    await interactive();
-    return "interactive";
-  }
-
-  console.error(USAGE);
-  return 2;
+/** A stdin that never sends a key, for frames rendered without a terminal. */
+function silentStdin(): NodeJS.ReadStream {
+  const s = new PassThrough() as unknown as NodeJS.ReadStream;
+  s.isTTY = true;
+  s.setRawMode = () => s;
+  return s;
 }
 
-/**
- * The interface itself.
- *
- * No agent yet: one is built from the configured provider, and until that is
- * wired the interface still runs, still takes input, and says what to do about
- * it. A program that refuses to start because it is not configured is a program
- * you cannot configure from inside it.
- */
-async function interactive(): Promise<void> {
-  // `keepLive: 0`: the opening is the top of the transcript, so it settles into
-  // scrollback immediately and stays there. With the default the opening was
-  // still "live" when the reader left, and pressing ctrl+d erased the banner and
-  // the instructions with `\x1b[10A` — the interface deleting its own welcome on
-  // the way out.
-  const session = new Session({ keepLive: 0 });
-  // The same opening `--dump` renders, shown here too. It existed in one code
-  // path and was missing from the one people actually run: a clean home got a
-  // bare `> ` cursor with no word about what to do, which is the exact failure
-  // the old interface was retired over.
-  const facts = collectFacts();
-  const cols = process.stdout.columns ?? 80;
-  session.apply({
-    type: "opening",
-    lines: [
-      banner(cols, facts.runtime),
-      "",
-      // The figure below the banner, dropped entirely when the terminal is too
-      // narrow to show it whole — a half-drawn crab is worse than none.
-      ...splash(cols),
-      ...(facts.provider ? statusLines(cols, facts) : setupSteps(cols)),
-    ],
-  });
+async function main(): Promise<number> {
+  const args = parse(process.argv.slice(2));
+  if (args.help) return console.log(USAGE), 0;
+  if (args.version) return console.log(pkg.version), 0;
 
-  // The agent, when there is something to run on. Building it is a spawn, so a
-  // failure here is reported and the interface still starts: an interface that
-  // refuses to open because the agent would not is one you cannot fix from
-  // inside it.
-  let agent: PiTurnRunner | undefined;
-  if (facts.provider) {
+  const home = mnemoHome();
+  const dir = agentDir(home);
+  fs.mkdirSync(dir, { recursive: true });
+  pointPiAt(dir);
+
+  let cwd = args.cwd ?? process.cwd();
+  let injected: Partial<Parameters<typeof startRuntime>[0]> = {};
+  if (args.demo) {
+    cwd = createDemoProject();
+    const { modelRuntime, faux } = await createFaux(dir, { tokensPerSecond: args.dump ? undefined : 90 });
+    faux.setResponses(demoScript());
+    injected = { modelRuntime, model: faux.getModel(), sessionManager: SessionManager.inMemory(cwd) };
+  }
+  const runtime = await startRuntime({ cwd, agentDir: dir, continueRecent: args.continueRecent, ...injected });
+
+  if (args.print !== undefined) {
+    const session = runtime.session;
+    await session.bindExtensions({});
+    if (!session.model || !session.modelRuntime.hasConfiguredAuth(session.model.provider)) {
+      console.error("mnemo: no model configured — run mnemo and use /login, then /model");
+      await runtime.dispose();
+      return 1;
+    }
     try {
-      agent = await PiTurnRunner.create(session, {
-        repoRoot: new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
-        cwd: process.cwd(),
-        home: facts.home,
-        provider: facts.provider,
-        model: facts.model,
-      });
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      session.apply({
-        type: "notice",
-        tone: "warn",
-        text: `could not start the agent: ${reason} — the interface still works, commands still answer`,
-      });
+      await session.prompt(args.print);
+      process.stdout.write(`${session.getLastAssistantText() ?? ""}\n`);
+      return 0;
+    } finally {
+      await runtime.dispose();
     }
   }
-  startTui({
-    streams: {
-      stdin: process.stdin,
-      stdout: process.stdout,
+
+  const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true && !args.dump;
+  let instance: ReturnType<typeof render> | undefined;
+  const clearTerminal = () => {
+    instance?.clear();
+    if (process.stdout.isTTY) process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+  };
+  let exitCode = 0;
+  let finished!: () => void;
+  const done = new Promise<void>((r) => (finished = r));
+  const controller = new Controller(runtime, {
+    exit: (code) => {
+      exitCode = code ?? 0;
+      finished();
     },
-    session,
-    agent,
-    facts: { home: facts.home, provider: facts.provider, model: facts.model },
-    // Re-collected every frame, so `/login` and `/model` are visible in the
-    // chrome the moment they take effect rather than after a restart.
-    status: () => renderStatusLine(collectFacts(), { width: process.stdout.columns ?? 80, preset: "default" }),
-    exit: (code) => process.exit(code ?? 0),
+    onClearScreen: clearTerminal,
   });
+  await controller.bind();
+  controller.transcript.push({ kind: "welcome" });
+  if (args.continueRecent && runtime.session.messages.length > 0) {
+    controller.transcript.load(runtime.session.messages);
+    controller.transcript.notice("Continuing the most recent session");
+  }
+
+  instance = render(
+    React.createElement(App, { controller, version: pkg.version, home: process.env.HOME ?? "", motion: args.motion && interactive, clearTerminal }),
+    {
+      exitOnCtrlC: false,
+      patchConsole: true,
+      kittyKeyboard: { mode: "auto" },
+      ...(interactive ? {} : { stdin: silentStdin(), interactive: false }),
+    },
+  );
+
+  if (args.demo) {
+    setTimeout(() => void controller.submit(DEMO_PROMPT), args.dump ? 0 : 900);
+  }
+  if (args.dump) {
+    if (args.demo) {
+      await new Promise((r) => setTimeout(r, 50));
+      await runtime.session.waitForIdle();
+    }
+    await instance.waitUntilRenderFlush();
+    await controller.quit();
+  }
+
+  await done;
+  instance.unmount();
+  await instance.waitUntilExit().catch(() => {});
+  return exitCode;
 }
 
-if (import.meta.main) {
-  const result = await run();
-  // "interactive" means the interface owns the process from here; setting an
-  // exit code would end it immediately after drawing the first frame.
-  if (result !== "interactive") process.exitCode = result;
-}
+main().then(
+  (code) => process.exit(code),
+  (error) => {
+    console.error(`mnemo: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  },
+);
