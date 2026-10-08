@@ -13,6 +13,7 @@
  * Modes, each over the same tasks:
  *   baseline   the student model, no memory
  *   memory     the student model, with memory
+ *   hermes     the student model, with a Hermes-Agent-style memory (eval/hermes.ts)
  *   teacher    the teacher model for the first half, the student after —
  *              memory carries what the stronger model learned (with --teacher)
  *
@@ -167,7 +168,7 @@ export function score(dir: string, i: number, session: SessionResult, changelogB
   };
 }
 
-export async function runSeries(mode: string, student: EvalModel, teacher: EvalModel | undefined, memory: boolean): Promise<TaskScore[]> {
+export async function runSeries(mode: string, student: EvalModel, teacher: EvalModel | undefined, memory: boolean, hermes = false): Promise<TaskScore[]> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `mnemo-eval-series-${mode}-`));
   const dir = path.join(root, "till");
   const home = path.join(root, "home");
@@ -181,7 +182,7 @@ export async function runSeries(mode: string, student: EvalModel, teacher: EvalM
       fs.rmSync(path.join(dir, "src", "generated"), { recursive: true, force: true });
       const before = (fs.readFileSync(path.join(dir, "CHANGELOG.md"), "utf8").split("## Unreleased")[1] ?? "").split(/\n## /)[0]!.split("\n").filter((l) => /^\s*[-*]\s+\S/.test(l)).length;
       process.stdout.write(`  ${mode} task ${i + 1}/${TASKS.length} (${model.label})…`);
-      const session = await runSession({ home, cwd: dir, model, memory }, [TASKS[i]!.prompt]);
+      const session = await runSession({ home, cwd: dir, model, memory, hermes }, [TASKS[i]!.prompt]);
       const s = score(dir, i, session, before);
       const leak = contamination(root, [session]);
       scores.push({ task: i + 1, model: model.label, ...s, tools: session.tools.length, cost: session.cost, commands: session.tools.filter((t) => t.name === "bash").map((t) => `${t.ok ? "" : "✗ "}${String(t.args.command ?? "").slice(0, 160)}`), notes: session.memory, ...(leak ? { contaminated: leak } : {}) });
@@ -245,7 +246,7 @@ if (import.meta.main) {
       const student = await realModel(agentDir, studentSpec);
       const teacher = mode === "teacher" && teacherSpec ? await realModel(agentDir, teacherSpec) : undefined;
       if (mode === "teacher" && !teacher) throw new Error("--teacher provider/id is needed for the teacher mode");
-      results[mode]!.push(await runSeries(mode, student, teacher, mode !== "baseline"));
+      results[mode]!.push(await runSeries(mode, student, teacher, mode === "memory" || mode === "teacher", mode === "hermes"));
       fs.rmSync(agentDir, { recursive: true, force: true });
     }
   const out = path.join(import.meta.dir, "results", `series-${new Date().toISOString().replace(/[:.]/g, "-")}`);

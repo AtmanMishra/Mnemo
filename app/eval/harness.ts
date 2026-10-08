@@ -18,6 +18,7 @@ import { createFaux } from "../src/runtime/demo.ts";
 import { MemoryService } from "@mnemo/memory";
 import { createHost, settleBackground, type Mode } from "../src/extensions/host.ts";
 import { mnemoExtensions } from "../src/extensions/index.ts";
+import { hermesExtension, HermesStore } from "./hermes.ts";
 import { findMemsrv, journalPath } from "../src/runtime/paths.ts";
 import type { Block } from "../src/ui/store.ts";
 
@@ -80,6 +81,8 @@ export interface SessionOptions {
   cwd: string;
   model: EvalModel;
   memory: boolean;
+  /** A Hermes-Agent-style memory instead of Mnemo's (eval/hermes.ts); `memory` must be false. */
+  hermes?: boolean;
   mode?: Mode;
   /** Abort a prompt that runs longer than this. */
   promptTimeoutMs?: number;
@@ -97,14 +100,14 @@ export async function runSession(o: SessionOptions, prompts: string[]): Promise<
   const memsrv = o.memory ? findMemsrv(o.home) : undefined;
   if (o.memory && !memsrv) throw new Error("memory requested but memsrv is not built (cd memory-layer && cargo build --release --bin memsrv)");
   const memory = memsrv ? new MemoryService(memsrv, journalPath(o.home)) : undefined;
-  const host = createHost({ home: o.home, agentDir, modelRuntime: o.model.modelRuntime, memory, mode: o.mode ?? "yolo", reflect: o.memory });
+  const host = createHost({ home: o.home, agentDir, modelRuntime: o.model.modelRuntime, memory, mode: o.mode ?? "yolo", reflect: o.memory || !!o.hermes });
   const runtime = await startRuntime({
     cwd: o.cwd,
     agentDir,
     modelRuntime: o.model.modelRuntime,
     model: o.model.model,
     sessionManager: SessionManager.inMemory(o.cwd),
-    extensions: mnemoExtensions(host),
+    extensions: [...mnemoExtensions(host), ...(o.hermes ? [hermesExtension(host, new HermesStore(path.join(o.home, "hermes", "memories")))] : [])],
   });
   const controller = new Controller(runtime, { exit: () => {}, host });
   await controller.bind();
