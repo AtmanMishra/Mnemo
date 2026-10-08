@@ -6,50 +6,88 @@ The Go interface's design is archived at `docs/archive/DESIGN-go-tui.md`.
 
 ## 1. Principles
 
-1. **Familiar first.** People arrive from Claude Code, Codex CLI, Gemini CLI.
-   The input box, slash menu, `esc` to interrupt, `@` for files, a footer with
-   the model and context use — these work the way their hands expect. Mnemo's
-   difference is the memory, not new keybindings.
-2. **The transcript is the terminal's scrollback.** Finished messages are
-   written once (Ink `<Static>`) and become ordinary terminal history: scroll,
-   search and select them with the terminal's own tools. Only the live turn and
-   the input are redrawn.
-3. **Motion means work.** Something animates only while the agent is doing
-   something. When it is idle the screen is still.
-4. **Colour carries meaning.** Lavender is Mnemo (brand, the assistant, memory).
-   Green is success or an added line, red is an error or a removed line, amber
-   is a question waiting for you. Everything else is the terminal's own
-   foreground or a muted grey.
-5. **Never lose the user's words.** A draft survives a dialog, an interrupt and
-   a failed turn. A message typed while the agent works is queued, not dropped.
+1. **A signature, not a copy.** "A memory palace, rendered in pixels": real
+   pixels (two per terminal cell — a half block with a foreground and a
+   background colour), ASCII for structure (bracketed tabs, box rules, dither
+   ramps), and a node-and-wire motif (`◆───◆`) for memory. Mne, a pixel
+   elephant (elephants never forget), is the face.
+2. **One surface.** In a terminal Mnemo is a full-screen workspace (alternate
+   screen): header, sidebar, main area, composer. Everything about the project
+   — files, memory, sessions, skills, logs — is a keystroke away, previewed
+   in place. `--inline` keeps the older scrollback transcript.
+3. **Familiar where it matters.** The composer, the slash menu, `@` for
+   files, `esc` to interrupt, shift+tab for modes work the way hands from
+   Claude Code or Codex expect.
+4. **Motion means something.** The launch sequence plays once per start (any
+   key skips it); after that something animates only while work happens. No
+   motion with `--no-motion`, in a dump or a pipe.
+5. **Colour carries meaning.** Neuron magenta is the agent and focus, synapse
+   cyan is structure and links, memory amber is anything memory did; green is
+   success, red failure. The rest is parchment on deep ink.
+6. **Never lose the user's words.** A draft survives a dialog, an interrupt
+   and a failed turn; a message typed while the agent works is queued.
 
-## 2. Palette and glyphs
+## 2. Palette, pixels and glyphs
 
-One file owns them: `app/src/ui/theme.ts`. Truecolor hex; chalk downsamples to
-256 or 16 colours, and `NO_COLOR` turns it off.
+One file owns colour: `app/src/ui/theme.ts` ("Mnemo Night"). Truecolor hex;
+chalk downsamples, `NO_COLOR` turns it off. Pixels: `app/src/ui/pixel.ts`
+(grids → cells → merged runs, a 5×5 pixel font with a drop shadow for the
+wordmark, Mne's sprites, noise that resolves into an image).
 
 | Token | Hex | Used for |
 |---|---|---|
-| `accent` | `#B794F6` | brand, assistant bullet, focused border, selection |
-| `accent2` | `#7DD3FC` | second stop of the brand gradient, links, file paths |
-| `success` | `#86EFAC` | finished tool, added diff line |
-| `warning` | `#FCD34D` | approval dialog, queued message, retry |
-| `error` | `#FCA5A5` | failed tool, error notice, removed diff line |
-| `muted` | `#8B8B96` | secondary text, hints, footer |
-| `subtle` | `#4A4A55` | borders at rest, rules, thinking text |
-| `addBg` / `removeBg` | `#1C3326` / `#3A1E24` | behind added / removed diff lines |
+| ground / panel / rule | `#0E0B16` / `#16111F` / `#2B2238` | background, surfaces, rules |
+| text / dim / faint | `#EDE4D3` / `#8A7F94` / `#4A4157` | parchment text, secondary, hints |
+| magenta | `#FF5C8A` | the agent, focus, the active tab pill, the wordmark's start |
+| cyan | `#3DDBD9` | structure: headings, links, the memory wire, the wordmark's end |
+| amber | `#FFB547` | memory: recalled, learned, pitfalls and fixes |
+| violet | `#9D7BFF` | thinking |
+| green / red | `#7BE07B` / `#FF4F5E` | success / failure, added / removed lines |
 
 | Glyph | Meaning |
 |---|---|
 | `❯` | your message |
-| `●` | Mnemo's answer (lavender) |
-| `✻` | thinking (collapsed by default) |
-| `◆` / spinner | a tool call: animated while running, `✓` green / `✗` red when done |
-| `⎿` | a tool's result, indented under its call |
-| `◈` | memory: what was recalled or written |
-| `▸` | a notice from Mnemo itself (model changed, session resumed, …) |
+| `◆` | Mnemo's answer; a node on the memory wire |
+| `◇` | thinking |
+| `▣` | a tool call (`✓` / `✗` when done) |
+| `◈` | memory: recalled, learned, the footer's node count |
+| `▐ NAME ▌` | a pill: the active pane, a panel title |
+| `░ ▒ ▓ █` | the dither ramp: shading and motion |
+| `▤ ◈ ▣ ◇ ≡` | the sidebar panes: files, memory, sessions, skills, logs |
 
-## 3. The screen, top to bottom
+## 3. A launch, and the screen
+
+**Boot** (`components/Boot.tsx`, every launch, ~1.6 s): Mne and the wordmark
+condense out of dither noise; a magenta scanline sweeps; the memory wire
+draws and the tagline types; what memory holds counts up; Mne blinks.
+
+**Introduction** (`components/Onboarding.tsx`, first run; `--intro`): meet
+Mne · how it learns (a signal travelling session → reflect → memory) · the
+workspace in miniature · your other agents · a model (log in, demo, later).
+
+**Workspace** (`workspace/Workspace.tsx`):
+
+```
+▞▚ mnemo  repo ⎇ branch                          ◆ model  ◈ 412  $0.03
+▐▤ FILES▌ ◈ ▣ ◇ ≡  │ ──▐ TRANSCRIPT ▌──────────────────────────────────
+ ▾ src          12  │ ❯ fix the flaky login test
+   · auth.ts        │ ◆ The session cookie expires before …
+   · login.ts       │ ▣ bash  pnpm vitest auth   ✓
+ ▸ test             │ ◈ recalled 1 pitfall · fix: refresh first
+╭──────────────────────────────────────────────────────────────────────╮
+│ ❯ ask, or / for commands, @ for files                                │
+╰──────────────────────────────────────────────────────────────────────╯
+ ⏵⏵ accept edits · ? shortcuts                 model · 12% context · ◈ 412
+```
+
+Focus is the composer, the sidebar or the main area: `tab` moves on (from the
+composer only when no completion is open), `esc` comes back, `ctrl+b` hides
+the sidebar, `1`–`5` switch panes, `↑↓` move, `→`/enter open, `←` close,
+`PgUp`/`PgDn` scroll the main area from anywhere. Moving through the sidebar
+previews the selection in the main area; a pane's own keys act on it (`r`
+resumes a session, `i` puts `@file` in the prompt).
+
+The inline layout (`--inline`, dumps, pipes) is the earlier one:
 
 ```
 ╭─────────────────────────────────────────────────────────────╮

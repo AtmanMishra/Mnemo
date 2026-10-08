@@ -24,6 +24,8 @@ import { WorkingLine } from "../components/Working.tsx";
 import { gradientAt, palette } from "../theme.ts";
 import { fileTree, PANES, type Item, type Pane, type Preview, type WorkspaceSource } from "./model.ts";
 import { Bar, PreviewView, Viewport } from "./Main.tsx";
+import { PixelArt } from "../components/PixelArt.tsx";
+import { mne } from "../pixel.ts";
 import { PANE_ICON, Sidebar } from "./Sidebar.tsx";
 
 export type Focus = "composer" | "sidebar" | "main";
@@ -58,6 +60,25 @@ function Header({ controller, columns }: { controller: Controller; columns: numb
       <Text color={f.memory ? palette.amber : palette.faint}>{`  ${f.memory ? `◈ ${f.memory.nodes}` : "◈ off"}`}</Text>
       {f.cost > 0 ? <Text color={palette.dim}>{`  $${f.cost.toFixed(2)}`}</Text> : null}
     </Text>
+  );
+}
+
+/** Mne, waiting: a blink every few seconds when motion is on. */
+function IdleMne(): React.ReactElement {
+  const motion = React.useContext(MotionContext);
+  const [blink, setBlink] = useState(false);
+  useEffect(() => {
+    if (!motion) return;
+    const id = setInterval(() => {
+      setBlink(true);
+      setTimeout(() => setBlink(false), 160);
+    }, 4200);
+    return () => clearInterval(id);
+  }, [motion]);
+  return (
+    <Box marginBottom={1}>
+      <PixelArt grid={blink ? mne.blink : mne.idle} />
+    </Box>
   );
 }
 
@@ -209,6 +230,7 @@ export function Workspace({ controller, source, motion, initial }: WorkspaceProp
                 <Bar title="transcript" subtitle={back > 0 ? `${back} rows up · PgDn to follow` : undefined} width={mainWidth - 1} focused={focus === "main"} />
                 {empty ? (
                   <Box height={mainHeight} flexDirection="column" justifyContent="center" alignItems="center">
+                    {mainHeight >= 16 ? <IdleMne /> : null}
                     <Text color={palette.dim}>Ask anything about this project.</Text>
                     <Text color={palette.faint}>/ commands · @ files · tab sidebar · ctrl+b hide it</Text>
                   </Box>
