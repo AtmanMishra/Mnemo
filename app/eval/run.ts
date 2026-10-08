@@ -97,7 +97,7 @@ function report(results: RunResult[], args: Args): string {
 }
 
 const args = parse(process.argv.slice(2));
-const scenarios = SCENARIOS.filter((s) => !args.scenario || s.name === args.scenario);
+const scenarios = SCENARIOS.filter((s) => !args.scenario || args.scenario.split(",").includes(s.name));
 if (!scenarios.length) throw new Error(`no scenario ${args.scenario}; have: ${SCENARIOS.map((s) => s.name).join(", ")}`);
 const makeModel = args.faux ? fauxModel : (dir: string) => realModel(dir, args.model);
 // Fail fast on a missing key, before building anything.
