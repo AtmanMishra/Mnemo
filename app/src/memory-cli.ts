@@ -18,18 +18,21 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
 import {
   contextHook,
+  curateSkills,
+  projectIdentity,
   findMemsrv,
   ingestClaudeCode,
   journalPath,
   MemoryService,
   redact,
   serveMcp,
+  SessionIndex,
   textOf,
   type HookInput,
   type Reflector,
 } from "@mnemo/memory";
 import { createModelRuntime } from "./runtime/runtime.ts";
-import { skillsDir } from "./runtime/paths.ts";
+import { sessionIndexPath, sessionSources, skillsDir } from "./runtime/paths.ts";
 
 export const MEMORY_USAGE = `mnemo memory — memory for any coding agent
 
@@ -39,6 +42,8 @@ usage
   mnemo memory ingest [options]    learn from Claude Code's sessions (~/.claude/projects)
   mnemo memory hook                a Claude Code hook (event JSON on stdin); never fails the agent
   mnemo memory mcp [--cwd <dir>]   memory as an MCP server on stdio
+  mnemo memory curate [--apply]    skills by last use: stale after 30 days, archived after 90
+                                   (personal skills only; project skills are reported)
   mnemo memory status              what memory holds and what has been ingested
 
 ingest options
@@ -158,9 +163,30 @@ export async function runMemoryCommand(argv: string[], home: string, agentDir: s
       out.write(`ingested  ${Object.keys(ledger).length} sessions, ${Object.values(ledger).reduce((a, b) => a + b, 0)} runs\n`);
       return 0;
     }
+    if (command === "curate") {
+      const report = await curateSkills({
+        memory,
+        projectRoot: projectIdentity(path.resolve(option(rest, "--cwd") ?? process.cwd())).root,
+        userSkillsDir: skillsDir(home),
+        staleDays: Number(option(rest, "--stale") ?? 30),
+        archiveDays: Number(option(rest, "--archive") ?? 90),
+        apply: rest.includes("--apply"),
+      });
+      if (!report.length) out.write("no skills yet\n");
+      for (const r of report)
+        out.write(`${r.state.padEnd(8)} ${r.scope.padEnd(8)} ${r.name.padEnd(28)} last used ${r.lastUsed} (${r.ageDays}d)${r.archivedTo ? `  → ${r.archivedTo}` : ""}\n`);
+      if (!rest.includes("--apply") && report.some((r) => r.state === "archive" && r.scope === "user")) out.write("\n--apply moves the archivable personal skills out of the skills directory\n");
+      return 0;
+    }
     if (command === "mcp") {
       await serveMcp(
-        { memory, userSkillsDir: skillsDir(home), cwd: path.resolve(option(rest, "--cwd") ?? process.cwd()), source: { agent: option(rest, "--agent") ?? "mcp" } },
+        {
+          memory,
+          userSkillsDir: skillsDir(home),
+          cwd: path.resolve(option(rest, "--cwd") ?? process.cwd()),
+          source: { agent: option(rest, "--agent") ?? "mcp" },
+          sessions: new SessionIndex(sessionIndexPath(home), sessionSources(home)),
+        },
         process.stdin,
         process.stdout,
       );

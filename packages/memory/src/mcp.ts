@@ -18,6 +18,7 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { MemoryService } from "./service.ts";
 import { MemorySession, type Source } from "./session.ts";
+import { describeSessionHits, type SessionIndex } from "./sessions.ts";
 
 export interface McpOptions {
   memory: MemoryService;
@@ -26,6 +27,8 @@ export interface McpOptions {
   cwd: string;
   source?: Source;
   version?: string;
+  /** Past-session search; the tool is offered only when this is given. */
+  sessions?: SessionIndex;
 }
 
 const PROTOCOL = "2025-06-18";
@@ -62,6 +65,17 @@ export const MCP_TOOLS = [
   },
 ];
 
+export const SESSION_SEARCH_TOOL = {
+  name: "session_search",
+  description:
+    "Search what was actually said and run in past sessions of this project (this agent's and others', e.g. Claude Code's). Use it when the user refers to earlier work.",
+  inputSchema: {
+    type: "object",
+    properties: { query: { type: "string" }, k: { type: "number" }, all_projects: { type: "boolean" }, cwd: cwdProp },
+    required: ["query"],
+  },
+};
+
 type Request = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
 
 export function serveMcp(o: McpOptions, input: Readable, output: Writable): Promise<void> {
@@ -77,6 +91,8 @@ export function serveMcp(o: McpOptions, input: Readable, output: Writable): Prom
 
   const call = async (name: string, a: Record<string, unknown>) => {
     const s = sessionFor(a.cwd);
+    if (name === "session_search" && o.sessions)
+      return text(describeSessionHits(o.sessions.search(String(a.query ?? ""), { k: typeof a.k === "number" ? a.k : 8, under: a.all_projects ? undefined : s.identity.root })));
     if (name === "memory_recall") {
       const r = await s.context(String(a.task ?? ""), { lastSession: true });
       return text([r.system.trim(), r.message].filter(Boolean).join("\n\n"));
@@ -107,7 +123,7 @@ export function serveMcp(o: McpOptions, input: Readable, output: Writable): Prom
         case "ping":
           return send({ id: req.id, result: {} });
         case "tools/list":
-          return send({ id: req.id, result: { tools: MCP_TOOLS } });
+          return send({ id: req.id, result: { tools: o.sessions ? [...MCP_TOOLS, SESSION_SEARCH_TOOL] : MCP_TOOLS } });
         case "tools/call": {
           const name = String(req.params?.name ?? "");
           try {

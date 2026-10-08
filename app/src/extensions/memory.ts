@@ -7,8 +7,8 @@
  */
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { MemorySession, textOf, type Reflector } from "@mnemo/memory";
-import { skillsDir } from "../runtime/paths.ts";
+import { describeSessionHits, MemorySession, SessionIndex, textOf, type Reflector } from "@mnemo/memory";
+import { sessionIndexPath, sessionSources, skillsDir } from "../runtime/paths.ts";
 import { inBackground, type Host } from "./host.ts";
 
 export { describeHit, DIRECTIVE, profileBlock, recallMessage } from "@mnemo/memory";
@@ -66,6 +66,28 @@ export function memoryExtension(host: Host) {
         async execute(_id, params, _signal, _update, ctx) {
           const body = await sessionFor(ctx.cwd).search(params.query, params.k ?? 5);
           return { content: [{ type: "text", text: body }], details: {} };
+        },
+      }),
+    );
+
+    let index: SessionIndex | undefined;
+    pi.registerTool(
+      defineTool({
+        name: "session_search",
+        label: "Session search",
+        description:
+          "Search what was actually said and run in past sessions of this project — yours and other agents' (Claude Code). " +
+          "Use it when the user refers to earlier work. all_projects: search every project.",
+        parameters: Type.Object({
+          query: Type.String({ description: "Words from what you are looking for" }),
+          k: Type.Optional(Type.Number({ description: "How many passages (default 8)" })),
+          all_projects: Type.Optional(Type.Boolean()),
+        }),
+        async execute(_id, params, _signal, _update, ctx) {
+          index ??= new SessionIndex(sessionIndexPath(host.home), sessionSources(host.home));
+          const root = sessionFor(ctx.cwd).identity.root;
+          const hits = index.search(params.query, { k: params.k ?? 8, under: params.all_projects ? undefined : root });
+          return { content: [{ type: "text", text: describeSessionHits(hits) }], details: { hits: hits.length } };
         },
       }),
     );

@@ -22,10 +22,12 @@
  * agent can be weighed when another uses it. Memory never breaks the agent's
  * loop: every call is best-effort.
  */
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { Credit } from "./credit.ts";
 import { projectIdentity, type ProjectIdentity } from "./project.ts";
 import { redact } from "./redact.ts";
+import { unsafeMemory } from "./safety.ts";
 import { describeHit, hitLine, profileBlock, recallMessage } from "./recall.ts";
 import { digest, parseReflection, REFLECT_PROMPT, worthReflecting, type Reflection, type ToolEvent } from "./reflect.ts";
 import { factValue, factsOf, type MemoryService, type ProfileFact } from "./service.ts";
@@ -47,6 +49,8 @@ export interface SkillOffer {
   file: string;
   body: string;
   reason: string;
+  /** A correction to an existing skill, not a new one. */
+  patch?: boolean;
 }
 
 /** Who produced what this session learns. */
@@ -148,7 +152,8 @@ export class MemorySession {
   private readonly credit = new Credit();
   private toolLog: ToolEvent[] = [];
   private readonly files = new Set<string>();
-  private readonly skillsRead = new Set<string>();
+  /** Skills read in this run: name → the SKILL.md file. */
+  private readonly skillsRead = new Map<string, string>();
   private runFailed = false;
   private nudged = false;
   /** Pitfalls already pointed out in this session: the guard speaks once each. */
@@ -257,6 +262,8 @@ export class MemorySession {
   /** A fact the agent decided to keep. Throws when it cannot be kept. */
   async remember(scope: "project" | "user", key: string, value: string): Promise<{ superseded: boolean }> {
     if (key.toLowerCase() === "last session") throw new Error("\"last session\" is written by Mnemo from the session record; choose another key");
+    const unsafe = unsafeMemory(`${key} ${value}`);
+    if (unsafe) throw new Error(`memory refused this: it ${unsafe}`);
     const r = await this.learnFact(scope, key.toLowerCase(), value);
     if (!r) throw new Error("memory is not reachable");
     this.note({ kind: "learned", items: [`${scope} · ${key}: ${value}`] });
@@ -341,7 +348,7 @@ export class MemorySession {
 
   toolStart(tool: string, args: Record<string, unknown>): void {
     const file = String(args.path ?? args.file_path ?? "");
-    if (tool.toLowerCase() === "read" && file.endsWith("SKILL.md")) this.skillsRead.add(path.basename(path.dirname(file)));
+    if (tool.toLowerCase() === "read" && file.endsWith("SKILL.md")) this.skillsRead.set(path.basename(path.dirname(file)), path.resolve(this.o.cwd, file));
     for (const node of this.credit.observe(JSON.stringify(args))) void this.mem.markUseful(node).catch(() => {});
   }
 
@@ -378,11 +385,21 @@ export class MemorySession {
     const mem = this.mem;
     const ep = this.episodeId;
     const failed = this.runFailed;
-    const digestInput = { messages: run.messages, tools: this.toolLog, files: [...this.files], signals: run.signals ?? [] };
+    const skills = [...this.skillsRead.entries()].flatMap(([name, file]) => {
+      try {
+        return [{ name, body: fs.readFileSync(file, "utf8") }];
+      } catch {
+        return [];
+      }
+    });
+    const digestInput = { messages: run.messages, tools: this.toolLog, files: [...this.files], signals: run.signals ?? [], skills };
     if (ep !== undefined && !failed) await mem.good(ep, "run completed without errors");
-    for (const name of this.skillsRead) {
+    for (const name of this.skillsRead.keys()) {
       const node = await mem.findLabel(`skill ${name}`);
-      if (node !== undefined) await mem.log(node, "used", `episode #${ep}: ${failed ? "had failures" : "clean"}`);
+      if (node === undefined) continue;
+      await mem.log(node, "used", `episode #${ep}: ${failed ? "had failures" : "clean"}`);
+      // What the curator reads to tell a skill in use from one nobody needs.
+      await mem.fact(node, "last used", new Date().toISOString().slice(0, 10));
     }
     if (!this.o.reflect || !worthReflecting(digestInput)) return;
     const [projectFacts, userFacts] = await Promise.all([mem.profile("project", this.identity.id), mem.profile("user", this.identity.id)]);
@@ -407,6 +424,40 @@ export class MemorySession {
     }
   }
 
+  /**
+   * A skill this run followed and found wrong: the corrected instructions,
+   * offered with the reason; on approval the old version is kept as history.
+   * Only a skill this run actually read can be patched.
+   */
+  private async patchSkill(s: NonNullable<Reflection["skill"]>): Promise<void> {
+    const file = this.skillsRead.get(s.name);
+    if (!file || !fs.existsSync(file) || !this.o.approveSkill) return;
+    const old = fs.readFileSync(file, "utf8");
+    const description = /description:\s*(.*)/.exec(old)?.[1]?.replace(/^"|"$/g, "") ?? s.description;
+    const body = renderSkill(s.name, description, s.instructions);
+    if (body === old) return;
+    const reason = `skill ${s.name} needs a fix: ${s.reason || "it did not work as written in this run"}`;
+    if (!(await this.o.approveSkill({ name: s.name, scope: s.scope, file, body, reason, patch: true }))) return;
+    const history = path.join(path.dirname(this.o.userSkillsDir), "skill-history", s.name);
+    fs.mkdirSync(history, { recursive: true });
+    fs.writeFileSync(path.join(history, `${new Date().toISOString().replace(/[:.]/g, "-")}.md`), old);
+    writeSkill(file, body);
+    const node = await this.mem.findLabel(`skill ${s.name}`);
+    if (node !== undefined) {
+      await this.mem.fact(node, "last change", s.reason || "patched after a run that used it");
+      await this.mem.log(node, "patched", `episode #${this.episodeId}: ${s.reason}`);
+    }
+    this.note({ kind: "skill", text: `patched skill ${s.name}: ${s.reason}` });
+    this.o.skillsChanged?.();
+  }
+
+  /** True (and said) when text may not be kept: see safety.ts. */
+  private refuse(text: string): boolean {
+    const why = unsafeMemory(text);
+    if (why) this.note({ kind: "failed", text: `Memory refused a learned item: it ${why}` });
+    return !!why;
+  }
+
   /** Write what one reflection found. Kept separate so its rules read in one place. */
   private async apply(r: Reflection, ctx: { projectFacts: ProfileFact[]; userFacts: ProfileFact[]; ep: number | undefined }): Promise<void> {
     const mem = this.mem;
@@ -418,6 +469,7 @@ export class MemorySession {
     ]);
     for (const f of r.facts) {
       if (f.source === "inferred" || f.key === "last session" || known.get(`${f.scope}:${f.key}`) === f.value) continue;
+      if (this.refuse(`${f.key} ${f.value}`)) continue;
       await this.learnFact(f.scope, f.key, f.value);
       learned.push(`${f.scope} · ${f.key}: ${f.value}`);
     }
@@ -436,7 +488,7 @@ export class MemorySession {
     }
     // Fixes: attach to the failure's marker when we know it; otherwise a pitfall of its own.
     const fixed: string[] = [];
-    for (const f of r.fixes) {
+    for (const f of r.fixes.filter((x) => !this.refuse(`${x.problem} ${x.fix}`))) {
       // The fix joins a failure marker only when its problem is clearly that
       // failure; otherwise it is a pitfall of its own, in the model's words.
       let node = matchPain(f.problem, this.pains);
@@ -454,7 +506,7 @@ export class MemorySession {
       }
     }
     if (fixed.length) this.note({ kind: "learned", items: fixed.map((x) => `fix · ${x}`) });
-    if (r.skill) await this.proposeSkill(r.skill);
+    if (r.skill && !this.refuse(`${r.skill.name} ${r.skill.description} ${r.skill.instructions}`)) await this.proposeSkill(r.skill);
   }
 
   /**
@@ -465,6 +517,7 @@ export class MemorySession {
    */
   private async proposeSkill(s: NonNullable<Reflection["skill"]>): Promise<void> {
     const mem = this.mem;
+    if (s.patch) return this.patchSkill(s);
     const candidateLabel = `skill candidate ${s.name}`;
     let candidate = await mem.findLabel(candidateLabel);
     let seen = 1;

@@ -60,5 +60,8 @@ export {
   type ReplaySession,
   type ReplayTool,
 } from "./ingest/index.ts";
-export { MCP_TOOLS, serveMcp, type McpOptions } from "./mcp.ts";
+export { MCP_TOOLS, SESSION_SEARCH_TOOL, serveMcp, type McpOptions } from "./mcp.ts";
 export { contextHook, type HookInput, type HookOptions } from "./hooks.ts";
+export { unsafeMemory } from "./safety.ts";
+export { describeSessionHits, SessionIndex, type SessionHit, type SessionSource } from "./sessions.ts";
+export { curateSkills, type CurateOptions, type SkillStatus } from "./curator.ts";

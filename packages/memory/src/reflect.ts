@@ -70,6 +70,8 @@ export interface DigestInput {
   tools: readonly ToolEvent[];
   files: readonly string[];
   signals: readonly string[];
+  /** Skills the agent read and followed in this run, as they stood. */
+  skills?: readonly { name: string; body: string }[];
 }
 
 /** One run, condensed and grounded. Bounded so a long run costs a bounded call. */
@@ -96,7 +98,10 @@ export function digest(d: DigestInput, max = 9000): string {
   if (d.files.length) parts.push("", `FILES CHANGED: ${d.files.slice(0, 30).join(", ")}`);
   if (d.signals.length) parts.push("", "THE USER SAID IN APPROVAL DIALOGS:", ...d.signals.map((s) => `- ${s}`));
   const all = parts.join("\n");
-  return all.length > max ? `${all.slice(0, max)}\n…` : all;
+  const run = all.length > max ? `${all.slice(0, max)}\n…` : all;
+  // Skills have their own allowance after the run: a long run must not crowd out what a patch needs.
+  if (!d.skills?.length) return run;
+  return [run, "", "SKILLS FOLLOWED (as they stood):", ...d.skills.slice(0, 3).map((s) => `--- ${s.name}\n${clip(s.body, 1500)}`)].join("\n");
 }
 
 export const REFLECT_PROMPT = `You maintain the long-term memory of Mnemo, a coding agent. Read one run of a session and return JSON only.
@@ -105,7 +110,7 @@ export const REFLECT_PROMPT = `You maintain the long-term memory of Mnemo, a cod
   "facts": [{"scope": "project"|"user", "key": "...", "value": "...", "source": "user"|"observed"|"inferred"}],
   "episode": {"goal": "...", "outcome": "done"|"partial"|"failed"|"abandoned", "done": "...", "decisions": ["..."], "open": ["..."]},
   "fixes": [{"problem": "...", "fix": "..."}],
-  "skill": null | {"name": "kebab-case", "scope": "project"|"user", "description": "when to use it", "instructions": "markdown steps", "explicit": true|false}
+  "skill": null | {"name": "kebab-case", "scope": "project"|"user", "description": "when to use it", "instructions": "markdown steps", "explicit": true|false, "patch": true|false, "reason": "..."}
 }
 
 facts — only DURABLE knowledge still true next week, at most 5 per run: the ones a future session in this project would most regret not knowing:
@@ -122,6 +127,7 @@ facts — only DURABLE knowledge still true next week, at most 5 per run: the on
 episode — this session's record, in plain sentences: what the user wanted, how it ended, what was actually done (files, commands), choices made and why, what is left open. Base it ONLY on the transcript and tool calls.
 fixes — for each failure that was later resolved: the problem in a few words and the concrete fix (a command, a change). At most 3. Skip failures that were not resolved, and slips in the agent's own tool use (an edit whose old text did not match, a file changed since it was read, a mistyped path it then corrected): they teach nothing about the project.
 skill — propose one ONLY if the run demonstrated a multi-step procedure (3+ steps) likely to be repeated (setup, release, deploy, migration, a debugging routine), or the user asked to remember how to do something (then "explicit": true). Otherwise null.
+  A skill listed under SKILLS FOLLOWED that proved wrong or incomplete in this run — a step failed and something else worked, or the user corrected it — is returned under its own name with "patch": true, a "reason" (what went wrong), and the complete corrected instructions: lessons, not a log of this run. Patch only on such evidence; a skill that worked is left alone.
 Use empty lists when there is nothing. Output the JSON object and nothing else.`;
 
 export interface LearnedFact {
@@ -145,6 +151,9 @@ export interface SkillProposal {
   description: string;
   instructions: string;
   explicit: boolean;
+  /** An existing skill corrected by what this run showed. */
+  patch?: boolean;
+  reason?: string;
 }
 
 export interface Reflection {
@@ -204,6 +213,8 @@ export function parseReflection(answer: string): Reflection {
           description: str(k.description, 300),
           instructions: str(k.instructions, 6000),
           explicit: k.explicit === true,
+          patch: k.patch === true,
+          reason: str(k.reason, 300),
         }
       : undefined;
   return { facts, episode, fixes, skill };

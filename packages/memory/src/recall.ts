@@ -11,7 +11,7 @@ export const DIRECTIVE = [
   "You have a persistent memory that outlives this conversation. What it knows about this project and this user is below; anything else relevant to a message arrives with that message.",
   "- Treat recalled items as candidates, not facts: use what fits, ignore what does not.",
   "- When you learn something durable (a convention, a command, a preference, a decision, a pitfall), store it with memory_remember. Use a short stable key; the same key again replaces the old value.",
-  "- Search with memory_search before saying you do not know something about this project.",
+  "- Search with memory_search before saying you do not know something about this project; when the user refers to earlier work (\"like last time\", \"the bug we fixed\"), session_search finds what was actually said and run.",
   "- A recalled pitfall's fix comes first: apply it before the command it is about instead of reproducing the failure.",
   "- Open items from the last session are agreed next steps: when the user asks to continue, do them.",
   "- Remember only what stays true. Work deferred to later, or an instruction tied to now (\"not yet\", \"until next session\"), is not a fact: the session record already carries open work.",
