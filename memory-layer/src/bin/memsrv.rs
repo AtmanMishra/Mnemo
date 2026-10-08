@@ -11,7 +11,7 @@ use memory_layer::search::{
     ann_requested, build_vectors, live_nodes, plan_search, route_query, search_with_path,
     SeedPath, SearchOpts,
 };
-use memory_layer::cache::{normalize_query, touched_nodes, SearchCache, SearchKey, SEARCH_CACHE_CAP};
+use memory_layer::cache::{normalize_query, SearchCache, SearchKey, SEARCH_CACHE_CAP};
 use memory_layer::consolidate::consolidate;
 use memory_layer::steering::{reinforce, steer, Correction};
 use memory_layer::store::StoreData;
@@ -83,53 +83,44 @@ fn main() {
     load_dotenv();
 
     let mut s = StoreData::new();
-    // ab99acb1: tolerant load. A corrupt/partial line costs that line only;
-    // the damage is reported, never silently zeroed. Only a genuine I/O
-    // error on the journal file itself starts empty (and says so loudly).
-    let report = match Journal::read_all_reported(&jpath) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("[memsrv] journal read failed ({e}); starting from EMPTY memory");
-            Default::default()
-        }
-    };
     let mut clock: Millis = 1_700_000_000_000;
-    let mut skipped_apply = 0usize;
-    for op in &report.ops {
-        if let Err(e) = s.apply(op) {
-            eprintln!("[memsrv] skipping unappliable op: {e}");
-            skipped_apply += 1;
-        }
-        clock = clock.max(op_at(op) + 1);
-    }
-    if report.skipped > 0 {
-        eprintln!("[memsrv] quarantined {} corrupt journal line(s) to {jpath}.corrupt — check it, never silent amnesia", report.skipped);
-    }
-    if skipped_apply > 0 {
-        eprintln!("[memsrv] skipped {} unappliable op(s) (id collisions / missing refs)", skipped_apply);
-    }
     let mut journal = match Journal::open(&jpath) {
         Ok(j) => j,
         Err(e) => { eprintln!("[memsrv] cannot open journal {jpath}: {e}"); std::process::exit(1); }
+    };
+    // F1: several memsrv processes may serve one journal (two Mnemo windows).
+    // Every request runs under this exclusive lock and first applies whatever
+    // the others appended, so this store is current before it reads or
+    // allocates an id. Without it, two stale stores both handed out node 1.
+    // The load itself is the first sync (tolerant: ab99acb1 — a corrupt line
+    // costs that line only, and is reported).
+    let mut lock = match Journal::lock_file(&jpath) {
+        Ok(f) => fd_lock::RwLock::new(f),
+        Err(e) => { eprintln!("[memsrv] cannot open journal lock for {jpath}: {e}"); std::process::exit(1); }
+    };
+    let mut offset: u64 = 0;
+    // ML-1: in-memory LRU for search results, keyed on the resolved inputs
+    // (normalized query, area filter, k). F2: cleared on every write, own or
+    // foreign — a new node can outrank every cached hit without touching one.
+    let mut search_cache: SearchCache<(Vec<serde_json::Value>, Vec<NodeId>)> =
+        SearchCache::new(SEARCH_CACHE_CAP);
+    let loaded = {
+        let _guard = match lock.write() {
+            Ok(g) => g,
+            Err(e) => { eprintln!("[memsrv] cannot lock journal {jpath}: {e}"); std::process::exit(1); }
+        };
+        sync(&jpath, &mut offset, &mut s, &mut clock, &mut search_cache)
     };
 
     let embedder: Arc<dyn Embedder> = match OpenRouterEmbedder::from_env(Path::new("data")) {
         Some(e) => { eprintln!("[memsrv] embedder=openrouter ({})", e.model_name()); Arc::new(e) }
         None => { eprintln!("[memsrv] embedder=hashing (no OPENROUTER_API_KEY)"); Arc::new(HashingEmbedder) }
     };
-    eprintln!("[memsrv] ready: {jpath} ({} ops)", report.ops.len());
+    eprintln!("[memsrv] ready: {jpath} ({loaded} ops)");
 
     let stdin = std::io::stdin();
     let mut reader = stdin.lock();
     let mut out = std::io::stdout();
-    // ML-1: in-memory LRU for search results. Keyed on the resolved inputs
-    // (normalized query, area filter, k); bounded; no TTL. A hit returns
-    // exactly what the uncached path would — it sits after scoring. The
-    // value carries the hit node ids so journal ops touching a node can
-    // invalidate the keys that reference it (stale reads ARE the trigger
-    // ML-1 names; mark_useful must be observable on the next identical query).
-    let mut search_cache: SearchCache<(Vec<serde_json::Value>, Vec<NodeId>)> =
-        SearchCache::new(SEARCH_CACHE_CAP);
     // e8e7d9e2 + f7c2c763: read BYTES, not lines, with a hard frame cap.
     // `lines()` yields Err on a non-UTF8 frame and the old loop `break`-ed
     // on any Err — one bad byte stream killed the sidecar (the pi extension
@@ -174,8 +165,19 @@ fn main() {
         let params = req.get("params").cloned().unwrap_or(json!({}));
 
         // bump logical clock so every op is strictly newer than the last
-        clock += 1;
-        let reply = handle(&method, &params, &mut s, &mut journal, embedder.as_ref(), &mut clock, &mut search_cache);
+        let reply = {
+            let guard = lock.write();
+            if let Err(e) = &guard {
+                eprintln!("[memsrv] journal lock failed ({e}); serving without other writers' updates");
+            }
+            sync(&jpath, &mut offset, &mut s, &mut clock, &mut search_cache);
+            clock += 1;
+            let reply = handle(&method, &params, &mut s, &mut journal, embedder.as_ref(), &mut clock, &mut search_cache);
+            // our appends moved the end of the journal; nobody else's could
+            // have, because we hold the lock
+            if let Ok(meta) = std::fs::metadata(&jpath) { offset = meta.len(); }
+            reply
+        };
         match reply {
             Ok(result) => write_msg(&mut out, &id, true, &result),
             Err(err) => write_msg(&mut out, &id, false, &json!(err)),
@@ -191,6 +193,44 @@ fn write_msg(out: &mut dyn Write, id: &serde_json::Value, ok: bool, body: &serde
 }
 fn write_err(out: &mut dyn Write, id: &serde_json::Value, err: &str) {
     write_msg(out, id, false, &json!(err));
+}
+
+/// Apply everything appended to the journal since `offset` (by this or any
+/// other process); returns how many ops. A foreign write can change any
+/// ranking, so the search cache is cleared when there was one.
+fn sync(
+    jpath: &str,
+    offset: &mut u64,
+    s: &mut StoreData,
+    clock: &mut Millis,
+    cache: &mut SearchCache<(Vec<serde_json::Value>, Vec<NodeId>)>,
+) -> usize {
+    let (report, next) = match Journal::read_from(jpath, *offset) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[memsrv] journal read failed ({e}); serving what is already loaded");
+            return 0;
+        }
+    };
+    let mut skipped = 0usize;
+    for op in &report.ops {
+        if let Err(e) = s.apply(op) {
+            eprintln!("[memsrv] skipping unappliable op: {e}");
+            skipped += 1;
+        }
+        *clock = (*clock).max(op_at(op) + 1);
+    }
+    if report.skipped > 0 {
+        eprintln!("[memsrv] quarantined {} corrupt journal line(s) to {jpath}.corrupt — check it, never silent amnesia", report.skipped);
+    }
+    if skipped > 0 {
+        eprintln!("[memsrv] skipped {skipped} unappliable op(s) (id collisions / missing refs)");
+    }
+    if !report.ops.is_empty() {
+        cache.clear();
+    }
+    *offset = next;
+    report.ops.len()
 }
 
 fn op_at(op: &Op) -> Millis {
@@ -260,15 +300,10 @@ fn handle(
 ) -> Result<serde_json::Value, String> {
     let mut apply = |s: &mut StoreData, j: &mut Journal, op: Op| -> Result<(), String> {
         s.apply(&op)?;
-        j.append(&op).map_err(|e| format!("journal write failed: {e}"))?;
-        // ML-1 invalidation + cddd21c0: an op touching a node drops every
-        // cached search result that references it, so re-running the same
-        // query observes the mutation. Edge ops (Unlink/Reweight/
-        // RecordOutcome) resolve their endpoints through the store — they
-        // change via_graph scores that cached hits carry.
-        for node in touched_nodes(s, &op) {
-            cache.retain(|(_, nodes)| !nodes.contains(&node));
-        }
+        j.append_held(&op).map_err(|e| format!("journal write failed: {e}"))?;
+        // F2: any write can change ranking (a new node can outrank every
+        // cached hit without touching one), so the cache is cleared, not pruned.
+        cache.clear();
         Ok(())
     };
     match method {

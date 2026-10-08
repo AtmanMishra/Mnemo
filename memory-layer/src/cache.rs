@@ -93,6 +93,13 @@ impl<V> SearchCache<V> {
         self.order.retain(|k| !doomed.contains(k));
     }
 
+    /// Drop everything. Any write can change ranking — a new node can outrank
+    /// every cached hit without touching any of them — so writes clear.
+    pub fn clear(&mut self) {
+        self.map.clear();
+        self.order.clear();
+    }
+
     pub fn len(&self) -> usize {
         self.map.len()
     }
