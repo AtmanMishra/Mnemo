@@ -20,6 +20,7 @@ import { MemoryService } from "@mnemo/memory";
 import { createHost, settleBackground, type Mode } from "../src/extensions/host.ts";
 import { mnemoExtensions } from "../src/extensions/index.ts";
 import { App } from "../src/ui/App.tsx";
+import { runMemoryCommand } from "../src/memory-cli.ts";
 
 const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
 
@@ -28,6 +29,7 @@ usage
   mnemo -c, --continue     continue the most recent session here
   mnemo -p "<prompt>"      answer once and print the result (no interface)
   mnemo doctor             what is installed, configured and reachable
+  mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
 
 options
@@ -119,6 +121,11 @@ async function doctor(home: string, dir: string): Promise<number> {
 }
 
 async function main(): Promise<number> {
+  if (process.argv[2] === "memory") {
+    const home = mnemoHome();
+    pointPiAt(agentDir(home));
+    return runMemoryCommand(process.argv.slice(3), home, agentDir(home));
+  }
   const args = parse(process.argv.slice(2));
   if (args.help) return console.log(USAGE), 0;
   if (args.version) return console.log(pkg.version), 0;

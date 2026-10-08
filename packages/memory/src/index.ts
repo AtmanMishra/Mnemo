@@ -49,3 +49,14 @@ export {
   type Source,
 } from "./session.ts";
 export { renderSkill, skillPath, writeSkill, type SkillScope } from "./skills.ts";
+export {
+  claudeCodeSessions,
+  ingestClaudeCode,
+  parseClaudeCode,
+  replay,
+  type IngestOptions,
+  type IngestReport,
+  type ReplayRun,
+  type ReplaySession,
+  type ReplayTool,
+} from "./ingest/index.ts";

@@ -25,6 +25,7 @@
 import * as path from "node:path";
 import { Credit } from "./credit.ts";
 import { projectIdentity, type ProjectIdentity } from "./project.ts";
+import { redact } from "./redact.ts";
 import { describeHit, hitLine, profileBlock, recallMessage } from "./recall.ts";
 import { digest, parseReflection, REFLECT_PROMPT, worthReflecting, type Reflection, type ToolEvent } from "./reflect.ts";
 import { factValue, factsOf, type MemoryService, type ProfileFact } from "./service.ts";
@@ -282,7 +283,8 @@ export class MemorySession {
     const known = [...projectFacts.map((f) => `project · ${f.key}: ${f.value}`), ...userFacts.map((f) => `user · ${f.key}: ${f.value}`)];
     let answer: string;
     try {
-      answer = await this.o.reflect(REFLECT_PROMPT, `KNOWN:\n${known.join("\n") || "(nothing yet)"}\n\nRUN:\n${digest(digestInput)}`);
+      // Redacted: the run may hold a pasted key, and the reflection model may be a third party's.
+      answer = await this.o.reflect(REFLECT_PROMPT, redact(`KNOWN:\n${known.join("\n") || "(nothing yet)"}\n\nRUN:\n${digest(digestInput)}`));
     } catch (error) {
       this.note({ kind: "failed", text: `Reflection failed: ${error instanceof Error ? error.message : String(error)}` });
       return;

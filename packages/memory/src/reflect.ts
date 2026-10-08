@@ -108,17 +108,18 @@ export const REFLECT_PROMPT = `You maintain the long-term memory of Mnemo, a cod
   "skill": null | {"name": "kebab-case", "scope": "project"|"user", "description": "when to use it", "instructions": "markdown steps", "explicit": true|false}
 }
 
-facts — only DURABLE knowledge still true next week:
+facts — only DURABLE knowledge still true next week, at most 5 per run: the ones a future session in this project would most regret not knowing:
   - scope "user": how this person likes to work (true in every project)
   - scope "project": this codebase's stack, commands, conventions, structure, decisions, pitfalls
   - source "user" if the user stated it, "observed" if a tool result showed it, "inferred" if you are guessing
   - corrections from the user ("no, use X", "don't do Y", a refusal with a reason) are the most important facts
-  - short stable lowercase keys ("package manager", "test command"); reuse a key from KNOWN to update it
+  - short stable lowercase keys ("package manager", "test command"); when a KNOWN fact is about the same thing, reuse its key so the new value replaces it
+  - describe how things stand at the END of the run: if the run moved, renamed or replaced something, the old state is not a fact
   - never secrets, tokens, passwords or personal data; nothing about this one task's specifics
   - never what a quick look at the repository shows (a file's contents, an empty scripts object, what a module exports)
   - never deferred work or the state of this task ("not implemented yet", "X still needs adding", "do not do Y until later"): that is episode.open
 episode — this session's record, in plain sentences: what the user wanted, how it ended, what was actually done (files, commands), choices made and why, what is left open. Base it ONLY on the transcript and tool calls.
-fixes — for each failure that was later resolved: the problem in a few words and the concrete fix (a command, a change). Skip failures that were not resolved.
+fixes — for each failure that was later resolved: the problem in a few words and the concrete fix (a command, a change). At most 3. Skip failures that were not resolved, and slips in the agent's own tool use (an edit whose old text did not match, a file changed since it was read, a mistyped path it then corrected): they teach nothing about the project.
 skill — propose one ONLY if the run demonstrated a multi-step procedure (3+ steps) likely to be repeated (setup, release, deploy, migration, a debugging routine), or the user asked to remember how to do something (then "explicit": true). Otherwise null.
 Use empty lists when there is nothing. Output the JSON object and nothing else.`;
 
