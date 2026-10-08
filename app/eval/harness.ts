@@ -19,7 +19,7 @@ import { MemoryService } from "@mnemo/memory";
 import { createHost, settleBackground, type Mode } from "../src/extensions/host.ts";
 import { mnemoExtensions } from "../src/extensions/index.ts";
 import { hermesExtension, HermesStore } from "./hermes.ts";
-import { findMemsrv, journalPath } from "../src/runtime/paths.ts";
+import { findMemsrv, journalPath, skillsDir } from "../src/runtime/paths.ts";
 import type { Block } from "../src/ui/store.ts";
 
 export interface EvalModel {
@@ -107,7 +107,7 @@ export async function runSession(o: SessionOptions, prompts: string[]): Promise<
     modelRuntime: o.model.modelRuntime,
     model: o.model.model,
     sessionManager: SessionManager.inMemory(o.cwd),
-    extensions: [...mnemoExtensions(host), ...(o.hermes ? [hermesExtension(host, new HermesStore(path.join(o.home, "hermes", "memories")))] : [])],
+    extensions: [...mnemoExtensions(host), ...(o.hermes ? [hermesExtension(host, new HermesStore(path.join(o.home, "hermes", "memories")), skillsDir(o.home))] : [])],
   });
   const controller = new Controller(runtime, { exit: () => {}, host });
   await controller.bind();

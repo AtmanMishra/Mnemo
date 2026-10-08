@@ -76,6 +76,7 @@ export async function runScenario(s: Scenario, withMemory: boolean, repeat: numb
     dirs,
     sessions,
     memory,
+    home,
     read: (project, file) => {
       try {
         return fs.readFileSync(path.join(dirs[project]!, file), "utf8");

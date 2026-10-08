@@ -43,3 +43,26 @@ test("the snapshot is frozen for the session: a write shows up in the next sessi
   expect(system(3)).toContain("prefers tabs");
   expect(system(3)).toContain("repo uses make"); // the background review's write
 });
+
+test("the background review creates and patches skills where the agent loads them; a patch needs an existing skill", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "hermes-skill-home-"));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "hermes-skill-cwd-"));
+  const { modelRuntime, faux } = await createFaux(path.join(home, "agent"));
+  const review = (skills: object[]) => fauxAssistantMessage(fauxText(JSON.stringify({ ops: [], skills })));
+  faux.setResponses([
+    fauxAssistantMessage(fauxText("released")),
+    review([
+      { action: "create", name: "release", description: "Cut a release", instructions: "1. npm run build\n2. npm publish" },
+      { action: "patch", name: "no-such-skill", description: "x", instructions: "x" },
+    ]),
+    fauxAssistantMessage(fauxText("released again")),
+    review([{ action: "patch", name: "release", description: "Cut a release", instructions: "1. npm run build\n2. npm run sign\n3. npm publish", reason: "publish needs a signature" }]),
+  ]);
+  const model = { modelRuntime, model: faux.getModel(), label: "faux", faux };
+  await runSession({ home, cwd, model, memory: false, hermes: true }, ["cut a release of the package for me please"]);
+  const skill = path.join(home, "agent", "skills", "release", "SKILL.md");
+  expect(fs.readFileSync(skill, "utf8")).toContain("2. npm publish");
+  expect(fs.existsSync(path.join(home, "agent", "skills", "no-such-skill"))).toBe(false);
+  await runSession({ home, cwd, model, memory: false, hermes: true }, ["cut another release of the package please"]);
+  expect(fs.readFileSync(skill, "utf8")).toContain("2. npm run sign");
+});

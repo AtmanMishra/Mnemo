@@ -16,16 +16,22 @@
  *     refused
  *   - a background review after the session (Hermes reviews every N user
  *     turns and flushes on exit; these eval sessions are one prompt long, so
- *     it runs at the end of each — the generous reading)
+ *     it runs at the end of each — the generous reading) covering memory AND
+ *     skills, as Hermes' review does (agent/background_review.py): it may
+ *     create a skill or patch an existing one, "actively", treating user
+ *     corrections as first-class signals, "lessons, not logs"; skills are
+ *     written where the agent loads them (the personal skills directory,
+ *     Hermes' ~/.hermes/skills)
  *
- * Not reproduced: session search (FTS5), Honcho, the skill curator. Skills
- * are the same in both arms (Mnemo's create_skill tool is present in each).
+ * Not reproduced: session search (FTS5), Honcho, the skill curator, the
+ * creation nudge every 15 tool iterations (these sessions are short). The
+ * create_skill tool the agent can call itself is the same in every arm.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { textOf } from "@mnemo/memory";
+import { renderSkill, textOf, writeSkill } from "@mnemo/memory";
 import type { Host } from "../src/extensions/host.ts";
 import { inBackground } from "../src/extensions/host.ts";
 
@@ -94,11 +100,23 @@ const GUIDANCE = [
   "Save proactively with the memory tool whenever you learn something durable: user preferences, corrections, project conventions, commands that work, pitfalls and their fixes. Keep entries short; memory is small, so replace or remove stale entries when it fills up.",
 ].join("\n");
 
-const REVIEW = `You maintain an AI coding agent's persistent memory: MEMORY.md (agent notes: environment, project conventions, commands, lessons, pitfalls) and USER.md (the user's preferences). Review the conversation and consider what to save. Return JSON only:
-{"ops": [{"target": "memory"|"user", "action": "add"|"replace"|"remove", "content": "...", "old_text": "..."}]}
-Save durable facts and lessons a future session would need; skip anything already saved. Keep entries short. Memory is capped (MEMORY.md ${LIMITS.memory} chars, USER.md ${LIMITS.user} chars): when it is near full, replace or remove stale entries. Use {"ops": []} when nothing is worth saving.`;
+const REVIEW = `You maintain an AI coding agent's persistent memory and skills. Memory: MEMORY.md (agent notes: environment, project conventions, commands, lessons, pitfalls) and USER.md (the user's preferences). Skills: SKILL.md procedures the agent loads when a task matches. Review the conversation and decide what to save. Return JSON only:
+{"ops": [{"target": "memory"|"user", "action": "add"|"replace"|"remove", "content": "...", "old_text": "..."}],
+ "skills": [{"action": "create"|"patch", "name": "kebab-case", "description": "when to use it", "instructions": "the full markdown steps", "reason": "..."}]}
+Memory: save durable facts and lessons a future session would need; skip anything already saved; keep entries short. Memory is capped (MEMORY.md ${LIMITS.memory} chars, USER.md ${LIMITS.user} chars): when it is near full, replace or remove stale entries.
+Skills: be ACTIVE — most sessions should produce at least one skill update. Save multi-step workflows, error recoveries and corrected approaches as skills; patch an existing skill (give its full corrected instructions) when the session showed it wrong or incomplete. User corrections are first-class signals. Write class-level skills: lessons, not logs of this session.
+Use empty lists when there is nothing to save.`;
 
-export function hermesExtension(host: Host, store: HermesStore) {
+/** The skills the agent loads (Hermes' ~/.hermes/skills): what the review sees, and where it writes. */
+export function skillList(dir: string): { name: string; body: string }[] {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .filter((n) => fs.existsSync(path.join(dir, n, "SKILL.md")))
+    .map((name) => ({ name, body: fs.readFileSync(path.join(dir, name, "SKILL.md"), "utf8") }));
+}
+
+export function hermesExtension(host: Host, store: HermesStore, skillsDir?: string) {
   return (pi: ExtensionAPI): void => {
     let frozen: string | undefined;
     pi.registerTool(
@@ -140,17 +158,40 @@ export function hermesExtension(host: Host, store: HermesStore) {
       inBackground(host, async () => {
         const answer = await host.modelRuntime.completeSimple(
           model,
-          { systemPrompt: REVIEW, messages: [{ role: "user", content: `CURRENT MEMORY:\n${store.snapshot()}\n\nCONVERSATION:\n${transcript}`, timestamp: Date.now() }] },
+          {
+            systemPrompt: REVIEW,
+            messages: [
+              {
+                role: "user",
+                content: `CURRENT MEMORY:\n${store.snapshot()}\n\nCURRENT SKILLS:\n${
+                  skillsDir ? skillList(skillsDir).map((k) => `--- ${k.name}\n${k.body.slice(0, 1200)}`).join("\n") || "(none)" : "(none)"
+                }\n\nCONVERSATION:\n${transcript}`,
+                timestamp: Date.now(),
+              },
+            ],
+          },
           { sessionId },
         );
         if (answer.stopReason === "error") return;
         const json = /\{[\s\S]*\}/.exec(textOf(answer.content))?.[0];
         if (!json) return;
         let ops: { target?: string; action?: string; content?: string; old_text?: string }[] = [];
+        let skills: { action?: string; name?: string; description?: string; instructions?: string; reason?: string }[] = [];
         try {
-          ops = (JSON.parse(json) as { ops?: typeof ops }).ops ?? [];
+          const parsed = JSON.parse(json) as { ops?: typeof ops; skills?: typeof skills };
+          ops = parsed.ops ?? [];
+          skills = parsed.skills ?? [];
         } catch {
           return;
+        }
+        for (const k of skillsDir ? skills.slice(0, 3) : []) {
+          const name = (k.name ?? "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+          if (!name || !k.instructions) continue;
+          const file = path.join(skillsDir!, name, "SKILL.md");
+          if (k.action === "patch" && !fs.existsSync(file)) continue;
+          writeSkill(file, renderSkill(name, k.description ?? name, k.instructions));
+          host.ui?.note({ kind: "skill", text: `${k.action === "patch" ? "patched" : "created"} skill ${name}${k.reason ? `: ${k.reason}` : ""}` });
+          host.ui?.resourcesChanged();
         }
         const done: string[] = [];
         for (const op of ops.slice(0, 8)) {

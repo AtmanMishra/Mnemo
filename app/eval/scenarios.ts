@@ -22,12 +22,15 @@ export interface Ctx {
   dirs: Record<string, string>;
   sessions: SessionResult[];
   memory?: MemoryService;
+  /** The Mnemo home every session ran with (skills, a Hermes-style memory's files). */
+  home: string;
   read(project: string, file: string): string;
 }
 
 export interface Check {
   name: string;
-  kind: "behaviour" | "memory";
+  /** behaviour: what the agent did; memory: Mnemo's memory (Mnemo arm only); knowledge: what any arm stored (skills, memory files). */
+  kind: "behaviour" | "memory" | "knowledge";
   /** true = pass; a string = fail, with the evidence. */
   run(ctx: Ctx): Promise<true | string> | true | string;
 }
@@ -69,6 +72,32 @@ const commands = (s: SessionResult) => s.tools.filter((t) => t.name === "bash").
 async function profile(ctx: Ctx, project: string, scope: "project" | "user") {
   if (!ctx.memory) return [];
   return ctx.memory.profile(scope, projectIdentity(ctx.dirs[project]!).id);
+}
+
+
+/** Every SKILL.md the agent could load afterwards: the repositories' and the personal ones. */
+function skillTexts(ctx: Ctx): string[] {
+  const dirs = [...Object.values(ctx.dirs).map((d) => path.join(d, ".agents", "skills")), path.join(ctx.home, "agent", "skills")];
+  return dirs.flatMap((dir) =>
+    fs.existsSync(dir) ? fs.readdirSync(dir).flatMap((n) => (fs.existsSync(path.join(dir, n, "SKILL.md")) ? [fs.readFileSync(path.join(dir, n, "SKILL.md"), "utf8")] : [])) : [],
+  );
+}
+
+/**
+ * Everything an arm stored for later, as later recall can surface it: skills,
+ * a Hermes-style memory's files, and Mnemo's profile facts and pitfall fixes
+ * — not its raw logs, which record what happened, not what was learned.
+ */
+async function knowledge(ctx: Ctx): Promise<string[]> {
+  const hermes = ["MEMORY.md", "USER.md"].map((f) => path.join(ctx.home, "hermes", "memories", f)).filter((f) => fs.existsSync(f)).map((f) => fs.readFileSync(f, "utf8"));
+  const mnemo: string[] = [];
+  if (ctx.memory)
+    for (const dir of Object.values(ctx.dirs)) {
+      const id = projectIdentity(dir).id;
+      mnemo.push(...(await ctx.memory.profile("project", id)).map((f) => `${f.key}: ${f.value}`));
+      mnemo.push(...(await ctx.memory.search("release publish sign build", 10)).filter((h) => h.area === "Salience" && /fix:/.test(h.state)).map((h) => h.state));
+    }
+  return [...skillTexts(ctx), ...hermes, ...mnemo];
 }
 
 export const SCENARIOS: Scenario[] = [
@@ -368,6 +397,89 @@ export const SCENARIOS: Scenario[] = [
           const r = spawnSync("node", ["--test"], { cwd: dir, encoding: "utf8" });
           return r.status === 0 ? true : `node --test:\n${(r.stdout + r.stderr).split("\n").filter((l) => /^not ok|# (pass|fail)/.test(l)).join("\n")}`;
         },
+      },
+    ],
+  },
+  {
+    name: "procedure-evolves",
+    about: "A procedure learned in one session is corrected when the world changes, and the corrected version is followed afterwards.",
+    projects: {
+      app: (d) => {
+        nodeProject(d, "relay");
+        const pkg = JSON.parse(fs.readFileSync(path.join(d, "package.json"), "utf8"));
+        pkg.scripts = { build: "node scripts/build.mjs", publish: "node scripts/publish.mjs" };
+        write(d, "package.json", JSON.stringify(pkg, null, 2) + "\n");
+        write(d, "src/relay.mjs", `export const relay = (msg) => \`relay:\${msg}\`;\n`);
+        write(
+          d,
+          "scripts/build.mjs",
+          `import { mkdirSync, readFileSync, writeFileSync } from "node:fs";\nconst { version } = JSON.parse(readFileSync("package.json", "utf8"));\nmkdirSync("dist", { recursive: true });\n` +
+            `writeFileSync("dist/relay.js", "// relay " + version + "\\n" + readFileSync("src/relay.mjs", "utf8"));\nconsole.log("built relay " + version);\n`,
+        );
+        write(
+          d,
+          "scripts/publish.mjs",
+          `import { cpSync, existsSync, readFileSync } from "node:fs";\nconst { version } = JSON.parse(readFileSync("package.json", "utf8"));\n` +
+            `if (!existsSync("dist/relay.js") || !readFileSync("dist/relay.js", "utf8").includes(version)) { console.error("error: dist is stale — run npm run build first"); process.exit(1); }\n` +
+            `if (existsSync(".release-policy") && readFileSync(".release-policy", "utf8").includes("signed") && !existsSync("dist/SIGNATURE")) { console.error("error: unsigned build — run npm run sign before npm run publish"); process.exit(1); }\n` +
+            `cpSync("dist", "registry/" + version, { recursive: true });\nconsole.log("published relay " + version);\n`,
+        );
+        write(d, ".gitignore", "dist/\n");
+      },
+    },
+    sessions: [
+      {
+        project: "app",
+        prompts: [
+          "Release a new version of relay: bump the patch version in package.json, run npm run build, then npm run publish, and commit. Remember how to do releases — I will ask again.",
+        ],
+      },
+      {
+        project: "app",
+        // The team changed the process between releases: builds must be signed now.
+        before: (dirs) => {
+          const d = dirs.app!;
+          write(d, ".release-policy", "signed\n");
+          write(d, "scripts/sign.mjs", `import { readFileSync, writeFileSync } from "node:fs";\nimport { createHash } from "node:crypto";\nwriteFileSync("dist/SIGNATURE", createHash("sha256").update(readFileSync("dist/relay.js")).digest("hex"));\nconsole.log("signed dist/relay.js");\n`);
+          const pkg = JSON.parse(fs.readFileSync(path.join(d, "package.json"), "utf8"));
+          pkg.scripts.sign = "node scripts/sign.mjs";
+          write(d, "package.json", JSON.stringify(pkg, null, 2) + "\n");
+          spawnSync("git", ["add", "-A"], { cwd: d });
+          spawnSync("git", ["-c", "user.email=e@x", "-c", "user.name=eval", "commit", "-qm", "require signed releases"], { cwd: d });
+          fs.rmSync(path.join(d, "dist"), { recursive: true, force: true });
+        },
+        prompts: ["Do another release please."],
+      },
+      { project: "app", before: (dirs) => fs.rmSync(path.join(dirs.app!, "dist"), { recursive: true, force: true }), prompts: ["Release again, please."] },
+    ],
+    checks: [
+      {
+        name: "the second release went out despite the new rule",
+        kind: "behaviour",
+        run: (ctx) => (fs.existsSync(path.join(ctx.dirs.app!, "registry", "0.1.2", "SIGNATURE")) ? true : `registry: ${fs.existsSync(path.join(ctx.dirs.app!, "registry")) ? fs.readdirSync(path.join(ctx.dirs.app!, "registry")).join(", ") : "(none)"}`),
+      },
+      {
+        name: "the third release follows the corrected procedure (signed, never refused)",
+        kind: "behaviour",
+        run: (ctx) => {
+          const refused = lastSession(ctx).tools.filter((t) => /^error: unsigned build/m.test(t.output)).length;
+          if (!fs.existsSync(path.join(ctx.dirs.app!, "registry", "0.1.3", "SIGNATURE"))) return "0.1.3 not published signed";
+          return refused === 0 ? true : `refused ${refused} time(s) for an unsigned build`;
+        },
+      },
+      {
+        name: "what was learned includes the signing step",
+        kind: "knowledge",
+        run: async (ctx) => {
+          const stored = await knowledge(ctx);
+          const found = stored.filter((t) => /npm run sign|\bsign(ed|ing)?\b/i.test(t));
+          return found.length ? true : `nothing stored mentions signing (stored: ${stored.length} items)`;
+        },
+      },
+      {
+        name: "the release procedure is a skill",
+        kind: "knowledge",
+        run: (ctx) => (skillTexts(ctx).some((t) => /publish/.test(t)) ? true : `skills: ${skillTexts(ctx).length}`),
       },
     ],
   },
