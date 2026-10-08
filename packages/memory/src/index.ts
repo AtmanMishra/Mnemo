@@ -47,6 +47,7 @@ export {
   type SessionOptions,
   type SkillOffer,
   type Source,
+  VERIFY,
 } from "./session.ts";
 export { renderSkill, skillPath, writeSkill, type SkillScope } from "./skills.ts";
 export {

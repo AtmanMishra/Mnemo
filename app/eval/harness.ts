@@ -84,6 +84,8 @@ export interface SessionOptions {
   /** A Hermes-Agent-style memory instead of Mnemo's (eval/hermes.ts); `memory` must be false. */
   hermes?: boolean;
   mode?: Mode;
+  /** `provider/id` to finish a run on after two failed checks (src/extensions/escalate.ts). */
+  escalate?: string;
   /** Abort a prompt that runs longer than this. */
   promptTimeoutMs?: number;
 }
@@ -100,7 +102,7 @@ export async function runSession(o: SessionOptions, prompts: string[]): Promise<
   const memsrv = o.memory ? findMemsrv(o.home) : undefined;
   if (o.memory && !memsrv) throw new Error("memory requested but memsrv is not built (cd memory-layer && cargo build --release --bin memsrv)");
   const memory = memsrv ? new MemoryService(memsrv, journalPath(o.home)) : undefined;
-  const host = createHost({ home: o.home, agentDir, modelRuntime: o.model.modelRuntime, memory, mode: o.mode ?? "yolo", reflect: o.memory || !!o.hermes });
+  const host = createHost({ home: o.home, agentDir, modelRuntime: o.model.modelRuntime, memory, mode: o.mode ?? "yolo", reflect: o.memory || !!o.hermes, escalate: o.escalate });
   const runtime = await startRuntime({
     cwd: o.cwd,
     agentDir,

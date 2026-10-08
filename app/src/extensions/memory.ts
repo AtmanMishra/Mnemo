@@ -53,6 +53,9 @@ export function memoryExtension(host: Host) {
         },
         skillsChanged: () => host.ui?.resourcesChanged(),
       }));
+    host.onModelChanged = async (model, reason) => {
+      await session?.modelChanged(model, reason);
+    };
 
     pi.registerTool(
       defineTool({

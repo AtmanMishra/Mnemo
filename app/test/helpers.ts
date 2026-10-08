@@ -27,6 +27,8 @@ export interface EnvOptions {
   home?: string;
   cwd?: string;
   persistent?: boolean;
+  /** `provider/id` to escalate to; registers a second faux model, `mnemo-demo/demo-strong`. */
+  escalate?: string;
 }
 
 export async function mnemoEnv(o: EnvOptions = {}) {
@@ -35,9 +37,9 @@ export async function mnemoEnv(o: EnvOptions = {}) {
   fs.mkdirSync(agentDir, { recursive: true });
   process.env.PI_CODING_AGENT_DIR = agentDir;
   const cwd = o.cwd ?? createDemoProject();
-  const { modelRuntime, faux } = await createFaux(agentDir);
+  const { modelRuntime, faux } = await createFaux(agentDir, { strong: !!o.escalate });
   const memory = o.memory && MEMSRV ? new MemoryService(MEMSRV, path.join(home, "memory", "journal.jsonl")) : undefined;
-  const host = createHost({ home, agentDir, modelRuntime, memory, mode: o.mode, reflect: o.reflect ?? false, verify: o.verify ?? false });
+  const host = createHost({ home, agentDir, modelRuntime, memory, mode: o.mode, reflect: o.reflect ?? false, verify: o.verify ?? false, escalate: o.escalate });
   const runtime = await startRuntime({
     cwd,
     agentDir,

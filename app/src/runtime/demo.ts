@@ -23,10 +23,14 @@ export interface Faux {
   faux: FauxProviderHandle;
 }
 
-export async function createFaux(agentDir: string, options: { tokensPerSecond?: number } = {}): Promise<Faux> {
+export async function createFaux(agentDir: string, options: { tokensPerSecond?: number; strong?: boolean } = {}): Promise<Faux> {
   const faux = fauxProvider({
     provider: "mnemo-demo",
-    models: [{ id: "demo-model", name: "demo", reasoning: true, contextWindow: 200_000 }],
+    models: [
+      { id: "demo-model", name: "demo", reasoning: true, contextWindow: 200_000 },
+      // A second model to escalate to, for the tests that need one.
+      ...(options.strong ? [{ id: "demo-strong", name: "demo strong", reasoning: true, contextWindow: 200_000 }] : []),
+    ],
     tokensPerSecond: options.tokensPerSecond,
   });
   const modelRuntime = await ModelRuntime.create({ authPath: path.join(agentDir, "auth.json"), modelsPath: null });

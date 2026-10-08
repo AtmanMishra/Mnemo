@@ -49,6 +49,12 @@ export interface Host {
   reflect: boolean;
   /** Send a run that changed code and checked nothing back once, to verify. */
   verify: boolean;
+  /** `provider/id` of a stronger model a run moves to when its checks keep failing. */
+  escalate?: string;
+  /** Every escalation this session made, oldest first. */
+  escalations: { from: string; to: string; reason: string }[];
+  /** Set by the memory extension: the session record learns the model changed. */
+  onModelChanged?: (model: string, reason: string) => Promise<void>;
   /** Absent in headless runs (`-p`). */
   ui?: HostUi;
   /** Work the extensions started and did not wait for (reflection). Tests await it. */
@@ -85,6 +91,7 @@ export interface HostOptions {
   mode?: Mode;
   reflect?: boolean;
   verify?: boolean;
+  escalate?: string;
   maxDepth?: number;
   /** Injected by tests; the default probes for a Python that actually runs. */
   python?: () => string | undefined;
@@ -108,6 +115,8 @@ export function createHost(o: HostOptions): Host {
     mode: o.mode ?? "default",
     reflect: o.reflect ?? true,
     verify: o.verify ?? true,
+    escalate: o.escalate,
+    escalations: [],
     background: new Set(),
     signals: [],
   };

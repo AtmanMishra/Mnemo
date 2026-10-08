@@ -40,6 +40,7 @@ options
   --no-memory              run without the memory layer
   --no-reflect             do not extract facts after each run
   --no-verify              do not send a run that changed code back to run a check
+  --escalate <provider/id> after two failed checks in a run, finish it on this model ($MNEMO_ESCALATE_MODEL)
   --dump                   render one frame (after the demo turn, with --demo) and exit
   --no-motion              no animation
   --no-boot                skip the launch sequence
@@ -63,6 +64,7 @@ interface Args {
   memory: boolean;
   reflect: boolean;
   verify: boolean;
+  escalate?: string;
   mode: Mode;
   continueRecent: boolean;
   print?: string;
@@ -70,7 +72,7 @@ interface Args {
 }
 
 function parse(argv: string[]): Args {
-  const a: Args = { help: false, version: false, demo: false, dump: false, motion: true, boot: true, inline: false, intro: false, memory: true, reflect: true, verify: true, mode: "default", continueRecent: false };
+  const a: Args = { help: false, version: false, demo: false, dump: false, motion: true, boot: true, inline: false, intro: false, memory: true, reflect: true, verify: true, escalate: process.env.MNEMO_ESCALATE_MODEL || undefined, mode: "default", continueRecent: false };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i]!;
     if (v === "doctor" && i === 0) a.command = "doctor";
@@ -85,6 +87,7 @@ function parse(argv: string[]): Args {
     else if (v === "--no-memory") a.memory = false;
     else if (v === "--no-reflect") a.reflect = false;
     else if (v === "--no-verify") a.verify = false;
+    else if (v === "--escalate") a.escalate = argv[++i];
     else if (v === "--plan") a.mode = "plan";
     else if (v === "--yolo") a.mode = "yolo";
     else if (v === "-c" || v === "--continue") a.continueRecent = true;
@@ -193,7 +196,7 @@ async function main(): Promise<number> {
 
   const memsrv = args.memory ? findMemsrv(home) : undefined;
   const memory = memsrv ? new MemoryService(memsrv, journal) : undefined;
-  const host = createHost({ home, agentDir: dir, modelRuntime, memory, mode: args.mode, reflect: args.reflect, verify: args.verify });
+  const host = createHost({ home, agentDir: dir, modelRuntime, memory, mode: args.mode, reflect: args.reflect, verify: args.verify, escalate: args.escalate });
   const runtime = await startRuntime({
     cwd,
     agentDir: dir,

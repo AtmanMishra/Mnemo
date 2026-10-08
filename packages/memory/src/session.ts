@@ -161,13 +161,25 @@ export class MemorySession {
   /** Pitfalls already pointed out in this session: the guard speaks once each. */
   private readonly warned = new Set<number>();
 
-  constructor(private readonly o: SessionOptions) {
+  constructor(private o: SessionOptions) {
     this.mem = o.memory;
     this.identity = projectIdentity(o.cwd);
   }
 
   get episode(): number | undefined {
     return this.episodeId;
+  }
+
+  /**
+   * The model working this session changed (an escalation): what is learned
+   * from here on is attributed to it, and the episode says it happened.
+   */
+  async modelChanged(model: string, reason: string): Promise<void> {
+    if (this.o.source) this.o.source = { ...this.o.source, model };
+    if (this.episodeId !== undefined) {
+      await this.mem.fact(this.episodeId, "escalated", `${model}: ${reason}`).catch(() => {});
+      await this.mem.log(this.episodeId, "escalated", `${model}: ${reason}`).catch(() => {});
+    }
   }
 
   private note(n: MemoryNote): void {
