@@ -345,3 +345,25 @@ mt("/forget retires a fact: history keeps it, recall never shows it again", asyn
   await e.idle();
   expect(seen[0]).not.toContain("yarn");
 });
+
+mt("the reflection call carries the session id, and a failed reflection is reported, not swallowed", async () => {
+  const e = await env();
+  // Like OpenCode: a call without a session id is refused.
+  const runtime = e.host.modelRuntime;
+  const original = runtime.completeSimple.bind(runtime);
+  const ids: (string | undefined)[] = [];
+  let refuse = false;
+  runtime.completeSimple = async (model, context, options) => {
+    ids.push(options?.sessionId);
+    const answer = await original(model, context, options);
+    return refuse ? { ...answer, stopReason: "error", errorMessage: "400 MissingSessionID" } : answer;
+  };
+  e.faux.setResponses([say("noted"), reflect({}), say("noted again"), say("{}")]);
+  await e.controller.submit("remember that we always use pnpm in this repository");
+  await e.idle();
+  expect(ids).toEqual([e.controller.session.sessionManager.getSessionId()]);
+  refuse = true;
+  await e.controller.submit("remember that we never use yarn in this repository");
+  await e.idle();
+  expect(texts(e.controller)).toContain("notice: Reflection failed: 400 MissingSessionID");
+});

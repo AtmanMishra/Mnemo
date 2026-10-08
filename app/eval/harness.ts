@@ -153,7 +153,7 @@ export async function runSession(o: SessionOptions, prompts: string[]): Promise<
     tokens: { input: stats.tokens.input, output: stats.tokens.output, cacheRead: stats.tokens.cacheRead },
     cost: stats.cost,
     ms: Date.now() - started,
-    errors: [...errors, ...blocks.filter((b) => b.kind === "notice" && b.tone === "error").map(blockText)],
+    errors: [...errors, ...blocks.filter((b) => b.kind === "notice" && b.tone !== "info").map(blockText)],
   };
   await runtime.dispose();
   memory?.stop();

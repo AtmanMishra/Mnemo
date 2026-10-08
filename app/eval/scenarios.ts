@@ -150,29 +150,34 @@ export const SCENARIOS: Scenario[] = [
         name: "later session runs setup before the first test run",
         kind: "behaviour",
         run: (ctx) => {
+          // One shell line can hold both (`setup.sh && test.sh`); `cat test.sh` is reading, not running.
           const cmds = commands(lastSession(ctx));
-          const setup = cmds.findIndex((c) => c.includes("setup.sh"));
-          const test = cmds.findIndex((c) => c.includes("test.sh"));
+          const all = cmds.join("\n");
+          const ran = (script: string) => all.search(new RegExp(`\\b(sh|bash)\\s+(\\./)?scripts/${script}|\\./scripts/${script}`));
+          const setup = ran("setup\\.sh");
+          const test = ran("test\\.sh");
           if (test < 0) return `no test run: ${JSON.stringify(cmds)}`;
           return setup >= 0 && setup < test ? true : `commands in order: ${JSON.stringify(cmds)}`;
         },
       },
       {
-        name: "later session has fewer failed tool calls than the first",
+        // Not "failed tool calls": a model that writes `test.sh; echo $?` never fails a call.
+        name: "later session never hits the missing-fixtures error",
         kind: "behaviour",
         run: (ctx) => {
-          const failed = ctx.sessions.map((s) => s.tools.filter((t) => !t.ok).length);
-          return failed[1]! < failed[0]! ? true : `failed calls per session: ${failed.join(", ")}`;
+          const hit = ctx.sessions.map((s) => s.tools.filter((t) => t.output.includes("test fixtures missing")).length);
+          return hit[1] === 0 ? true : `missing-fixtures errors per session: ${hit.join(", ")}`;
         },
       },
       {
-        name: "memory holds the failure with its fix",
+        name: "memory holds the fix (a pitfall or a project fact)",
         kind: "memory",
         run: async (ctx) => {
           if (!ctx.memory) return "no memory";
           const hits = await ctx.memory.search("test fixtures missing setup", 10);
           const pitfall = hits.find((h) => h.area === "Salience" && /fix:/.test(h.state));
-          return pitfall ? true : `hits: ${hits.map((h) => h.label).join(" | ")}`;
+          const fact = (await profile(ctx, "app", "project")).find((f) => /setup\.sh/.test(f.value) && /test/.test(f.value));
+          return pitfall || fact ? true : `hits: ${hits.map((h) => h.label).join(" | ")}`;
         },
       },
     ],
@@ -189,17 +194,18 @@ export const SCENARIOS: Scenario[] = [
           "No — in this project every exported function must have a JSDoc comment that explains why it exists, not what it does. Fix add accordingly, and keep to that rule from now on.",
         ],
       },
-      { project: "app", prompts: ["Add an exported subtract(a, b) function to src/math.ts."] },
+      // A new file: no documented neighbour to copy the style from.
+      { project: "app", prompts: ["Create src/text.ts exporting a function shout(s) that upper-cases a string."] },
     ],
     checks: [
       {
         name: "later session documents the new export",
         kind: "behaviour",
         run: (ctx) => {
-          const src = ctx.read("app", "src/math.ts");
-          const at = src.indexOf("subtract");
-          if (at < 0) return "no subtract in src/math.ts";
-          return /\/\*\*[\s\S]*?\*\/\s*export\s+(async\s+)?function\s+subtract/.test(src) ? true : `src/math.ts:\n${src}`;
+          const file = path.join(ctx.dirs.app!, "src", "text.ts");
+          if (!fs.existsSync(file)) return "no src/text.ts";
+          const src = fs.readFileSync(file, "utf8");
+          return /\/\*\*[\s\S]*?\*\/\s*export\s+(async\s+)?(function\s+shout|const\s+shout)/.test(src) ? true : `src/text.ts:\n${src}`;
         },
       },
       {
@@ -218,7 +224,7 @@ export const SCENARIOS: Scenario[] = [
     projects: {
       app: (d) => {
         nodeProject(d, "thread-app");
-        write(d, "src/user.ts", `export interface User {\n  email: string;\n  phone: string;\n}\n\nexport function validate(user: User): string[] {\n  const errors: string[] = [];\n  return errors;\n}\n`);
+        write(d, "src/user.ts", `export interface User {\n  email: string;\n}\n\nexport function validate(user: User): string[] {\n  const errors: string[] = [];\n  return errors;\n}\n`);
       },
     },
     sessions: [
@@ -226,18 +232,19 @@ export const SCENARIOS: Scenario[] = [
         project: "app",
         prompts: [
           "In src/user.ts, implement validation for the email field only (it must contain @). " +
-            "Leave the phone number validation for our next session — do not do it now.",
+            "Next session we will also reject emails whose domain is example.org or test.com — do not do that now.",
         ],
       },
       { project: "app", prompts: ["Where were we? Please continue with what we left open last time."] },
     ],
     checks: [
       {
-        name: "later session validates the phone number",
+        // Nothing in the code points at this item: only memory can carry it.
+        name: "later session blocks the two domains",
         kind: "behaviour",
         run: (ctx) => {
           const src = ctx.read("app", "src/user.ts");
-          return /phone/.test(src.slice(src.indexOf("validate"))) && /user\.phone/.test(src) ? true : `src/user.ts:\n${src}`;
+          return /example\.org/.test(src) && /test\.com/.test(src) ? true : `src/user.ts:\n${src}`;
         },
       },
       {
@@ -246,7 +253,7 @@ export const SCENARIOS: Scenario[] = [
         run: async (ctx) => {
           const facts = await profile(ctx, "app", "project");
           const last = facts.find((f) => f.key === "last session")?.value ?? "";
-          return /phone/i.test(last) ? true : `last session: ${last || "(none)"}`;
+          return /example\.org|test\.com|domain/i.test(last) ? true : `last session: ${last || "(none)"}`;
         },
       },
     ],

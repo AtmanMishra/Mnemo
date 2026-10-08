@@ -33,9 +33,9 @@ saving a skill — are answered yes and recorded.
 | scenario | the claim | behaviour check (later session) | memory check |
 |---|---|---|---|
 | `convention-carries` | a convention stated once is followed later | uses pnpm, dev script on port 4111 | profile has the package manager |
-| `pitfall-learned` | a failure fixed once is avoided next time | runs setup before the first test run; fewer failed calls | a pitfall with its fix |
-| `correction-sticks` | a mid-session correction holds | the new export has a JSDoc | the comment rule is in a profile |
-| `picks-up-the-thread` | open work resumes from "where were we?" | phone validation is implemented | "last session" mentions the phone check |
+| `pitfall-learned` | a failure fixed once is avoided next time | runs setup before the first test run; never sees the error | the fix, as a pitfall or a project fact |
+| `correction-sticks` | a mid-session correction holds | a new file's export has a JSDoc | the comment rule is in a profile |
+| `picks-up-the-thread` | open work resumes from "where were we?" | the two blocked domains are implemented | "last session" mentions them |
 | `skill-from-procedure` | a procedure asked to be remembered becomes a skill | the second release is 0.1.2, logged and committed | a skill file under `.agents/skills/` |
 | `projects-stay-apart` | one repo's memory stays out of another | project b never hears of `ship-alpha` | the fact is in project a only |
 

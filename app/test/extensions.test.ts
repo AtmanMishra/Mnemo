@@ -242,7 +242,7 @@ test("a sub-agent works on its own and its answer comes back as the tool result"
 
 // ── skills ───────────────────────────────────────────────────────────────────
 
-test("a skill Mnemo writes is a file on disk and loadable after the run", async () => {
+test("a skill Mnemo writes is a file in the repository and loadable after the run", async () => {
   const e = await env({ mode: "yolo" });
   e.faux.setResponses([
     call("create_skill", { name: "release-notes", description: "Write release notes from git log", instructions: "1. git log\n2. group by type" }),
@@ -251,9 +251,22 @@ test("a skill Mnemo writes is a file on disk and loadable after the run", async 
   await e.controller.submit("remember how we write release notes");
   await e.idle();
   await new Promise((r) => setTimeout(r, 50));
-  const file = path.join(e.home, "agent", "skills", "release-notes", "SKILL.md");
+  const file = path.join(e.cwd, ".agents", "skills", "release-notes", "SKILL.md");
   expect(fs.readFileSync(file, "utf8")).toContain("description: \"Write release notes from git log\"");
+  expect(fs.existsSync(path.join(e.home, "agent", "skills", "release-notes"))).toBe(false);
   expect(e.controller.commands().some((c) => c.name === "skill:release-notes")).toBe(true);
+});
+
+test("a personal skill goes to Mnemo's home", async () => {
+  const e = await env({ mode: "yolo" });
+  e.faux.setResponses([
+    call("create_skill", { name: "my-style", description: "How I like commits", instructions: "short subject", scope: "user" }),
+    say("saved"),
+  ]);
+  await e.controller.submit("remember my commit style everywhere");
+  await e.idle();
+  expect(fs.existsSync(path.join(e.home, "agent", "skills", "my-style", "SKILL.md"))).toBe(true);
+  expect(fs.existsSync(path.join(e.cwd, ".agents", "skills", "my-style"))).toBe(false);
 });
 
 test("tool calls are traced, with secrets redacted", async () => {

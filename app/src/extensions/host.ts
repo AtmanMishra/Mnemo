@@ -29,7 +29,8 @@ export type MemoryNote =
   | { kind: "learned"; items: string[] }
   | { kind: "steer"; text: string }
   | { kind: "skill"; text: string }
-  | { kind: "session"; text: string; items: string[] };
+  | { kind: "session"; text: string; items: string[] }
+  | { kind: "failed"; text: string };
 
 export interface HostUi {
   approve(request: ApprovalRequest, signal?: AbortSignal): Promise<ApprovalAnswer>;

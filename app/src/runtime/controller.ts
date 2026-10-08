@@ -327,6 +327,9 @@ export class Controller {
       case "session":
         this.transcript.memory(n.text, n.items);
         break;
+      case "failed":
+        this.transcript.push({ kind: "notice", tone: "warn", text: n.text });
+        break;
     }
   }
 

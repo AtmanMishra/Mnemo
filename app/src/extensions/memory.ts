@@ -287,6 +287,7 @@ export function memoryExtension(host: Host) {
       if (!last || last.stopReason === "aborted") return;
       const ep = episode;
       const model = ctx.model;
+      const sessionId = ctx.sessionManager.getSessionId();
       const signals = host.signals.splice(0);
       const run = { messages: event.messages, tools: toolLog, files: [...files], signals };
       const usedSkills = [...skillsRead];
@@ -301,10 +302,19 @@ export function memoryExtension(host: Host) {
         if (!host.reflect || !model || host.depth > 0 || !identity || !worthReflecting(run)) return;
         const [projectFacts, userFacts] = await Promise.all([mem.profile("project", identity.id), mem.profile("user", identity.id)]);
         const known = [...projectFacts.map((f) => `project · ${f.key}: ${f.value}`), ...userFacts.map((f) => `user · ${f.key}: ${f.value}`)];
-        const answer = await host.modelRuntime.completeSimple(model, {
-          systemPrompt: REFLECT_PROMPT,
-          messages: [{ role: "user", content: `KNOWN:\n${known.join("\n") || "(nothing yet)"}\n\nRUN:\n${digest(run)}`, timestamp: Date.now() }],
-        });
+        // The session id routes the call like the session's own (OpenCode refuses one without it).
+        const answer = await host.modelRuntime.completeSimple(
+          model,
+          {
+            systemPrompt: REFLECT_PROMPT,
+            messages: [{ role: "user", content: `KNOWN:\n${known.join("\n") || "(nothing yet)"}\n\nRUN:\n${digest(run)}`, timestamp: Date.now() }],
+          },
+          { sessionId },
+        );
+        if (answer.stopReason === "error") {
+          host.ui?.note({ kind: "failed", text: `Reflection failed: ${answer.errorMessage ?? "no answer"}` });
+          return;
+        }
         await applyReflection(parseReflection(textOf(answer.content)), { projectFacts, userFacts, ep });
       });
     });
