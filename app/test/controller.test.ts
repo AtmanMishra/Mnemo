@@ -36,7 +36,7 @@ async function setup(cwd = createDemoProject()) {
   return { controller, faux, cwd, exited: () => exited };
 }
 
-test("a scripted turn reads, edits and answers, in order", async () => {
+test("a scripted turn reads, edits, checks and answers, in order", async () => {
   const { controller, faux, cwd } = await setup();
   faux.setResponses(demoScript());
   await controller.submit(DEMO_PROMPT);
@@ -46,7 +46,7 @@ test("a scripted turn reads, edits and answers, in order", async () => {
   expect(snap.live).toEqual([]);
   expect(snap.working).toBeNull();
   const kinds = snap.committed.map((b) => (b.kind === "tool" ? `tool:${b.name}:${b.status}` : b.kind));
-  expect(kinds).toEqual(["user", "thinking", "assistant", "tool:read:done", "tool:edit:done", "assistant"]);
+  expect(kinds).toEqual(["user", "thinking", "assistant", "tool:read:done", "tool:edit:done", "assistant", "tool:bash:done", "assistant"]);
 
   const edit = snap.committed.find((b) => b.kind === "tool" && b.name === "edit");
   expect((edit as { details?: { diff?: string } }).details?.diff).toContain("attempt");

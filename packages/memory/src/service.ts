@@ -237,6 +237,11 @@ export class MemoryService {
     return (r?.lessons ?? []).map((l) => (typeof l === "string" ? l : JSON.stringify(l)));
   }
 
+  /** Every node: id, label, kind and area (for a browser of memory). */
+  async nodes(): Promise<{ id: number; label: string; kind: string; area: string }[]> {
+    return (await this.call<{ nodes: { id: number; label: string; kind: string; area: string }[] }>("dump"))?.nodes ?? [];
+  }
+
   async stats(): Promise<{ nodes: number; episodes: number; byArea: Record<string, number> } | undefined> {
     const dump = await this.call<{ nodes: { kind: string; area: string }[] }>("dump");
     if (!dump) return undefined;

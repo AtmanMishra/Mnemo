@@ -114,9 +114,11 @@ const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
  * trailing redirections dropped) is the command that failed.
  */
 export function sameCommand(command: string, failure: string): boolean {
-  if (normalize(failure).includes(command)) return true;
   const failed = /^\w+\((.+?)\) failed:/.exec(failure)?.[1];
-  if (!failed || failed.length < 4) return false;
+  // A marker that names its command is matched on that command only: its
+  // error text may quote the remedy ("run sh scripts/setup.sh first").
+  if (!failed) return normalize(failure).includes(command);
+  if (failed.length < 4) return false;
   const want = normalize(failed);
   return command
     .split(/&&|\|\||;|\|/)
@@ -310,6 +312,8 @@ export class MemorySession {
         const fix = factValue(h.state, "fix");
         const failure = factValue(h.state, "failure") ?? h.label.replace(/^pain: /, "");
         if (!fix || !sameCommand(command, failure)) continue;
+        // A failure described in words (no named command) may quote its remedy: the fix itself is never stopped.
+        if (!/^\w+\(.+?\) failed:/.test(failure) && normalize(fix).includes(command)) continue;
         // Already applied: a successful call in this run that the fix names.
         if (this.toolLog.some((t) => t.ok && t.subject.length > 3 && fix.includes(t.subject))) continue;
         this.warned.add(h.node);

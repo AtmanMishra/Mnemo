@@ -14,7 +14,8 @@ export interface BlockProps {
   block: Block;
   cwd: string;
   expanded: boolean;
-  welcome: WelcomeInfo;
+  /** The welcome card's facts; the workspace has a header instead and never shows the card. */
+  welcome?: WelcomeInfo;
 }
 
 function Gutter({ mark, tint, children }: { mark: string; tint: string; children: React.ReactNode }): React.ReactElement {
@@ -120,7 +121,7 @@ function ThinkingView({ block, expanded }: { block: Extract<Block, { kind: "thin
 export function BlockView({ block, cwd, expanded, welcome }: BlockProps): React.ReactElement {
   switch (block.kind) {
     case "welcome":
-      return <Welcome info={welcome} />;
+      return welcome ? <Welcome info={welcome} /> : <></>;
     case "user":
       return (
         <Gutter mark={glyph.user} tint={color.accent}>

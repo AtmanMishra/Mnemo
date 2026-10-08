@@ -114,7 +114,7 @@ test("usefulness credit needs distinctive reuse, not an echo of the question", (
 
 mt("F3: profiles stay in the system prompt and per-message recall arrives as a message", async () => {
   const e = await env();
-  await e.memory!.learn("project", `dir:${e.cwd}`, "package manager", "pnpm");
+  await e.memory!.learn("project", projectIdentity(e.cwd).id, "package manager", "pnpm");
   await e.memory!.remember("deploys to staging use flyctl deploy --app shop-staging");
   const seen: string[] = [];
   e.faux.setResponses([capture(seen, "ok"), capture(seen, "ok again")]);
@@ -240,7 +240,7 @@ mt("a refusal's reason reaches reflection and becomes a preference", async () =>
   await run;
   await e.idle();
   expect(seen[0]).toContain("never delete dist, it is checked in");
-  const prefs = await e.memory!.profile("user", `dir:${e.cwd}`);
+  const prefs = await e.memory!.profile("user", projectIdentity(e.cwd).id);
   expect(prefs).toContainEqual({ key: "deleting build output", value: "never delete dist; ask first" });
 });
 
@@ -252,7 +252,7 @@ mt("F16: a guessed fact is not written; small talk costs no reflection call", as
   ]);
   await e.controller.submit("have a look at the configuration of this project and tell me what you see");
   await e.idle();
-  expect(await e.memory!.profile("project", `dir:${e.cwd}`)).not.toContainEqual(expect.objectContaining({ key: "framework" }));
+  expect(await e.memory!.profile("project", projectIdentity(e.cwd).id)).not.toContainEqual(expect.objectContaining({ key: "framework" }));
   e.faux.setResponses([say("You're welcome!")]);
   const before = e.faux.state.callCount;
   await e.controller.submit("thanks!");
@@ -334,9 +334,9 @@ mt("F25: a secret in the conversation never reaches memory", async () => {
 
 mt("/forget retires a fact: history keeps it, recall never shows it again", async () => {
   const e = await env({ reflect: false });
-  await e.memory!.learn("project", `dir:${e.cwd}`, "package manager", "yarn");
+  await e.memory!.learn("project", projectIdentity(e.cwd).id, "package manager", "yarn");
   await e.controller.submit("/forget package manager");
-  expect(await e.memory!.profile("project", `dir:${e.cwd}`)).toEqual([]);
+  expect(await e.memory!.profile("project", projectIdentity(e.cwd).id)).toEqual([]);
   const seen: string[] = [];
   e.faux.setResponses([capture(seen, "ok")]);
   await e.controller.submit("how do I add a dependency?");
@@ -372,14 +372,14 @@ mt("the agent cannot overwrite the session record's \"last session\" fact", asyn
   await e.controller.submit("run the tests and note it");
   await e.idle();
   expect(texts(e.controller).join("\n")).toContain("tool memory_remember error");
-  expect(await e.memory!.profile("project", `dir:${e.cwd}`)).toEqual([]);
+  expect(await e.memory!.profile("project", projectIdentity(e.cwd).id)).toEqual([]);
 });
 
 // ── accuracy: known fixes first, verify before done ─────────────────────────
 
 mt("a command that failed before is stopped once with its known fix, and runs if the agent insists", async () => {
   const e = await env({ mode: "yolo" });
-  const s = await e.memory!.project(`dir:${e.cwd}`, e.cwd);
+  const s = await e.memory!.project(projectIdentity(e.cwd).id, e.cwd);
   const pain = await e.memory!.createNode("aspect", "pain: tests need fixtures", "salience");
   await e.memory!.fact(pain!, "failure", "bash(sh scripts/test.sh) failed: error: test fixtures missing");
   await e.memory!.fact(pain!, "fix", "run sh scripts/setup.sh before sh scripts/test.sh");
@@ -399,7 +399,7 @@ mt("a command that failed before is stopped once with its known fix, and runs if
 
 mt("a run that changed code and checked nothing is sent back once to verify, with the remembered command", async () => {
   const e = await env({ mode: "yolo", verify: true, reflect: false });
-  await e.memory!.learn("project", `dir:${e.cwd}`, "verify command", "bun test");
+  await e.memory!.learn("project", projectIdentity(e.cwd).id, "verify command", "bun test");
   const seen: string[] = [];
   e.faux.setResponses([
     call("write", { path: "src/add.ts", content: "export const add = (a: number, b: number) => a + b;\n" }),

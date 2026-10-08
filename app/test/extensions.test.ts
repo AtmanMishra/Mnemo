@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
 import { judge, globMatch, matchRule } from "../src/extensions/policy.ts";
-import { factsOf } from "@mnemo/memory";
+import { factsOf, projectIdentity } from "@mnemo/memory";
 import { MEMSRV, mnemoEnv, nextDialog, texts } from "./helpers.ts";
 
 const envs: Awaited<ReturnType<typeof mnemoEnv>>[] = [];
@@ -167,7 +167,7 @@ memoryTest("what one session learns, the next session knows — and a changed fa
   expect(t[at + 1]).toStartWith("◈ Recalled");
 
   // The second reflection changed the fact: one current value, not two.
-  const profile = await two.memory!.profile("project", `dir:${two.cwd}`);
+  const profile = await two.memory!.profile("project", projectIdentity(two.cwd).id);
   expect(profile.filter((f) => f.key === "package manager")).toEqual([{ key: "package manager", value: "bun" }]);
 });
 

@@ -151,7 +151,8 @@ async function main(): Promise<number> {
     faux.faux.setResponses(demoScript());
     modelRuntime = faux.modelRuntime;
     injected = { model: faux.faux.getModel(), sessionManager: SessionManager.inMemory(cwd) };
-    if (args.dump && args.mode === "default") args.mode = "accept-edits";
+    // A dump has nobody to answer an approval: the demo runs its check unasked.
+    if (args.dump && args.mode === "default") args.mode = "yolo";
   }
   modelRuntime ??= await createModelRuntime(dir);
 

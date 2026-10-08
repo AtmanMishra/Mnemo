@@ -4,6 +4,7 @@
  * its real tools, sessions, the interface — runs with no key and no network.
  */
 import * as fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -56,12 +57,17 @@ export function createDemoProject(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-demo-"));
   fs.mkdirSync(path.join(dir, "src"));
   fs.writeFileSync(path.join(dir, "src", "fetch.ts"), FETCH_BEFORE);
+  // A repository, as real work is: the demo checks its change with git.
+  const git = (...args: string[]) => spawnSync("git", ["-c", "user.email=demo@mnemo", "-c", "user.name=demo", ...args], { cwd: dir, stdio: "ignore" });
+  git("init", "-q");
+  git("add", "-A");
+  git("commit", "-qm", "init");
   return dir;
 }
 
 export const DEMO_PROMPT = "add a retry to the fetch helper";
 
-/** What the reflection step "extracts" from the demo turn (the faux model's 4th answer). */
+/** What the reflection step "extracts" from the demo turn (the faux model's last answer). */
 export const DEMO_REFLECTION = JSON.stringify({
   facts: [
     { scope: "project", key: "language", value: "TypeScript", source: "observed" },
@@ -92,6 +98,10 @@ export function demoScript(): FauxResponseStep[] {
       { stopReason: "toolUse" },
     ),
     fauxAssistantMessage([fauxToolCall("edit", { path: "src/fetch.ts", edits: [{ oldText: OLD, newText: NEW }] })], {
+      stopReason: "toolUse",
+    }),
+    // A change is checked before it is called done (Mnemo sends a run back that skips this).
+    fauxAssistantMessage([fauxText("Checking the change."), fauxToolCall("bash", { command: "git diff --check && git diff --stat" })], {
       stopReason: "toolUse",
     }),
     fauxAssistantMessage(

@@ -27,6 +27,8 @@ export interface ComposerProps {
   onClear: () => void;
   onCycleThinking: () => void;
   onCycleMode: () => void;
+  /** Tab with no completion open: move focus on (the workspace's sidebar). */
+  onFocusNext?: () => void;
 }
 
 type Suggestion = { value: string; label: string; detail?: string };
@@ -192,6 +194,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
       if (key.tab && key.shift) return props.onCycleMode();
       if (key.tab) {
         if (menuOpen && selected) accept(selected, false);
+        else props.onFocusNext?.();
         return;
       }
       if (key.upArrow) {

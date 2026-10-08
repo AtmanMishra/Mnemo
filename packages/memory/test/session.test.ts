@@ -143,3 +143,17 @@ t("the guard knows a failed command inside a longer one, and stays quiet for an 
   expect(await later.guard("bash", { command: `cd ${cwd} && npm test 2>&1 | tail -20` })).toContain("Known fix: run npm run gen before npm test");
   memory.stop();
 }, 30_000);
+
+t("the guard never stops the fix itself, even when the error text quotes it", async () => {
+  const { cwd, memory } = setup();
+  const s = new MemorySession({ memory, cwd, userSkillsDir: path.join(cwd, "skills") });
+  await s.begin("run the tests");
+  await s.toolEnd("bash", { command: "sh scripts/test.sh" }, false, "error: test fixtures missing — run sh scripts/setup.sh first");
+  const pain = (await memory.search("test fixtures missing", 5)).find((h) => h.area === "Salience")!;
+  await memory.fact(pain.node, "fix", "run sh scripts/setup.sh before sh scripts/test.sh");
+  const later = new MemorySession({ memory, cwd, userSkillsDir: path.join(cwd, "skills") });
+  await later.begin("run the tests");
+  expect(await later.guard("bash", { command: "sh scripts/setup.sh" })).toBeUndefined();
+  expect(await later.guard("bash", { command: "sh scripts/test.sh" })).toContain("Known fix");
+  memory.stop();
+}, 30_000);

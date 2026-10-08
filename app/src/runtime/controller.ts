@@ -244,6 +244,11 @@ export class Controller {
     this.refreshFooter();
   }
 
+  /** What is in the input right now. */
+  get draftText(): string {
+    return this.draft;
+  }
+
   /** The input reports its text so extensions can read it. */
   reportDraft(text: string): void {
     this.draft = text;
@@ -691,7 +696,13 @@ export class Controller {
         })),
     );
     if (!pick) return;
-    const result = await this.runtime.switchSession(pick);
+    await this.resumePath(pick);
+  }
+
+  /** Continue the session stored at `file` (the workspace's Sessions pane, /resume). */
+  async resumePath(file: string): Promise<void> {
+    if (this.runtime.session.sessionFile === file) return;
+    const result = await this.runtime.switchSession(file);
     if (result.cancelled) return;
     this.options.onClearScreen?.();
     this.transcript.clear();
