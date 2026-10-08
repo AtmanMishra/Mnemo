@@ -203,14 +203,17 @@ test("a running tool shows its title; a failed one shows why", () => {
   expect(running.lastFrame()).toContain("Bash(npm test)");
   expect(running.lastFrame()).toContain("running");
   const failed = render(
-    <BlockView
-      block={{ kind: "tool", id: "2", name: "read", args: { path: "/p/missing.ts" }, status: "error", output: "ENOENT: no such file" }}
-      cwd="/p"
-      expanded={false}
-      welcome={welcome}
-    />,
+    <MotionContext.Provider value={false}>
+      <BlockView
+        block={{ kind: "tool", id: "2", name: "read", args: { path: "/p/missing.ts" }, status: "error", output: "ENOENT: no such file" }}
+        cwd="/p"
+        expanded={false}
+        welcome={welcome}
+      />
+    </MotionContext.Provider>,
   );
-  expect(failed.lastFrame()).toContain("✗ Read(missing.ts)");
+  // The status mark, the tool's tile (◉ for reading), then the title.
+  expect(failed.lastFrame()).toContain("✗  ◉  Read(missing.ts)");
   expect(failed.lastFrame()).toContain("ENOENT");
 });
 

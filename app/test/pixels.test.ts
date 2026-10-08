@@ -47,3 +47,27 @@ test("a check in a real run becomes an activity with its test counts", async () 
   const a = e.controller.snapshot().activity;
   expect(a).toMatchObject({ kind: "check", ok: false, tests: { passed: 4, failed: 1 } });
 });
+
+test("a tool's tile, an edit's diff strip and a test run's heatmap render", async () => {
+  const React = (await import("react")).default;
+  const { render } = await import("ink-testing-library");
+  const { BlockView, toolTile } = await import("../src/ui/components/Blocks.tsx");
+  const { MotionContext } = await import("../src/ui/components/motion.ts");
+  expect(toolTile("bash").ch).toBe("$");
+  expect(toolTile("memory_search").ch).toBe("◈");
+  expect(toolTile("something_else").ch).toBe("▪");
+  const show = (block: unknown) =>
+    render(React.createElement(MotionContext.Provider, { value: false }, React.createElement(BlockView, { block: block as never, cwd: "/p", expanded: false }))).lastFrame()!;
+  const edit = show({
+    kind: "tool",
+    id: "e",
+    name: "edit",
+    args: { path: "/p/a.ts" },
+    status: "done",
+    output: "",
+    details: { diff: " 1 a\n-2 b\n+2 c\n+3 d" },
+  });
+  expect(edit).toContain("+2 −1  ▀▀▀");
+  const tests = show({ kind: "tool", id: "t", name: "bash", args: { command: "bun test" }, status: "done", output: " 5 pass\n 1 fail\n" });
+  expect(tests).toContain("▀▀▀▀▀▀  5 passed · 1 failed");
+});
