@@ -5,7 +5,7 @@ mod lru_tests {
     use crate::model::*;
 
     fn key(q: &str, areas: &[Area], k: usize) -> SearchKey {
-        SearchKey { query: normalize_query(q), areas: areas.to_vec(), k }
+        SearchKey { query: normalize_query(q), areas: areas.to_vec(), k, scope: None }
     }
 
     #[test]

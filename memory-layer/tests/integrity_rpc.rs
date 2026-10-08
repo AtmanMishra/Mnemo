@@ -149,3 +149,52 @@ fn the_recent_log_renders_as_separate_lines() {
     assert!(state.lines().any(|l| l.trim_start().starts_with('[') && l.ends_with("tool_call: bash: ok")), "{state}");
     s.close();
 }
+
+#[test]
+fn a_scoped_search_never_returns_another_projects_memories() {
+    let (journal, work) = temp("f10");
+    let mut s = Srv::spawn(&journal, &work);
+    let shop = s.call("create_node", serde_json::json!({"kind": "entity", "label": "project shop"}))["node"].as_u64().unwrap();
+    let blog = s.call("create_node", serde_json::json!({"kind": "entity", "label": "project blog"}))["node"].as_u64().unwrap();
+    let a = s.call("remember", serde_json::json!({"summary": "deploys use fly with the staging app first"}))["node"].as_u64().unwrap();
+    let b = s.call("remember", serde_json::json!({"summary": "deploys use netlify from the main branch"}))["node"].as_u64().unwrap();
+    let both = s.call("remember", serde_json::json!({"summary": "deploys are announced in the team channel"}))["node"].as_u64().unwrap();
+    s.call("link", serde_json::json!({"src": a, "dst": shop, "kind": "part_of"}));
+    s.call("link", serde_json::json!({"src": b, "dst": blog, "kind": "part_of"}));
+    let ids = |r: &serde_json::Value| -> Vec<u64> { r["results"].as_array().unwrap().iter().map(|h| h["node"].as_u64().unwrap()).collect() };
+    let q = |scope: Option<u64>| serde_json::json!({"query": "how do deploys work", "k": 10, "scope": scope});
+    let in_shop = ids(&s.call("search", q(Some(shop))));
+    assert!(in_shop.contains(&a) && !in_shop.contains(&b), "{in_shop:?}");
+    assert!(in_shop.contains(&both), "unattached memories stay visible: {in_shop:?}");
+    let in_blog = ids(&s.call("search", q(Some(blog))));
+    assert!(in_blog.contains(&b) && !in_blog.contains(&a), "{in_blog:?}");
+    let unscoped = ids(&s.call("search", q(None)));
+    assert!(unscoped.contains(&a) && unscoped.contains(&b));
+    s.close();
+}
+
+#[test]
+fn a_recurring_failure_counts_on_one_marker_and_a_tool_error_makes_no_gap() {
+    let (journal, work) = temp("f5");
+    let mut s = Srv::spawn(&journal, &work);
+    let mut pains = vec![];
+    for (i, line) in [12, 40, 7].iter().enumerate() {
+        let ep = s.call("episode", serde_json::json!({"label": format!("task {i}")}))["episode"].as_u64().unwrap();
+        let r = s.call("steer", serde_json::json!({
+            "episode": ep, "failure": format!("bash failed: vitest not found (line {line})"),
+            "gap": false, "dedupe": true,
+        }));
+        assert!(r["gap_node"].is_null(), "no gap node for a tool error: {r}");
+        assert_eq!(r["occurrences"].as_u64(), Some(i as u64 + 1));
+        pains.push(r["pain_node"].as_u64().unwrap());
+    }
+    assert!(pains.iter().all(|p| *p == pains[0]), "one marker for one failure: {pains:?}");
+    let state = s.call("state", serde_json::json!({"node": pains[0]}))["state"].as_str().unwrap().to_string();
+    assert!(state.contains("occurrences: 3"), "{state}");
+    // without the new params the planner behaves exactly as before
+    let ep = s.call("episode", serde_json::json!({"label": "legacy"}))["episode"].as_u64().unwrap();
+    let r = s.call("steer", serde_json::json!({"episode": ep, "failure": "bash failed: vitest not found (line 1)"}));
+    assert_ne!(r["pain_node"].as_u64().unwrap(), pains[0]);
+    assert!(r["gap_node"].is_u64());
+    s.close();
+}

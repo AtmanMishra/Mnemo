@@ -8,12 +8,12 @@ use memory_layer::model::*;
 use memory_layer::persist::{self, Journal};
 use memory_layer::remote::OpenRouterEmbedder;
 use memory_layer::search::{
-    ann_requested, build_vectors, live_nodes, plan_search, route_query, search_with_path,
+    ann_requested, build_vectors, live_nodes, out_of_scope, plan_search, route_query, search_with_path,
     SeedPath, SearchOpts,
 };
 use memory_layer::cache::{normalize_query, SearchCache, SearchKey, SEARCH_CACHE_CAP};
 use memory_layer::consolidate::consolidate;
-use memory_layer::steering::{reinforce, steer, Correction};
+use memory_layer::steering::{reinforce, steer_with, Correction, SteerOpts};
 use memory_layer::store::StoreData;
 use memory_layer::vec::{Embedder, HashingEmbedder};
 use serde_json::json;
@@ -432,7 +432,14 @@ fn handle(
             let src = p_node(params, "src")?;
             let dst = p_node(params, "dst")?;
             let id = s.next_edge;
-            apply(s, j, Op::Link { id, src, dst, kind: EdgeKind::SuppliesContext, at: *clock })?;
+            let kind = match params.get("kind").and_then(|k| k.as_str()).unwrap_or("supplies_context") {
+                "supplies_context" => EdgeKind::SuppliesContext,
+                "part_of" => EdgeKind::PartOf,
+                "derived_from" => EdgeKind::DerivedFrom,
+                "activated_with" => EdgeKind::ActivatedWith,
+                other => return Err(format!("unknown edge kind '{other}'")),
+            };
+            apply(s, j, Op::Link { id, src, dst, kind, at: *clock })?;
             Ok(json!({ "edge": id }))
         }
 
@@ -471,7 +478,10 @@ fn handle(
             // ML-1: LRU key on the resolved inputs. `prefer` is derived from
             // the query/filter, so (query, areas, k) fully determines the
             // result. A hit skips routing+embed+scoring entirely.
-            let key = SearchKey { query: normalize_query(query), areas: asked.clone(), k };
+            // audit F10: `scope` = a project node; nodes attached to another
+            // project are left out (unattached nodes stay visible everywhere)
+            let scope = params.get("scope").and_then(|v| v.as_u64());
+            let key = SearchKey { query: normalize_query(query), areas: asked.clone(), k, scope };
             // The decision is pure and per-request, so it is taken once and
             // reported either way: on a cache hit there is no search to run,
             // but the caller still has to be told which path this query is
@@ -484,7 +494,8 @@ fn handle(
             let (results, from_cache) = match cache.get(&key) {
                 Some((hits, _)) => (hits.clone(), "hit"),
                 None => {
-                    let opts = SearchOpts::areas(asked).prefer(routed.clone());
+                    let mut opts = SearchOpts::areas(asked).prefer(routed.clone());
+                    if let Some(p) = scope { opts.exclude = out_of_scope(s, p, *clock); }
                     let vectors = build_vectors(s, emb);
                     let results =
                         search_with_path(s, &vectors, emb, query, k, *clock, &opts, plan.path);
@@ -580,9 +591,16 @@ fn handle(
                 }),
                 None => None,
             };
-            let (ops, notes) = steer(s, episode, failure, correction.as_ref(), *clock)?;
+            // audit F5/F6: the agent asks for deduplicated pain markers and no
+            // gap node for a tool error; without the params, behaviour is as before
+            let opts = SteerOpts {
+                gap: params.get("gap").and_then(|g| g.as_bool()).unwrap_or(true),
+                dedupe_pain: params.get("dedupe").and_then(|d| d.as_bool()).unwrap_or(false),
+            };
+            let (ops, notes) = steer_with(s, episode, failure, correction.as_ref(), opts, *clock)?;
             for op in ops { apply(s, j, op)?; }
             Ok(json!({
+                "occurrences": notes.occurrences,
                 "pain_node": notes.pain_node,
                 "blamed_feeders": notes.blamed_feeders,
                 "superseded_on": notes.superseded_on,

@@ -30,6 +30,8 @@ pub struct SearchKey {
     /// The hard area filter (empty = every area).
     pub areas: Vec<Area>,
     pub k: usize,
+    /// The project the search is scoped to (audit F10); part of the key.
+    pub scope: Option<NodeId>,
 }
 
 /// Case/whitespace normalization — enough to collapse queries the underlying
