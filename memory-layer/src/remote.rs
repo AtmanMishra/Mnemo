@@ -66,8 +66,19 @@ impl OpenRouterEmbedder {
 
     /// Load disk cache (text-hash -> vector) so identical text never re-hits the API.
     pub fn new(api_key: String, model: String, cache_dir: &Path) -> Self {
+        // The API key and the text of every memory go to this address, so it must be
+        // encrypted, or a server on this machine (tests, a local model).
         let endpoint = std::env::var("OPENROUTER_EMBED_URL")
-            .unwrap_or_else(|_| DEFAULT_ENDPOINT.into());
+            .ok()
+            .filter(|u| {
+                let ok = u.starts_with("https://")
+                    || ["http://localhost", "http://127.0.0.1", "http://[::1]"].iter().any(|p| {
+                        u.strip_prefix(p).map_or(false, |rest| rest.is_empty() || rest.starts_with(':') || rest.starts_with('/'))
+                    });
+                if !ok { eprintln!("[memsrv] ignoring OPENROUTER_EMBED_URL: it must be https:// or a local address"); }
+                ok
+            })
+            .unwrap_or_else(|| DEFAULT_ENDPOINT.into());
         let timeout = std::env::var("OPENROUTER_EMBED_TIMEOUT_MS").ok()
             .and_then(|v| v.parse::<u64>().ok())
             .map(Duration::from_millis)

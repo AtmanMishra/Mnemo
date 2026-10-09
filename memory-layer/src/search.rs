@@ -371,7 +371,7 @@ pub fn search_ann(
     opts: &SearchOpts,
 ) -> Vec<SearchResult> {
     let q = emb.embed(&expand_query_aliases(query));
-    let seeds: Vec<(NodeId, f32)> = index.search(&q, k * 4).into_iter()
+    let seeds: Vec<(NodeId, f32)> = index.search(&q, k.min(1000) * 4).into_iter()
         .map(|(id, s)| (id as NodeId, s))
         .filter(|(id, _)| passes_filter(store, *id, opts))
         .map(|(id, s)| {

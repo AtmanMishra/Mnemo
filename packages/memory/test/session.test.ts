@@ -140,7 +140,7 @@ t("the guard knows a failed command inside a longer one, and stays quiet for an 
   const later = new MemorySession({ memory, cwd, userSkillsDir: path.join(cwd, "skills") });
   await later.begin("add a feature");
   expect(await later.guard("bash", { command: "npm run lint" })).toBeUndefined();
-  expect(await later.guard("bash", { command: `cd ${cwd} && npm test 2>&1 | tail -20` })).toContain("Known fix: run npm run gen before npm test");
+  expect(await later.guard("bash", { command: `cd ${cwd} && npm test 2>&1 | tail -20` })).toContain("Known fix: «run npm run gen before npm test»");
   memory.stop();
 }, 30_000);
 

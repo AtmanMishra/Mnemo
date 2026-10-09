@@ -31,30 +31,70 @@ pub struct LoadReport {
 
 pub struct Journal {
     writer: BufWriter<File>,
+    path: std::path::PathBuf,
     lock_path: std::path::PathBuf,
+}
+
+/// Private to the user: a journal holds project facts, commands and failure text.
+fn private_options() -> OpenOptions {
+    let mut o = OpenOptions::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    o
+}
+
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir)
+    }
+}
+
+/// A writer killed mid-line leaves a journal that does not end in a newline; the next
+/// append would glue its line onto the torn one and lose both. Called with the lock held.
+fn end_torn_line(path: &Path) -> std::io::Result<()> {
+    let Ok(mut f) = File::open(path) else { return Ok(()) };
+    let len = f.metadata()?.len();
+    if len == 0 { return Ok(()); }
+    f.seek(SeekFrom::Start(len - 1))?;
+    let mut last = [0u8; 1];
+    std::io::Read::read_exact(&mut f, &mut last)?;
+    if last[0] != b'\n' {
+        OpenOptions::new().append(true).open(path)?.write_all(b"\n")?;
+    }
+    Ok(())
 }
 
 impl Journal {
     pub fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = path.as_ref();
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+            create_private_dir(dir)?;
         }
-        let f = OpenOptions::new().create(true).append(true).open(path)?;
+        let f = private_options().create(true).append(true).open(path)?;
         // advisory lock file next to the journal; every writer takes it before
         // appending so concurrent processes (memcli/memtui/memsrv/agents)
         // never interleave partial JSON lines.
         let mut lock_path = path.to_path_buf();
         lock_path.set_extension("lock");
-        Ok(Self { writer: BufWriter::new(f), lock_path })
+        Ok(Self { writer: BufWriter::new(f), path: path.to_path_buf(), lock_path })
     }
 
     pub fn append(&mut self, op: &Op) -> std::io::Result<()> {
-        let lock_file = OpenOptions::new().create(true).write(true)
+        let lock_file = private_options().create(true).write(true)
             .open(&self.lock_path)?;
         let mut lock = fd_lock::RwLock::new(lock_file);
         let mut guard = lock.write()?;
         let _ = &mut *guard; // hold exclusive lock across the write
+        end_torn_line(&self.path)?;
         serde_json::to_writer(&mut self.writer, op)?;
         self.writer.write_all(b"\n")?;
         self.writer.flush()?;
@@ -74,14 +114,15 @@ impl Journal {
         let mut lock_path = path.as_ref().to_path_buf();
         lock_path.set_extension("lock");
         if let Some(dir) = lock_path.parent() {
-            std::fs::create_dir_all(dir)?;
+            create_private_dir(dir)?;
         }
-        OpenOptions::new().read(true).write(true).create(true).open(lock_path)
+        private_options().read(true).write(true).create(true).open(lock_path)
     }
 
     /// Append while the CALLER holds the lock from `lock_file` (taking it
     /// again here would deadlock: flock is per open file description).
     pub fn append_held(&mut self, op: &Op) -> std::io::Result<()> {
+        end_torn_line(&self.path)?;
         serde_json::to_writer(&mut self.writer, op)?;
         self.writer.write_all(b"\n")?;
         self.writer.flush()

@@ -112,7 +112,9 @@ fn main() {
         sync(&jpath, &mut offset, &mut s, &mut clock, &mut search_cache)
     };
 
-    let embedder: Arc<dyn Embedder> = match OpenRouterEmbedder::from_env(Path::new("data")) {
+    // The embedding cache lives beside the journal, not in whatever folder this was started in.
+    let cache_dir = Path::new(&jpath).parent().map(|p| p.join("embed")).unwrap_or_else(|| Path::new("embed").into());
+    let embedder: Arc<dyn Embedder> = match OpenRouterEmbedder::from_env(&cache_dir) {
         Some(e) => { eprintln!("[memsrv] embedder=openrouter ({})", e.model_name()); Arc::new(e) }
         None => { eprintln!("[memsrv] embedder=hashing (no OPENROUTER_API_KEY)"); Arc::new(HashingEmbedder) }
     };
@@ -244,17 +246,24 @@ fn op_at(op: &Op) -> Millis {
     }
 }
 
+/// Settings from `$MNEMO_HOME/.env` (default `~/.mnemo/.env`), for what the real
+/// environment does not already say. Never from the working directory: that is
+/// the folder of whatever repository the agent was opened in, and a `.env` there
+/// could redirect the embedding key and every memory's text to a server of its
+/// choosing.
 fn load_dotenv() {
-    for candidate in [".env", "../.env"] {
-        if let Ok(txt) = std::fs::read_to_string(candidate) {
-            for line in txt.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') { continue; }
-                if let Some((k, v)) = line.split_once('=') {
-                    std::env::set_var(k.trim(), v.trim());
-                }
+    let home = std::env::var_os("MNEMO_HOME").map(std::path::PathBuf::from).or_else(|| {
+        std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(|h| std::path::PathBuf::from(h).join(".mnemo"))
+    });
+    let Some(home) = home else { return };
+    if let Ok(txt) = std::fs::read_to_string(home.join(".env")) {
+        for line in txt.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') { continue; }
+            if let Some((k, v)) = line.split_once('=') {
+                let k = k.trim();
+                if std::env::var_os(k).is_none() { std::env::set_var(k, v.trim()); }
             }
-            return;
         }
     }
 }

@@ -396,7 +396,7 @@ mt("a command that failed before is stopped once with its known fix, and runs if
   await e.controller.submit("run the tests");
   await e.idle();
   const tools = e.controller.transcript.snapshot().committed.filter((b) => b.kind === "tool") as { output: string }[];
-  expect(tools[0]!.output).toContain("Known fix: run sh scripts/setup.sh before sh scripts/test.sh");
+  expect(tools[0]!.output).toContain("Known fix: «run sh scripts/setup.sh before sh scripts/test.sh»");
   // Said once: the second attempt is not stopped by memory.
   expect(tools[1]!.output).not.toContain("Known fix");
 });

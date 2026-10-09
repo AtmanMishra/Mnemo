@@ -45,7 +45,7 @@ impl StoreData {
                     context: vec![], created_at: *at, deleted: false,
                     useful: 0, unhelpful: 0,
                 });
-                self.next_node = self.next_node.max(id + 1);
+                self.next_node = self.next_node.max(id.saturating_add(1));
                 self.state_memo.remove(id);
             }
             Op::AddFact { node, fact_id, key, value, at } => {
@@ -55,7 +55,7 @@ impl StoreData {
                     status: FactStatus::Active, created_at: *at, superseded_by: None,
                 });
                 n.log.push(LogEntry { at: *at, kind: "fact_added".into(), detail: format!("{key}: {value}") });
-                self.next_fact = self.next_fact.max(fact_id + 1);
+                self.next_fact = self.next_fact.max(fact_id.saturating_add(1));
                 self.state_memo.remove(node);
             }
             Op::SupersedeFact { node, old_fact, new_key, new_value, new_fact_id, at } => {
@@ -93,7 +93,7 @@ impl StoreData {
                         format!("{} -> {}: {}", old_fact, new_fact_id, new_value)
                     },
                 });
-                self.next_fact = self.next_fact.max(new_fact_id + 1);
+                self.next_fact = self.next_fact.max(new_fact_id.saturating_add(1));
                 // superseding changes the node's derived text (a fact's status
                 // is what puts it in — or takes it out of — the facts block)
                 self.state_memo.remove(node);
@@ -128,7 +128,7 @@ impl StoreData {
                     weight: 0.5, valid_from: *at, invalid_at: None,
                     success: 0, failure: 0,
                 });
-                self.next_edge = self.next_edge.max(id + 1);
+                self.next_edge = self.next_edge.max(id.saturating_add(1));
                 // a new edge topologically touches both endpoints (future
                 // state text may cite feeders); invalidate defensively
                 self.state_memo.remove(src);

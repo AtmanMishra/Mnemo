@@ -61,8 +61,8 @@ function readLedger(home: string): Ledger {
 }
 
 function writeLedger(home: string, ledger: Ledger): void {
-  fs.mkdirSync(path.dirname(ledgerPath(home)), { recursive: true });
-  fs.writeFileSync(ledgerPath(home), JSON.stringify(ledger, null, 2));
+  fs.mkdirSync(path.dirname(ledgerPath(home)), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(ledgerPath(home), JSON.stringify(ledger, null, 2), { mode: 0o600 });
 }
 
 export function claudeCodeSessions(projectsDir = path.join(os.homedir(), ".claude", "projects")): string[] {

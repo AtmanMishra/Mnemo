@@ -6,6 +6,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { redact } from "./redact.ts";
 
 export type SkillScope = "project" | "user";
 
@@ -20,5 +21,6 @@ export function skillPath(scope: SkillScope, name: string, where: { projectRoot:
 
 export function writeSkill(file: string, body: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, body);
+  // A skill body is model output: no credential in it is worth keeping.
+  fs.writeFileSync(file, redact(body));
 }

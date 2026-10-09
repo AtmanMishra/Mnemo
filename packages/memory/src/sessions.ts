@@ -126,8 +126,13 @@ export class SessionIndex {
     file: string,
     private readonly sources: SessionSource[],
   ) {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     this.db = new Database(file);
+    try {
+      fs.chmodSync(file, 0o600);
+    } catch {
+      // a platform without modes keeps its own access rules
+    }
     this.db.run("PRAGMA journal_mode = WAL");
     this.db.run("CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, mtime REAL, size INTEGER, agent TEXT, session TEXT, cwd TEXT)");
     this.db.run(
@@ -153,7 +158,7 @@ export class SessionIndex {
         this.db.transaction(() => {
           this.db.run("DELETE FROM messages WHERE path = ?", [file]);
           this.db.run("INSERT OR REPLACE INTO files VALUES (?, ?, ?, ?, ?, ?)", [file, st.mtimeMs, st.size, src.agent, parsed?.id ?? "", parsed?.cwd ?? ""]);
-          for (const r of parsed?.rows ?? []) insert.run(redact(r.text).slice(0, 20_000), r.role, r.seq, file);
+          for (const r of parsed?.rows ?? []) insert.run(redact(r.text.slice(0, 20_000)), r.role, r.seq, file);
         })();
         read++;
       }

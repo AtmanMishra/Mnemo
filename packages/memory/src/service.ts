@@ -73,6 +73,14 @@ export function factValue(state: string, key: string): string | undefined {
   return factsOf(state, { internal: true }).find((f) => f.key === key)?.value;
 }
 
+/**
+ * A profile is stored as `  - key: value` lines and read back line by line, so a newline in a
+ * value would write facts of its own (a forged "last session", say). One line, redacted, bounded.
+ */
+function oneLine(text: string, max: number): string {
+  return redact(text).replace(/[\r\n\u2028\u2029\u0085]+/g, " ").slice(0, max);
+}
+
 export function spawnMemsrv(binary: string, args: string[]): MemoryChild {
   return spawn(binary, args, { stdio: ["pipe", "pipe", "ignore"] }) as unknown as MemoryChild;
 }
@@ -88,7 +96,7 @@ export class MemoryService {
     readonly journal: string,
     spawnFn: (binary: string, args: string[]) => MemoryChild = spawnMemsrv,
   ) {
-    fs.mkdirSync(path.dirname(journal), { recursive: true });
+    fs.mkdirSync(path.dirname(journal), { recursive: true, mode: 0o700 });
     this.client = new MemoryClient({ binaryPath: binary, journalPath: journal, spawn: spawnFn, timeoutMs: 15_000 });
   }
 
@@ -152,7 +160,7 @@ export class MemoryService {
   async learn(scope: Scope, projectId: string, key: string, value: string): Promise<{ superseded: boolean } | undefined> {
     const node = await this.profileNode(scope, projectId);
     if (node === undefined) return undefined;
-    const r = await this.call<{ fact: number; superseded: number | null }>("fact", { node, key, value: redact(value) });
+    const r = await this.call<{ fact: number; superseded: number | null }>("fact", { node, key: oneLine(key, 120), value: oneLine(value, 4000) });
     return r ? { superseded: r.superseded !== null } : undefined;
   }
 
@@ -202,7 +210,7 @@ export class MemoryService {
   }
 
   async fact(node: number, key: string, value: string): Promise<void> {
-    await this.call("fact", { node, key, value: redact(value) });
+    await this.call("fact", { node, key: oneLine(key, 120), value: oneLine(value, 4000) });
   }
 
   async link(src: number, dst: number, kind: EdgeKind = "supplies_context"): Promise<void> {
