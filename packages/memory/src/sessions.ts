@@ -180,10 +180,10 @@ export class SessionIndex {
       .query(
         `SELECT m.text, m.role, m.seq, f.agent, f.session, f.cwd, snippet(messages, 0, '«', '»', ' … ', 24) AS snip
          FROM messages m JOIN files f ON f.path = m.path
-         WHERE messages MATCH ? ${under ? "AND (f.cwd = ? OR f.cwd LIKE ?)" : ""}
+         WHERE messages MATCH ? ${under ? "AND (f.cwd = ? OR f.cwd LIKE ? ESCAPE '!')" : ""}
          ORDER BY bm25(messages) LIMIT ?`,
       )
-      .all(...([q, ...(under ? [under, `${under}${path.sep}%`] : []), o.k ?? 8] as [string, ...(string | number)[]])) as {
+      .all(...([q, ...(under ? [under, `${under.replace(/[!%_]/g, "!$&")}${path.sep}%`] : []), o.k ?? 8] as [string, ...(string | number)[]])) as {
       text: string;
       role: string;
       seq: number;
