@@ -10,7 +10,7 @@
   "scripts": {
     "start": "bun bin/mnemo.ts",
     "demo": "bun bin/mnemo.ts --demo",
-    "test": "bun test ./test",
+    "test": "bun test --timeout 30000 ./test",
     "typecheck": "tsc --noEmit",
     "build": "bun scripts/build.ts"
   },

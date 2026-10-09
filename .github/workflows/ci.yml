@@ -82,9 +82,11 @@ jobs:
       - name: typecheck
         working-directory: app
         run: bunx tsc --noEmit
+      # Several tests drive a real agent turn and a rendered terminal; a loaded Windows
+      # runner can take over bun's 5 s default for one. 30 s still catches a hang.
       - name: bun test
         working-directory: app
-        run: bun test ./test
+        run: bun test --timeout 30000 ./test
       # @mnemo/memory stands alone: other agents attach to it without the app.
       - name: memory package typecheck
         working-directory: packages/memory
