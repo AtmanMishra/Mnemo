@@ -41,6 +41,7 @@ usage
 options
   --cwd <dir>              work in another folder
   --plan                   start in plan mode (read-only)
+  --accept-edits           change files in the project without asking (commands still ask)
   --yolo                   ask for nothing (deny rules in permissions.json still hold)
   --no-memory              run without the memory layer
   --no-reflect             do not extract facts after each run
@@ -99,6 +100,7 @@ function parse(argv: string[]): Args {
     else if (v === "--best-of") a.bestOf = Number(argv[++i]);
     else if (v === "--check") a.check = argv[++i];
     else if (v === "--plan") a.mode = "plan";
+    else if (v === "--accept-edits") a.mode = "accept-edits";
     else if (v === "--yolo") a.mode = "yolo";
     else if (v === "-c" || v === "--continue") a.continueRecent = true;
     else if (v === "-p" || v === "--print") a.print = argv[++i] ?? "";

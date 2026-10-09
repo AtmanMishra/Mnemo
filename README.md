@@ -102,8 +102,9 @@ leaderboard. Details, and a comparison with a Hermes-style memory:
 ## Before you run it
 
 Mnemo reads your files, edits them and runs commands as you. It asks before
-every edit and command by default (`/mode`); `--yolo` and headless `-p` ask for
-nothing, so use those in a container or a throwaway checkout. The gate filters
+every edit and command by default. `/accept-edits` stops it asking about
+edits, `/yolo` (or `--yolo`) about everything, and headless `-p` never asks, so
+use the last two in a container or a throwaway checkout. The gate filters
 what runs; it is not a sandbox. Your prompts and the files the model reads go to
 the provider you chose; nothing else leaves your machine, and there is no
 telemetry. Read [SECURITY.md](SECURITY.md), which also says how to report a

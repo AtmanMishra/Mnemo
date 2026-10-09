@@ -22,6 +22,10 @@ permission gate (`/mode`).
 | `plan` | read-only: nothing is changed |
 | `yolo` | asks for nothing. Only deny rules in `permissions.json` still hold |
 
+Switch with `shift+tab`, `/mode`, `/accept-edits` or `/yolo` (each toggles), or start
+in one with `--accept-edits`, `--plan` or `--yolo`. Only you can change the mode:
+it is never a tool the model can call.
+
 **The gate filters what runs; it is not a sandbox.** It stops the agent from
 running things you did not approve, but anything you approve runs with your
 permissions. In headless mode (`mnemo -p`) there is nobody to ask, so every

@@ -96,6 +96,8 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "remember", description: "tell Mnemo something to keep: /remember we deploy with fly" },
   { name: "forget", description: "retire a remembered fact: /forget package manager" },
   { name: "mode", description: "how much Mnemo may do without asking (default, accept-edits, plan, yolo)" },
+  { name: "yolo", description: "toggle bypass: ask for nothing (deny rules in permissions.json still hold)" },
+  { name: "accept-edits", description: "toggle accept edits: change project files without asking, still ask before commands" },
   { name: "theme", description: "the look: Mnemo Night, Game Boy, Paper" },
   { name: "bestof", description: 'race N attempts at a task, keep the smallest that passes: /bestof 3 "npm test" <task>' },
   { name: "plan", description: "toggle plan mode (read-only)" },
@@ -605,6 +607,25 @@ export class Controller {
           this.options.onTheme?.(pick);
           this.transcript.notice(`Theme: ${THEMES[pick].label}`);
         }
+        return true;
+      }
+      case "yolo":
+      case "accept-edits": {
+        if (!this.options.host) {
+          this.transcript.notice("Permission modes need the full Mnemo runtime.", "warn");
+          return true;
+        }
+        const target: Mode = name === "yolo" ? "yolo" : "accept-edits";
+        const on = this.mode !== target;
+        this.setMode(on ? target : "default");
+        this.transcript.notice(
+          !on
+            ? "Back to default: Mnemo asks before edits and commands"
+            : target === "yolo"
+              ? "Bypass on: Mnemo runs every edit and command without asking. Deny rules in permissions.json still hold. /yolo again to turn it off"
+              : "Accept edits on: Mnemo changes files in this project without asking, and still asks before commands",
+          on && target === "yolo" ? "warn" : "info",
+        );
         return true;
       }
       case "plan":

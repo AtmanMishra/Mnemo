@@ -48,6 +48,24 @@ test("accept-edits allows edits inside the project only", () => {
   expect("ask" in judge({ mode: "accept-edits" }, [], noGrants, "/p", "bash", { command: "ls" })).toBe(true);
 });
 
+test("/yolo and /accept-edits toggle their mode, and a deny rule still holds", async () => {
+  const e = await env();
+  const mode = () => e.controller.snapshot().footer.mode;
+  await e.controller.submit("/yolo");
+  expect(mode()).toBe("yolo");
+  expect(texts(e.controller).at(-1)).toContain("Deny rules in permissions.json still hold");
+  await e.controller.submit("/yolo");
+  expect(mode()).toBe("default");
+  await e.controller.submit("/accept-edits");
+  expect(mode()).toBe("accept-edits");
+  await e.controller.submit("/yolo");
+  await e.controller.submit("/accept-edits");
+  expect(mode()).toBe("accept-edits");
+  await e.controller.submit("/accept-edits");
+  expect(mode()).toBe("default");
+  expect(e.faux.state.callCount).toBe(0);
+});
+
 test("a deny rule beats every mode, yolo included", () => {
   const rules = [{ tool: "bash", pattern: "rm -rf*", action: "deny" as const }];
   expect(judge({ mode: "yolo" }, rules, noGrants, "/p", "bash", { command: "rm -rf /" })).toMatchObject({ allow: false });
