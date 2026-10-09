@@ -153,10 +153,16 @@ jobs:
           # most recent 200 commits (verified cheap: 80 commits in ~1.6s locally)
           # and stops at the first hit. A full-history scan is deferred: it is
           # unbounded cost for the same single finding this already catches.
+          #
+          # History still holds the previous stack (it lives on the `legacy` branch, and
+          # the commits before its removal are reachable from main), including its
+          # redaction fixtures: fake keys in agent/test/ on purpose. Those paths are
+          # excluded from the history sweep only; no file at them exists on main (audit/FINDINGS.jsonl quotes the same fixtures).
+          history_exclude="$exclude :!agent/test/trace.test.ts :!agent/test/hooks_executor.test.ts :!agent/test/childenv.test.ts :!agent/test/hooks_engine.test.ts :!audit/FINDINGS.jsonl"
           for sha in $(git rev-list --max-count=200 HEAD); do
-            if git grep -qE "$GATE_PAT" "$sha" -- $exclude 2>/dev/null; then
+            if git grep -qE "$GATE_PAT" "$sha" -- $history_exclude 2>/dev/null; then
               echo "::error::credential-shaped string found in commit $sha (history)"
-              git grep -nE "$GATE_PAT" "$sha" -- $exclude
+              git grep -nE "$GATE_PAT" "$sha" -- $history_exclude
               exit 1
             fi
           done
