@@ -20,9 +20,9 @@ export function traceExtension(host: Host) {
     let session = "";
     const write = (record: Record<string, unknown>) => {
       try {
-        fs.mkdirSync(dir, { recursive: true });
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
         const day = new Date().toISOString().slice(0, 10);
-        fs.appendFileSync(path.join(dir, `${day}.jsonl`), `${redact(JSON.stringify({ ts: new Date().toISOString(), session, depth: host.depth, ...record }))}\n`);
+        fs.appendFileSync(path.join(dir, `${day}.jsonl`), `${redact(JSON.stringify({ ts: new Date().toISOString(), session, depth: host.depth, ...record }))}\n`, { mode: 0o600 });
       } catch {
         // Tracing is never worth a failed turn.
       }

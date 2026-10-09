@@ -11,8 +11,11 @@ import {
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
+  hasTrustRequiringProjectResources,
   ModelRuntime,
+  ProjectTrustStore,
   SessionManager,
+  SettingsManager,
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
   type InlineExtension,
@@ -31,6 +34,23 @@ export interface RuntimeOptions {
   /** Continue the most recent session in this directory. */
   continueRecent?: boolean;
   extensions?: InlineExtension[];
+  /**
+   * Whether the folder's own `.pi/` extensions, settings, prompts and skills may load.
+   * Left out, a folder that carries any is trusted only if the user said so earlier.
+   */
+  trustProject?: boolean;
+}
+
+/**
+ * Code that comes with a folder (`.pi/extensions/*.ts` runs inside this process, before
+ * any approval) loads only when the user has trusted the folder. A folder with nothing of
+ * the kind needs no decision. The answer is kept in pi's own `trust.json`, so it is shared
+ * with pi and survives restarts.
+ */
+export function projectTrusted(cwd: string, agentDir: string, override?: boolean): boolean {
+  if (override !== undefined) return override;
+  if (!hasTrustRequiringProjectResources(cwd)) return true;
+  return new ProjectTrustStore(agentDir).get(cwd) === true;
 }
 
 export async function createModelRuntime(agentDir: string): Promise<ModelRuntime> {
@@ -47,6 +67,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<AgentSessio
       cwd,
       agentDir: options.agentDir,
       modelRuntime,
+      settingsManager: SettingsManager.create(cwd, options.agentDir, { projectTrusted: projectTrusted(cwd, options.agentDir, options.trustProject) }),
       resourceLoaderOptions: { extensionFactories: options.extensions ?? [] },
     });
     const created = await createAgentSessionFromServices({

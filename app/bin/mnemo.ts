@@ -10,7 +10,8 @@ import * as path from "node:path";
 import { PassThrough } from "node:stream";
 import React from "react";
 import { render } from "ink";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { hasTrustRequiringProjectResources, ProjectTrustStore, SessionManager } from "@earendil-works/pi-coding-agent";
+import * as readline from "node:readline/promises";
 import pkg from "../package.json" with { type: "json" };
 import { agentDir, findMemsrv, journalPath, memsrvName, mnemoHome, pointPiAt, skillsDir } from "../src/runtime/paths.ts";
 import { createModelRuntime, startRuntime } from "../src/runtime/runtime.ts";
@@ -43,6 +44,7 @@ options
   --plan                   start in plan mode (read-only)
   --accept-edits           change files in the project without asking (commands still ask)
   --yolo                   ask for nothing (deny rules in permissions.json still hold)
+  --trust-project          load this folder's .pi/ extensions, settings and skills without asking (they run code)
   --no-memory              run without the memory layer
   --no-reflect             do not extract facts after each run
   --no-verify              do not send a run that changed code back to run a check
@@ -76,6 +78,7 @@ interface Args {
   check?: string;
   mode: Mode;
   continueRecent: boolean;
+  trustProject?: boolean;
   print?: string;
   cwd?: string;
 }
@@ -102,12 +105,43 @@ function parse(argv: string[]): Args {
     else if (v === "--plan") a.mode = "plan";
     else if (v === "--accept-edits") a.mode = "accept-edits";
     else if (v === "--yolo") a.mode = "yolo";
+    else if (v === "--trust-project") a.trustProject = true;
     else if (v === "-c" || v === "--continue") a.continueRecent = true;
     else if (v === "-p" || v === "--print") a.print = argv[++i] ?? "";
     else if (v === "--cwd") a.cwd = argv[++i];
     else throw new Error(`unknown argument ${v} — mnemo --help lists them`);
   }
   return a;
+}
+
+/**
+ * A folder can carry code of its own (`.pi/extensions/*.ts` runs in this process, before
+ * any approval) and instructions (`.pi/SYSTEM.md`, skills). Cloning a repo must not be
+ * enough to run it: ask once, remember "always", and without a terminal say what was left out.
+ * Returns an override for this run, or undefined to follow what is saved.
+ */
+async function trustDecision(cwd: string, dir: string, args: Args): Promise<boolean | undefined> {
+  if (args.trustProject) return true;
+  if (!hasTrustRequiringProjectResources(cwd)) return undefined;
+  const store = new ProjectTrustStore(dir);
+  if (store.get(cwd) !== null) return undefined;
+  const found = [".pi/extensions", ".pi/settings.json", ".pi/mcp.json", ".pi/skills", ".pi/prompts", ".pi/themes", ".agents/skills"].filter((f) => fs.existsSync(path.join(cwd, f)));
+  const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true && args.print === undefined && !args.dump;
+  if (!interactive) {
+    console.error(`mnemo: not loading this folder's ${found.join(", ") || "project resources"} (not trusted; --trust-project allows it)`);
+    return undefined;
+  }
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = (await rl.question(`This folder ships its own ${found.join(", ")}.\nExtensions run as code with your permissions, before any approval, and the rest steers the model.\nLoad them? [y] this time · [a] always for this folder · [N] no: `)).trim().toLowerCase();
+    if (answer === "a") {
+      store.set(cwd, true);
+      return true;
+    }
+    return answer === "y" || answer === "yes";
+  } finally {
+    rl.close();
+  }
 }
 
 /** A stdin that never sends a key, for frames rendered without a terminal. */
@@ -166,8 +200,8 @@ function readState(home: string): State {
 
 function writeState(home: string, state: State): void {
   try {
-    fs.mkdirSync(home, { recursive: true });
-    fs.writeFileSync(path.join(home, "state.json"), JSON.stringify(state, null, 2));
+    fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(home, "state.json"), JSON.stringify(state, null, 2), { mode: 0o600 });
   } catch {
     /* a lost flag only means the introduction shows again */
   }
@@ -225,7 +259,7 @@ async function main(): Promise<number> {
 
   const home = mnemoHome();
   const dir = agentDir(home);
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   pointPiAt(dir);
   if (args.command === "doctor") return doctor(home, dir);
   if (args.bestOf !== undefined) return runBestOf(args, home);
@@ -250,6 +284,7 @@ async function main(): Promise<number> {
   const memsrv = args.memory ? findMemsrv(home) : undefined;
   const memory = memsrv ? new MemoryService(memsrv, journal) : undefined;
   const runtimeModels = modelRuntime;
+  const firstTrust = args.demo ? undefined : await trustDecision(cwd, dir, args);
   /** One agent's host and pi session in `agentCwd`; the first gets --continue and the demo's injections. */
   const makeAgent = async (agentCwd: string, first = false) => {
     const host = createHost({ home, agentDir: dir, modelRuntime: runtimeModels, memory, mode: args.mode, reflect: args.reflect, verify: args.verify, escalate: args.escalate });
@@ -258,6 +293,7 @@ async function main(): Promise<number> {
       agentDir: dir,
       modelRuntime: runtimeModels,
       continueRecent: first && args.continueRecent,
+      trustProject: first ? firstTrust : undefined,
       extensions: mnemoExtensions(host),
       ...(first ? injected : {}),
     });

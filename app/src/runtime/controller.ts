@@ -591,7 +591,16 @@ export class Controller {
           this.transcript.notice('Usage: /bestof <2–8> "<check command>" <task> — e.g. /bestof 3 "npm test" add retries to fetch', "warn");
           return true;
         }
-        void this.raceBestOf(Number(m[1]), (m[2] ?? m[3])!, m[4]!.trim());
+        const [n, check, task] = [Number(m[1]), (m[2] ?? m[3])!, m[4]!.trim()];
+        // Candidates run headless, where nothing can ask: say so before starting them.
+        if (!this.options.bestOfRunner && this.mode !== "yolo") {
+          const ok = await this.dialogs.confirm(
+            `Race ${n} attempts?`,
+            "Each attempt runs unattended in its own copy of the project with full privileges: nothing asks before an edit or a command. The best passing change is then applied here.",
+          );
+          if (!ok) return true;
+        }
+        void this.raceBestOf(n, check, task);
         return true;
       }
       case "theme": {

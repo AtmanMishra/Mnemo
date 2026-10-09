@@ -72,6 +72,7 @@ export function skillsExtension(host: Host) {
           description: Type.Optional(Type.String()),
         }),
         async execute(_id, params, _signal, _update, ctx) {
+          if (!NAME.test(params.name)) throw new Error("name must be lowercase letters, digits and dashes");
           const root = projectIdentity(ctx.cwd).root;
           const file = [target(host.home, root, "project", params.name), skillFile(host.home, params.name)].find((f) => fs.existsSync(f));
           if (!file) throw new Error(`no skill ${params.name} in ${path.join(root, ".agents", "skills")} or ${skillsDir(host.home)}`);

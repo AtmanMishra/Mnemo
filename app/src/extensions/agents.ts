@@ -12,11 +12,13 @@ import { Type } from "@earendil-works/pi-ai";
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
+  SettingsManager,
   defineTool,
   SessionManager,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import type { Host } from "./host.ts";
+import { projectTrusted } from "../runtime/runtime.ts";
 
 const READ_ONLY = ["read", "grep", "find", "ls", "memory_search"];
 
@@ -54,6 +56,7 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             cwd: ctx.cwd,
             agentDir: host.agentDir,
             modelRuntime: host.modelRuntime,
+            settingsManager: SettingsManager.create(ctx.cwd, host.agentDir, { projectTrusted: projectTrusted(ctx.cwd, host.agentDir) }),
             resourceLoaderOptions: { extensionFactories: extensionsFor(child) },
           });
           const { session } = await createAgentSessionFromServices({

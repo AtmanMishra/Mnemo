@@ -93,3 +93,16 @@ test("a leading environment assignment does not become the program", () => {
   assert.equal(generalise(bash("FOO=1 git status")), "git status*");
   assert.equal(generalise(bash("CI=1 npm run build")), "npm run*");
 });
+
+test("an approval never widens over an operand, and a pattern ends on a word", () => {
+  assert.equal(generalise(bash("rm -rf dist")), "rm -rf dist");
+  assert.equal(generalise(bash("cat README.md")), "cat README.md");
+  assert.equal(generalise(bash("git config core.pager x")), "git config core.pager x");
+  const grants = { project: ["ls*", "rm -rf dist", "git status*"], global: [], deny: [] };
+  assert.equal(decide(bash("ls -la"), grants).decision, "allow");
+  assert.equal(decide(bash("lsof -i"), grants).decision, "ask");
+  assert.equal(decide(bash("rm -rf dist"), grants).decision, "allow");
+  assert.equal(decide(bash("rm -rf dist ~/Documents"), grants).decision, "ask");
+  assert.equal(decide(bash("git statusx"), grants).decision, "ask");
+  assert.equal(decide(bash("git status  --short"), grants).decision, "allow");
+});

@@ -53,7 +53,14 @@ export interface GateResult {
 }
 
 /** Shell metacharacters that make a command a sequence rather than a command. */
-const COMPOUND = /[;&|><`$(){}\n]|\|\|/;
+export const COMPOUND = /[;&|><`$(){}\n]|\|\|/;
+
+/** Programs whose first word after the name picks what they do: `git status`, `npm test`. */
+const SUBCOMMAND_PROGRAMS = new Set(["git", "npm", "pnpm", "yarn", "bun", "cargo", "go", "docker", "make"]);
+/** Subcommands whose arguments can carry a command of their own: never a class. */
+const EXEC_SUBCOMMANDS = new Set(["config", "alias", "exec", "run-script"]);
+/** Programs an approval must never widen: they act on whatever operand follows. */
+const OPERAND_PROGRAMS = new Set(["rm", "mv", "cp", "dd", "chmod", "chown", "ln", "ssh", "scp", "rsync", "curl", "wget", "sudo", "su", "sh", "bash", "zsh", "dash", "env", "xargs", "find", "eval", "exec", "nohup", "kill", "tar", "sed", "awk", "python", "python3", "node", "perl", "ruby"]);
 
 /**
  * The pattern a call generalises to — by subcommand for commands, by subject
@@ -78,16 +85,29 @@ export function generalise(call: ToolCall): string | undefined {
   const program = parts[index];
   if (!program) return undefined;
 
-  const sub = parts.slice(index + 1).find((part) => !part.startsWith("-"));
-  return sub ? `${program} ${sub}*` : `${program}*`;
+  const rest = parts.slice(index + 1);
+  const sub = rest.find((part) => !part.startsWith("-"));
+  const bare = program.replace(/^.*\//, "");
+  if (SUBCOMMAND_PROGRAMS.has(bare)) {
+    // `git status*`; but not `git config*`, whose arguments can name a program to run.
+    if (sub && EXEC_SUBCOMMANDS.has(sub)) return trimmed;
+    return sub ? `${program} ${sub}*` : `${program}*`;
+  }
+  // Anything else generalises only when there is nothing to generalise over:
+  // an operand ("rm dist") is an argument, and arguments are never a class.
+  if (sub || OPERAND_PROGRAMS.has(bare)) return trimmed;
+  return `${program}*`;
 }
 
 function matchesCommand(pattern: string, command: string): boolean {
   if (command.length === 0) return false;
-  // A pattern ends in `*` or is an exact word; either way it is a prefix test on
-  // the command, so `git status*` covers `git status --short` and not `git stash`.
-  const stem = pattern.endsWith("*") ? pattern.slice(0, -1) : pattern;
-  return command === stem.replace(/\s+$/, "") || command.startsWith(stem);
+  command = command.replace(/\s+/g, " ");
+  // A pattern without `*` is the exact command. One ending in `*` is a prefix that
+  // must end on a word, so `git status*` covers `git status --short` but not
+  // `git stash` or `git statusx`.
+  if (!pattern.endsWith("*")) return command === pattern.replace(/\s+/g, " ").trim();
+  const stem = pattern.slice(0, -1).replace(/\s+/g, " ").trimEnd();
+  return command === stem || command.startsWith(stem + " ");
 }
 
 /**
