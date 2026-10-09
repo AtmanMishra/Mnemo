@@ -32,7 +32,8 @@ main() {
   BIN_DIR="$HOME_DIR/bin"
   LINK_DIR=${MNEMO_LINK_DIR:-"$HOME/.local/bin"}
   VERSION=${MNEMO_VERSION:-}
-  UNINSTALL=${MNEMO_UNINSTALL:-}
+  UNINSTALL=
+  case "${MNEMO_UNINSTALL:-}" in "" | 0 | false | no) ;; *) UNINSTALL=1 ;; esac
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -43,6 +44,10 @@ main() {
     esac
     shift
   done
+
+  # These end up in a URL and a download: refuse anything that is not what it says.
+  case "$REPO" in .* | */.* | */ | /* | */*/* | *[!A-Za-z0-9._/-]* | "") fail "MNEMO_REPO must look like owner/name, not $REPO" ;; */*) ;; *) fail "MNEMO_REPO must look like owner/name, not $REPO" ;; esac
+  case "$VERSION" in "") ;; v[0-9]*) case "$VERSION" in *[!A-Za-z0-9.+-]*) fail "version must look like v0.1.0, not $VERSION" ;; esac ;; *) fail "version must look like v0.1.0, not $VERSION" ;; esac
 
   if [ -n "$UNINSTALL" ]; then
     rm -f "$BIN_DIR/mnemo" "$BIN_DIR/memsrv"
@@ -68,6 +73,11 @@ main() {
 
   if [ -n "${MNEMO_RELEASE_BASE:-}" ]; then
     base="$MNEMO_RELEASE_BASE"
+    case "$base" in
+      https://* | file://*) ;;
+      *) fail "MNEMO_RELEASE_BASE must start with https:// or file://" ;;
+    esac
+    say "! downloading from $base instead of github.com/$REPO: only continue if you chose that"
   elif [ -n "$VERSION" ]; then
     base="https://github.com/$REPO/releases/download/$VERSION"
   else
@@ -93,14 +103,22 @@ main() {
   say "✓ checksum"
 
   mkdir -p "$BIN_DIR" "$LINK_DIR"
-  tar -xzf "$tmp/$archive" -C "$tmp"
+  # Take the two files we expect and nothing else the archive might carry.
+  tar -xzf "$tmp/$archive" -C "$tmp" mnemo memsrv 2>/dev/null || fail "$archive does not hold mnemo and memsrv"
   for f in mnemo memsrv; do
-    [ -f "$tmp/$f" ] || fail "$archive has no $f"
-    # Move over the old file rather than into it, so a running mnemo is not corrupted.
-    mv -f "$tmp/$f" "$BIN_DIR/$f"
-    chmod +x "$BIN_DIR/$f"
+    [ -f "$tmp/$f" ] && [ ! -L "$tmp/$f" ] || fail "$archive has no regular file $f"
+    chmod +x "$tmp/$f"
   done
-  ln -sf "$BIN_DIR/mnemo" "$LINK_DIR/mnemo"
+  # Copy beside the target, then rename: a rename is atomic, so an interrupt leaves
+  # the old file whole, and a running mnemo is replaced rather than written into.
+  for f in mnemo memsrv; do
+    cp "$tmp/$f" "$BIN_DIR/.$f.new.$$" && mv -f "$BIN_DIR/.$f.new.$$" "$BIN_DIR/$f"
+  done
+  if [ -e "$LINK_DIR/mnemo" ] || [ -L "$LINK_DIR/mnemo" ]; then
+    if [ -L "$LINK_DIR/mnemo" ] && [ "$(readlink "$LINK_DIR/mnemo")" = "$BIN_DIR/mnemo" ]; then :
+    else say "! $LINK_DIR/mnemo already exists and is not ours; left alone. Run $BIN_DIR/mnemo or fix your PATH"; linked=no; fi
+  fi
+  [ "${linked:-}" = no ] || ln -sf "$BIN_DIR/mnemo" "$LINK_DIR/mnemo"
   say "✓ installed into $BIN_DIR"
 
   case ":$PATH:" in
@@ -122,8 +140,8 @@ fetch() {
   case "$1" in
     file://*) cp "${1#file://}" "$2" ;;
     *)
-      if command -v curl >/dev/null 2>&1; then curl -fsSL "$1" -o "$2"
-      elif command -v wget >/dev/null 2>&1; then wget -qO "$2" "$1"
+      if command -v curl >/dev/null 2>&1; then curl --proto '=https' --tlsv1.2 -fsSL "$1" -o "$2"
+      elif command -v wget >/dev/null 2>&1; then wget --https-only -qO "$2" "$1"
       else fail "needs curl or wget"; fi ;;
   esac
 }

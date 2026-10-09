@@ -31,6 +31,9 @@ permissions:
 env:
   # Empty on a dry run.
   TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag || '' }}
+  # What every job builds. A tag push is pinned to the commit it pointed at when
+  # the run started, so a tag moved mid-run cannot make jobs disagree.
+  REF: ${{ github.ref_type == 'tag' && github.sha || inputs.tag || github.ref }}
 
 jobs:
   build:
@@ -47,15 +50,20 @@ jobs:
           - { platform: windows-x64, os: windows-latest, bun: bun-windows-x64, rust: x86_64-pc-windows-msvc, ext: ".exe" }
     name: build (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
+    # Read-only: this job runs dependency code (crate build scripts, npm packages),
+    # so it must not be able to sign anything. Attestation is the job below.
     permissions:
       contents: read
-      id-token: write # build provenance
-      attestations: write
     steps:
+      - name: the tag is a version
+        if: ${{ env.TAG != '' }}
+        shell: bash
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::$TAG is not a version tag like v0.1.0"; exit 1; }
       # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ env.REF }}
       # oven-sh/setup-bun v2.2.0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
@@ -146,32 +154,49 @@ jobs:
           if (Test-Path (Join-Path $env:MNEMO_HOME "bin/mnemo.exe")) { throw "mnemo.exe is still installed after the uninstall" }
           Remove-Item out/SHA256SUMS
 
-      # Private repositories need an Enterprise plan for attestations; public ones do not.
-      # actions/attest-build-provenance v4.2.2
-      - name: attest the archive
-        if: ${{ !github.event.repository.private }}
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
-        with:
-          subject-path: out/*
-
       # actions/upload-artifact v4.6.2
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: mnemo-${{ matrix.platform }}
           path: out/*
 
-  publish:
+  # Signs what the build produced and nothing else runs here. Private repositories
+  # need an Enterprise plan for attestations; public ones do not.
+  attest:
     needs: build
-    # Only a tag publishes; a dry run stops after the build.
-    if: ${{ github.ref_type == 'tag' || (inputs.publish && inputs.tag != '') }}
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      # actions/download-artifact v4.3.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: dist
+          merge-multiple: true
+      # actions/attest-build-provenance v4.2.2
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: dist/*
+
+  publish:
+    needs: [build, attest]
+    # Only a tag publishes; a dry run stops after the build. The attest job is
+    # skipped on a private repository, which does not stop a release.
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.attest.result != 'failure' && (github.ref_type == 'tag' || (inputs.publish && inputs.tag != '')) }}
+    runs-on: ubuntu-latest
+    # Give this environment required reviewers (Settings → Environments → release)
+    # and a rule that only v* tags may deploy to it; keep TAP_TOKEN in it too.
+    environment: release
     permissions:
       contents: write
     steps:
       # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ env.REF }}
           fetch-depth: 0
       # oven-sh/setup-bun v2.2.0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
@@ -182,7 +207,9 @@ jobs:
       - name: the tag is on main
         run: |
           git fetch origin main
-          git merge-base --is-ancestor "$TAG" origin/main || { echo "::error::$TAG is not on main: merge first, then tag"; exit 1; }
+          # The tag must name the commit this run built, and that commit must be on main.
+          [ "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$(git rev-parse HEAD)" ] || { echo "::error::$TAG moved since this run started"; exit 1; }
+          git merge-base --is-ancestor HEAD origin/main || { echo "::error::$TAG is not on main: merge first, then tag"; exit 1; }
 
       # actions/download-artifact v4.3.0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
@@ -208,7 +235,8 @@ jobs:
           case "$TAG" in *-*) prerelease="--prerelease" ;; esac
           notes="--generate-notes"
           [ -f "docs/releases/$TAG.md" ] && notes="--notes-file docs/releases/$TAG.md"
-          gh release create "$TAG" dist/* --title "Mnemo $TAG" $notes $prerelease || gh release upload "$TAG" dist/* --clobber
+          # No --clobber fallback: a release that exists is never overwritten (a bad one is fixed by a new version).
+          gh release create "$TAG" dist/* --title "Mnemo $TAG" $notes $prerelease
 
       # Optional: keep a Homebrew tap and a Scoop bucket current. Set the
       # TAP_TOKEN secret (a fine-grained token with contents:write on those two

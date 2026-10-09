@@ -40,6 +40,19 @@ docker run --rm -v "$REL:/release:ro" "$IMAGE" sh -c '
   sh /release/install.sh --uninstall > /dev/null
   [ ! -e "$HOME/.mnemo/bin/mnemo" ] && [ ! -e "$HOME/.mnemo/bin/memsrv" ] && [ ! -e "$HOME/.local/bin/mnemo" ] && echo "✓ binaries and link removed"
   [ "$(cat "$HOME/.mnemo/memory/journal.jsonl")" = keep ] && echo "✓ memory untouched"
+  echo "--- an unrelated mnemo on the PATH is left alone"
+  mkdir -p "$HOME/.local/bin" && echo mine > "$HOME/.local/bin/mnemo"
+  sh /release/install.sh > /tmp/out 2>&1
+  [ "$(cat "$HOME/.local/bin/mnemo")" = mine ] && grep -q "not ours" /tmp/out && echo "✓ foreign file kept, and said so"
+  rm -f "$HOME/.local/bin/mnemo"; sh /release/install.sh --uninstall > /dev/null
+  echo "--- overrides that would point the download somewhere else are refused"
+  for bad in "MNEMO_REPO=../evil/x" "MNEMO_REPO=a/b/c" "MNEMO_VERSION=../../evil/x/releases/download/v1" "MNEMO_RELEASE_BASE=http://example.com/r"; do
+    if env "$bad" sh /release/install.sh >/dev/null 2>/tmp/err; then echo "accepted $bad"; exit 1; fi
+    [ -s /tmp/err ] || { echo "no reason given for $bad"; exit 1; }
+  done
+  echo "✓ four bad overrides refused"
+  MNEMO_UNINSTALL=0 sh /release/install.sh > /dev/null && [ -e "$HOME/.mnemo/bin/mnemo" ] && echo "✓ MNEMO_UNINSTALL=0 installs"
+  sh /release/install.sh --uninstall > /dev/null
   echo "--- no curl or wget: say so before doing anything"
   if MNEMO_RELEASE_BASE= sh /release/install.sh --version v9.9.9 >/tmp/out 2>/tmp/err; then echo "unexpected success"; exit 1; fi
   grep -q "needs curl or wget" /tmp/err && ! grep -q downloading /tmp/out && echo "✓ clear error, nothing started"

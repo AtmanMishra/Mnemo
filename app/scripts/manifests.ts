@@ -101,7 +101,7 @@ export function scoop(tag: string, sums: Record<string, string>): string {
 
 if (import.meta.main) {
   const [tag, dir] = process.argv.slice(2);
-  if (!tag || !dir || !/^v\d+\.\d+\.\d+/.test(tag)) {
+  if (!tag || !dir || !/^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(tag)) {
     console.error("usage: bun app/scripts/manifests.ts v<version> <dir holding SHA256SUMS>");
     process.exit(2);
   }
