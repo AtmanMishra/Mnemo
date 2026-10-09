@@ -92,6 +92,8 @@ function Install-Mnemo {
       Write-Host "  added $BinDir to your PATH (open a new terminal)"
     }
     & (Join-Path $BinDir "mnemo.exe") doctor
+    # doctor exits 1 when no model is configured yet; that must not become the installer's exit code.
+    $global:LASTEXITCODE = 0
     Write-Host "done: run  mnemo"
     Write-Host "      uninstall:  `$env:MNEMO_UNINSTALL=1; irm https://github.com/$Repo/releases/latest/download/install.ps1 | iex"
   } finally {

@@ -116,9 +116,14 @@ jobs:
           export MNEMO_HOME="$RUNNER_TEMP/mnemo-home"
           got=$(stage/mnemo${{ matrix.ext }} --version)
           echo "$got"
-          stage/mnemo${{ matrix.ext }} doctor | tee doctor.txt
+          # doctor exits 1 when no model is configured, which a fresh runner never has;
+          # what matters here is what it found, so read the report, not the exit code.
+          stage/mnemo${{ matrix.ext }} doctor > doctor.txt || true
+          cat doctor.txt
           grep -q "✓ memory" doctor.txt || { echo "::error::mnemo did not find memsrv beside it"; exit 1; }
-          stage/mnemo${{ matrix.ext }} --demo --dump | grep -q "retries"
+          # A here-string, not a pipe: under pipefail, grep -q closing the pipe early fails the step.
+          demo=$(stage/mnemo${{ matrix.ext }} --demo --dump)
+          grep -q "retries" <<<"$demo" || { echo "::error::the scripted turn did not run"; exit 1; }
 
       # The one-liner's own script, run against this very archive: install,
       # upgrade in place, uninstall. SHA256SUMS is made here only for the test.
@@ -153,6 +158,8 @@ jobs:
           & ./app/scripts/get.ps1
           if (Test-Path (Join-Path $env:MNEMO_HOME "bin/mnemo.exe")) { throw "mnemo.exe is still installed after the uninstall" }
           Remove-Item out/SHA256SUMS
+          # The step's exit code is the last native command's; doctor's 1 (no model) is not a failure.
+          exit 0
 
       # actions/upload-artifact v4.6.2
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
