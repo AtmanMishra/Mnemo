@@ -1,3 +1,5 @@
+> **Historical.** This file was written while the previous stack (`tui-go/`, `agent/`, `harness-engine/`) was the program. That code now lives on the `legacy` branch; the paths below refer to it. Current work: [`ROADMAP.md`](ROADMAP.md).
+
 # The issue ledger
 
 Every issue filed against this repository — twenty-five of them, eight open and seventeen

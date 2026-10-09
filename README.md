@@ -30,6 +30,16 @@ Windows (PowerShell):
 irm https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.ps1 | iex
 ```
 
+The same scripts are served from the project site, which is shorter to type:
+
+```bash
+curl -fsSL https://atmanmishra.dev/install.sh | sh
+```
+
+```powershell
+irm https://atmanmishra.dev/install.ps1 | iex
+```
+
 No Bun, Node or Rust is needed: the installer downloads one archive holding
 `mnemo` and its memory sidecar `memsrv`, checks its SHA-256, and puts both in
 `~/.mnemo/bin`. Run it again to upgrade; add `--uninstall` (after `sh -s --`) to
@@ -120,7 +130,7 @@ vulnerability.
 | `site/` | the project page and installers (GitHub Pages) |
 | `docs/` | [ROADMAP](docs/ROADMAP.md), [RELEASING](docs/RELEASING.md), [the previous stack](docs/LEGACY.md) |
 | `research/` | the evals and the design papers |
-| `tui-go/`, `agent/`, `harness-engine/` | the previous stack; still run, no new features |
+| branch [`legacy`](https://github.com/AtmanMishra/Mnemo/tree/legacy) | the previous stack (`tui-go/`, `agent/`, `harness-engine/`), kept for reference and **unmaintained** |
 
 Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Maintainers cutting a release:
 [docs/RELEASING.md](docs/RELEASING.md).

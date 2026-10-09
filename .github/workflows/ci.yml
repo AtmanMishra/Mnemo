@@ -1,7 +1,7 @@
 name: ci
 
-# 7.1: every push and PR runs all four suites. They are independent, so they
-# run as separate jobs and a red Rust suite still tells you about TypeScript.
+# Every push and PR runs the suites. They are independent, so they run as
+# separate jobs and a red Rust suite still tells you about TypeScript.
 on:
   push:
     branches: [main]
@@ -56,73 +56,9 @@ jobs:
         working-directory: memory-layer
         run: cargo test --locked --offline --test memeval_gate
 
-  agent:
-    # Two runners, not one. This suite was written on a POSIX host and
-    # carried assumptions that only Windows disproves: os.tmpdir() there
-    # sits under the user's home, so skill discovery's ancestor walk left
-    # the fixture and picked up the developer's own ~/.agents/skills as
-    # "project" skills; commands go through cmd.exe, not /bin/sh; and NTFS
-    # has no POSIX mode bits, so a 0600 assertion cannot hold there at all.
-    # Every one of those passed on ubuntu for as long as nobody ran the
-    # suite on Windows - which is exactly the failure this leg moves from a
-    # maintainer's laptop to a PR.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    name: agent (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    steps:
-      # actions/checkout v4.4.0
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      # actions/setup-node v4.4.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          # 22.18 is the floor, and it is a measured floor: 22.6 shipped type
-          # stripping behind --experimental-strip-types, so pinning 22.6 here
-          # made every .ts test die on ERR_UNKNOWN_FILE_EXTENSION — the whole
-          # agent and harness-engine suites were red on main for weeks with
-          # nobody noticing, because CI is where they run.
-          node-version: "22.18"
-      # dtolnay/rust-toolchain stable (moving branch — see header note)
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
-      # the memory tests talk to the real sidecar
-      - name: build memsrv
-        working-directory: memory-layer
-        run: cargo build --bin memsrv
-      # npm ci installs exactly the lockfile's tree — a dependency drift can
-      # only be introduced deliberately, never by a timestamp
-      - name: npm ci
-        working-directory: agent
-        run: npm ci
-      - name: typecheck
-        working-directory: agent
-        run: npx tsc --noEmit
-      - name: npm test
-        working-directory: agent
-        run: npm test
-
-  harness-engine:
-    runs-on: ubuntu-latest
-    steps:
-      # actions/checkout v4.4.0
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      # actions/setup-node v4.4.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: "22.18"
-      - name: npm ci
-        working-directory: harness-engine
-        run: npm ci
-      # one watcher test is timing-based; a single retry keeps CI honest
-      # without hiding a real failure, since a genuine break fails twice
-      - name: npm test
-        working-directory: harness-engine
-        run: npm test || npm test
-
   app:
     # The Bun application (the interface on pi). Three runners for the same
-    # reason as tui-go below: the terminal is where portability breaks.
+    # reason: the terminal is where portability breaks (paths, line endings, symlinks).
     strategy:
       fail-fast: false
       matrix:
@@ -163,33 +99,6 @@ jobs:
           bun scripts/build.ts
           MNEMO_HOME="$RUNNER_TEMP/mnemo-home" ./dist/mnemo --demo --dump | grep -q "retries"
 
-  tui-go:
-    # Three runners, not one. This suite was written on a POSIX host and its
-    # fixtures, its path expectations and (mostly) its golden frames assumed
-    # one; making them portable is only worth anything if something notices the
-    # next time it stops being true. The failure this guards against is quiet:
-    # on Windows the acceptance frames compared CRLF against LF and failed
-    # while `git status` showed a clean tree.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    name: tui-go (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    steps:
-      # actions/checkout v4.4.0
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      # actions/setup-go v5
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
-        with:
-          go-version: "1.27"
-      - name: go vet
-        working-directory: tui-go
-        run: go vet ./...
-      - name: go test
-        working-directory: tui-go
-        run: go test ./...
-
   secrets:
     runs-on: ubuntu-latest
     steps:
@@ -205,9 +114,9 @@ jobs:
       # or plausibly will: session keys (sk-*; sk-or-v1-* for OpenRouter),
       # classic and fine-grained GitHub tokens, AWS access keys, and a
       # generic API_KEY=long-string assignment (oc_sk_* is OpenCode's shape: any
-          # <prefix>_sk_<token>, so a new provider's key with that shape is caught too). Fixtures that legitimately
-      # hold these shapes live ONLY under agent/test/ — both files are
-      # excluded here, so a fixture added anywhere else trips the gate.
+      # <prefix>_sk_<token>, so a new provider's key with that shape is caught too).
+      # Fixtures that legitimately hold these shapes live only in the redaction
+      # tests, which are excluded below, so a fixture added anywhere else trips the gate.
       #
       # The working-tree scan catches a key on disk; the history sweep
       # catches one that was committed and then rotated. It is bounded to the
@@ -233,10 +142,8 @@ jobs:
           # has to feed it something that looks real. The gate cannot tell a
           # fixture from a leak, so every new one belongs on this list — the
           # gate going red for a fixture is how it trains people to ignore it.
-          # audit/FINDINGS.jsonl is on the list for the same reason: the audit
-          # quotes the fixture strings as evidence, and it is a record, not code.
           GATE_PAT="(sk-[A-Za-z0-9]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|[a-z]{1,8}_sk_[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy][\"']?[:=][[:space:]]*[\"']?[A-Za-z0-9_-]{20,})"
-          exclude=':!agent/test/trace.test.ts :!agent/test/hooks_executor.test.ts :!agent/test/childenv.test.ts :!agent/test/hooks_engine.test.ts :!audit/FINDINGS.jsonl :!.github/workflows/ci.yml :!packages/memory/test/redact.test.ts :!app/test/scrub.test.ts'
+          exclude=':!.github/workflows/ci.yml :!packages/memory/test/redact.test.ts :!app/test/scrub.test.ts'
           if git grep -nE "$GATE_PAT" -- $exclude; then
             echo "::error::credential-shaped string found outside the redaction fixtures"
             exit 1

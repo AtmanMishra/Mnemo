@@ -2,14 +2,11 @@
 #
 # Without this file git applies the contributor's core.autocrlf, so a Windows
 # checkout turns every text file into CRLF. That is invisible for compilers and
-# invisible in `git status` (git compares after normalising), but the TUI's
-# acceptance frames are compared byte-for-byte — so on Windows the golden test
-# failed while the file looked unchanged. Normalise on the way in, hand every
-# platform the same bytes.
+# invisible in `git status` (git compares after normalising), but tests that
+# compare bytes (rendered frames, installers run with sh) then fail on Windows
+# while the file looks unchanged. Normalise on the way in, hand every platform
+# the same bytes.
 * text=auto eol=lf
-
-# The golden frames are an exact contract: never converted, on any machine.
-tui-go/app/testdata/golden/*.txt text eol=lf
 
 # Binaries are never text.
 *.png binary

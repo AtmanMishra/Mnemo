@@ -1,3 +1,5 @@
+> **Note.** Most of these documents describe the previous stack (`tui-go/`, `agent/`, `harness-engine/`). That code is no longer on `main`; it lives on the `legacy` branch, so the file paths mentioned here point into it. Current work: [../ROADMAP.md](../ROADMAP.md).
+
 # Archive
 
 History, not instructions. Nothing here describes how Mnemo works *today* — if

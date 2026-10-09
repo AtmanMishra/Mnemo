@@ -14,9 +14,9 @@ pull requests are all welcome.
 | `DESIGN.md` | the interface spec: palette, motion, keys |
 | `docs/ROADMAP.md` | what is left, in order |
 
-`tui-go/`, `agent/` and `harness-engine/` are the previous stack. They still
-run and are the specification for some behaviour, but new features go in
-`app/` and `packages/`.
+The previous stack (`tui-go/`, `agent/`, `harness-engine/`) lives on the
+[`legacy`](https://github.com/AtmanMishra/Mnemo/tree/legacy) branch. It is not
+maintained and not accepted for changes; new work goes in `app/` and `packages/`.
 
 ## Set up
 

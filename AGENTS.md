@@ -1,300 +1,57 @@
-# Mnemo — agent contract
-
-> **Direction (2026-10-08): Bun is the program.** The interface, agent loop,
-> tools, harness engine, hooks and schedules are being rebuilt as one Bun
-> application in `app/`; memory stays in Rust (`memory-layer/`, `memsrv`); code
-> execution is the Python ipy kernel. `tui-go/`, `agent/` (Node) and
-> `harness-engine/` are **legacy**: they still run and still carry the only copy
-> of most behavior, so read them as the specification and port their tests, but
-> do not add features to them. Everything left to ship is in
-> **`docs/ROADMAP.md`** — start there. State of the Bun branch and its
-> conventions: `docs/HANDOFF.md`. Target layout: `docs/REBUILD.md`,
-> `docs/PLAN-monorepo.md`.
->
-> `app/` is an Ink + React interface on pi 1.1's **in-process** SDK
-> (`createAgentSessionRuntime`) — no RPC, no child process. Layout: `src/ui/`
-> (components, pure `store.ts` / `editor.ts` / `format.ts`), `src/runtime/`
-> (`controller.ts` is the only caller of the pi session). Mnemo's behaviour is
-> added as pi inline extensions in `src/extensions/` (policy, memory, kernel,
-> agents, skills, trace), which share one `Host` (`src/extensions/host.ts`) —
-> never globals. The memory semantics (profiles, recall, learning, steering)
-> live in `packages/memory` (`@mnemo/memory`): `MemorySession` is the loop any
-> agent drives, `service.ts` the semantics over the sidecar. `app/` drives it
-> from a pi extension; `cd packages/memory && bun test ./test` tests it alone.
->
-> Working in `app/`: `cd app && bun install && bun test ./test && bunx tsc --noEmit`.
-> Everything must be verifiable without an API key: tests run real pi sessions
-> against pi-ai's faux provider (`src/runtime/demo.ts`), and
-> `bun bin/mnemo.ts --demo --dump` prints a whole scripted turn.
-> The sections below this note describe the Go interface (`tui-go/`) as built;
-> they remain accurate for that code and for the invariants it taught us.
-
-# Mnemo TUI — Go Rebuild Handover (legacy, superseded by `app/`)
-
-## What's been built
-
-**tui-go**: Complete rebuild of the Mnemo terminal interface from Rust (ratatui) to Go (Charm.land v2 ecosystem). Lives alongside `tui/` (Rust) until acceptance testing confirms feature parity.
-
-The terminal UI is **one unified surface** — no tab switching. The transcript is the primary view; everything else (palette, sessions, explorer, memory, logs) floats as a modal and dismisses with `esc`.
-
-### Core features delivered
-
-**Navigation & Input**
-
-- Three keyboard modes: Insert (typing), Read (esc activates), Browse (tree focus)
-- Global chords reachable in one press: `^k` palette, `^t` explorer, `^s` sessions, `^m` memory, `^l` logs
-- `esc` always goes up one level — complete model
-- Arrow keys and vim keys throughout (j/k for scroll, J/K for block nav, etc.)
-- Tab cycles: prompt → transcript → explorer → prompt
-- Search via `^f`: live query, case-insensitive, wraps around, highlights in context
-
-**Rendering & Layout**
-
-- Markdown rendering via Glamour with palette-generated stylesheet
-- Hierarchical transcript: user/agent/think/tool/delegation/notice block types
-- One-key toggle (`^e` think/`^r` tools/`^a` all) opens/closes blocks by type across the whole transcript
-- Folding on click, focus-by-block navigation, `y`/`Y` copy to clipboard
-- Floating overlays over dimmed backdrop (palette, sessions, memory, logs, help)
-- Lazy-loaded folder explorer with size display
-
-**State & Integration**
-
-- Sessions browser: project → session → sub-agent hierarchy
-- Memory management: read-only view with forget capability (`d` key, requires confirmation)
-- Live agent integration: spawns pi process, streams messages, handles interrupts
-- Command discovery: slash commands populate from SKILL.md files and plugin manifests
-- Model selection: `/model` lists what logged-in providers offer
-- Authentication: `/login` and `/logout` manage API keys per provider
-
-**Testing & Quality**
-
-- 329 green tests across all packages
-- Mock agent for offline testing
-- Test fixtures for common scenarios (session resume, search, overlays, key dispatch)
-- go vet clean, zero warnings
-
-## Architecture
-
-### Package map
-
-| Package | Owns | Key exports |
-| --------- | ------ | ------------- |
-| `internal/theme` | Palette, glyphs, styles. Single source of color. | Theme struct, 14-colour PICO-8, dither ramp, spinner |
-| `internal/brand` | Nyx mascot and wordmark, marker-based art system | Paint(), CatFor(), Wordmark sizes, walk cycle, blink |
-| `internal/tree` | Hierarchical list model, one impl, three uses | Model, Node, ExpandAll/CollapseAll, Filter, Toggle |
-| `internal/chat` | Transcript: blocks, folding, focus, wrapping, search | Block, Model, ToggleAll, Search, Highlight, SetFocus |
-| `internal/ui` | Chrome: rules, bands, chips, floating panels | Rule, Band, Chip, Header, Panel, Float, Dim |
-| `internal/keymap` | Every binding. Help & palette render from it. | Map (struct), Mode enum, Help/Hints/OverlayHints |
-| `internal/overlay` | One modal contract: purpose, filter, empty state | Model (flat or tree), NewList/NewTree, SetQuery |
-| `internal/session` | Pi's stored sessions as hierarchy | Session, Project, Subs, Load, Nodes, Transcript |
-| `internal/filetree` | Directory → tree.Nodes, lazy-loaded | Root, size display, skip common dirs (.git, etc.) |
-| `internal/prompt` | Input, history, queue, completion | Model, Value, Suggest, Complete, Queue, HistoryPrev/Next |
-| `internal/agent` | Backend boundary: spawn, stream, interrupt | Agent interface, Started/Think/Text/ToolStart/ToolEnd/Delegated/Done/Failed messages |
-| `internal/auth` | API key store & model catalogue | File (JSON), SetKey, LoggedKey, Fetch/Filter models |
-| `internal/markdown` | Glamour v2 renderer with palette stylesheet | Renderer, Render (cached by content lines + width) |
-| `internal/command` | Command discovery: built-ins, skills, plugins | Kind enum, Builtins(), Roots(), ScanSkills, Load, Match |
-| `internal/memory` | Brain areas from pi's memory server | Client, Nodes, Forget, read-only state view |
-| `internal/pi` | Live pi RPC backend, message streaming | Spawn, Chan for messages, Interrupt, Close |
-| `app` | Root model: modes, state machine, layout | Model, Update, View, Config, layout owner for hit-testing |
-
-### Key design decisions
-
-**One owner for layout math**: The `rows()` struct in app/view.go computes all region boundaries in one place. Two functions computing it separately disagreed by one row, putting the terminal cursor off and breaking click hit-testing. Unified computation fixed it.
-
-**Markdown cache by (content, width)**: Glamour renders on every keystroke, but only re-parses when the source text or viewport width changes. Cache key is (source lines count, width). Invalidate on SetBody.
-
-**Streaming continues the previous line**: If a delta arrives as two chunks, the second chunk continues the first, not a fresh line. Critical for not splitting words at chunk boundaries.
-
-**Palette filters by field, not joined**: Query against label/group/detail SEPARATELY. Matching joined fields lets a query like "a^" match by taking 'a' from label and '^' from detail thirty words apart. Per-field prevents false positives.
-
-**Two-tier query matching**: Names use subsequence (every char in order: "sess" finds `/sessions`). Prose uses substring (Descriptions are sentences). Prevents three-letter queries returning the whole list.
-
-**Confirmations precede global chords**: Only destructive actions ask first (forgetting a memory). The question must outrank `^t` and other globals, or a chord walks past it. Confirmation state owns the keyboard.
-
-## Running
-
-### Prerequisites
-
-```bash
-go 1.22+
-node (for --list-models; queries pi agent)
-pi repository at REPO_ROOT
-```
-
-### Build
-
-```bash
-cd tui-go
-go build -o mnemo ./cmd/mnemo
-```
-
-### Run offline (no agent)
-
-```bash
-./mnemo --dump --rows 30 --cols 100
-# Renders one frame to stdout, exits. Useful for testing layout.
-```
-
-### Run live with agent
-
-```bash
-./mnemo --repo $REPO_ROOT --cwd $CWD
-# Spawns pi agent via agent/bin/mnemo.ts
-# --home $HOME (default ~/.mnemo) for sessions & auth store
-# --memsrv path/to/memsrv --journal ~/.mnemo/journal.jsonl (optional)
-# --bundles path/to/harness (optional, for tool discovery)
-```
-
-### Flags for debugging
-
-```bash
---dump             render one frame and exit
---keys <chord>     press keys before dump (e.g., --keys "ctrl+k,e,s,p")
---rows, --cols     set viewport size for dump
-```
-
-## What's left
-
-### Not in this build (by design)
-
-1. **Onboarding/auth/model switching**: First-run wizard still in Rust tui/src/auth.rs. Go side assumes pre-configured ~/.mnemo/auth.json. Can be migrated if needed. **(DONE 2026-08-31:** the /login + /model + logout flow, the provider→key→model wizard and first-run detection now ship in tui-go; see STATUS.md TUI-GO COMFORT run 2.**)**
-2. **Mouse click/wheel hit-testing**: Mouse reporting requested but never acted on. Choice: terminal drag-select (current) vs. in-app clicks (complicated, loses terminal's copy gesture).
-3. **Golden-file tests**: Tests check logic and text, not colour. Colour regressions not caught. Low value; would need visual-diff harness.
-4. **Overlay compositor**: Overlays float over a dimmed backdrop via Compositor (done). Harmonica springs not used; current spring physics is simple Y-offset (good enough).
-
-### If continued
-
-**High value, reasonable scope**:
-
-- Onboarding integration: Move auth flow to Go so --repo works for first-timers
-- Memory write operations: full CRUD (currently read + forget only)
-- Acceptance test harness: automated screenshots for regression testing
-- Tool output capture in transcript: currently quoted as text, could render natively
-
-**Medium value, higher scope**:
-
-- Plugin system UI: create/upload/manage plugins from within TUI (plugin API exists)
-- Dockable panes: sessions/memory/logs as toggleable columns, not modals
-- Theme picker: user-selectable palettes (already structured for it)
-- Macro recording: capture and replay key sequences
-
-## How to continue
-
-1. **Understand context**: `graft map` for token-budgeted orientation. `graft ask "<question>" --source` to find code.
-2. **Small changes**: Read the package that owns the concern. One-owner design means minimal blast radius.
-3. **Test before committing**: `go test ./...` must pass. `go vet ./...` must be clean.
-4. **Refresh the graph**: After big code changes, `graft build` updates the index.
-5. **Commit hygiene**: Include WHY in messages, not just WHAT. Code already says WHAT.
-
-## Repo structure
-
-```
-self-evolving-agent/
-  tui-go/                   ← the Go rebuild (this one)
-    cmd/mnemo/              entry point, config wiring
-    internal/*/             all packages listed in Architecture above
-    app/                    root model & layout
-    *.go                    per-package main, tests
-    go.mod / go.sum         dependencies
-    DESIGN.md               user-facing feature spec
-    README.md               running & architecture overview
-  agent/                    pi agent (spawned as subprocess)
-  memory-layer/             memsrv memory backend (optional)
-  DESIGN.md                 the TUI spec (root)
-  AGENTS.md                 this file
-```
-
-> The Rust `tui/` was archived on branch `archive/tui-rust` (see git history
-> before commit 2240ac4); it is not part of the main system anymore.
-
-## Dependencies
-
-Go modules only (go.mod). Pin versions; no k8s-style floating.
-
-- charm.land/bubbletea/v2 (v2.0.9): TUI framework
-- charm.land/lipgloss/v2 (v2.0.6): styling & layout (compositor)
-- charm.land/bubbles/v2 (v2.2.1): reusable components (textarea, etc.)
-- github.com/charmbracelet/glamour (latest): Markdown rendering
-- github.com/charmbracelet/x/ansi: ANSI-aware string ops
-
-Rust (memory-layer only, if memsrv used):
-
-- serde/serde_json: serialization
-- tokio: async runtime
-- jsonrpc: RPC protocol
-
-## Platform invariants (keep these true)
-
-Hard-won while making the tree run on Windows; each one is a failure that was
-invisible on the machine it was written on.
-
-- **Node >= 22.18, not 22.6.** 22.6 shipped type stripping behind
-  `--experimental-strip-types`; anything pinned there dies on every `.ts` file
-  with `ERR_UNKNOWN_FILE_EXTENSION`. CI pins 22.18 exactly, and `MIN_NODE`,
-  both `engines` fields and the lockfiles all say so.
-- **The memory sidecar is `memsrv.exe` on Windows.** Any derived path goes
-  through the platform name (`memsrvName()` in `tui-go/cmd/mnemo`,
-  `MEMSRV_NAME` in `agent/`), or the Memory pane quietly goes offline there
-  while the built binary sits in `target/debug`.
-- **Test fixtures never spawn a shell.** The stand-in sidecars are the test
-  binary re-executed with a JSON spec (`fakesrv_test.go` in `internal/memory`
-  and `app/`); a `#!/bin/sh` script is unrunnable on Windows and takes the
-  whole package with it.
-- **Golden frames are LF, everywhere.** `.gitattributes` pins them and the
-  comparison strips CRLF anyway — a checkout that converts line endings is not
-  a visual change, and `git status` will not tell you.
-- **CI runs the TUI suite on ubuntu, macos and windows.** A POSIX-only
-  assumption in `tui-go` now fails CI at the PR, not months later on someone
-  else's laptop.
-
-## Contact & references
-
-- **Start here**: `docs/MNEMO.md` — what Mnemo is, one turn end to end, the interface, how to run it
-- **When changing it**: `docs/MNEMO-INTERNALS.md` — memory model and algorithms, runtime, kernel, protocols, invariants, tests, extension points
-- **Design spec**: DESIGN.md (root)
-- **Code graph**: graft/ (auto-indexed)
-- **Test suite**: `go test ./...` runs all, `go test ./app/` for a package
-- **Live view**: `go run ../tui-go/cmd/mnemo -- --repo $(pwd)` — run from the REPO ROOT (--repo must be the root containing agent/, not tui-go/)
-- **Original Rust TUI**: archived on branch `archive/tui-rust`; not in the main system.
-
-<!-- graft:start -->
-## Graft — repo context graph
-
-This repo is indexed in `graft/`: small linked markdown nodes that explain each
-system and carry exact file:line spans, kept in sync with the code through git.
-
-For ANY task here — understanding how something works, finding where code lives,
-or scoping a change — get context from the graph before grepping or opening
-source files. Re-ask freely (it's cheap) and reuse literal identifiers you
-already have (symbol, error string, file name) as the query. New to this repo?
-Run `graft map` first — a token-budgeted orientation (dir clusters, hubs,
-hotspots), no LLM, no key.
-
-- Run `graft ask "<your question>" --source` → ranked nodes with the relevant
-  code spans inlined (each hit's ≤8-line crux by default; `--full` for whole
-  definitions when the crux isn't enough). Match the tool to the task shape:
-  for understanding or editing, the top node IS the answer — cite its
-  `covers:` file:line spans and edit straight from `--source`. For
-  exhaustive tasks ("every occurrence / every caller of this pattern"), ranked
-  results are top-N, not complete — run `graft grep "<literal>"` instead
-  (exhaustive over indexed files, grouped by enclosing symbol), falling back
-  to raw `grep -rn` only for unindexed files.
-- `graft skeleton <file>` → every definition's signature + span, ~10× cheaper
-  than reading the file; use it to skim an API surface.
-- `graft callers <symbol>` gives precomputed, exact edges — who calls this.
-  Add `--direction out` for what it calls, or `--depth N` to walk
-  transitively for the full blast radius. For structural questions, skip
-  ranking and use this directly.
-- Or browse: `graft/INDEX.md` lists every node; follow the links.
-- Monorepos and folders of multiple repos rank fairly across sub-projects —
-  hits carry `[scope/]` labels naming which one they're from. Narrow with
-  `graft ask "<task>" --in <scope>/` once you know where you're working.
-
-If a returned span is truncated ("+N more lines"), open the file at that exact
-range before finalizing. Only open source files when a node genuinely lacks a
-needed detail, and then at the exact file:line the node points to — never
-re-read whole files.
-
-After big code changes, refresh the graph with `graft build` (deterministic,
-no API key, $0).
-<!-- graft:end -->
+# Mnemo: agent contract
+
+Mnemo is one Bun application in `app/`, with its memory in Rust (`memory-layer/`,
+`memsrv`) and code execution in a Python kernel. The previous implementation
+(`tui-go/`, `agent/`, `harness-engine/`) is on the `legacy` branch and is not
+maintained; read it as a specification, never copy its security posture.
+
+**Start with `docs/ROADMAP.md`** (what is left), then `docs/HANDOFF.md` (the state
+of the Bun code and its conventions); target layout in `docs/REBUILD.md` and
+`docs/PLAN-monorepo.md`.
+
+## Layout
+
+`app/` is an Ink + React interface on pi 1.1's **in-process** SDK
+(`createAgentSessionRuntime`): no RPC, no child process.
+
+- `src/ui/`: components and the pure `store.ts` / `editor.ts` / `format.ts`.
+- `src/runtime/`: `controller.ts` is the only caller of the pi session.
+- `src/extensions/`: Mnemo's behaviour as pi inline extensions (policy, memory,
+  kernel, agents, skills, trace, escalate). They share one `Host`
+  (`src/extensions/host.ts`), never globals.
+- `src/policy/`: the permission gate (a pure decision) and the approval prompt.
+- `packages/memory` (`@mnemo/memory`): the memory semantics (profiles, recall,
+  learning, steering). `MemorySession` is the loop any agent drives; `service.ts` is the
+  semantics over the sidecar. Test it alone: `cd packages/memory && bun test ./test`.
+- `memory-layer/`: `memsrv`, the Rust sidecar. `cd memory-layer && cargo test`.
+
+## Working in `app/`
+
+    bun install
+    cd app && bun test ./test && bunx tsc --noEmit
+
+Everything must be verifiable without an API key: tests run real pi sessions against
+pi-ai's faux provider (`src/runtime/demo.ts`), and `bun bin/mnemo.ts --demo --dump`
+prints a whole scripted turn.
+
+## Invariants (keep these true)
+
+Each is a failure that was invisible on the machine it was written on.
+
+- **The memory sidecar is `memsrv.exe` on Windows.** Derive its path through the platform
+  name (`memsrvName()` in `src/runtime/paths.ts`), or memory goes quietly offline there.
+- **Test fixtures never spawn a shell script.** `#!/bin/sh` is unrunnable on Windows.
+- **Compare real paths.** macOS `/var` vs `/private/var` and Windows 8.3 names make two
+  spellings of one directory; use `realpath` before comparing.
+- **Line endings are LF everywhere** (`.gitattributes`). CI runs the suite on ubuntu,
+  macos and windows, so a POSIX-only assumption fails at the pull request.
+- **The gate filters; it is not a sandbox.** Do not describe it as one. Read `SECURITY.md`
+  before changing `src/policy/` or `src/extensions/policy.ts`, and keep a regression test
+  for every bypass you close.
+- **Secrets never reach files, logs or tests.** `redact()` (memory) and `scrub()` (evals)
+  exist; the CI gate fails on credential-shaped strings outside the redaction tests.
+- **No telemetry and no network calls except to the user's model provider.**
+
+## Commits
+
+Say why, not what; the diff says what. Never commit secrets or personal paths.

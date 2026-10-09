@@ -1,3 +1,5 @@
+> **Historical.** This file was written while the previous stack (`tui-go/`, `agent/`, `harness-engine/`) was the program. That code now lives on the `legacy` branch; the paths below refer to it. Current work: [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
 # MNEMO — MASTER PLAN
 
 One command: `mnemo`. An agentic coding + harness assistant whose memory works like a brain.

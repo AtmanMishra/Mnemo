@@ -12,15 +12,3 @@ updates:
     directory: /
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
-  - package-ecosystem: npm
-    directory: /agent
-    schedule: { interval: weekly }
-    open-pull-requests-limit: 3
-  - package-ecosystem: npm
-    directory: /harness-engine
-    schedule: { interval: weekly }
-    open-pull-requests-limit: 3
-  - package-ecosystem: gomod
-    directory: /tui-go
-    schedule: { interval: weekly }
-    open-pull-requests-limit: 3

@@ -13,7 +13,7 @@ memory-layer/data/
 
 # misc
 .DS_Store
-agent/.agents/
+__pycache__/
 *.log
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).

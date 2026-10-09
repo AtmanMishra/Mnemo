@@ -1,3 +1,5 @@
+> **Historical.** This file was written while the previous stack (`tui-go/`, `agent/`, `harness-engine/`) was the program. That code now lives on the `legacy` branch; the paths below refer to it. Current work: [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
 # PROJECT STATUS
 Updated: this file is maintained on every milestone. Design details live in research/.
 GOAL: coding agent reaching frontier-model performance using small/local models,

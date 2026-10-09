@@ -1,9 +1,9 @@
 # The previous stack (Go interface + Node agent)
 
 > **Legacy.** This is the documentation for `tui-go/`, `agent/` and
-> `harness-engine/`, the first version of Mnemo. They still build and run and are
-> the specification for some behaviour, but new work happens in `app/` and
-> `packages/`; see the [README](../README.md) for the current program and
+> `harness-engine/`, the first version of Mnemo. That code is no longer on `main`:
+> it lives on the `legacy` branch, unmaintained (see [SECURITY.md](../SECURITY.md)).
+> New work happens in `app/` and `packages/`; see the [README](../README.md) for the current program and
 > [`docs/ROADMAP.md`](ROADMAP.md) for what is left. The commands, files and
 > environment variables below belong to the Go interface and the Node agent, not
 > to the `mnemo` you install from a release.

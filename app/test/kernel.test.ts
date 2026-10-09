@@ -242,7 +242,7 @@ test("an interpreter is only chosen if it runs", () => {
 // The real bridge, the real interpreter.
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
-const BRIDGE = path.join(REPO_ROOT, "agent", "kernel", "ipy_bridge.py");
+const BRIDGE = path.join(REPO_ROOT, "app", "python", "ipy_bridge.py");
 const interpreter = resolveInterpreter({
   which: (command) => {
     const bun = (globalThis as { Bun?: { which: (c: string) => string | null } }).Bun;

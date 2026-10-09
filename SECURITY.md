@@ -119,11 +119,13 @@ and repositories you trust with all of it.
 
 ## The legacy stack
 
-`agent/`, `harness-engine/`, `tui-go/` and `scripts/install.sh` are the previous
-implementation, kept as a specification and **not maintained**. They predate several
-of the protections above: a repository's own `.mnemo/permissions.json` and hooks can
-run code when opened, and the agent does not ask before acting unless the Go
-interface starts it. Do not run them on a repository you do not trust. Use `mnemo`.
+`agent/`, `harness-engine/` and `tui-go/` (the previous implementation) are not on
+`main`. They remain on the `legacy` branch for reference and are **not maintained**.
+They predate several of the protections above: a repository's own
+`.mnemo/permissions.json` and hooks can run code when opened, and the agent does not
+ask before acting unless the Go interface starts it. Do not run that code, least of all
+on a repository you do not trust. Use `mnemo`. Reports about the `legacy` branch are
+welcome but will not be fixed.
 
 ## Verifying a download
 
