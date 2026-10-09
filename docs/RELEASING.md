@@ -95,7 +95,8 @@ One-time setup:
    - an apex domain: four `A` records to `185.199.108.153`, `185.199.109.153`,
      `185.199.110.153`, `185.199.111.153` (and, for IPv6, the four `AAAA` records
      in GitHub's documentation)
-3. Nothing in the repository names the domain: the page builds its one-liner
+3. This project's domain is `mnemo.atmanmishra.dev`: a `CNAME` record, host `mnemo`, pointing to `atmanmishra.github.io` (no trailing path, DNS only if your registrar proxies).
+4. Nothing in the repository names the domain: the page builds its one-liner
    from the address it is served from. Once it works, put the short one-liner
    in the README.
 

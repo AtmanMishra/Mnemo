@@ -33,11 +33,11 @@ irm https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.ps1 | 
 The same scripts are served from the project site, which is shorter to type:
 
 ```bash
-curl -fsSL https://atmanmishra.dev/install.sh | sh
+curl -fsSL https://mnemo.atmanmishra.dev/install.sh | sh
 ```
 
 ```powershell
-irm https://atmanmishra.dev/install.ps1 | iex
+irm https://mnemo.atmanmishra.dev/install.ps1 | iex
 ```
 
 No Bun, Node or Rust is needed: the installer downloads one archive holding
