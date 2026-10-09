@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /Users/srutinayak/self-evolving-agent/agent
+cd ~/self-evolving-agent/agent
 # secrets come from gitignored .env - never hardcode keys here
 set -a; source ../memory-layer/.env; set +a
 export MNEMO_PROVIDER=opencode-go

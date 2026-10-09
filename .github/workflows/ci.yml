@@ -21,10 +21,8 @@ concurrency:
 # Each pin carries the tag it was resolved from so an upgrade is a
 # deliberate, diffable step.
 #
-# One accepted exception: dtolnay/rust-toolchain is a moving "stable" branch
-# by design. Pinning its SHA freezes the toolchain — rust updates stop
-# arriving — so it tracks stable, with the drift risk that implies (a rustc
-# change can land without a workflow diff). Everything else is a fixed SHA.
+# dtolnay/rust-toolchain is pinned too; the toolchain it installs ("stable") still
+# moves, so a rustc change can land without a workflow diff.
 jobs:
   memory-layer:
     runs-on: ubuntu-latest

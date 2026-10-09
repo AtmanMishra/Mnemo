@@ -139,7 +139,7 @@ Session handling:
 
 Other tips:
 - `Response` = `Selector` + `.status/.reason/.cookies/.headers/.request_headers/.history/.body(bytes)/.meta/.captured_xhr`; selection: `.css()/.xpath()/.find_all()/.find_by_text()`, pseudo-elements like `::text`/`::attr(href)`, chained selectors, navigation (`parent`, `next_sibling`, `below_elements`), `find_similar()`, `markdown(main_content_only=True)` for RAG pipelines (needs `rag` extra).
-- Subagents should run Scrapling inside the prepared venv: `/Users/srutinayak/self-evolving-agent/research/scrapling-venv/bin/python` (Python 3.12; system python is 3.14 — untested upstream there).
+- Subagents should run Scrapling inside the prepared venv: `~/self-evolving-agent/research/scrapling-venv/bin/python` (Python 3.12; system python is 3.14 — untested upstream there).
 
 ---
 

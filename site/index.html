@@ -120,7 +120,7 @@
       <div class="panel" id="panel-ps" role="tabpanel" aria-labelledby="tab-ps">
         <div class="cmd ps"><code id="cmd-ps" data-script="install.ps1">irm https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.ps1 | iex</code><button type="button" data-copy="cmd-ps">copy</button></div>
       </div>
-      <p class="note">No Bun, Node or Rust needed. The installer checks the download's SHA-256 before installing, never touches your memory or settings, and upgrades in place when you run it again. <a id="read-script" href="install.sh">Read the script first.</a></p>
+      <p class="note">No Bun, Node or Rust needed. The installer checks the download's SHA-256 against the release's checksum file (that catches a corrupted download, not a compromised release: <a href="https://github.com/AtmanMishra/Mnemo/blob/main/docs/RELEASING.md">verify provenance</a> if that matters to you), never touches your memory or settings, and upgrades in place when you run it again. <a id="read-script" href="install.sh">Read the script first.</a></p>
       <p class="note">Then: <code>mnemo doctor</code> to see what it found, <code>mnemo --demo</code> for a scripted session that needs no API key, and <code>mnemo</code> to start. Remove it with <code>… | sh -s -- --uninstall</code> (Windows: set <code>$env:MNEMO_UNINSTALL=1</code> first).</p>
     </div>
 
@@ -180,7 +180,9 @@
   document.documentElement.classList.add("js");
   // The one-liner names the address this page is served from, so it is right on
   // any domain; opened as a file, or if anything is odd, the GitHub URL stays.
-  var served = /^https?:$/.test(location.protocol) && location.hostname !== "localhost" ? location.origin : "";
+  // Only an https address, and only the folder this page sits in, so the command can
+  // never be an http one or point above the page.
+  var served = location.protocol === "https:" && location.hostname !== "localhost" ? location.origin + location.pathname.replace(/[^/]*$/, "").replace(/\/$/, "") : "";
   document.querySelectorAll("code[data-script]").forEach(function (el) {
     var name = el.getAttribute("data-script");
     if (served) el.textContent = el.textContent.replace(/https:\/\/\S+/, served + "/" + name);

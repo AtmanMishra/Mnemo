@@ -1,8 +1,8 @@
 You are picking up an existing project called MNEMO cold. Read these two files
 FIRST, in this exact order, before doing anything else:
 
-1. /Users/srutinayak/self-evolving-agent/HANDOFF.md   <- full onboarding doc
-2. /Users/srutinayak/self-evolving-agent/plan.md       <- the live task tracker
+1. ~/self-evolving-agent/HANDOFF.md   <- full onboarding doc
+2. ~/self-evolving-agent/plan.md       <- the live task tracker
 
 Then confirm you understand by telling me: (a) what Mnemo is in one sentence,
 (b) the 4 codebases and what each owns, (c) current test totals, (d) what Area

@@ -17,7 +17,14 @@ that release. Nothing else is published by hand.
 
 Every archive carries a build-provenance attestation (public repository only):
 
-    gh attestation verify mnemo-linux-x64.tar.gz --repo AtmanMishra/Mnemo
+    gh attestation verify mnemo-linux-x64.tar.gz --repo AtmanMishra/Mnemo \
+      --source-ref refs/tags/v0.1.0
+
+`--source-ref` matters: without it a dry-run build from any branch also verifies.
+The installers' SHA-256 check catches corrupted and truncated downloads; it does
+not protect against a compromised release, because the checksum file is published
+beside the archive. The attestation is the provenance check, and the build job
+that makes the archives cannot sign anything (a separate job does).
 
 ## Cutting a release
 
@@ -45,8 +52,11 @@ Every archive carries a build-provenance attestation (public repository only):
 
    The script refuses unless you are on an up-to-date `main` whose three versions
    match. Pushing the tag is the only step that publishes anything.
-6. **Watch it.** The workflow publishes only if the tag is on `main`. Pre-release
-   tags (`v0.2.0-rc.1`) are marked as pre-releases and do not update the tap.
+6. **Watch it.** The workflow publishes only if the tag names the commit it built
+   and that commit is on `main`. Pre-release tags (`v0.2.0-rc.1`) are marked as
+   pre-releases and do not update the tap. That check is a safety net against
+   mistakes, not access control: anyone who can push a tag can run the workflow
+   file at that tag. Access control is the repository setup below.
 7. **Check it from a clean machine:**
 
        curl -fsSL https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.sh | sh
@@ -55,6 +65,18 @@ Every archive carries a build-provenance attestation (public repository only):
 A bad release is fixed by a new version, not by moving the tag. If one must be
 withdrawn, delete the GitHub release (and mark it so in the next notes); never
 re-tag a version people may have installed.
+
+## Who can publish (set this up once)
+
+1. **Tags:** *Settings → Rules → Rulesets → New tag ruleset*, target `v*`, restrict
+   creation (and updates and deletions) to maintainers.
+2. **Environment:** *Settings → Environments → release* (the publish job already
+   names it): add required reviewers, limit deployment to the `v*` tags, and move
+   `TAP_TOKEN` here from the repository secrets so only that job can read it.
+3. **Immutable releases:** *Settings → General → Releases* → enable, so a published
+   release's assets cannot be swapped.
+4. Branch protection on `main` (required CI, no force pushes); a `CODEOWNERS` entry
+   for `.github/` and `app/scripts/get.*` if there is more than one maintainer.
 
 ## The install one-liner and the site
 
