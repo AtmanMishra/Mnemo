@@ -28,6 +28,8 @@ const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
 test("/bestof races candidates, applies the smallest that passes, and draws the lanes", async () => {
   const e = await mnemoEnv({ mode: "yolo" });
   envs.push(e);
+  // Windows git defaults to autocrlf=true: a patch applied to the project would get CRLF line endings.
+  Bun.spawnSync(["git", "config", "core.autocrlf", "false"], { cwd: e.cwd });
   // Stand-in candidates: the second writes the right value, the third the right value and more.
   (e.controller as unknown as { options: Record<string, unknown> }).options.bestOfRunner = async (i: number, cwd: string) => {
     if (i === 1) fs.writeFileSync(path.join(cwd, "answer.txt"), "42\n");
@@ -73,7 +75,8 @@ test("an agent off screen that learns something shows up as a toast", async () =
   await wait();
   // The second agent is not on screen; it learns two facts.
   (b.controller as unknown as { note: (n: unknown) => void }).note({ kind: "learned", items: ["x: 1", "y: 2"] });
-  await wait(150);
+  // Poll rather than guess: how long a frame takes depends on the machine.
+  for (let t = 0; t < 60 && !r.lastFrame()?.includes(`${second.name}  ◈ +2 learned`); t++) await wait(50);
   expect(r.lastFrame()).toContain(`${second.name}  ◈ +2 learned`);
   r.unmount();
 });

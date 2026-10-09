@@ -142,8 +142,12 @@ function ruleHits(r: Rule, tool: string, subjects: readonly string[]): boolean {
   return globMatch(r.tool, tool) && (r.pattern === undefined || subjects.some((s) => globMatch(r.pattern!, s)));
 }
 
-/** The path a pi tool will really open: it expands `~`, drops a leading `@`, reads `file://`. */
-function toolPath(p: string): string {
+/**
+ * The path a pi tool will really open: it expands `~`, drops a leading `@`, reads `file://`.
+ * `undefined` when it names nothing that exists as a path here (a `file:///etc/hosts` on
+ * Windows has no drive), which is never inside the project.
+ */
+function toolPath(p: string): string | undefined {
   let s = p.startsWith("@") ? p.slice(1) : p;
   if (s === "~") return os.homedir();
   if (s.startsWith("~/")) return path.join(os.homedir(), s.slice(2));
@@ -151,7 +155,7 @@ function toolPath(p: string): string {
     try {
       s = fileURLToPath(s);
     } catch {
-      // keep it as written
+      return undefined;
     }
   }
   return s;
@@ -178,7 +182,9 @@ const CONTROL_DIRS = new Set([".git", ".pi", ".agents", ".mnemo", ".husky", ".gi
 
 function insideProject(cwd: string, p: unknown): boolean {
   if (typeof p !== "string") return false;
-  const rel = path.relative(realPath(cwd), realPath(path.resolve(cwd, toolPath(p))));
+  const target = toolPath(p);
+  if (target === undefined) return false;
+  const rel = path.relative(realPath(cwd), realPath(path.resolve(cwd, target)));
   if (rel.startsWith("..") || path.isAbsolute(rel)) return false;
   return !CONTROL_DIRS.has(rel.split(path.sep)[0]!.toLowerCase());
 }
@@ -186,7 +192,9 @@ function insideProject(cwd: string, p: unknown): boolean {
 /** Credentials a read tool is never needed for. A rule in permissions.json can still allow them. */
 function secretPath(home: string | undefined, cwd: string, p: unknown): boolean {
   if (typeof p !== "string") return false;
-  const real = realPath(path.resolve(cwd, toolPath(p)));
+  const target = toolPath(p);
+  if (target === undefined) return false;
+  const real = realPath(path.resolve(cwd, target));
   const bases = [path.join(os.homedir(), ".ssh"), path.join(os.homedir(), ".aws"), path.join(os.homedir(), ".gnupg")];
   const files = home ? [path.join(home, "agent", "auth.json"), path.join(home, "grants.json")] : [];
   const same = (a: string, b: string) => realPath(a) === real;

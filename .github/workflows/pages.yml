@@ -20,6 +20,9 @@ concurrency:
 
 jobs:
   build:
+    # Pages needs a public repository (or a paid plan) with Pages switched on; until
+    # then this stays quiet instead of failing every push.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     steps:
       # actions/checkout v4.4.0

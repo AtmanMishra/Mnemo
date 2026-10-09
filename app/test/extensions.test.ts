@@ -122,7 +122,7 @@ test("accept-edits stays inside the project: ~, @, symlinks and control director
   const w = (p: string) => judge({ mode: "accept-edits" }, [], noGrants, dir, "write", { path: p });
   expect(w("src/a.ts")).toEqual({ allow: true });
   expect(w("new/dir/a.ts")).toEqual({ allow: true });
-  for (const p of ["~/.bashrc", "@/etc/cron.d/x", "lnk/x", "../x", "/etc/hosts", "file:///etc/hosts", ".git/hooks/pre-commit", ".pi/extensions/e.ts", ".mnemo/permissions.json", ".github/workflows/ci.yml"])
+  for (const p of ["~/.bashrc", "@/etc/cron.d/x", "lnk/x", "../x", "/etc/hosts", "file:///etc/hosts", "file://evil-host/share/x", ".git/hooks/pre-commit", ".pi/extensions/e.ts", ".mnemo/permissions.json", ".github/workflows/ci.yml"])
     expect("ask" in w(p), p).toBe(true);
 });
 

@@ -16,6 +16,8 @@ function repo(ignore = "node_modules/\n"): string {
   run("init", "-q");
   run("config", "user.email", "t@t");
   run("config", "user.name", "t");
+  // Windows git defaults to autocrlf=true, which would hand every worktree CRLF files.
+  run("config", "core.autocrlf", "false");
   fs.writeFileSync(path.join(dir, "value.txt"), "0\n");
   fs.writeFileSync(path.join(dir, ".gitignore"), ignore);
   run("add", "-A");
