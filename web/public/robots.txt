@@ -1,0 +1,17 @@
+# Everything is public. Search and answer-engine crawlers are welcome; so are the
+# training crawlers (the project is Apache-2.0 and wants to be found and quoted).
+User-agent: *
+Allow: /
+
+# Named so the intent is on record: these decide citation in ChatGPT Search,
+# Claude's search and Perplexity.
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+Sitemap: https://mnemo.atmanmishra.dev/sitemap.xml

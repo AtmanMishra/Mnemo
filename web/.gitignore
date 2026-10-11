@@ -3,3 +3,4 @@ dist
 public/install.sh
 public/install.ps1
 .vercel
+dist-ssr

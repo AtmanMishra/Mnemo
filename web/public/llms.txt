@@ -1,0 +1,14 @@
+# Mnemo
+
+> Mnemo is an open-source (Apache-2.0) terminal coding agent for macOS, Linux and Windows. After each run it writes down what it learned about your project, recalls it next session, and keeps the fix when something failed. Bring your own model; memory stays on your machine.
+
+## Start here
+- [Home](https://mnemo.atmanmishra.dev/): what Mnemo is, install, measurements, FAQ
+- [Install script](https://mnemo.atmanmishra.dev/install.sh): macOS and Linux one-liner (read it before you run it)
+- [Releases](https://github.com/AtmanMishra/Mnemo/releases): binaries, checksums, build attestations
+
+## Reference
+- [Source](https://github.com/AtmanMishra/Mnemo)
+- [Security policy](https://github.com/AtmanMishra/Mnemo/blob/main/SECURITY.md)
+- [Roadmap](https://github.com/AtmanMishra/Mnemo/blob/main/docs/ROADMAP.md)
+- [Measurements and write-ups](https://github.com/AtmanMishra/Mnemo/tree/main/research)
