@@ -393,10 +393,11 @@ async function main(): Promise<number> {
     },
   );
 
-  if (args.demo) setTimeout(() => void controller.submit(DEMO_PROMPT), args.dump ? 0 : 900);
+  if (args.demo && !args.dump) setTimeout(() => void controller.submit(DEMO_PROMPT), 900);
   if (args.dump) {
     if (args.demo) {
-      await new Promise((r) => setTimeout(r, 50));
+      // Awaited, not scheduled: a slow runner must not dump a frame before the turn began.
+      await controller.submit(DEMO_PROMPT);
       await runtime.session.waitForIdle();
       await settleBackground(host);
       await new Promise((r) => setTimeout(r, 50));
