@@ -13,6 +13,7 @@ in `site/` once the domain moves.
   before every build, so the one-liner, the release asset and the repository carry the same script.
   This reads outside `web/`, so the Vercel project must keep **Include source files outside of the Root
   Directory in the Build Step** on (the default).
+- One section per feature in `web/src/sections/`, each with a working demo built from the app's own text (command and tool descriptions, the `--demo` turn, the gate's rules, the theme palettes). Interactive state is local; the server render and reduced motion show every demo in its finished state.
 - Motion is loaded after hydration (GSAP + Lenis, one smooth-scroll engine, fine pointers only) and does not
   run under `prefers-reduced-motion`. The hero is `src/art/engram.ts`; the idea behind it is in
   `art/ENGRAM.md`.

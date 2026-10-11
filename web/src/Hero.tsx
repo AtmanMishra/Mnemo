@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Split } from "./Split";
-import { REPO } from "./site";
 
 const SEEDS = [7, 11, 23, 42, 64, 99];
 
@@ -39,12 +38,12 @@ export function Hero() {
         <Split as="h1" id="top" text="A terminal coding agent that remembers your project" hero />
         <p className="lead" data-intro="">
           <strong>Mnemo is an open-source terminal coding agent</strong> for macOS, Linux and Windows. After each run it writes
-          down what it learned about your project, recalls it next session, and keeps the fix when something failed. Bring your
-          own model; memory stays on your machine.
+          down what it learned about your project, recalls it next session, keeps the fix when something failed, and writes skills
+          for itself. Bring your own model; memory stays on your machine.
         </p>
         <p className="cta" data-intro="">
           <a className="btn primary" href="#install">Install Mnemo</a>
-          <a className="btn" href={REPO}>View Source</a>
+          <a className="btn" href="#demo">See a turn</a>
         </p>
         <p className="facts" data-intro="">v0.1.0 · macOS · Linux · Windows · no Bun, Node or Rust needed</p>
       </div>
