@@ -455,6 +455,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
           onClear={() => controller.transcript.clear()}
           onCycleThinking={() => controller.cycleThinking()}
           onCycleMode={() => controller.cycleMode()}
+          onRewind={() => void controller.rewind()}
           onFocusNext={() => setFocus(nextFocus("composer"))}
         />
         </Box>

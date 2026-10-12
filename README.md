@@ -100,6 +100,12 @@ cd app && bun bin/mnemo.ts --demo
   model after two failed checks; `mnemo -p "<task>" --best-of 3 --check "npm
   test"` races three attempts in separate worktrees and applies the smallest
   change that passes (`/bestof` does the same from the interface).
+- **Rewinds.** `esc esc` on an empty prompt (or `/rewind`) goes back to before
+  an earlier message: the conversation, the files the agent edited since, or
+  both, and your message returns to the prompt. Changes made by shell commands
+  are not tracked.
+- **Stays out of your keys.** Commands the agent runs (bash, the Python kernel)
+  do not get your model-provider API keys; see [SECURITY.md](SECURITY.md).
 - **A pixel interface** with Mne the elephant, three themes (`/theme`) and a
   sidebar for files, memory, sessions, skills and logs. The spec is
   [DESIGN.md](DESIGN.md).

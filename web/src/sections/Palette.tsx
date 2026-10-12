@@ -18,6 +18,7 @@ const COMMANDS: [string, string][] = [
   ["logout", "remove a provider's credentials"],
   ["theme", "the look: Mnemo Night, Game Boy, Paper"],
   ["resume", "continue an earlier session in this folder"],
+  ["rewind", "go back to before an earlier message: the conversation, the files, or both (esc esc)"],
   ["new", "start a fresh session"],
   ["compact", "summarise the conversation to free context"],
   ["cost", "tokens and spend for this session"],

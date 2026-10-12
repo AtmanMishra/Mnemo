@@ -29,6 +29,8 @@ export interface ComposerProps {
   onCycleMode: () => void;
   /** Tab with no completion open: move focus on (the workspace's sidebar). */
   onFocusNext?: () => void;
+  /** esc twice on an empty prompt: go back to an earlier message. */
+  onRewind?: () => void;
   /** Columns it has (a split pane is narrower than the terminal); default: the terminal's. */
   width?: number;
 }
@@ -52,6 +54,7 @@ const SHORTCUTS: [string, string][] = [
   ["enter", "send · queue while working"],
   ["alt+enter", "newline (or end a line with \\)"],
   ["esc", "interrupt · close menu · twice to clear"],
+  ["esc esc", "on an empty prompt: rewind to an earlier message"],
   ["↑ ↓", "history"],
   ["tab", "accept suggestion"],
   ["@", "mention a file"],
@@ -187,6 +190,13 @@ export function Composer(props: ComposerProps): React.ReactElement {
           }
           return setPending("esc");
         }
+        if (props.onRewind) {
+          if (pressedTwice("esc")) {
+            setPending(null);
+            return props.onRewind();
+          }
+          return setPending("esc");
+        }
         return;
       }
       if (key.return) {
@@ -287,7 +297,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
     pending === "ctrl-c" ? (
       <Text color={color.warning}>press ctrl+c again to quit</Text>
     ) : pending === "esc" ? (
-      <Text color={color.warning}>press esc again to clear</Text>
+      <Text color={color.warning}>{draft.text ? "press esc again to clear" : "press esc again to rewind"}</Text>
     ) : props.working ? (
       "esc to interrupt · enter to queue"
     ) : (

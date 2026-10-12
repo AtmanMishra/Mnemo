@@ -208,6 +208,7 @@ Nothing animates in `--dump`, in tests, or when stdout is not a TTY.
 | `shift+tab` | cycle mode: default → accept edits → plan | |
 | `ctrl+t` | cycle thinking level | |
 | `ctrl+o` | expand / collapse thinking and tool output, everywhere: inline, the screen is cleared and the transcript printed again | |
+| `esc` `esc` on an empty prompt | rewind: pick an earlier message, then put back the conversation, the files edited since (kept before each `edit`/`write`, `runtime/checkpoints.ts`), or both; the message returns to the prompt. Same as `/rewind` | |
 | `ctrl+f` | find in the conversation (workspace): type, `↑↓` step through matches newest first, `enter` stays at that turn, `esc` closes | |
 | `ctrl+l` | clear the screen (the session is kept) | |
 | `?` on an empty input | shortcuts panel | |

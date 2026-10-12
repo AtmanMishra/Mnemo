@@ -233,3 +233,18 @@ test("finished answers render markdown", () => {
   expect(f).toContain("let x = 1");
   expect(f).not.toContain("```");
 });
+
+test("esc twice on an empty prompt asks to rewind; with a draft it clears", async () => {
+  let rewound = 0;
+  const c = composer({ onRewind: () => rewound++ });
+  await c.type(KEY.esc);
+  expect(c.lastFrame()).toContain("press esc again to rewind");
+  await c.type(KEY.esc);
+  expect(rewound).toBe(1);
+  await c.type("draft");
+  await c.type(KEY.esc);
+  expect(c.lastFrame()).toContain("press esc again to clear");
+  await c.type(KEY.esc);
+  expect(rewound).toBe(1);
+  expect(c.lastFrame()).not.toContain("draft");
+});

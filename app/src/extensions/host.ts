@@ -11,6 +11,7 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { ApprovalAnswer, ApprovalRequest } from "../runtime/dialogs.ts";
 import type { MemoryNote, MemoryService } from "@mnemo/memory";
 import { probeInterpreter, resolveInterpreter } from "../kernel/kernel.ts";
+import { Checkpoints } from "../runtime/checkpoints.ts";
 
 /**
  * How much Mnemo may do without asking.
@@ -55,6 +56,8 @@ export interface Host {
   escalations: { from: string; to: string; reason: string }[];
   /** Set by the memory extension: the session record learns the model changed. */
   onModelChanged?: (model: string, reason: string) => Promise<void>;
+  /** Files as they were before each turn changed them (shared with sub-agents). */
+  checkpoints?: Checkpoints;
   /** Absent in headless runs (`-p`). */
   ui?: HostUi;
   /** Work the extensions started and did not wait for (reflection). Tests await it. */
@@ -119,5 +122,6 @@ export function createHost(o: HostOptions): Host {
     escalations: [],
     background: new Set(),
     signals: [],
+    checkpoints: new Checkpoints(),
   };
 }

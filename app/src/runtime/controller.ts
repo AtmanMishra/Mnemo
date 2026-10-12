@@ -91,6 +91,7 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "logout", description: "remove a provider's credentials" },
   { name: "new", description: "start a fresh session" },
   { name: "resume", description: "continue an earlier session in this folder" },
+  { name: "rewind", description: "go back to before an earlier message: the conversation, the files, or both (esc esc)" },
   { name: "compact", description: "summarise the conversation to free context" },
   { name: "cost", description: "tokens and spend for this session" },
   { name: "clear", description: "clear the screen (the session is kept)" },
@@ -533,6 +534,9 @@ export class Controller {
       case "exit":
         await this.quit();
         return true;
+      case "rewind":
+        await this.rewind();
+        return true;
       case "clear":
         this.options.onClearScreen?.();
         this.transcript.clear();
@@ -929,6 +933,66 @@ export class Controller {
     this.options.onClearScreen?.();
     this.transcript.clear();
     this.transcript.notice("New session");
+  }
+
+  /**
+   * Back to before one of your messages: the conversation moves to that point
+   * on the session tree (the later turns stay on their own branch), the files
+   * the agent changed since go back to how they were, and the message returns
+   * to the prompt to edit and send again.
+   */
+  async rewind(): Promise<void> {
+    if (this.transcript.isWorking) {
+      this.transcript.notice("Rewind once the turn ends (esc stops it).", "warn");
+      return;
+    }
+    const users = this.runtime.session.sessionManager
+      .getBranch()
+      .filter((e) => e.type === "message" && e.message.role === "user")
+      .map((e) => e.id);
+    const texts = new Map(this.runtime.session.getUserMessagesForForking().map((m) => [m.entryId, m.text]));
+    const shown = users.filter((id) => texts.has(id));
+    if (shown.length === 0) {
+      this.transcript.notice("Nothing to rewind to yet.");
+      return;
+    }
+    const store = this.options.host?.checkpoints;
+    const from = (id: string) => users.slice(users.indexOf(id));
+    const plural = (n: number) => `${n} file${n === 1 ? "" : "s"}`;
+    const pick = await this.dialogs.select(
+      "Rewind to before…",
+      [...shown].reverse().map((id) => {
+        const files = store?.plan(from(id)).size ?? 0;
+        return {
+          value: id,
+          label: texts.get(id)!.replace(/\s+/g, " ").slice(0, 70),
+          description: files ? `${plural(files)} changed since` : "no file changes since",
+        };
+      }),
+    );
+    if (!pick) return;
+    const turns = from(pick);
+    const files = store?.plan(turns).size ?? 0;
+    let how: string | undefined = "conversation";
+    if (files) {
+      how = await this.dialogs.select("Put back", [
+        { value: "both", label: `The conversation and ${plural(files)}` },
+        { value: "conversation", label: "The conversation only" },
+        { value: "files", label: `Only the ${plural(files)}` },
+      ]);
+      if (!how) return;
+    }
+    const restored = how === "conversation" ? [] : (store?.restore(turns) ?? []);
+    if (how !== "files") {
+      const result = await this.runtime.session.navigateTree(pick);
+      if (result.cancelled) return;
+      this.options.onClearScreen?.();
+      this.transcript.clear();
+      this.transcript.load(this.runtime.session.messages);
+      if (result.editorText) this.setDraft(result.editorText);
+    }
+    const what = [how !== "files" && "the conversation", restored.length > 0 && plural(restored.length)].filter(Boolean).join(" and ");
+    this.transcript.notice(`Rewound ${what || "nothing (the files already match)"}.${how !== "files" ? " Your message is back in the prompt." : ""}`);
   }
 
   private async resume(): Promise<void> {

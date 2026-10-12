@@ -100,6 +100,7 @@ export function App({ controller, version, home, motion, clearTerminal }: AppPro
           }}
           onCycleThinking={() => controller.cycleThinking()}
           onCycleMode={() => controller.cycleMode()}
+          onRewind={() => void controller.rewind()}
         />
       </Box>
     </MotionContext.Provider>
