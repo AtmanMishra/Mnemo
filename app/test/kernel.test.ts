@@ -320,3 +320,49 @@ test("the real kernel: a hung cell is bounded and the interpreter is replaced", 
     client.stop();
   }
 });
+
+test("the real kernel: aborting a cell restarts the interpreter at once", { skip: !realReady }, async () => {
+  const client = new KernelClient({
+    interpreter: interpreter!,
+    bridgePath: BRIDGE,
+    spawn: (bin, args) => spawnKernel(bin, args) as unknown as KernelChild,
+    timeoutMs: 30_000,
+  });
+  try {
+    const abort = new AbortController();
+    const started = Date.now();
+    setTimeout(() => abort.abort(), 300);
+    const r = await client.run("import time\ntime.sleep(20)", { signal: abort.signal });
+    assert.equal(r.ok, false);
+    assert.match(String(r.error), /cancelled/);
+    assert.ok(Date.now() - started < 5_000, "it did not wait for the cell");
+    const short = await client.run("import time\ntime.sleep(5)", { timeoutMs: 500 });
+    assert.match(String(short.error), /within 500ms/, "a per-call timeout overrides the client's");
+    assert.equal((await client.run("'next'")).result, "'next'");
+  } finally {
+    client.stop();
+  }
+});
+
+test("the real kernel: no provider keys, and memory is capped on linux", { skip: !realReady }, async () => {
+  const { childEnv } = await import("../src/runtime/env.ts");
+  const client = new KernelClient({
+    interpreter: interpreter!,
+    bridgePath: BRIDGE,
+    spawn: (bin, args) =>
+      spawnKernel(bin, args, undefined, childEnv({ ...process.env, OPENAI_API_KEY: "sk-x", MNEMO_KERNEL_MEMORY_MB: "512" })) as unknown as KernelChild,
+    timeoutMs: 30_000,
+  });
+  try {
+    const key = await client.run("import os\nrepr(os.environ.get('OPENAI_API_KEY'))");
+    assert.equal(key.result, "'None'");
+    if (process.platform === "linux") {
+      const big = await client.run("x = bytearray(2 * 1024 ** 3)");
+      assert.equal(big.ok, false);
+      assert.match(String(big.error), /MemoryError/);
+      assert.equal((await client.run("1 + 1")).result, "2", "the kernel survives it");
+    }
+  } finally {
+    client.stop();
+  }
+});

@@ -89,15 +89,24 @@ in a place you can afford to lose: a container, a throwaway checkout.
   `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `AWS_*`, `OPENCODE_API_KEY`) and may
   choose that provider by default. If you do not want that, unset them for
   the session.
-- **Commands the agent runs inherit your environment, including those keys.**
-  A prompt injection (text in a file, a web page or a tool result that tells
-  the model what to do) can therefore try to read or send them, for example
-  with `env`. This is a known limitation, not a solved problem. Mitigations
-  today: leave the mode on `default` so commands need your approval, use a
-  provider key with a spend limit and no other access, and put `deny` rules
-  for `env`, `printenv` and `curl`/`wget` to unknown hosts in
-  `permissions.json`. Scrubbing provider keys from child processes is on the
-  roadmap.
+- **Commands the agent runs do not get the model-provider keys.** The bash
+  tool, the Python kernel and best-of checks start with your environment minus
+  every key pi reads for a model provider (`ANTHROPIC_API_KEY`,
+  `OPENAI_API_KEY`, `OPENCODE_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, … — the
+  list is `app/src/runtime/env.ts`) and any variable a custom provider in
+  `models.json` names as `$NAME`. Mnemo itself still reads them. A command
+  that needs one can have it back with `MNEMO_PASS_ENV=NAME,NAME`.
+  **Everything else is still inherited**, including `AWS_ACCESS_KEY_ID` and
+  friends (your own tools use them, and Bedrock reads them too), `GITHUB_TOKEN`
+  and your project's own secrets. A prompt injection (text in a file, a web page
+  or a tool result that tells the model what to do) can try to read or send
+  those, for example with `env`. Mitigations: leave the mode on `default` so
+  commands need your approval, and put `deny` rules for `env`, `printenv` and
+  `curl`/`wget` to unknown hosts in `permissions.json`.
+- **The Python kernel is an interpreter, not a sandbox.** Each cell is stopped
+  after 120 seconds (the model may ask for up to 600), stopping a turn stops the
+  cell, and on Linux its memory is capped at 8 GB (`MNEMO_KERNEL_MEMORY_MB`, `0`
+  for no cap). It can read and write what you can.
 - Memory writes and session ingestion are redacted for common credential
   shapes (`sk-…`, `ghp_…`, `AKIA…`, private keys, and similar) before they are
   stored. Redaction is pattern-based and best effort: do not rely on it. Eval

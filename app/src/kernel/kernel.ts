@@ -84,14 +84,16 @@ export class KernelClient {
   }
 
   /** Run one cell. Never throws: a failure is a result. */
-  run(code: string): Promise<KernelResult> {
+  /** `timeoutMs` overrides the client's for this cell; aborting `signal` restarts the interpreter. */
+  run(code: string, options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<KernelResult> {
     const task = this.#queue.then(async () => {
+      if (options.signal?.aborted) return { ok: false, error: "cancelled" } as KernelResult;
       try {
         this.#start();
       } catch (error) {
         return { ok: false, error: `no interpreter: ${String(error)}` } as KernelResult;
       }
-      return this.#send(code);
+      return this.#send(code, options.timeoutMs, options.signal);
     });
     this.#queue = task.catch(() => undefined);
     return task;
@@ -141,11 +143,11 @@ export class KernelClient {
     this.#child = child;
   }
 
-  #send(code: string): Promise<KernelResult> {
+  #send(code: string, timeout?: number, signal?: AbortSignal): Promise<KernelResult> {
     const child = this.#child;
     if (!child?.stdin) return Promise.resolve({ ok: false, error: "no interpreter stdin" });
     const id = this.#nextId++;
-    const timeoutMs = this.#options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timeoutMs = timeout ?? this.#options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
     return new Promise<KernelResult>((resolve) => {
       // Not unref'd: this timer is what stops a hung cell from hanging the
@@ -161,8 +163,18 @@ export class KernelClient {
         });
       }, timeoutMs);
 
+      // Stopping is the only way to interrupt a running cell; the namespace is lost with it.
+      const onAbort = () => {
+        this.#pending.delete(id);
+        clearTimeout(timer);
+        this.stop();
+        resolve({ ok: false, error: "cancelled — the interpreter was restarted" });
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+
       this.#pending.set(id, (result) => {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
         resolve(result);
       });
 
@@ -305,6 +317,6 @@ export function probeInterpreter(path: string, script: string): string | null {
 }
 
 /** A spawn wrapper so a caller need not know about node's child_process shape. */
-export function spawnKernel(interpreter: string, args: string[], cwd?: string): ChildProcess {
-  return spawn(interpreter, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+export function spawnKernel(interpreter: string, args: string[], cwd?: string, env?: NodeJS.ProcessEnv): ChildProcess {
+  return spawn(interpreter, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
 }

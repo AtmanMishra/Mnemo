@@ -16,6 +16,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI, type ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { KernelClient, spawnKernel, type KernelChild } from "../kernel/kernel.ts";
 import bridgeSource from "../../python/ipy_bridge.py" with { type: "text" };
+import { childEnv, configuredKeys } from "../runtime/env.ts";
 import type { Host } from "./host.ts";
 
 /** Write the bundled bridge where Python can run it; rewrite only when it changed. */
@@ -41,6 +42,9 @@ function textOf(result: { content?: { type: string; text?: string }[] } | undefi
     .join("\n");
 }
 
+const DEFAULT_SECONDS = 120;
+const MAX_SECONDS = 600;
+
 export function kernelExtension(host: Host) {
   return (pi: ExtensionAPI): void => {
     const python = host.python();
@@ -52,7 +56,7 @@ export function kernelExtension(host: Host) {
       (client ??= new KernelClient({
         interpreter: python,
         bridgePath: installBridge(host.home),
-        spawn: (i, a) => spawnKernel(i, a, cwd) as unknown as KernelChild,
+        spawn: (i, a) => spawnKernel(i, a, cwd, childEnv(process.env, configuredKeys(host.agentDir))) as unknown as KernelChild,
         cwd,
         dispatch: async (name, args) => {
           if (!current) throw new Error("no tool context");
@@ -70,11 +74,15 @@ export function kernelExtension(host: Host) {
           "Run Python in a persistent kernel (state survives between calls). Use it to compute, transform data, or script many steps at once. " +
           "Inside the code, call tools as tools.read(path=...), tools.bash(command=...), tools.grep(pattern=...); " +
           "tools.parallel([(\"read\", {\"path\": \"a\"}), ...]) runs several at once. The value of the last expression is returned.",
-        parameters: Type.Object({ code: Type.String({ description: "Python source to run" }) }),
-        async execute(_id, params, _signal, _update, ctx) {
+        parameters: Type.Object({
+          code: Type.String({ description: "Python source to run" }),
+          timeout: Type.Optional(Type.Number({ description: `Seconds before the cell is stopped (default ${DEFAULT_SECONDS}, at most ${MAX_SECONDS})` })),
+        }),
+        async execute(_id, params, signal, _update, ctx) {
           current = ctx;
           try {
-            const r = await kernel(ctx.cwd).run(params.code);
+            const seconds = Math.min(MAX_SECONDS, Math.max(1, params.timeout ?? DEFAULT_SECONDS));
+            const r = await kernel(ctx.cwd).run(params.code, { timeoutMs: seconds * 1000, signal });
             const parts = [r.output?.trimEnd(), r.result && r.result !== "None" ? r.result : undefined].filter(Boolean);
             if (!r.ok) throw new Error([r.output?.trimEnd(), r.error].filter(Boolean).join("\n") || "the cell failed");
             return { content: [{ type: "text", text: parts.join("\n") || "(no output)" }], details: { result: r.result } };

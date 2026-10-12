@@ -14,6 +14,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { childEnv } from "./env.ts";
 
 /** Run one candidate in `cwd`; resolves to its final answer. */
 export type CandidateRunner = (i: number, cwd: string) => Promise<string>;
@@ -61,7 +62,7 @@ function git(cwd: string, args: string[], input?: string): string {
 }
 
 async function sh(cwd: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }> {
-  const p = Bun.spawn(["sh", "-c", command], { cwd, stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawn(["sh", "-c", command], { cwd, env: childEnv(), stdout: "pipe", stderr: "pipe" });
   const timer = setTimeout(() => p.kill(), timeoutMs);
   const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
   clearTimeout(timer);

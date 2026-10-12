@@ -9,12 +9,14 @@ import { escalateExtension } from "./escalate.ts";
 import { kernelExtension } from "./kernel.ts";
 import { memoryExtension } from "./memory.ts";
 import { policyExtension } from "./policy.ts";
+import { shellExtension } from "./shell.ts";
 import { skillsExtension } from "./skills.ts";
 import { traceExtension } from "./trace.ts";
 
 export function mnemoExtensions(host: Host): InlineExtension[] {
   return [
     { name: "mnemo-policy", factory: policyExtension(host) },
+    { name: "mnemo-shell", factory: shellExtension(host) },
     { name: "mnemo-memory", factory: memoryExtension(host) },
     { name: "mnemo-kernel", factory: kernelExtension(host) },
     { name: "mnemo-agents", factory: agentsExtension(host, mnemoExtensions) },

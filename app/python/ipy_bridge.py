@@ -189,7 +189,30 @@ def handle(kernel: SeaKernel, request: dict) -> dict:
     return response
 
 
+def limit_memory() -> None:
+    """Cap the interpreter's address space so a runaway cell raises MemoryError
+    instead of taking the machine down. MNEMO_KERNEL_MEMORY_MB, 0 for no cap.
+    Linux only: macOS does not enforce RLIMIT_AS and Windows has no resource."""
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        import os
+        import resource
+
+        mb = int(os.environ.get("MNEMO_KERNEL_MEMORY_MB", "8192"))
+        if mb <= 0:
+            return
+        cap = mb * 1024 * 1024
+        _soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        if hard != resource.RLIM_INFINITY:
+            cap = min(cap, hard)
+        resource.setrlimit(resource.RLIMIT_AS, (cap, hard))
+    except Exception:
+        pass
+
+
 def main() -> None:
+    limit_memory()
     # Unbuffered binary wrappers so partial writes are visible immediately.
     # Captured BEFORE any redirect_stdout, which is what lets a tool_call
     # escape the cell's output capture.
