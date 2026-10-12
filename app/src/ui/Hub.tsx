@@ -155,8 +155,24 @@ export function Hub(p: HubProps): React.ReactElement {
   const waiting = states.filter((s) => s.kind === "waiting").length;
   const cost = states.reduce((n, s) => n + s.cost, 0);
   const tall = p.height >= 24;
-  const rowsOfCards = Math.ceil(p.agents.length / cols);
-  const roomForProjects = Math.max(0, p.height - (tall ? 10 : 3) - rowsOfCards * CARD_H - 4);
+  // The cards that fit between the title and the key hint; the rest scroll, following the selection.
+  const headH = tall ? 10 : 1;
+  const fitRows = Math.max(1, Math.floor((p.height - headH - 2) / CARD_H));
+  const slots = p.agents.length + 1; // the agents and the "new agent" card
+  const allRows = Math.ceil(slots / cols);
+  const selRow = Math.floor(Math.min(at, p.agents.length) / cols);
+  const firstRow = Math.max(0, Math.min(selRow - fitRows + 1, allRows - fitRows));
+  const shownFrom = firstRow * cols;
+  const shownTo = Math.min(slots, (firstRow + fitRows) * cols);
+  const hidden = slots - (shownTo - shownFrom);
+  const rowsOfCards = Math.min(fitRows, allRows);
+  const roomForProjects = Math.max(0, p.height - headH - rowsOfCards * CARD_H - 4);
+  const keys =
+    p.width >= 100
+      ? "←→↑↓ choose · enter open · s split in/out · x close · n new agent · ^p projects · ^g back"
+      : p.width >= 60
+        ? "↑↓ choose · enter open · s split · x close · n new · ^g back"
+        : "enter open · n new · ^g back";
 
   return (
     <Box flexDirection="column" width={p.width} height={p.height} paddingX={2}>
@@ -184,10 +200,12 @@ export function Hub(p: HubProps): React.ReactElement {
         </Text>
       )}
       <Box flexDirection="row" flexWrap="wrap" marginTop={1}>
-        {p.agents.map((a, i) => (
-          <Card key={a.id} a={a} n={i + 1} s={p.states.get(a.id)} on={i === at} inSplit={p.split.includes(a.id)} width={cardW} />
-        ))}
-        {p.agents.length < cols * Math.max(1, rowsOfCards) || p.agents.length === 0 ? (
+        {p.agents.map((a, i) =>
+          i >= shownFrom && i < shownTo ? (
+            <Card key={a.id} a={a} n={i + 1} s={p.states.get(a.id)} on={i === at} inSplit={p.split.includes(a.id)} width={cardW} />
+          ) : null,
+        )}
+        {shownTo === slots ? (
           <Box width={cardW} height={CARD_H} borderStyle="round" borderBackgroundColor={ground()} borderColor={palette.rule} justifyContent="center" alignItems="center">
             <Text color={palette.faint}>+ n new agent · ^p a project</Text>
           </Box>
@@ -209,7 +227,10 @@ export function Hub(p: HubProps): React.ReactElement {
         </Box>
       ) : null}
       <Box flexGrow={1} />
-      <Text color={palette.faint}>←→↑↓ choose · enter open · s split in/out · x close · n new agent · ^p projects · ^g back</Text>
+      <Text color={palette.faint} wrap="truncate-end">
+        {hidden > 0 ? <Text color={palette.dim}>{`+${hidden} more · `}</Text> : null}
+        {keys}
+      </Text>
     </Box>
   );
 }

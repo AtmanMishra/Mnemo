@@ -11,51 +11,62 @@ export function contextGauge(pct: number): { bar: string; tone: string } {
   return { bar, tone: pct >= 80 ? palette.magenta : pct >= 50 ? palette.amber : palette.dim };
 }
 
+/**
+ * The status line, one row at any width. Facts on the right, by priority: the
+ * model always; then memory, the context gauge, the branch, the thinking level
+ * and cost, the least important dropped first when the row would not fit. The
+ * hint on the left is truncated, and goes when there is no room for it.
+ */
 export function Footer({
   data,
   hint,
   statuses,
+  width = 200,
 }: {
   data: FooterData;
   hint: React.ReactNode;
   statuses: readonly [string, string][];
+  /** Columns the row has. */
+  width?: number;
 }): React.ReactElement {
   const pct = data.contextPercent;
   const pctColor = pct === null ? color.muted : pct >= 80 ? color.error : pct >= 50 ? color.warning : color.muted;
-  const parts: React.ReactNode[] = [
-    <Text key="m" color={color.accent}>
-      {data.model}
-    </Text>,
-  ];
-  if (data.thinking) parts.push(<Text key="t">think:{data.thinking}</Text>);
+  // [priority (lower stays longer), plain width, node]
+  const all: [number, number, React.ReactNode][] = [[0, Bun.stringWidth(data.model), <Text key="m" color={color.accent}>{data.model}</Text>]];
+  if (data.thinking) all.push([4, 6 + data.thinking.length, <Text key="t">think:{data.thinking}</Text>]);
   if (pct !== null) {
     const g = contextGauge(pct);
-    parts.push(
+    all.push([
+      2,
+      8 + ` ${Math.round(pct)}%`.length,
       <Text key="c">
         <Text color={g.tone}>{g.bar.replace(/░+$/, "")}</Text>
         <Text color={palette.rule}>{g.bar.match(/░+$/)?.[0] ?? ""}</Text>
         <Text color={pctColor}>{` ${Math.round(pct)}%`}</Text>
       </Text>,
-    );
+    ]);
   }
-  if (data.cost > 0)
-    parts.push(
-      <Text key="$" color={palette.amber}>
-        ◉ ${data.cost < 0.1 ? data.cost.toFixed(3) : data.cost.toFixed(2)}
-      </Text>,
-    );
-  if (data.branch) parts.push(<Text key="b">⎇ {data.branch}</Text>);
-  parts.push(
-    data.memory ? (
-      <Text key="mem" color={color.accent}>
-        ◈ {data.memory.nodes}
-      </Text>
-    ) : (
-      <Text key="mem" color={color.subtle}>
-        ◈ off
-      </Text>
-    ),
-  );
+  if (data.cost > 0) {
+    const cost = `◉ $${data.cost < 0.1 ? data.cost.toFixed(3) : data.cost.toFixed(2)}`;
+    all.push([5, Bun.stringWidth(cost), <Text key="$" color={palette.amber}>{cost}</Text>]);
+  }
+  if (data.branch) all.push([3, 2 + Bun.stringWidth(data.branch), <Text key="b">⎇ {data.branch}</Text>]);
+  const mem = data.memory ? `◈ ${data.memory.nodes}` : "◈ off";
+  all.push([1, Bun.stringWidth(mem), <Text key="mem" color={data.memory ? color.accent : color.subtle}>{mem}</Text>]);
+  // Keep the most important that fit beside a minimal hint (paddingX 1 each side, a 2-column gap).
+  const short = data.mode === "yolo" ? ["⚠ yolo", color.error] : data.mode === "plan" ? ["⏸ plan", color.accent2] : data.mode === "accept-edits" ? ["⏵⏵ edits", color.success] : undefined;
+  const budget = width - 2 - (width >= 50 ? 14 : short ? Bun.stringWidth(short[0]!) + 3 : 0);
+  const kept = new Set<number>();
+  let used = 0;
+  for (const i of all.map((_, i) => i).sort((a, b) => all[a]![0] - all[b]![0])) {
+    const w = all[i]![1] + (kept.size ? 3 : 0);
+    if (used + w > budget && kept.size) continue;
+    kept.add(i);
+    used += w;
+  }
+  const parts = all.filter((_, i) => kept.has(i)).map(([, , node]) => node);
+  // Narrow, the hint goes; the permission mode never does.
+  if (width < 50 && short) parts.unshift(<Text key="mode" color={short[1]}>{short[0]}</Text>);
   const mode =
     data.mode === "accept-edits" ? (
       <Text color={color.success}>⏵⏵ accept edits </Text>
@@ -65,8 +76,8 @@ export function Footer({
       <Text color={color.error}>⚠ yolo </Text>
     ) : null;
   return (
-    <Box flexDirection="row" justifyContent="space-between" paddingX={1}>
-      <Box flexShrink={1}>
+    <Box flexDirection="row" justifyContent="space-between" paddingX={1} width={width}>
+      <Box flexShrink={1} flexGrow={1} display={width >= 50 ? "flex" : "none"}>
         <Text color={color.muted} wrap="truncate-end">
           {mode}
           {mode ? <Text color={color.subtle}>(shift+tab) · </Text> : null}
@@ -74,8 +85,8 @@ export function Footer({
           {statuses.length > 0 ? <Text color={color.subtle}>{"  " + statuses.map(([, v]) => v).join(" · ")}</Text> : null}
         </Text>
       </Box>
-      <Box flexShrink={0} marginLeft={2}>
-        <Text color={color.muted}>
+      <Box flexShrink={0} marginLeft={width >= 50 ? 2 : 0}>
+        <Text color={color.muted} wrap="truncate-end">
           {parts.map((p, i) => (
             <React.Fragment key={i}>
               {i > 0 ? <Text color={color.subtle}> · </Text> : null}

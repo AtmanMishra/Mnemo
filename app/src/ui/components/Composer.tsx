@@ -3,7 +3,7 @@
  * shortcuts panel and the footer. Key rules are in DESIGN.md §6.
  */
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, useInput, usePaste } from "ink";
+import { Box, Text, useInput, usePaste, useWindowSize } from "ink";
 import type { CommandInfo, Footer as FooterData } from "../../runtime/controller.ts";
 import { color, glyph, ground } from "../theme.ts";
 import * as ed from "../editor.ts";
@@ -29,6 +29,8 @@ export interface ComposerProps {
   onCycleMode: () => void;
   /** Tab with no completion open: move focus on (the workspace's sidebar). */
   onFocusNext?: () => void;
+  /** Columns it has (a split pane is narrower than the terminal); default: the terminal's. */
+  width?: number;
 }
 
 type Suggestion = { value: string; label: string; detail?: string };
@@ -62,6 +64,8 @@ const SHORTCUTS: [string, string][] = [
 ];
 
 export function Composer(props: ComposerProps): React.ReactElement {
+  const terminal = useWindowSize();
+  const width = props.width ?? terminal.columns;
   const [draft, setDraftState] = useState<ed.Draft>(ed.empty);
   const [menuIndex, setMenuIndex] = useState(0);
   const [menuClosed, setMenuClosed] = useState(false);
@@ -271,7 +275,13 @@ export function Composer(props: ComposerProps): React.ReactElement {
     );
   });
 
-  const placeholder = props.working ? "Queue a follow-up…  (esc to interrupt)" : "Ask Mnemo anything  ·  / for commands  ·  @ for files";
+  // The placeholder fits on one line: the longest wording that fits the box
+  // (border, padding, the glyph and the cursor take 7 columns).
+  const room = width - 7;
+  const wordings = props.working
+    ? ["Queue a follow-up…  (esc to interrupt)", "Queue a follow-up…", "Queue…"]
+    : ["Ask Mnemo anything  ·  / for commands  ·  @ for files", "Ask anything  ·  / commands  ·  @ files", "Ask anything…"];
+  const placeholder = wordings.find((w) => w.length <= room) ?? wordings.at(-1)!;
   const hint =
     pending === "ctrl-c" ? (
       <Text color={color.warning}>press ctrl+c again to quit</Text>
@@ -293,7 +303,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
           <Text color={color.text}>
             <Text color={color.accent}>{`${glyph.user} `}</Text>
             {props.active ? <Text inverse> </Text> : null}
-            <Text color={color.subtle}>{placeholder}</Text>
+            <Text color={color.subtle} wrap="truncate-end">{placeholder}</Text>
           </Text>
         )}
       </Box>
@@ -322,7 +332,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
           ))}
         </Box>
       ) : (
-        <Footer data={props.footer} hint={hint} statuses={props.statuses} />
+        <Footer data={props.footer} hint={hint} statuses={props.statuses} width={width} />
       )}
     </Box>
   );

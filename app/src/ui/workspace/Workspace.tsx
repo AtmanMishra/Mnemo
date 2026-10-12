@@ -19,7 +19,7 @@ import { parseWheel, WHEEL_ROWS } from "../mouse.ts";
 import type { Controller } from "../../runtime/controller.ts";
 import { BlockView } from "../components/Blocks.tsx";
 import { Composer } from "../components/Composer.tsx";
-import { DialogView, InputActive } from "../components/Dialogs.tsx";
+import { DialogSpace, DialogView, InputActive } from "../components/Dialogs.tsx";
 import { Engram } from "../components/Engram.tsx";
 import { ENGRAM_MIN } from "../engram.ts";
 import { MotionContext } from "../components/motion.ts";
@@ -48,8 +48,12 @@ function Header({ controller, columns, brand, mood }: { controller: Controller; 
   const chrome = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const f = chrome.footer;
   const repo = f.cwd.split("/").filter(Boolean).at(-1) ?? f.cwd;
-  // The right side gives way first: the model name is cut, then the branch goes.
+  // The right side gives way first: the branch goes, then the model; a long
+  // folder name is cut to what is left rather than pushing the row past the edge.
   const narrow = columns < 70;
+  const tiny = columns < 56;
+  const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, Math.max(1, n - 1))}…` : s);
+  const repoShown = clip(repo, Math.max(6, columns - (brand ? 12 : 6) - (tiny ? 12 : 34)));
   return (
     <Box width={columns}>
       <Box flexShrink={0}>
@@ -65,10 +69,10 @@ function Header({ controller, columns, brand, mood }: { controller: Controller; 
                   </Text>
                 ))}
               </Text>
-              <Text color={palette.text}>{`  ${repo}`}</Text>
+              <Text color={palette.text}>{`  ${repoShown}`}</Text>
             </>
           ) : (
-            <Text bold color={palette.text}>{` ${repo}`}</Text>
+            <Text bold color={palette.text}>{` ${repoShown}`}</Text>
           )}
           <Text> </Text>
           <MneBadge mood={mood} activity={chrome.activity} />
@@ -77,8 +81,12 @@ function Header({ controller, columns, brand, mood }: { controller: Controller; 
       <Box flexGrow={1} flexShrink={1} justifyContent="flex-end" overflow="hidden">
         <Text wrap="truncate-start">
           {f.branch && !narrow ? <Text color={palette.dim}>{`⎇ ${f.branch}  `}</Text> : null}
-          <Text color={palette.magenta}>◆ </Text>
-          <Text color={palette.text}>{f.model}</Text>
+          {tiny ? null : (
+            <>
+              <Text color={palette.magenta}>◆ </Text>
+              <Text color={palette.text}>{f.model}</Text>
+            </>
+          )}
           <Text color={f.memory ? palette.amber : palette.faint}>{`  ${f.memory ? `◈ ${f.memory.nodes}` : "◈ off"}`}</Text>
           {f.cost > 0 ? <Text color={palette.dim}>{`  $${f.cost.toFixed(2)}`}</Text> : null}
           <Text> </Text>
@@ -192,7 +200,9 @@ export function Workspace({ controller, source, motion, initial, width, height, 
 
   const body = useRef<DOMElement>(null);
   const bodyHeight = useMeasuredHeight(body);
-  const mainHeight = Math.max(3, bodyHeight - 1);
+  // What the body really has: a dialog on a short terminal can leave it nothing, and then it draws nothing
+  // (a forced minimum would spill the conversation over the rows above it).
+  const mainHeight = Math.max(0, bodyHeight - 1);
   const showSidebar = sidebar && !compact && columns >= 60;
   const mainWidth = columns - (showSidebar ? SIDEBAR_WIDTH : 0);
 
@@ -329,7 +339,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
               learned={learnedFresh && chrome.activity ? { count: chrome.activity.count ?? 1, age: dropAge } : undefined}
             />
           ) : null}
-          <Box flexDirection="column" width={mainWidth} paddingLeft={showSidebar ? 1 : 0}>
+          <Box flexDirection="column" width={mainWidth} paddingLeft={showSidebar ? 1 : 0} display={mainHeight > 0 ? "flex" : "none"}>
             {map !== undefined && focus !== "composer" ? (
               <>
                 <Bar title="memory map" width={mainWidth - 1} focused={focus === "main"} />
@@ -362,7 +372,9 @@ export function Workspace({ controller, source, motion, initial, width, height, 
                       <IdleMne />
                     ) : null}
                     <Text color={palette.dim}>Ask anything about this project.</Text>
-                    <Text color={palette.faint}>/ commands · @ files · tab sidebar · ctrl+b hide it</Text>
+                    <Text color={palette.faint} wrap="truncate-end">
+                      {mainWidth >= 56 ? "/ commands · @ files · tab sidebar · ctrl+b hide it" : "/ commands · @ files"}
+                    </Text>
                   </Box>
                 ) : (
                   <Viewport height={mainHeight} back={fromTurn ? Number.MAX_SAFE_INTEGER : back} onMeasure={(h) => (contentHeight.current = h)}>
@@ -384,9 +396,13 @@ export function Workspace({ controller, source, motion, initial, width, height, 
         </Box>
         {dialog ? (
           <InputActive.Provider value={active}>
-            <DialogView dialog={dialog} />
+            <DialogSpace.Provider value={{ columns, rows: Math.max(6, Math.min(Math.floor(rows * 0.6), rows - 9)) }}>
+              <DialogView dialog={dialog} />
+            </DialogSpace.Provider>
           </InputActive.Provider>
         ) : null}
+        {/* A dialog takes the input box's place; on a short terminal the box steps aside (still mounted: the draft survives). */}
+        <Box flexDirection="column" flexShrink={0} display={dialog && rows < 24 ? "none" : "flex"}>
         <Composer
           working={snap.working !== null}
           active={active && !dialog && focus === "composer"}
@@ -394,6 +410,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
           files={() => files}
           footer={chrome.footer}
           statuses={chrome.statuses}
+          width={columns}
           draftRequest={chrome.draftRequest}
           onSubmit={(text, mode) => {
             setBack(0);
@@ -408,6 +425,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
           onCycleMode={() => controller.cycleMode()}
           onFocusNext={() => setFocus(nextFocus("composer"))}
         />
+        </Box>
       </Box>
     </MotionContext.Provider>
   );

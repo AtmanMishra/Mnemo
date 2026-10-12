@@ -61,12 +61,14 @@ export function Key({ k }: { k: string }): React.ReactElement {
   );
 }
 
-function Meet({ tick }: { tick: number }): React.ReactElement {
+function Meet({ tick, width }: { tick: number; width: number }): React.ReactElement {
   const blinking = tick % 40 >= 37;
+  // Mne beside the words when there is room for both (18 + 3 + 44 columns), else the words alone.
+  const side = width >= 65;
   return (
     <Box flexDirection="row" gap={3}>
-      <PixelArt grid={blinking ? mne.blink : mne.idle} />
-      <Box flexDirection="column" justifyContent="center" width={44}>
+      {side ? <PixelArt grid={blinking ? mne.blink : mne.idle} /> : null}
+      <Box flexDirection="column" justifyContent="center" width={side ? 44 : width}>
         <Title>meet mne</Title>
         <Text> </Text>
         <Text color={palette.text}>Mnemo is a coding agent that remembers.</Text>
@@ -90,15 +92,26 @@ export function loopDiagram(tick: number): string[] {
   return [line, "                                    │", "                ◆ facts ──── ◆ fixes ──── ◆ skills ──── ◆ sessions"];
 }
 
-function Learns({ tick }: { tick: number }): React.ReactElement {
+function Learns({ tick, width }: { tick: number; width: number }): React.ReactElement {
   const [a, b, c] = loopDiagram(tick);
+  // The wire is 66 columns; narrower, the loop is written as a list.
+  const wide = width >= 68;
   return (
-    <Box flexDirection="column" width={72}>
+    <Box flexDirection="column" width={width}>
       <Title>how it learns</Title>
       <Text> </Text>
-      <Text color={palette.cyan}>{a}</Text>
-      <Text color={palette.faint}>{b}</Text>
-      <Text color={palette.amber}>{c}</Text>
+      {wide ? (
+        <>
+          <Text color={palette.cyan}>{a}</Text>
+          <Text color={palette.faint}>{b}</Text>
+          <Text color={palette.amber}>{c}</Text>
+        </>
+      ) : (
+        <>
+          <Text color={palette.cyan} wrap="truncate-end">▣ session → ◇ reflect → ◈ memory → ▣ next</Text>
+          <Text color={palette.amber} wrap="truncate-end">  ◆ facts · ◆ fixes · ◆ skills · ◆ sessions</Text>
+        </>
+      )}
       <Text> </Text>
       <Text color={palette.dim}>After each run, one small model call reads what happened and keeps what will still be true next week: what you said, what a tool showed, which fix worked.</Text>
       <Text color={palette.dim}>Next time, it comes back before the first token — and a command that failed before is stopped once, with its fix.</Text>
@@ -106,7 +119,21 @@ function Learns({ tick }: { tick: number }): React.ReactElement {
   );
 }
 
-function Workspace(): React.ReactElement {
+function Workspace({ width }: { width: number }): React.ReactElement {
+  if (width < 60)
+    return (
+      <Box flexDirection="column" width={width}>
+        <Title>the workspace</Title>
+        <Text> </Text>
+        <Text color={palette.text}>One screen: the conversation in the middle, the project beside it, the input box below.</Text>
+        <Text> </Text>
+        <Text color={palette.dim}>Files, memory, sessions, skills and logs are panes in the sidebar, previewed in place.</Text>
+        <Text> </Text>
+        <Text color={palette.dim} wrap="truncate-end">
+          <Key k="ctrl+b" /> sidebar  <Key k="tab" /> focus  <Key k="1-5" /> panes
+        </Text>
+      </Box>
+    );
   const row = (l: string, r: string, lc: string = palette.dim, rc: string = palette.dim) => (
     <Text>
       <Text color={palette.faint}>│</Text>
@@ -117,7 +144,7 @@ function Workspace(): React.ReactElement {
     </Text>
   );
   return (
-    <Box flexDirection="column" width={74}>
+    <Box flexDirection="column" width={Math.min(74, width)}>
       <Title>the workspace</Title>
       <Text> </Text>
       <Text color={palette.faint}>┌────────────────┬────────────────────────────────────────┐</Text>
@@ -135,29 +162,29 @@ function Workspace(): React.ReactElement {
       </Text>
       <Text color={palette.faint}>└─────────────────────────────────────────────────────────┘</Text>
       <Text> </Text>
-      <Text color={palette.dim}>
+      <Text color={palette.dim} wrap="truncate-end">
         <Key k="ctrl+b" /> sidebar  <Key k="tab" /> focus  <Key k="1-5" /> panes  <Key k="pgup" /> scroll
       </Text>
     </Box>
   );
 }
 
-function Agents(): React.ReactElement {
+function Agents({ width }: { width: number }): React.ReactElement {
   return (
-    <Box flexDirection="column" width={74}>
+    <Box flexDirection="column" width={width}>
       <Title>your other agents</Title>
       <Text> </Text>
       <Text color={palette.text}>The memory is not only Mnemo&apos;s. Attach it to the agents you already use:</Text>
       <Text> </Text>
-      <Text>
+      <Text wrap="truncate-end">
         <Text color={palette.cyan}> ◆ Claude Code </Text>
         <Text color={palette.dim}>mnemo memory setup claude-code</Text>
       </Text>
-      <Text>
+      <Text wrap="truncate-end">
         <Text color={palette.cyan}> ◆ Codex · Cursor · opencode </Text>
         <Text color={palette.dim}>mnemo memory setup codex</Text>
       </Text>
-      <Text>
+      <Text wrap="truncate-end">
         <Text color={palette.cyan}> ◆ past sessions </Text>
         <Text color={palette.dim}>mnemo memory ingest</Text>
       </Text>
@@ -173,9 +200,9 @@ const CHOICES: { key: OnboardingChoice; label: string; hint: string }[] = [
   { key: "later", label: "Later", hint: "/login whenever you are ready" },
 ];
 
-function Model({ selected, hasModel }: { selected: number; hasModel: boolean }): React.ReactElement {
+function Model({ selected, hasModel, width }: { selected: number; hasModel: boolean; width: number }): React.ReactElement {
   return (
-    <Box flexDirection="column" width={74}>
+    <Box flexDirection="column" width={width}>
       <Title>a model</Title>
       <Text> </Text>
       {hasModel ? (
@@ -185,12 +212,12 @@ function Model({ selected, hasModel }: { selected: number; hasModel: boolean }):
           <Text color={palette.text}>Mnemo needs a model to think with. Any provider pi supports works; a cheap one does well once memory has learned your project.</Text>
           <Text> </Text>
           {CHOICES.map((c, i) => (
-            <Text key={c.key}>
+            <Text key={c.key} wrap="truncate-end">
               <Text color={i === selected ? palette.magenta : palette.faint}>{i === selected ? " ▶ " : "   "}</Text>
               <Text color={i === selected ? palette.text : palette.dim} bold={i === selected}>
-                {c.label.padEnd(24)}
+                {width >= 60 ? c.label.padEnd(24) : c.label}
               </Text>
-              <Text color={palette.faint}>{c.hint}</Text>
+              {width >= 60 ? <Text color={palette.faint}>{c.hint}</Text> : null}
             </Text>
           ))}
         </>
@@ -237,26 +264,28 @@ export function Onboarding({
       if (key.return || input === " ") return onDone(hasModel ? "later" : CHOICES[selected]!.key);
     }
   }, { isActive: active });
+  // Every page draws inside the window: up to 74 columns, less in a narrow terminal.
+  const width = Math.max(20, Math.min(74, columns - 4));
   const page =
     STEPS[step] === "meet" ? (
-      <Meet tick={tick} />
+      <Meet tick={tick} width={width} />
     ) : STEPS[step] === "learns" ? (
-      <Learns tick={tick} />
+      <Learns tick={tick} width={width} />
     ) : STEPS[step] === "workspace" ? (
-      <Workspace />
+      <Workspace width={width} />
     ) : STEPS[step] === "agents" ? (
-      <Agents />
+      <Agents width={width} />
     ) : (
-      <Model selected={selected} hasModel={hasModel} />
+      <Model selected={selected} hasModel={hasModel} width={width} />
     );
   return (
-    <Box flexDirection="column" alignItems="center" justifyContent="center" width={columns} height={Math.max(12, rows - 1)}>
-      <Box flexDirection="column" minHeight={14}>
+    <Box flexDirection="column" alignItems="center" justifyContent="center" width={columns} height={Math.max(1, rows - 1)} overflow="hidden">
+      <Box flexDirection="column" minHeight={Math.min(14, Math.max(6, rows - 5))} width={width}>
         {page}
       </Box>
       <Box marginTop={1} flexDirection="column" alignItems="center">
         <Progress step={step} />
-        <Text color={palette.faint}>
+        <Text color={palette.faint} wrap="truncate-end">
           ← → move · {step === last ? (hasModel ? "enter start" : "↑ ↓ choose · enter go") : "enter next"} · esc skip
         </Text>
       </Box>

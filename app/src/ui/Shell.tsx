@@ -76,9 +76,15 @@ function FleetBar({
   columns: number;
 }): React.ReactElement {
   const hints = "^g hub  ^p projects  ^n new  ^s split ";
+  const showHints = columns >= 100;
+  // One row, always: names shorten to share the room; with no room for names, numbers only.
+  const room = columns - 9 - (screen === "hub" ? 6 : 0) - (showHints ? hints.length : 0);
+  const perTab = Math.floor(room / Math.max(1, agents.length)) - 7;
+  const nameMax = perTab >= 3 ? perTab : 0;
+  const label = (name: string) => (nameMax === 0 ? "" : name.length > nameMax ? `${name.slice(0, Math.max(1, nameMax - 1))}…` : name);
   return (
     <Box width={columns}>
-      <Text>
+      <Text wrap="truncate-end">
         <Text color={palette.magenta}>▞</Text>
         <Text color={palette.cyan}>▚</Text>
         {[..." mnemo "].map((ch, i) => (
@@ -94,8 +100,8 @@ function FleetBar({
             <Text key={a.id}>
               <Text color={palette.faint}>{" "}</Text>
               <Text backgroundColor={on ? palette.selectBg : undefined} color={on ? palette.text : palette.dim}>
-                <Text color={on ? palette.magenta : palette.faint}>{` ${i + 1} `}</Text>
-                {a.name}
+                <Text color={on ? palette.magenta : palette.faint}>{nameMax ? ` ${i + 1} ` : ` ${i + 1}`}</Text>
+                {label(a.name)}
                 <Text color={s?.tone ?? palette.faint}>{` ${s?.glyph ?? "·"} `}</Text>
               </Text>
             </Text>
@@ -103,7 +109,7 @@ function FleetBar({
         })}
       </Text>
       <Box flexGrow={1} />
-      {columns >= 100 ? <Text color={palette.faint}>{hints}</Text> : null}
+      {showHints ? <Text color={palette.faint}>{hints}</Text> : null}
     </Box>
   );
 }
@@ -189,15 +195,21 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
         <ExitCard summary={snap.summary} width={columns} height={rows} />
       </MotionContext.Provider>
     );
-  const grid = splitGrid(split.length, columns);
+  // A split needs room: below about 40×10 a pane, one agent is shown instead, and the bar says why.
+  const want = splitGrid(split.length, columns);
+  const tooSmall = screen === "split" && (Math.floor(columns / want.cols) < 40 || Math.floor((body - 1) / want.rows) < 10);
+  const view: Screen = tooSmall ? "agent" : screen;
+  const grid = want;
+  const main = body - (tooSmall ? 1 : 0);
   const paneW = Math.floor(columns / grid.cols);
-  const paneH = Math.floor(body / grid.rows);
+  const paneH = Math.floor(main / grid.rows);
 
   return (
     <MotionContext.Provider value={motion}>
       <Box flexDirection="column" width={columns} height={rows} backgroundColor={themePaints() ? palette.ground : undefined}>
         <FleetBar agents={agents} states={states} activeId={active?.id} screen={screen} columns={columns} />
         {error ? <Text color={palette.magenta}>{` ✗ ${error}`}</Text> : null}
+        {tooSmall ? <Text color={palette.amber} wrap="truncate-end">{columns >= 64 ? " the window is too small to split: showing one agent (^s back)" : " too small to split · ^s back"}</Text> : null}
         {screen === "hub" ? (
           <Hub
             agents={agents}
@@ -216,16 +228,16 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
             onOpenProject={(cwd) => void open(cwd, false)}
           />
         ) : null}
-        <Box flexDirection="row" flexWrap="wrap" width={columns} height={screen === "hub" ? 0 : body} display={screen === "hub" ? "none" : "flex"}>
+        <Box flexDirection="row" flexWrap="wrap" width={columns} height={screen === "hub" ? 0 : main} display={screen === "hub" ? "none" : "flex"}>
           {agents.map((a) => {
-            const inSplit = screen === "split" && split.includes(a.id);
-            const shown = screen === "agent" ? a.id === active?.id : inSplit;
+            const inSplit = view === "split" && split.includes(a.id);
+            const shown = view === "agent" ? a.id === active?.id : inSplit;
             const focused = a.id === active?.id && !picker;
-            const framed = screen === "split";
+            const framed = view === "split";
             // Three in a 2×2 grid: the last one takes the whole bottom row.
             const last = framed && split.length === 3 && grid.cols === 2 && split.indexOf(a.id) === 2;
             const w = framed ? (last ? paneW * 2 : paneW) : columns;
-            const h = framed ? paneH : body;
+            const h = framed ? paneH : main;
             return (
               <Box
                 key={a.id}

@@ -7,7 +7,7 @@ import { Box, Static, useWindowSize } from "ink";
 import type { Controller } from "../runtime/controller.ts";
 import { BlockView } from "./components/Blocks.tsx";
 import { Composer } from "./components/Composer.tsx";
-import { DialogView } from "./components/Dialogs.tsx";
+import { DialogSpace, DialogView } from "./components/Dialogs.tsx";
 import { MotionContext } from "./components/motion.ts";
 import { WorkingLine } from "./components/Working.tsx";
 import type { WelcomeInfo } from "./components/Welcome.tsx";
@@ -27,7 +27,7 @@ export function App({ controller, version, home, motion, clearTerminal }: AppPro
   const snap = useSyncExternalStore(controller.transcript.subscribe, controller.transcript.snapshot);
   const chrome = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const dialog = useSyncExternalStore(controller.dialogs.subscribe, controller.dialogs.current);
-  const { columns } = useWindowSize();
+  const { columns, rows } = useWindowSize();
   const cwd = controller.runtime.cwd;
 
   // Fixed at start: the welcome card is printed once, into scrollback.
@@ -75,7 +75,11 @@ export function App({ controller, version, home, motion, clearTerminal }: AppPro
             }
           />
         ) : null}
-        {dialog ? <DialogView dialog={dialog} /> : null}
+        {dialog ? (
+          <DialogSpace.Provider value={{ columns, rows: Math.max(6, rows - 6) }}>
+            <DialogView dialog={dialog} />
+          </DialogSpace.Provider>
+        ) : null}
         <Composer
           working={snap.working !== null}
           active={!dialog}
@@ -83,6 +87,7 @@ export function App({ controller, version, home, motion, clearTerminal }: AppPro
           files={files}
           footer={chrome.footer}
           statuses={chrome.statuses}
+          width={columns}
           draftRequest={chrome.draftRequest}
           onSubmit={(text, mode) => void controller.submit(text, mode)}
           onInterrupt={() => controller.interrupt()}

@@ -439,6 +439,16 @@ async function main(): Promise<number> {
     },
   );
 
+  // A resize redraws the whole screen. Ink clears on its own only when the width
+  // shrinks; on the full-screen workspace a shorter or wider window would keep
+  // rows of the old frame. This runs before Ink's own handler, which then draws
+  // the new frame on a clean screen.
+  if (interactive && layout === "workspace")
+    process.stdout.prependListener("resize", () => {
+      process.stdout.write("\x1b[2J\x1b[H");
+      instance.clear();
+    });
+
   // The full-screen workspace has no scrollback, so the wheel is ours: ask the terminal to report it.
   // Handed back on every way out; MNEMO_MOUSE=0 never takes it (text selection stays the terminal's).
   if (interactive && layout === "workspace" && process.env.MNEMO_MOUSE !== "0") {

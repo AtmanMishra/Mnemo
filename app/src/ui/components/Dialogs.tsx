@@ -10,6 +10,35 @@ import * as ed from "../editor.ts";
 
 const WINDOW = 8;
 
+/**
+ * The room a dialog has: the layout that shows it says how many columns and
+ * rows are left once the header, some conversation and the composer have
+ * theirs. A long question is cut to fit, never drawn over its own buttons.
+ */
+export const DialogSpace = React.createContext({ columns: 200, rows: 40 });
+
+/** Wrap text at word boundaries to `width`, keeping at most `max` lines (the last one ends in … when cut). */
+export function clampLines(text: string, width: number, max: number): string[] {
+  const out: string[] = [];
+  for (const para of text.split("\n")) {
+    let line = "";
+    for (const word of para.split(/\s+/).filter(Boolean)) {
+      const next = line ? `${line} ${word}` : word;
+      if (next.length <= width) line = next;
+      else {
+        if (line) out.push(line);
+        line = word.length > width ? word.slice(0, width) : word;
+      }
+    }
+    out.push(line);
+  }
+  if (out.length <= max) return out;
+  const kept = out.slice(0, Math.max(1, max));
+  const last = kept[kept.length - 1]!;
+  kept[kept.length - 1] = `${last.slice(0, Math.max(0, width - 1))}…`;
+  return kept;
+}
+
 /** Field-by-field substring match, so a query never matches across two fields. */
 /** False for a dialog in an agent that is on screen but not focused (a split pane). */
 export const InputActive = React.createContext(true);
@@ -27,17 +56,19 @@ export function filterChoices(choices: readonly Choice[], query: string): Choice
 
 function Frame({ tint, title, children, hint }: { tint: string; title: string; children: React.ReactNode; hint: string }) {
   return (
-    <Box flexDirection="column" borderStyle="round" borderBackgroundColor={ground()} borderColor={tint} paddingX={1} marginTop={1}>
-      <Text bold color={tint}>
+    <Box flexDirection="column" borderStyle="round" borderBackgroundColor={ground()} borderColor={tint} paddingX={1} marginTop={1} flexShrink={0}>
+      <Text bold color={tint} wrap="truncate-end">
         {title}
       </Text>
       {children}
-      <Text color={color.subtle}>{hint}</Text>
+      <Text color={color.subtle} wrap="truncate-end">{hint}</Text>
     </Box>
   );
 }
 
 function SelectDialog({ dialog }: { dialog: Extract<Dialog, { kind: "select" }> }) {
+  const space = React.useContext(DialogSpace);
+  const WINDOW = Math.max(3, Math.min(8, space.rows - 6));
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const items = filterChoices(dialog.choices, query);
@@ -85,6 +116,8 @@ function SelectDialog({ dialog }: { dialog: Extract<Dialog, { kind: "select" }> 
 }
 
 function ConfirmDialog({ dialog }: { dialog: Extract<Dialog, { kind: "confirm" }> }) {
+  const space = React.useContext(DialogSpace);
+  const message = dialog.message ? clampLines(dialog.message, Math.max(10, space.columns - 4), Math.max(1, space.rows - 6)) : [];
   const [yes, setYes] = useState(true);
   useInput((input, key) => {
     if (key.escape || input === "n" || input === "N") return dialog.resolve(false);
@@ -94,7 +127,11 @@ function ConfirmDialog({ dialog }: { dialog: Extract<Dialog, { kind: "confirm" }
   });
   return (
     <Frame tint={color.warning} title={dialog.title} hint="y yes · n no · ←→ choose · enter confirm · esc no">
-      {dialog.message ? <Text color={color.text}>{dialog.message}</Text> : null}
+      {message.map((l, i) => (
+        <Text key={i} color={color.text}>
+          {l || " "}
+        </Text>
+      ))}
       <Box marginTop={1}>
         <Text inverse={yes} color={yes ? color.success : color.muted}>
           {" Yes "}
@@ -180,9 +217,12 @@ function ApprovalDialog({ dialog }: { dialog: Extract<Dialog, { kind: "approval"
     const n = Number(input);
     if (n >= 1 && n <= options.length) choose(options[n - 1]!.key);
   });
-  const preview = r.preview.slice(0, 14);
+  const space = React.useContext(DialogSpace);
+  // Title, subject, options, hint and border take the rest; the preview gets what is left (at least two lines).
+  const reason = r.reason ? clampLines(r.reason, Math.max(10, space.columns - 4), 2) : [];
+  const preview = r.preview.slice(0, Math.max(2, Math.min(14, space.rows - 7 - options.length - reason.length)));
   return (
-    <Box flexDirection="column" borderStyle="round" borderBackgroundColor={ground()} borderColor={color.warning} paddingX={1} marginTop={1}>
+    <Box flexDirection="column" borderStyle="round" borderBackgroundColor={ground()} borderColor={color.warning} paddingX={1} marginTop={1} flexShrink={0}>
       <Text bold color={color.warning}>
         Allow this?
       </Text>
@@ -205,7 +245,11 @@ function ApprovalDialog({ dialog }: { dialog: Extract<Dialog, { kind: "approval"
           {r.preview.length > preview.length ? <Text color={color.subtle}>… +{r.preview.length - preview.length} lines</Text> : null}
         </Box>
       ) : null}
-      {r.reason ? <Text color={color.subtle}>{r.reason}</Text> : null}
+      {reason.map((l, i) => (
+        <Text key={i} color={color.subtle}>
+          {l}
+        </Text>
+      ))}
       <Box flexDirection="column" marginTop={1}>
         {feedback ? (
           <>
@@ -219,7 +263,7 @@ function ApprovalDialog({ dialog }: { dialog: Extract<Dialog, { kind: "approval"
           </>
         ) : (
           options.map((o, i) => (
-            <Text key={o.key}>
+            <Text key={o.key} wrap="truncate-end">
               <Text color={color.warning}>{i === index ? `${glyph.user} ` : "  "}</Text>
               <Text color={i === index ? color.warning : undefined} bold={i === index}>
                 {i + 1}. {o.label}
@@ -228,7 +272,7 @@ function ApprovalDialog({ dialog }: { dialog: Extract<Dialog, { kind: "approval"
           ))
         )}
       </Box>
-      <Text color={color.subtle}>{feedback ? "esc to just say no" : "y yes · n no · ↑↓ choose · enter confirm"}</Text>
+      <Text color={color.subtle} wrap="truncate-end">{feedback ? "esc to just say no" : "y yes · n no · ↑↓ choose · enter confirm"}</Text>
     </Box>
   );
 }

@@ -104,6 +104,17 @@ terminals, to select text; `/mouse` or `MNEMO_MOUSE=0` hands the mouse back). Mo
 previews the selection in the main area; a pane's own keys act on it (`r`
 resumes a session, `i` puts `@file` in the prompt).
 
+**Any size.** Everything is laid out from the terminal's size and redrawn when
+it changes (a resize clears the screen first, so no rows of the old frame stay).
+Narrower, things give way in order rather than wrap: the footer drops cost, then
+the thinking level, then the branch, and keeps the model and the permission
+mode; the header drops the branch, then the model, and shortens the folder name;
+the input box's hint shortens; agent tabs shorten their names, then show only
+numbers. A split whose panes would be under about 40×10 shows one agent and says
+so. A dialog is cut to fit (about 60% of the height) and, on a short terminal,
+takes the input box's place. `test/layout.test.ts` checks every screen from
+30×10 to 200×50.
+
 The inline layout (`--inline`, dumps, pipes) is the earlier one:
 
 ```
