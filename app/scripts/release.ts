@@ -67,7 +67,8 @@ function prepare(version: string, skipTests: boolean): void {
     // The checks need the dependencies the lockfile names; a fresh clone has none.
     run(["bun", "install", "--frozen-lockfile"]);
     run(["bunx", "tsc", "--noEmit"], path.join(ROOT, "app"));
-    run(["bun", "test", "./test"], path.join(ROOT, "app"));
+    // The same timeout CI gives the suite: some tests start a real agent turn, slow on Windows.
+    run(["bun", "test", "--timeout", "30000", "./test"], path.join(ROOT, "app"));
     run(["bun", "test", "./test"], path.join(ROOT, "packages", "memory"));
   }
   run(["git", "add", ...VERSIONED, "memory-layer/Cargo.lock"]);
