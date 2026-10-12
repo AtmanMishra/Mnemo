@@ -18,6 +18,7 @@ import { CYCLE, type Host, type MemoryNote, type Mode } from "../extensions/host
 import { projectIdentity, VERIFY } from "@mnemo/memory";
 import { testCounts, type TestCounts } from "../ui/activity.ts";
 import { mouse } from "../ui/mouse.ts";
+import { compareVersions, manualStep, type InstallKind } from "./update.ts";
 import { setTheme, themeName, THEMES, type ThemeName } from "../ui/theme.ts";
 import { bestOf, describeBestOf, type CandidateRunner, type LaneState } from "./best-of.ts";
 import { selfCommand } from "./self.ts";
@@ -100,6 +101,7 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "yolo", description: "toggle bypass: ask for nothing (deny rules in permissions.json still hold)" },
   { name: "accept-edits", description: "toggle accept edits: change project files without asking, still ask before commands" },
   { name: "theme", description: "the look: Mnemo Night, Game Boy, Paper" },
+  { name: "update", description: "install the latest Mnemo · /update auto on|off: a daily check that only tells you" },
   { name: "mouse", description: "mouse wheel scrolls the conversation (on) or your terminal selects text (off)" },
   { name: "bestof", description: 'race N attempts at a task, keep the smallest that passes: /bestof 3 "npm test" <task>' },
   { name: "plan", description: "toggle plan mode (read-only)" },
@@ -131,6 +133,15 @@ function gitBranch(cwd: string): string | undefined {
       dir = up;
     }
   }
+}
+
+/** What `/update` needs from the program that runs it (bin/mnemo.ts gives the real one). */
+export interface Updater {
+  current: string;
+  kind: InstallKind;
+  latest(): Promise<string | undefined>;
+  install(version: string, log: (line: string) => void): Promise<number>;
+  setAuto(on: boolean): void;
 }
 
 /** Thrown when the user backs out of a login prompt; reported as a choice, not a failure. */
@@ -172,6 +183,8 @@ export class Controller {
       host?: Host;
       /** Persist a theme the user picked. */
       onTheme?: (name: ThemeName) => void;
+      /** `/update`: what is installed and how to replace it (see update.ts). Absent in tests and in-process runs. */
+      updater?: Updater;
       /** How a best-of candidate runs (tests inject one; the default is this program, headless). */
       bestOfRunner?: CandidateRunner;
     },
@@ -603,6 +616,55 @@ export class Controller {
           if (!ok) return true;
         }
         void this.raceBestOf(n, check, task);
+        return true;
+      }
+      case "update": {
+        const u = this.options.updater;
+        if (!u) {
+          this.transcript.notice("Updating needs the installed Mnemo: run `mnemo update` in a terminal.", "warn");
+          return true;
+        }
+        const auto = /^auto\s+(on|off)$/.exec(arg)?.[1];
+        if (auto) {
+          u.setAuto(auto === "on");
+          this.transcript.notice(
+            auto === "on"
+              ? "Update check on: once a day, at launch, Mnemo asks GitHub for the latest version and tells you when there is a newer one. Nothing installs without you."
+              : "Update check off: Mnemo makes no request of its own.",
+          );
+          return true;
+        }
+        if (arg) {
+          this.transcript.notice("Usage: /update · /update auto on · /update auto off", "warn");
+          return true;
+        }
+        this.transcript.notice("Checking for a newer Mnemo…");
+        const latest = await u.latest();
+        if (!latest) {
+          this.transcript.notice("Could not reach GitHub to check for updates.", "warn");
+          return true;
+        }
+        if (compareVersions(latest, u.current) <= 0) {
+          this.transcript.notice(`Mnemo v${u.current} is the latest.`);
+          return true;
+        }
+        if (u.kind !== "installer") {
+          this.transcript.notice(`Mnemo v${latest} is available (you have v${u.current}). This copy is managed elsewhere: ${manualStep(u.kind, latest)}`);
+          return true;
+        }
+        const ok = await this.dialogs.confirm(
+          `Install Mnemo v${latest}?`,
+          `You have v${u.current}. The release's installer downloads it, checks its SHA-256 and replaces mnemo and memsrv. Memory, sessions and settings are not touched. Restart Mnemo afterwards to use it.`,
+        );
+        if (!ok) return true;
+        const tail: string[] = [];
+        try {
+          const code = await u.install(latest, (line) => void tail.push(line));
+          if (code === 0) this.transcript.notice(`Installed Mnemo v${latest}. Quit and start mnemo again to use it.`);
+          else this.transcript.notice(`The installer stopped (exit ${code}):\n${tail.slice(-6).join("\n")}`, "error");
+        } catch (e) {
+          this.transcript.notice(`Update failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+        }
         return true;
       }
       case "mouse": {

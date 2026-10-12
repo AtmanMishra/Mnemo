@@ -64,9 +64,15 @@ in a place you can afford to lose: a container, a throwaway checkout.
 - **Your prompts, the files and command output the model reads, and your
   memory's recalled facts go to the model provider you configured.** That is
   how an agent works. Choose the provider accordingly.
-- **Nothing else.** Mnemo has no telemetry and no update checks. We measured
-  it: `--version`, `doctor`, `--demo` and `memory status` open no network
-  connection at all; only a real prompt does, and only to your provider.
+- **Nothing else, unless you ask.** Mnemo has no telemetry, and by default no
+  update check. We measured it: `--version`, `doctor`, `--demo` and `memory
+  status` open no network connection at all; only a real prompt does, and only
+  to your provider. Two things reach GitHub, and only when you start them:
+  `mnemo update` (or `/update`), which reads the latest release and runs its
+  installer; and the daily update check, **off unless you turn it on**
+  (`mnemo update --auto on` or `MNEMO_AUTO_UPDATE=1`), which reads
+  `github.com/AtmanMishra/Mnemo/releases/latest` once a day and sends nothing
+  about you.
 - Memory is stored locally under `$MNEMO_HOME` (default `~/.mnemo`) in a
   journal file, readable only by you. It is never uploaded by Mnemo. **One
   exception, opt in:** if `OPENROUTER_API_KEY` is set, the text of memories is

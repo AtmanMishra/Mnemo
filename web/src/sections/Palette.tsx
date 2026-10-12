@@ -23,6 +23,8 @@ const COMMANDS: [string, string][] = [
   ["cost", "tokens and spend for this session"],
   ["reload", "reload skills, prompts and extensions"],
   ["clear", "clear the screen (the session is kept)"],
+  ["update", "install the latest Mnemo · /update auto on|off: a daily check that only tells you"],
+  ["mouse", "mouse wheel scrolls the conversation (on) or your terminal selects text (off)"],
   ["help", "commands and keys"],
   ["quit", "leave Mnemo"],
 ];

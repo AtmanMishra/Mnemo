@@ -84,7 +84,16 @@ function Install-Mnemo {
       }
     } finally { $zip.Dispose() }
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-    foreach ($f in "mnemo.exe", "memsrv.exe") { Move-Item -Force (Join-Path $tmp $f) (Join-Path $BinDir $f) }
+    foreach ($f in "mnemo.exe", "memsrv.exe") {
+      $dest = Join-Path $BinDir $f
+      # A running .exe cannot be overwritten, but it can be renamed: move it aside
+      # (mnemo deletes the .old copy on its next start), then put the new one in place.
+      if (Test-Path $dest) {
+        Remove-Item -Force -ErrorAction SilentlyContinue "$dest.old"
+        try { Move-Item -Force -ErrorAction Stop $dest "$dest.old" } catch { throw "could not replace $f; close every Mnemo window and run the installer again" }
+      }
+      Move-Item -Force (Join-Path $tmp $f) $dest
+    }
     Write-Host "  ✓ installed into $BinDir"
     $userPath = Get-UserPath
     if (($userPath -split ";") -notcontains $BinDir) {

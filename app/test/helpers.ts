@@ -8,7 +8,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { startRuntime } from "../src/runtime/runtime.ts";
-import { Controller } from "../src/runtime/controller.ts";
+import { Controller, type Updater } from "../src/runtime/controller.ts";
 import { createDemoProject, createFaux } from "../src/runtime/demo.ts";
 import { MemoryService } from "@mnemo/memory";
 import { createHost, settleBackground, type Mode } from "../src/extensions/host.ts";
@@ -29,6 +29,8 @@ export interface EnvOptions {
   persistent?: boolean;
   /** `provider/id` to escalate to; registers a second faux model, `mnemo-demo/demo-strong`. */
   escalate?: string;
+  /** What /update talks to (see update.test.ts). */
+  updater?: Updater;
 }
 
 export async function mnemoEnv(o: EnvOptions = {}) {
@@ -48,7 +50,7 @@ export async function mnemoEnv(o: EnvOptions = {}) {
     sessionManager: o.persistent ? undefined : SessionManager.inMemory(cwd),
     extensions: mnemoExtensions(host),
   });
-  const controller = new Controller(runtime, { exit: () => {}, host });
+  const controller = new Controller(runtime, { exit: () => {}, host, updater: o.updater });
   await controller.bind();
   return {
     home,

@@ -15,7 +15,7 @@ import * as readline from "node:readline/promises";
 import pkg from "../package.json" with { type: "json" };
 import { agentDir, findMemsrv, journalPath, memsrvName, mnemoHome, pointPiAt, skillsDir } from "../src/runtime/paths.ts";
 import { createModelRuntime, startRuntime } from "../src/runtime/runtime.ts";
-import { Controller } from "../src/runtime/controller.ts";
+import { Controller, type Updater } from "../src/runtime/controller.ts";
 import { createDemoProject, createFaux, demoScript, DEMO_PROMPT } from "../src/runtime/demo.ts";
 import { MemoryService } from "@mnemo/memory";
 import { createHost, settleBackground, type Mode } from "../src/extensions/host.ts";
@@ -27,6 +27,7 @@ import { Fleet } from "../src/runtime/fleet.ts";
 import { exitLine } from "../src/ui/ExitCard.tsx";
 import { applyTheme, themePaints, type ThemeName } from "../src/ui/theme.ts";
 import { mouse } from "../src/ui/mouse.ts";
+import { clearReplaced, compareVersions, installKind, latestVersion, manualStep, runInstaller, shouldCheck } from "../src/runtime/update.ts";
 import { bestOf, describeBestOf } from "../src/runtime/best-of.ts";
 import { selfCommand } from "../src/runtime/self.ts";
 
@@ -37,6 +38,7 @@ usage
   mnemo -c, --continue     continue the most recent session here
   mnemo -p "<prompt>"      answer once and print the result (no interface)
   mnemo doctor             what is installed, configured and reachable
+  mnemo update             install the latest release · --check · --auto on|off (a daily check, off by default)
   mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
 
@@ -186,6 +188,10 @@ async function doctor(home: string, dir: string): Promise<number> {
 /** Small per-user state: whether the introduction has been seen. */
 interface State {
   onboarded?: boolean;
+  /** The opt-in daily update check, when it last ran, and what it found. */
+  autoUpdate?: boolean;
+  updateCheckedAt?: number;
+  updateAvailable?: string;
   /** Folders agents were opened in, most recent first. */
   recent?: string[];
   theme?: ThemeName;
@@ -248,7 +254,35 @@ async function runBestOf(args: Args, home: string): Promise<number> {
   return result.winner ? 0 : 1;
 }
 
+/** `mnemo update [--check] [--auto on|off]` */
+async function updateCommand(argv: string[], home: string): Promise<number> {
+  const auto = argv[0] === "--auto" ? argv[1] : undefined;
+  if (argv[0] === "--auto") {
+    if (auto !== "on" && auto !== "off") return console.error("mnemo update --auto on|off"), 2;
+    writeState(home, { ...readState(home), autoUpdate: auto === "on" });
+    console.log(
+      auto === "on"
+        ? "update check on: once a day, at launch, Mnemo asks GitHub for the latest version and tells you about a newer one. Nothing installs without you."
+        : "update check off: Mnemo makes no request of its own.",
+    );
+    return 0;
+  }
+  if (argv.length > 1 || (argv[0] && argv[0] !== "--check")) return console.error("usage: mnemo update [--check] [--auto on|off]"), 2;
+  const latest = await latestVersion();
+  if (!latest) return console.error("mnemo update: could not reach GitHub"), 1;
+  writeState(home, { ...readState(home), updateCheckedAt: Date.now(), updateAvailable: latest });
+  if (compareVersions(latest, pkg.version) <= 0) return console.log(`mnemo v${pkg.version} is the latest`), 0;
+  console.log(`mnemo v${latest} is available (you have v${pkg.version})`);
+  if (argv[0] === "--check") return 0;
+  const kind = installKind(process.execPath, home);
+  if (kind !== "installer") return console.log(`this copy is managed elsewhere; update it with:\n  ${manualStep(kind, latest)}`), 0;
+  const code = await runInstaller(latest, home, (line) => console.log(line));
+  if (code === 0) console.log(`updated to v${latest}`);
+  return code;
+}
+
 async function main(): Promise<number> {
+  if (process.argv[2] === "update") return updateCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "memory") {
     const home = mnemoHome();
     pointPiAt(agentDir(home));
@@ -331,12 +365,23 @@ async function main(): Promise<number> {
   const done = new Promise<void>((r) => (finished = r));
   const state = readState(home);
   applyTheme(state.theme ?? "night");
+  const updater: Updater = {
+    current: pkg.version,
+    kind: installKind(process.execPath, home),
+    latest: async () => {
+      const v = await latestVersion();
+      if (v) writeState(home, { ...readState(home), updateCheckedAt: Date.now(), updateAvailable: v });
+      return v;
+    },
+    install: (version, log) => runInstaller(version, home, log),
+    setAuto: (on) => writeState(home, { ...readState(home), autoUpdate: on }),
+  };
   const saveTheme = (theme: ThemeName) => writeState(home, { ...readState(home), theme });
   // Every agent of this process. The program ends when the last one closes.
   const fleet = new Fleet(
     async (agentCwd, exit) => {
       const made = await makeAgent(agentCwd);
-      const c = new Controller(made.runtime, { exit, onClearScreen: clearTerminal, host: made.host, onTheme: saveTheme });
+      const c = new Controller(made.runtime, { exit, onClearScreen: clearTerminal, host: made.host, onTheme: saveTheme, updater });
       await c.bind();
       c.transcript.push({ kind: "welcome" });
       return { controller: c, host: made.host, source: workspaceSource(c, made.host, home) };
@@ -352,7 +397,7 @@ async function main(): Promise<number> {
     },
   );
   let firstId = 0;
-  const controller = new Controller(runtime, { exit: (code) => fleet.closed(firstId, code ?? 0), onClearScreen: clearTerminal, host, onTheme: saveTheme });
+  const controller = new Controller(runtime, { exit: (code) => fleet.closed(firstId, code ?? 0), onClearScreen: clearTerminal, host, onTheme: saveTheme, updater });
   await controller.bind();
   controller.transcript.push({ kind: "welcome" });
   firstId = fleet.adopt(cwd, { controller, host, source: workspaceSource(controller, host, home) }).id;
@@ -399,6 +444,17 @@ async function main(): Promise<number> {
   if (interactive && layout === "workspace" && process.env.MNEMO_MOUSE !== "0") {
     mouse.set(true);
     process.on("exit", () => mouse.set(false));
+  }
+
+  if (interactive && !args.demo) {
+    clearReplaced(home);
+    // What an earlier check found, without asking again; then, if turned on and due, ask.
+    const announce = (v: string | undefined) => {
+      if (v && compareVersions(v, pkg.version) > 0) controller.transcript.notice(`Mnemo v${v} is available (you have v${pkg.version}). /update installs it.`);
+    };
+    const st = readState(home);
+    if (shouldCheck({ auto: st.autoUpdate, checkedAt: st.updateCheckedAt, now: Date.now(), env: process.env })) void updater.latest().then(announce);
+    else announce(st.updateAvailable);
   }
 
   if (args.demo && !args.dump) setTimeout(() => void controller.submit(DEMO_PROMPT), 900);

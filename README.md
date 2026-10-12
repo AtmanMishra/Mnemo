@@ -59,6 +59,18 @@ uses credentials it finds in your environment (`ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, `OPENCODE_API_KEY`, `AWS_*` and others): see
 [SECURITY.md](SECURITY.md).
 
+### Updating
+
+```bash
+mnemo update            # install the latest release (checks its SHA-256 first)
+mnemo update --check    # only say whether there is one
+mnemo update --auto on  # a daily check at launch that tells you; never installs on its own
+```
+
+Inside Mnemo, `/update` does the same. Homebrew and Scoop installs update with
+`brew upgrade mnemo` / `scoop update mnemo`. The daily check is off by default:
+until you turn it on, Mnemo never contacts anything but your model provider.
+
 <details><summary>From source</summary>
 
 Needs [Bun](https://bun.sh) 1.4+ and a Rust toolchain.
@@ -117,7 +129,7 @@ edits, `/yolo` (or `--yolo`) about everything, and headless `-p` never asks, so
 use the last two in a container or a throwaway checkout. The gate filters
 what runs; it is not a sandbox. Your prompts and the files the model reads go to
 the provider you chose; nothing else leaves your machine, and there is no
-telemetry. Read [SECURITY.md](SECURITY.md), which also says how to report a
+telemetry, and no update check unless you turn one on. Read [SECURITY.md](SECURITY.md), which also says how to report a
 vulnerability.
 
 ## Repository
