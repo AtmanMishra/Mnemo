@@ -89,7 +89,12 @@ cd app && bun bin/mnemo.ts --demo
 
 - **Remembers.** Facts, conventions, pitfalls with their fixes, open threads and
   skills, stored locally. `/memory` shows them, `/forget` retires one, and the
-  memory map (`m` in the memory pane) draws them.
+  memory map (`m` in the memory pane) draws them. In the memory pane, `e`
+  edits a fact, `d` forgets it, and `+`/`-` tell recall what helped and what was
+  wrong. `mnemo memory tidy` finds duplicates, facts about files that are gone
+  and what was marked wrong (`--apply` retires them). Search can use your own
+  embedding server: `MNEMO_EMBED_URL=http://localhost:11434/v1/embeddings
+  MNEMO_EMBED_MODEL=nomic-embed-text` (Ollama).
 - **Memory for other agents.** `mnemo memory setup claude-code` prints the hooks
   and MCP entry that give Claude Code (or Codex) the same memory; `mnemo memory
   ingest` learns from Claude Code sessions you already have.

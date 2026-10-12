@@ -54,7 +54,7 @@ export interface WorkspaceSource {
   logs(): Item[];
   preview(pane: Pane, id: string): Promise<Preview | undefined>;
   /** A key on an item: `r` resumes a session, `i` puts `@file` in the composer. */
-  act(pane: Pane, id: string, key: string): void;
+  act(pane: Pane, id: string, key: string): void | Promise<void>;
 }
 
 /**

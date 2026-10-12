@@ -114,9 +114,15 @@ fn main() {
 
     // The embedding cache lives beside the journal, not in whatever folder this was started in.
     let cache_dir = Path::new(&jpath).parent().map(|p| p.join("embed")).unwrap_or_else(|| Path::new("embed").into());
-    let embedder: Arc<dyn Embedder> = match OpenRouterEmbedder::from_env(&cache_dir) {
-        Some(e) => { eprintln!("[memsrv] embedder=openrouter ({})", e.model_name()); Arc::new(e) }
-        None => { eprintln!("[memsrv] embedder=hashing (no OPENROUTER_API_KEY)"); Arc::new(HashingEmbedder) }
+    // Your own embedding server first, then OpenRouter, then the offline hashing embedder.
+    let embedder: Arc<dyn Embedder> = if let Some(e) = OpenRouterEmbedder::local_from_env(&cache_dir) {
+        eprintln!("[memsrv] embedder=local ({})", e.model_name());
+        Arc::new(e)
+    } else {
+        match OpenRouterEmbedder::from_env(&cache_dir) {
+            Some(e) => { eprintln!("[memsrv] embedder=openrouter ({})", e.model_name()); Arc::new(e) }
+            None => { eprintln!("[memsrv] embedder=hashing (no MNEMO_EMBED_URL or OPENROUTER_API_KEY)"); Arc::new(HashingEmbedder) }
+        }
     };
     eprintln!("[memsrv] ready: {jpath} ({loaded} ops)");
 
@@ -338,6 +344,7 @@ fn handle(
                 // counted live facts could not tell "one value" from "one
                 // value and three retired ones" — `history` returns those.
                 "retired": n.facts.len() - n.active_facts().count(),
+                "useful": n.useful, "unhelpful": n.unhelpful,
                 "feeders": s.feeders_of(n.id, *clock).len(),
             })).collect();
             Ok(json!({ "nodes": nodes }))
@@ -519,6 +526,8 @@ fn handle(
                             "kind": s.nodes.get(&r.node).map(|n| format!("{:?}", n.kind)).unwrap_or_default(),
                             "area": s.nodes.get(&r.node).map(|n| format!("{:?}", n.area)).unwrap_or_default(),
                             "state": s.state_of(r.node).unwrap_or_default(),
+                            "useful": s.nodes.get(&r.node).map(|n| n.useful).unwrap_or(0),
+                            "unhelpful": s.nodes.get(&r.node).map(|n| n.unhelpful).unwrap_or(0),
                         })
                     }).collect();
                     let ids: Vec<NodeId> = enriched.iter()

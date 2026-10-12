@@ -31,6 +31,25 @@ export interface Hit {
   area: string;
   score: number;
   state: string;
+  /** Votes: recalled and then used, or marked wrong (the memory pane's thumbs). */
+  useful?: number;
+  unhelpful?: number;
+}
+
+/**
+ * How far to trust an item from its votes: 1 with none, toward 2 when it keeps
+ * helping, toward 0 when it is marked wrong. Laplace-smoothed, so one vote
+ * moves it a little and a run of them a lot.
+ */
+export function trust(h: Pick<Hit, "useful" | "unhelpful">): number {
+  const up = h.useful ?? 0;
+  const down = h.unhelpful ?? 0;
+  return (2 * (up + 1)) / (up + down + 2);
+}
+
+/** Marked wrong at least twice more often than it helped: not recalled at all. */
+export function distrusted(h: Pick<Hit, "useful" | "unhelpful">): boolean {
+  return (h.unhelpful ?? 0) - (h.useful ?? 0) >= 2;
 }
 
 export interface ProfileFact {
@@ -198,6 +217,8 @@ export class MemoryService {
       .filter((h) => !/^(gap:|lesson:|skill candidate)/.test(h.label))
       .filter((h) => h.area !== "Salience" || factValue(h.state, "fix") !== undefined)
       .filter((h) => h.kind !== "TaskEpisode" || factValue(h.state, "goal") !== undefined)
+      .filter((h) => !distrusted(h))
+      .sort((a, b) => b.score * trust(b) - a.score * trust(a))
       .slice(0, k);
   }
 
@@ -226,6 +247,11 @@ export class MemoryService {
     await this.call("good", { episode, detail });
   }
 
+  /** Retire a node (a pitfall, a note): kept in the journal, never recalled again. */
+  async forgetNode(node: number): Promise<boolean> {
+    return (await this.call("forget", { node })) !== undefined;
+  }
+
   async markUseful(node: number, useful = true): Promise<void> {
     await this.call("mark_useful", { node, useful });
   }
@@ -245,9 +271,9 @@ export class MemoryService {
     return (r?.lessons ?? []).map((l) => (typeof l === "string" ? l : JSON.stringify(l)));
   }
 
-  /** Every node: id, label, kind and area (for a browser of memory). */
-  async nodes(): Promise<{ id: number; label: string; kind: string; area: string }[]> {
-    return (await this.call<{ nodes: { id: number; label: string; kind: string; area: string }[] }>("dump"))?.nodes ?? [];
+  /** Every node: id, label, kind, area and its votes (for a browser of memory). */
+  async nodes(): Promise<{ id: number; label: string; kind: string; area: string; useful?: number; unhelpful?: number }[]> {
+    return (await this.call<{ nodes: { id: number; label: string; kind: string; area: string; useful?: number; unhelpful?: number }[] }>("dump"))?.nodes ?? [];
   }
 
   async stats(): Promise<{ nodes: number; episodes: number; byArea: Record<string, number> } | undefined> {

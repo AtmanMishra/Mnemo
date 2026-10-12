@@ -154,6 +154,8 @@ export class MemorySession {
   /** This run's failure markers, with the failure text a fix is matched against. */
   private pains: { node: number; text: string }[] = [];
   private readonly credit = new Credit();
+  /** Every node recalled in this session, newest last: the memory pane offers thumbs on them. */
+  readonly recalled = new Map<number, string>();
   private toolLog: ToolEvent[] = [];
   private readonly files = new Set<string>();
   /** Skills read in this run: name → the SKILL.md file. */
@@ -252,6 +254,10 @@ export class MemorySession {
           this.linked.add(node);
           await mem.link(node, ep);
         }
+    for (const h of hits) {
+      this.recalled.delete(h.node);
+      this.recalled.set(h.node, hitLine(h));
+    }
     this.credit.recalled(
       hits.map((h) => ({ node: h.node, text: `${h.label} ${factsOf(h.state).map((f) => `${f.key} ${f.value}`).join(" ")}` })),
       prompt,

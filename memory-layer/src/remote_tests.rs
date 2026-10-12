@@ -53,4 +53,55 @@ mod embed_bound_tests {
         assert!(EMBED_TIMEOUT <= Duration::from_secs(10), "per-call timeout must stay <= 10s");
         assert!(EMBED_BACKOFF <= Duration::from_secs(1), "backoff must stay <= 1s");
     }
+
+    #[test]
+    fn a_local_server_is_asked_without_a_key_when_none_is_set() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            // headers and body can arrive in separate reads: read until the body is complete
+            let mut raw = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = sock.read(&mut buf).unwrap();
+                if n == 0 { break; }
+                raw.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&raw).to_lowercase();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let len = text.lines()
+                        .find_map(|l| l.strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                        .unwrap_or(0);
+                    if raw.len() >= end + 4 + len { break; }
+                }
+            }
+            let req = String::from_utf8_lossy(&raw).to_lowercase();
+            let body = r#"{"data":[{"embedding":[0.6,0.8]}]}"#;
+            write!(sock, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            req
+        });
+        let dir = std::env::temp_dir().join(format!("memlayer-embed-local-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let e = OpenRouterEmbedder::new_with_endpoint(
+            String::new(), "nomic-embed-text".into(), &dir,
+            format!("http://127.0.0.1:{port}/v1/embeddings"),
+            Duration::from_secs(5),
+        );
+        assert_eq!(e.embed("hello"), vec![0.6, 0.8]);
+        let req = server.join().unwrap();
+        assert!(req.contains("nomic-embed-text"));
+        assert!(!req.contains("authorization:"), "no key, no Authorization header");
+    }
+
+    #[test]
+    fn only_https_or_this_machine_may_receive_memories() {
+        use crate::remote::allowed_endpoint;
+        assert!(allowed_endpoint("https://api.example.com/v1/embeddings"));
+        assert!(allowed_endpoint("http://localhost:11434/v1/embeddings"));
+        assert!(allowed_endpoint("http://127.0.0.1/v1/embeddings"));
+        assert!(!allowed_endpoint("http://localhost.evil.com/v1"));
+        assert!(!allowed_endpoint("http://192.168.1.5:11434/v1/embeddings"));
+    }
 }

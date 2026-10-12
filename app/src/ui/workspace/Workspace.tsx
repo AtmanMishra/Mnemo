@@ -311,7 +311,9 @@ export function Workspace({ controller, source, motion, initial, width, height, 
         if (at >= 0) return setSelected((s) => ({ ...s, files: at }));
       }
       if (key.return || key.rightArrow) return setFocus("main");
-      if (input && !key.ctrl && !key.meta) source.act(pane, current.id, input);
+      if (input && !key.ctrl && !key.meta)
+        // What a key changed (a memory edited or forgotten) shows when the pane reloads.
+        void Promise.resolve(source.act(pane, current.id, input)).then(() => load(pane));
     },
     { isActive: active && !dialog },
   );

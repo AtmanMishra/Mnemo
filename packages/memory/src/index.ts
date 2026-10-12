@@ -14,6 +14,7 @@ export { normalizeRemote, projectIdentity, type ProjectIdentity } from "./projec
 export { describeHit, DIRECTIVE, hitLine, profileBlock, recallMessage } from "./recall.ts";
 export { readMemory, type MemoryReader } from "./read.ts";
 export { redact } from "./redact.ts";
+export { applyTidy, pathsIn, planTidy, sameMeaning, type TidyItem } from "./tidy.ts";
 export {
   digest,
   parseReflection,
@@ -36,6 +37,8 @@ export {
   type Hit,
   type ProfileFact,
   type Scope,
+  distrusted,
+  trust,
 } from "./service.ts";
 export {
   MemorySession,

@@ -231,6 +231,7 @@ turn; recent projects below).
 | `alt+,` / `alt+.` | previous / next agent |
 | in the hub | arrows choose, `enter` open, `s` in/out of the split, `x` close, `n` new |
 | in the workspace | `m` in the memory pane opens the memory map; `[` `]` step through turns on the timeline |
+| memory pane | on a fact: `e` new value (the old one is kept as history), `d` forget. On a pitfall, a session record or an item under *Recalled this session*: `+` it helped, `-` it was wrong (recall ranks by these votes; marked wrong twice and it is not recalled), `e` edit a pitfall's fix, `d` forget |
 
 Closing an agent (`ctrl+d`, `/quit`) closes that agent; closing the last one
 ends the program.

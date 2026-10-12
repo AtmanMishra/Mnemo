@@ -6,7 +6,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { factsOf, factValue, projectIdentity } from "@mnemo/memory";
+import { factsOf, factValue, projectIdentity, type MemoryService } from "@mnemo/memory";
 import type { Controller } from "./controller.ts";
 import type { Host } from "../extensions/host.ts";
 import { listFiles } from "../ui/files.ts";
@@ -29,6 +29,52 @@ function readPreview(file: string, rel: string): Preview {
   const lines: PreviewLine[] = all.slice(0, PREVIEW_LINES).map((t, i) => ({ text: t.replace(/\t/g, "  "), gutter: String(i + 1) }));
   if (all.length > PREVIEW_LINES) lines.push({ text: `… ${all.length - PREVIEW_LINES} more lines`, tone: "faint" });
   return { title: rel, subtitle: `${all.length} lines`, lines, hint: "i insert @file into the prompt" };
+}
+
+/**
+ * The memory pane's keys. On a fact (p:, u:): e gives it a new value (the old
+ * one is kept as history), d forgets it. On a pitfall, a session record or
+ * something recalled (n:, r:): + and - vote on it (recall ranks by those
+ * votes, and one marked wrong twice is no longer recalled), e edits a
+ * pitfall's fix, d forgets it.
+ */
+async function editMemory(controller: Controller, memory: MemoryService, projectId: string, id: string, key: string): Promise<void> {
+  const say = (title: string, items: string[] = []) => controller.transcript.memory(title, items);
+  if (id.startsWith("p:") || id.startsWith("u:")) {
+    const scope = id.startsWith("p:") ? "project" : "user";
+    const name = id.slice(2);
+    const current = (await memory.profile(scope, projectId)).find((f) => f.key === name);
+    if (!current) return;
+    if (key === "e") {
+      const value = (await controller.dialogs.text(`New value for "${name}"`, { placeholder: current.value }))?.trim();
+      if (!value || value === current.value) return;
+      await memory.learn(scope, projectId, name, value);
+      say(`Changed "${name}"`, [value, `was: ${current.value}`]);
+    } else if (key === "d") {
+      if (!(await controller.dialogs.confirm(`Forget "${name}"?`, current.value))) return;
+      await memory.forget(scope, projectId, name);
+      say(`Forgot "${name}"`, ["kept as history, never recalled again"]);
+    }
+    return;
+  }
+  if (!id.startsWith("n:") && !id.startsWith("r:")) return;
+  const node = Number(id.slice(2));
+  if (!Number.isFinite(node)) return;
+  if (key === "+" || key === "-") {
+    await memory.markUseful(node, key === "+");
+    say(key === "+" ? "Noted: that helped" : "Noted: that was wrong", [key === "+" ? "recalled ahead of others" : "recalled behind others; twice and it is not recalled"]);
+  } else if (key === "e") {
+    const fix = factValue(await memory.state(node), "fix");
+    if (fix === undefined) return;
+    const value = (await controller.dialogs.text("New fix", { placeholder: fix }))?.trim();
+    if (!value || value === fix) return;
+    await memory.fact(node, "fix", value);
+    say("Changed the fix", [value, `was: ${fix}`]);
+  } else if (key === "d") {
+    if (!(await controller.dialogs.confirm("Forget this?", "It stays in the journal as history and is never recalled again."))) return;
+    await memory.forgetNode(node);
+    say("Forgot it", ["kept as history, never recalled again"]);
+  }
 }
 
 export function workspaceSource(controller: Controller, host: Host | undefined, home: string): WorkspaceSource {
@@ -70,6 +116,11 @@ export function workspaceSource(controller: Controller, host: Host | undefined, 
       items.push(...pitfalls);
       head("h:sessions", "Session records", sessions.length);
       items.push(...sessions);
+      const recalled = [...(host?.recalled ?? new Map<number, string>())].reverse();
+      if (recalled.length) {
+        head("h:recalled", "Recalled this session", recalled.length);
+        for (const [node, line] of recalled) items.push({ id: `r:${node}`, label: line.replace(/^\S+\s/, "").slice(0, 80), kind: "fact", depth: 1, tone: "memory" });
+      }
       return items;
     },
 
@@ -129,17 +180,28 @@ export function workspaceSource(controller: Controller, host: Host | undefined, 
           hint: "r resume this session",
         };
       }
-      if (pane === "memory" && memory && id.startsWith("n:")) {
+      if (pane === "memory" && memory && (id.startsWith("n:") || id.startsWith("r:"))) {
         const st = await memory.state(Number(id.slice(2)));
         const facts = factsOf(st, { internal: true });
-        return { title: "memory", lines: facts.map((f) => ({ text: `${f.key}: ${f.value}`, tone: f.key === "fix" ? "memory" : "text" })) };
+        return {
+          title: "memory",
+          lines: facts.map((f) => ({ text: `${f.key}: ${f.value}`, tone: f.key === "fix" ? "memory" : "text" })),
+          hint: `${factValue(st, "fix") !== undefined ? "e edit the fix · " : ""}+ it helped · - it was wrong · d forget`,
+        };
+      }
+      if (pane === "memory" && memory && (id.startsWith("p:") || id.startsWith("u:"))) {
+        const facts = await memory.profile(id.startsWith("p:") ? "project" : "user", identity.id);
+        const f = facts.find((x) => x.key === id.slice(2));
+        if (!f) return undefined;
+        return { title: f.key, subtitle: id.startsWith("p:") ? "this project" : "you", lines: [{ text: f.value }], hint: "e edit · d forget" };
       }
       return undefined;
     },
 
-    act(pane: Pane, id: string, key: string): void {
+    async act(pane: Pane, id: string, key: string): Promise<void> {
       if (pane === "sessions" && key === "r") void controller.resumePath(id);
       if (pane === "files" && key === "i") controller.setDraft(`${controller.draftText}@${id} `);
+      if (pane === "memory" && memory) await editMemory(controller, memory, identity.id, id, key);
     },
   };
 }

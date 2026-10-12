@@ -293,3 +293,33 @@ test("the real sidecar: a missing journal directory is an error, not a crash", {
     reap(children);
   }
 });
+
+test("the real sidecar: recall trusts what helped and drops what was marked wrong twice", { skip: !haveMemsrv }, async () => {
+  const { MemoryService, trust } = await import("../src/index.ts");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-trust-"));
+  const mem = new MemoryService(MEMSRV, path.join(dir, "journal.jsonl"));
+  try {
+    const wrong = await mem.remember("deploy the staging service with fly deploy --app staging");
+    const right = await mem.remember("deploy the staging service with make deploy-staging");
+    assert.ok(wrong !== undefined && right !== undefined);
+    const query = "how do we deploy the staging service";
+    const before = (await mem.recall(query, undefined, [])).map((h) => h.node);
+    assert.ok(before.includes(wrong!) && before.includes(right!), `both are recalled at first: ${before}`);
+
+    await mem.markUseful(wrong!, false);
+    const once = await mem.recall(query, undefined, []);
+    assert.equal(once.find((h) => h.node === wrong)?.unhelpful, 1, "the vote reaches the hit");
+    assert.ok(trust(once.find((h) => h.node === wrong)!) < 1);
+
+    await mem.markUseful(wrong!, false);
+    const after = (await mem.recall(query, undefined, [])).map((h) => h.node);
+    assert.ok(!after.includes(wrong!), "marked wrong twice: no longer recalled");
+    assert.ok(after.includes(right!));
+
+    assert.equal(await mem.forgetNode(right!), true);
+    assert.ok(!(await mem.recall(query, undefined, [])).some((h) => h.node === right));
+  } finally {
+    mem.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

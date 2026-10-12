@@ -31,8 +31,8 @@ export function memoryExtension(host: Host) {
       if (answer.stopReason === "error") throw new Error(answer.errorMessage ?? "no answer");
       return textOf(answer.content);
     };
-    const sessionFor = (cwd: string, model?: string): MemorySession =>
-      (session ??= new MemorySession({
+    const sessionFor = (cwd: string, model?: string): MemorySession => {
+      session ??= new MemorySession({
         memory: mem,
         cwd,
         userSkillsDir: skillsDir(host.home),
@@ -52,7 +52,10 @@ export function memoryExtension(host: Host) {
           return answer.kind !== "no";
         },
         skillsChanged: () => host.ui?.resourcesChanged(),
-      }));
+      });
+      if (host.depth === 0) host.recalled = session.recalled;
+      return session;
+    };
     host.onModelChanged = async (model, reason) => {
       await session?.modelChanged(model, reason);
     };

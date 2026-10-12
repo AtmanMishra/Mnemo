@@ -21,7 +21,9 @@ import {
   curateSkills,
   projectIdentity,
   findMemsrv,
+  applyTidy,
   ingestClaudeCode,
+  planTidy,
   journalPath,
   MemoryService,
   redact,
@@ -44,6 +46,8 @@ usage
   mnemo memory mcp [--cwd <dir>]   memory as an MCP server on stdio
   mnemo memory curate [--apply]    skills by last use: stale after 30 days, archived after 90
                                    (personal skills only; project skills are reported)
+  mnemo memory tidy [--apply]      retire duplicate facts and pitfalls, facts about files that are
+                                   gone, and what was marked wrong twice (--cwd <dir>: that project)
   mnemo memory status              what memory holds and what has been ingested
 
 ingest options
@@ -161,6 +165,19 @@ export async function runMemoryCommand(argv: string[], home: string, agentDir: s
       out.write(`journal   ${journalPath(home)}\n`);
       out.write(`nodes     ${stats?.nodes ?? "?"} (${stats?.episodes ?? "?"} sessions)\n`);
       out.write(`ingested  ${Object.keys(ledger).length} sessions, ${Object.values(ledger).reduce((a, b) => a + b, 0)} runs\n`);
+      return 0;
+    }
+    if (command === "tidy") {
+      const identity = projectIdentity(path.resolve(option(rest, "--cwd") ?? process.cwd()));
+      const plan = await planTidy(memory, identity.id, identity.root);
+      if (!plan.length) return out.write(`memory for ${identity.name} is tidy\n`), 0;
+      for (const item of plan) out.write(`${item.why.padEnd(11)} ${redact(item.what)}\n            ${redact(item.detail)}\n`);
+      if (!rest.includes("--apply")) {
+        out.write(`\n${plan.length} to retire. --apply retires them (kept in the journal as history, never recalled again)\n`);
+        return 0;
+      }
+      const done = await applyTidy(memory, identity.id, plan);
+      out.write(`\nretired ${done} of ${plan.length}\n`);
       return 0;
     }
     if (command === "curate") {

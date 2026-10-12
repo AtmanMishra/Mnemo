@@ -33,6 +33,15 @@ pub const EMBED_BACKOFF: Duration = Duration::from_secs(1);
 
 const DEFAULT_ENDPOINT: &str = "https://openrouter.ai/api/v1/embeddings";
 
+/// The API key and the text of every memory go to this address, so it must be
+/// encrypted, or a server on this machine (tests, a local model).
+pub fn allowed_endpoint(u: &str) -> bool {
+    u.starts_with("https://")
+        || ["http://localhost", "http://127.0.0.1", "http://[::1]"].iter().any(|p| {
+            u.strip_prefix(p).map_or(false, |rest| rest.is_empty() || rest.starts_with(':') || rest.starts_with('/'))
+        })
+}
+
 pub struct OpenRouterEmbedder {
     api_key: String,
     model: String,
@@ -66,15 +75,10 @@ impl OpenRouterEmbedder {
 
     /// Load disk cache (text-hash -> vector) so identical text never re-hits the API.
     pub fn new(api_key: String, model: String, cache_dir: &Path) -> Self {
-        // The API key and the text of every memory go to this address, so it must be
-        // encrypted, or a server on this machine (tests, a local model).
         let endpoint = std::env::var("OPENROUTER_EMBED_URL")
             .ok()
             .filter(|u| {
-                let ok = u.starts_with("https://")
-                    || ["http://localhost", "http://127.0.0.1", "http://[::1]"].iter().any(|p| {
-                        u.strip_prefix(p).map_or(false, |rest| rest.is_empty() || rest.starts_with(':') || rest.starts_with('/'))
-                    });
+                let ok = allowed_endpoint(u);
                 if !ok { eprintln!("[memsrv] ignoring OPENROUTER_EMBED_URL: it must be https:// or a local address"); }
                 ok
             })
@@ -84,6 +88,28 @@ impl OpenRouterEmbedder {
             .map(Duration::from_millis)
             .unwrap_or(EMBED_TIMEOUT);
         Self::new_with_endpoint(api_key, model, cache_dir, endpoint, timeout)
+    }
+
+    /// An embedding server of your own, OpenAI-compatible (`/v1/embeddings`):
+    /// Ollama, LM Studio, llama.cpp, vLLM. `MNEMO_EMBED_URL` and
+    /// `MNEMO_EMBED_MODEL` turn it on; `MNEMO_EMBED_KEY` is sent only if set.
+    /// The same address rule holds: https://, or this machine.
+    pub fn local_from_env(cache_dir: &Path) -> Option<Self> {
+        let url = std::env::var("MNEMO_EMBED_URL").ok().filter(|u| !u.trim().is_empty())?;
+        if !allowed_endpoint(&url) {
+            eprintln!("[memsrv] ignoring MNEMO_EMBED_URL: it must be https:// or a local address");
+            return None;
+        }
+        let Some(model) = std::env::var("MNEMO_EMBED_MODEL").ok().filter(|m| !m.trim().is_empty()) else {
+            eprintln!("[memsrv] ignoring MNEMO_EMBED_URL: MNEMO_EMBED_MODEL names the model to ask for");
+            return None;
+        };
+        let key = std::env::var("MNEMO_EMBED_KEY").unwrap_or_default();
+        let timeout = std::env::var("MNEMO_EMBED_TIMEOUT_MS").ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(Duration::from_millis)
+            .unwrap_or(EMBED_TIMEOUT);
+        Some(Self::new_with_endpoint(key, model, cache_dir, url, timeout))
     }
 
     pub fn from_env(cache_dir: &Path) -> Option<Self> {
@@ -112,10 +138,11 @@ impl OpenRouterEmbedder {
             if attempt > 0 {
                 std::thread::sleep(EMBED_BACKOFF);
             }
-            match self.agent.post(&self.endpoint)
-                .header("Authorization", &format!("Bearer {}", self.api_key))
-                .header("Content-Type", "application/json")
-                .send(serde_json::to_string(&body).map_err(|e| e.to_string())?)
+            let mut request = self.agent.post(&self.endpoint).header("Content-Type", "application/json");
+            if !self.api_key.is_empty() {
+                request = request.header("Authorization", &format!("Bearer {}", self.api_key));
+            }
+            match request.send(serde_json::to_string(&body).map_err(|e| e.to_string())?)
             {
                 Ok(mut r) => {
                     let v: serde_json::Value =
