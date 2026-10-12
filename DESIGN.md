@@ -209,6 +209,7 @@ Nothing animates in `--dump`, in tests, or when stdout is not a TTY.
 | `ctrl+t` | cycle thinking level | |
 | `ctrl+o` | expand / collapse thinking and tool output, everywhere: inline, the screen is cleared and the transcript printed again | |
 | `esc` `esc` on an empty prompt | rewind: pick an earlier message, then put back the conversation, the files edited since (kept before each `edit`/`write`, `runtime/checkpoints.ts`), or both; the message returns to the prompt. Same as `/rewind` | |
+| `ctrl+k` on an empty prompt (or from the sidebar or main area) | the palette: every command, the other agents, saved sessions and project files in one list; type to narrow it (label matches first). A command that takes no words runs, the rest go into the prompt; a file is mentioned (`@path`), a session resumed, an agent focused. With words in the prompt `ctrl+k` still kills to the end of the line | |
 | `ctrl+f` | find in the conversation (workspace): type, `↑↓` step through matches newest first, `enter` stays at that turn, `esc` closes | |
 | `ctrl+l` | clear the screen (the session is kept) | |
 | `?` on an empty input | shortcuts panel | |

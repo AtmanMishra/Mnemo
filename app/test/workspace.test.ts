@@ -277,3 +277,41 @@ test("ctrl+o reprints what is already printed, in the new state", async () => {
   expect(e.controller.snapshot().expanded).toBe(true);
   expect(e.controller.transcript.snapshot().epoch).toBe(epoch + 1);
 });
+
+test("ctrl+k on an empty prompt opens the palette; a file is mentioned, a command runs", async () => {
+  const r = await mount();
+  r.stdin.write("\x0b");
+  await wait(120);
+  let d = r.e.controller.dialogs.current();
+  if (d?.kind !== "select") throw new Error(`expected the palette, got ${d?.kind}`);
+  const labels = d.choices.map((c) => c.label);
+  expect(labels).toContain("/stats");
+  expect(labels).toContain("▤ src/app.ts");
+  expect(labels).toContain("▣ fix the login bug");
+  d.resolve("f:src/app.ts");
+  await wait(120);
+  expect(r.e.controller.snapshot().draftRequest?.text).toBe("@src/app.ts ");
+
+  r.e.controller.setDraft("");
+  await wait();
+  r.stdin.write("\x0b");
+  await wait(120);
+  d = r.e.controller.dialogs.current();
+  if (d?.kind !== "select") throw new Error("no palette");
+  d.resolve("c:remember");
+  await wait(80);
+  expect(r.e.controller.snapshot().draftRequest?.text).toBe("/remember ");
+  r.unmount();
+});
+
+test("ctrl+k with words in the prompt still kills to the end of the line", async () => {
+  const r = await mount();
+  for (const ch of "keep this") r.stdin.write(ch);
+  await wait();
+  r.stdin.write("\x01"); // ctrl+a: start of line
+  r.stdin.write("\x0b");
+  await wait(120);
+  expect(r.e.controller.dialogs.current()).toBeUndefined();
+  expect(r.lastFrame()).not.toContain("keep this");
+  r.unmount();
+});

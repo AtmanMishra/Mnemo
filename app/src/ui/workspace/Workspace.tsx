@@ -130,9 +130,14 @@ export interface WorkspaceProps {
   compact?: boolean;
   /** The wordmark in the header (off inside the shell, whose tab bar has it). */
   brand?: boolean;
+  /** The other agents, for the palette (ctrl+k) to switch to. */
+  agents?: { label: string; go: () => void }[];
 }
 
-export function Workspace({ controller, source, motion, initial, width, height, active = true, compact = false, brand = true }: WorkspaceProps): React.ReactElement {
+/** Commands that run as picked; the rest (they take words) go into the prompt. */
+const RUN_AS_PICKED = new Set(["help", "model", "thinking", "login", "logout", "new", "resume", "compact", "cost", "stats", "clear", "memory", "mode", "yolo", "accept-edits", "theme", "update", "mouse", "plan", "skills", "reload", "rewind", "quit"]);
+
+export function Workspace({ controller, source, motion, initial, width, height, active = true, compact = false, brand = true, agents }: WorkspaceProps): React.ReactElement {
   const snap = useSyncExternalStore(controller.transcript.subscribe, controller.transcript.snapshot);
   const chrome = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const dialog = useSyncExternalStore(controller.dialogs.subscribe, controller.dialogs.current);
@@ -216,8 +221,31 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   const move = (delta: number) => setSelected((s) => ({ ...s, [pane]: Math.max(0, Math.min(items.length - 1, sel + delta)) }));
   const nextFocus = (from: Focus): Focus => (from === "composer" ? (showSidebar ? "sidebar" : "main") : from === "sidebar" ? "main" : "composer");
 
+  // ctrl+k: one list of everything you can go to; type to narrow it.
+  const openPalette = async () => {
+    const sessions = await source.sessions();
+    const choices = [
+      ...controller.commands().map((c) => ({ value: `c:${c.name}`, label: `/${c.name}`, description: c.description })),
+      ...(agents ?? []).map((a, i) => ({ value: `a:${i}`, label: `◆ ${a.label}`, description: "switch to this agent" })),
+      ...sessions.filter((s) => s.kind === "session").map((s) => ({ value: `s:${s.id}`, label: `▣ ${s.label}`, description: s.detail })),
+      ...files.map((f) => ({ value: `f:${f}`, label: `▤ ${f}`, description: "mention it in the prompt" })),
+    ];
+    const pick = await controller.dialogs.select("Go to…  commands · agents · sessions · files", choices);
+    if (!pick) return;
+    const rest = pick.slice(2);
+    setFocus("composer");
+    if (pick.startsWith("c:")) {
+      const builtin = controller.commands().find((c) => c.name === rest)?.source === "builtin";
+      if (builtin && RUN_AS_PICKED.has(rest)) void controller.submit(`/${rest}`);
+      else controller.setDraft(`/${rest} `);
+    } else if (pick.startsWith("a:")) agents?.[Number(rest)]?.go();
+    else if (pick.startsWith("s:")) void controller.resumePath(rest);
+    else if (pick.startsWith("f:")) controller.setDraft(`${controller.draftText}@${rest} `);
+  };
+
   useInput(
     (input, key) => {
+      if (key.ctrl && input === "k" && focus !== "composer") return void openPalette();
       if (key.ctrl && input === "b" && !compact) {
         setSidebar((v) => !v);
         if (focus === "sidebar") setFocus("composer");
@@ -459,6 +487,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
           onCycleMode={() => controller.cycleMode()}
           onRewind={() => void controller.rewind()}
           onFocusNext={() => setFocus(nextFocus("composer"))}
+          onPalette={() => void openPalette()}
         />
         </Box>
       </Box>

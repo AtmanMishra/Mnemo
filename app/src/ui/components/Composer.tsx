@@ -29,6 +29,8 @@ export interface ComposerProps {
   onCycleMode: () => void;
   /** Tab with no completion open: move focus on (the workspace's sidebar). */
   onFocusNext?: () => void;
+  /** ctrl+k on an empty prompt: the palette. */
+  onPalette?: () => void;
   /** esc twice on an empty prompt: go back to an earlier message. */
   onRewind?: () => void;
   /** Columns it has (a split pane is narrower than the terminal); default: the terminal's. */
@@ -63,6 +65,7 @@ const SHORTCUTS: [string, string][] = [
   ["ctrl+t", "thinking level"],
   ["ctrl+o", "expand output"],
   ["ctrl+f", "find in the conversation"],
+  ["ctrl+k", "on an empty prompt: go to a command, file, session, skill or agent"],
   ["ctrl+l", "clear screen"],
   ["ctrl+c", "clear · interrupt · twice to quit"],
 ];
@@ -238,6 +241,8 @@ export function Composer(props: ComposerProps): React.ReactElement {
           case "u":
             return setDraft(ed.killToStart);
           case "k":
+            // On an empty prompt there is nothing to kill: ctrl+k opens the palette instead.
+            if (!draft.text && props.onPalette) return props.onPalette();
             return setDraft(ed.killToEnd);
           case "w":
             return setDraft(ed.deleteWordBack);

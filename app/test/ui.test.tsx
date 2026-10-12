@@ -248,3 +248,12 @@ test("esc twice on an empty prompt asks to rewind; with a draft it clears", asyn
   expect(rewound).toBe(1);
   expect(c.lastFrame()).not.toContain("draft");
 });
+
+test("a filter ranks label matches ahead of description matches", () => {
+  const choices = [
+    { value: "new", label: "/new", description: "start a fresh session" },
+    { value: "stats", label: "/stats", description: "this session" },
+    { value: "f", label: "▤ docs/state.md", description: "mention it" },
+  ];
+  expect(filterChoices(choices, "sta").map((c) => c.value)).toEqual(["stats", "f", "new"]);
+});

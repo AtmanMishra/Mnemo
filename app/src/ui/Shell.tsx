@@ -256,6 +256,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
                   active={shown && focused}
                   compact={framed}
                   brand={false}
+                  agents={agents.filter((o) => o.id !== a.id).map((o) => ({ label: o.name, go: () => go(o.id) }))}
                 />
               </Box>
             );

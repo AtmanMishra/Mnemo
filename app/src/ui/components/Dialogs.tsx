@@ -51,7 +51,18 @@ const usePaste: typeof inkUsePaste = (handler, options) =>
 export function filterChoices(choices: readonly Choice[], query: string): Choice[] {
   const q = query.trim().toLowerCase();
   if (!q) return [...choices];
-  return choices.filter((c) => [c.label, c.value, c.description ?? "", c.keywords ?? ""].some((f) => f.toLowerCase().includes(q)));
+  // Where it matched decides the order: the start of a word in the label, then anywhere in it, then the rest.
+  const rank = (c: Choice): number => {
+    const label = c.label.toLowerCase();
+    if (label.split(/[^a-z0-9]+/).some((w) => w.startsWith(q)) || label.startsWith(q)) return 0;
+    if (label.includes(q)) return 1;
+    return [c.value, c.description ?? "", c.keywords ?? ""].some((f) => f.toLowerCase().includes(q)) ? 2 : 3;
+  };
+  return choices
+    .map((c, i) => ({ c, i, r: rank(c) }))
+    .filter((x) => x.r < 3)
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map((x) => x.c);
 }
 
 function Frame({ tint, title, children, hint }: { tint: string; title: string; children: React.ReactNode; hint: string }) {

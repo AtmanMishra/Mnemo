@@ -100,6 +100,10 @@ cd app && bun bin/mnemo.ts --demo
   ingest` learns from Claude Code sessions you already have.
 - **Many agents, one window.** `ctrl+g` the hub, `ctrl+s` split view (up to
   four), `ctrl+p` switch project, `ctrl+n` another agent on this project.
+- **Keyboard first.** `ctrl+k` on an empty prompt goes to any command, agent,
+  session or file; `ctrl+f` finds in the conversation; `/stats` shows the
+  session and the week; a long turn that ends while you are in another window
+  sends a desktop notification.
 - **Checks its work.** A run that changed code and ran nothing is sent back to
   run the project's checks. `--escalate provider/id` finishes a run on a stronger
   model after two failed checks; `mnemo -p "<task>" --best-of 3 --check "npm
