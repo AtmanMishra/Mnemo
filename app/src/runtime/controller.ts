@@ -104,7 +104,7 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "mode", description: "how much Mnemo may do without asking (default, accept-edits, plan, yolo)" },
   { name: "yolo", description: "toggle bypass: ask for nothing (deny rules in permissions.json still hold)" },
   { name: "accept-edits", description: "toggle accept edits: change project files without asking, still ask before commands" },
-  { name: "theme", description: "the look: Mnemo Night, Game Boy, Paper" },
+  { name: "theme", description: "the look: Mnemo Night, Dracula, Nord, Gruvbox, Tokyo Night, Catppuccin, Synthwave, Amber CRT, Game Boy, Paper, Solarized" },
   { name: "update", description: "install the latest Mnemo · /update auto on|off: a daily check that only tells you" },
   { name: "mouse", description: "mouse wheel scrolls the conversation (on) or your terminal selects text (off)" },
   { name: "bestof", description: 'race N attempts at a task, keep the smallest that passes: /bestof 3 "npm test" <task>' },

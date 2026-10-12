@@ -37,12 +37,14 @@ const NIGHT = {
 };
 
 export type PaletteKey = keyof typeof NIGHT;
-export type ThemeName = "night" | "gameboy" | "paper";
+export type ThemeName = "night" | "gameboy" | "paper" | "dracula" | "nord" | "gruvbox" | "tokyo" | "mocha" | "solarized" | "amber" | "synthwave";
 
 /**
  * The palettes. Night is the identity; the others keep its roles (accent,
  * structure, memory) in another light. Game Boy is four greens, so roles are
- * told apart by value, not hue. Paper is light: it paints its own ground.
+ * told apart by value, not hue; Amber CRT is one phosphor the same way. Paper
+ * and Solarized Light are light. Every theme but Night paints its own ground.
+ * The rest follow the colour schemes they are named after.
  */
 export const THEMES: Record<ThemeName, { label: string; paint: boolean; colors: Record<PaletteKey, string> }> = {
   night: { label: "Mnemo Night", paint: false, colors: NIGHT },
@@ -96,6 +98,86 @@ export const THEMES: Record<ThemeName, { label: string; paint: boolean; colors: 
       addBg: "#DDF0DC",
       removeBg: "#F6DCE2",
       selectBg: "#E2D7F0",
+    },
+  },
+  dracula: {
+    label: "Dracula",
+    paint: true,
+    colors: {
+      ground: "#282A36", panel: "#2F3241", rule: "#44475A", text: "#F8F8F2", dim: "#A4A8C4", faint: "#6272A4",
+      magenta: "#FF79C6", cyan: "#8BE9FD", amber: "#FFB86C", green: "#50FA7B", red: "#FF5555", violet: "#BD93F9",
+      hide: "#BD93F9", hideShade: "#8A6CC8", outline: "#21222C", blush: "#FF79C6", tusk: "#F8F8F2",
+      addBg: "#2C4A3A", removeBg: "#4A2C3A", selectBg: "#44475A",
+    },
+  },
+  nord: {
+    label: "Nord",
+    paint: true,
+    colors: {
+      ground: "#2E3440", panel: "#3B4252", rule: "#434C5E", text: "#ECEFF4", dim: "#AEB7C7", faint: "#616E88",
+      magenta: "#B48EAD", cyan: "#88C0D0", amber: "#EBCB8B", green: "#A3BE8C", red: "#BF616A", violet: "#81A1C1",
+      hide: "#D8DEE9", hideShade: "#9AA5B8", outline: "#242933", blush: "#D08770", tusk: "#ECEFF4",
+      addBg: "#3B4A40", removeBg: "#4A3B42", selectBg: "#434C5E",
+    },
+  },
+  gruvbox: {
+    label: "Gruvbox",
+    paint: true,
+    colors: {
+      ground: "#282828", panel: "#32302F", rule: "#504945", text: "#EBDBB2", dim: "#BDAE93", faint: "#7C6F64",
+      magenta: "#D3869B", cyan: "#83A598", amber: "#FABD2F", green: "#B8BB26", red: "#FB4934", violet: "#B16286",
+      hide: "#A89984", hideShade: "#7C6F64", outline: "#1D2021", blush: "#FE8019", tusk: "#FBF1C7",
+      addBg: "#32361A", removeBg: "#3C1F1E", selectBg: "#504945",
+    },
+  },
+  tokyo: {
+    label: "Tokyo Night",
+    paint: true,
+    colors: {
+      ground: "#1A1B26", panel: "#1F2335", rule: "#292E42", text: "#C0CAF5", dim: "#9AA5CE", faint: "#565F89",
+      magenta: "#F7768E", cyan: "#7DCFFF", amber: "#E0AF68", green: "#9ECE6A", red: "#DB4B4B", violet: "#BB9AF7",
+      hide: "#A9B1D6", hideShade: "#737AA2", outline: "#16161E", blush: "#FF9E64", tusk: "#C0CAF5",
+      addBg: "#20303B", removeBg: "#37222C", selectBg: "#292E42",
+    },
+  },
+  mocha: {
+    label: "Catppuccin Mocha",
+    paint: true,
+    colors: {
+      ground: "#1E1E2E", panel: "#24273A", rule: "#313244", text: "#CDD6F4", dim: "#A6ADC8", faint: "#6C7086",
+      magenta: "#F5C2E7", cyan: "#94E2D5", amber: "#F9E2AF", green: "#A6E3A1", red: "#F38BA8", violet: "#CBA6F7",
+      hide: "#BAC2DE", hideShade: "#7F849C", outline: "#11111B", blush: "#F2CDCD", tusk: "#F5E0DC",
+      addBg: "#2A3A30", removeBg: "#3E2A35", selectBg: "#313244",
+    },
+  },
+  solarized: {
+    label: "Solarized Light",
+    paint: true,
+    colors: {
+      ground: "#FDF6E3", panel: "#EEE8D5", rule: "#DDD6C1", text: "#073642", dim: "#586E75", faint: "#93A1A1",
+      magenta: "#C02B76", cyan: "#167F78", amber: "#8C6A00", green: "#5F6E00", red: "#C62A27", violet: "#5A5FB8",
+      hide: "#839496", hideShade: "#657B83", outline: "#073642", blush: "#CB4B16", tusk: "#FFFDF5",
+      addBg: "#E6EFC8", removeBg: "#F7DCD5", selectBg: "#E4DDC8",
+    },
+  },
+  amber: {
+    label: "Amber CRT",
+    paint: true,
+    colors: {
+      ground: "#140C02", panel: "#1E1304", rule: "#3A2508", text: "#FFB000", dim: "#C78A00", faint: "#7A5300",
+      magenta: "#FFCC4D", cyan: "#E89F00", amber: "#FFD580", green: "#FFCC4D", red: "#FFE6A8", violet: "#C78A00",
+      hide: "#C78A00", hideShade: "#7A5300", outline: "#140C02", blush: "#FFCC4D", tusk: "#FFE6A8",
+      addBg: "#3A2508", removeBg: "#2A1A06", selectBg: "#3A2508",
+    },
+  },
+  synthwave: {
+    label: "Synthwave",
+    paint: true,
+    colors: {
+      ground: "#1B1029", panel: "#241536", rule: "#3A2156", text: "#F4EEFF", dim: "#B9A6D9", faint: "#6A4F8F",
+      magenta: "#FF2E97", cyan: "#00E5FF", amber: "#FFD319", green: "#72F1B8", red: "#FE4450", violet: "#B967FF",
+      hide: "#C9A6FF", hideShade: "#8C68C9", outline: "#120A1C", blush: "#FF71CE", tusk: "#FFF4D6",
+      addBg: "#123A34", removeBg: "#41142E", selectBg: "#3A2156",
     },
   },
 };

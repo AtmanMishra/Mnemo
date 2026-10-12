@@ -61,4 +61,11 @@ docker run --rm -v "$REL:/release:ro" "$IMAGE" sh -c '
   if MNEMO_RELEASE_BASE= sh /release/install.sh --version v9.9.9 >/dev/null 2>/tmp/err; then echo "unexpected success"; exit 1; fi
   grep -q "could not download" /tmp/err && echo "✓ clear error"
   [ ! -e "$HOME/.mnemo/bin/mnemo" ] && echo "✓ nothing installed"
+  rm -f /usr/local/bin/curl
+  echo "--- deep uninstall: the script, then the program itself"
+  sh /release/install.sh > /dev/null && mkdir -p "$HOME/.mnemo/memory" && echo j > "$HOME/.mnemo/memory/journal.jsonl"
+  if sh /release/install.sh --deep < /dev/null > /dev/null 2>&1; then echo "deleted without asking"; exit 1; fi
+  [ -e "$HOME/.mnemo/memory/journal.jsonl" ] && echo "✓ --deep without a terminal asks for --yes"
+  sh /release/install.sh --deep --yes > /dev/null && [ ! -e "$HOME/.mnemo" ] && [ ! -e "$HOME/.local/bin/mnemo" ] && echo "✓ --deep --yes removed everything"
+  sh /release/install.sh > /dev/null && "$HOME/.mnemo/bin/mnemo" uninstall --deep --yes > /dev/null && [ ! -e "$HOME/.mnemo" ] && [ ! -e "$HOME/.local/bin/mnemo" ] && echo "✓ mnemo uninstall --deep --yes removed everything"
 '

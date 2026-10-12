@@ -65,12 +65,19 @@ export interface BootFrame {
 
 const ease = (x: number) => 1 - (1 - Math.min(1, Math.max(0, x))) ** 3;
 
-/** The field around the picture: as much as the terminal allows, up to ten columns a side. */
-function field(info: BootInfo, art: Grid): { cols: number; rows: number } {
-  const w = art[0]!.length;
-  const h = Math.ceil(art.length / 2);
-  const pad = Math.max(0, Math.min(10, Math.floor((info.columns - w - 4) / 2)));
-  return { cols: w + pad * 2, rows: h + (info.rows >= 24 ? 4 : 2) };
+/** Lines under the picture: a gap, the wire, the tagline, a gap, the stats, the version. */
+const BELOW = 6;
+
+/** Write `text` centred on row `y`, with a cell of clear ground either side so it reads over the field. */
+function stamp(cells: EngramCell[][], y: number, text: string, fg: string): void {
+  const row = cells[y];
+  if (!row || !text) return;
+  const chars = [...text];
+  const x0 = Math.max(0, Math.floor((row.length - chars.length) / 2));
+  for (let x = Math.max(0, x0 - 1); x < Math.min(row.length, x0 + chars.length + 1); x++) {
+    const ch = chars[x - x0];
+    row[x] = ch === undefined ? { ch: " " } : { ch, fg };
+  }
 }
 
 /** The frame at `ms` since launch. */
@@ -80,7 +87,12 @@ export function bootFrame(ms: number, info: BootInfo, animate = true): BootFrame
   const scanRow = scanning ? Math.floor(((t - 0.34) / 0.16) * 20) : undefined;
   const blinking = t > 0.86 && t < 0.92;
   const art = scene(blinking, scanRow);
-  const cells = engramFrame({ ...field(info, art), t: ms / 1000, art, variant: "boot", seed: 5, animate });
+  // The whole terminal is the field; the picture and its lines sit in the middle of it.
+  const cols = info.columns;
+  const rows = Math.max(8, info.rows - 1);
+  const pictureRows = Math.ceil(art.length / 2);
+  const top = Math.max(0, Math.floor((rows - pictureRows - BELOW) / 2));
+  const cells = engramFrame({ cols, rows, t: ms / 1000, art, variant: "boot", seed: 5, animate, fill: true, top });
   const wireT = ease((t - 0.5) / 0.25);
   const nodes = 5;
   const wireFull = Array.from({ length: nodes }, () => "◆").join("───");
@@ -92,6 +104,11 @@ export function bootFrame(ms: number, info: BootInfo, animate = true): BootFrame
     const n = (x: number) => Math.round(x * k);
     stats = `◈ ${n(info.stats.memories)} memories   ◇ ${n(info.stats.skills)} skills   ▣ ${n(info.stats.sessions)} sessions`;
   }
+  const under = top + pictureRows;
+  stamp(cells, under + 1, wire, palette.cyan);
+  stamp(cells, under + 2, tagline + (t >= 1 || tagline.length === TAGLINE.length ? "" : "▌"), palette.text);
+  if (stats) stamp(cells, under + 4, stats, palette.amber);
+  stamp(cells, under + 5, `v${info.version}`, palette.faint);
   return { cells, wire, tagline, stats, done: t >= 1 };
 }
 
@@ -124,23 +141,17 @@ export function Boot({ info, onDone, at }: { info: BootInfo; onDone: () => void;
   }, []);
 
   const f = bootFrame(ms, info, motion);
-  const small = info.columns < 50 || info.rows < 16;
+  const small = info.columns < 50 || info.rows < 18;
+  if (!small) return <EngramCells cells={f.cells} />;
   return (
     <Box flexDirection="column" alignItems="center" justifyContent="center" width={info.columns} height={Math.max(8, info.rows - 1)}>
-      {small ? (
-        <Text color={palette.magenta} bold>
-          ▞ MNEMO ▚
-        </Text>
-      ) : (
-        <EngramCells cells={f.cells} />
-      )}
+      <Text color={palette.magenta} bold>
+        ▞ MNEMO ▚
+      </Text>
       <Box marginTop={1}>
         <Text color={palette.cyan}>{f.wire.padEnd(21)}</Text>
       </Box>
-      <Text color={palette.text}>
-        {f.tagline}
-        <Text color={palette.magenta}>{f.done || f.tagline.length === TAGLINE.length ? "" : "▌"}</Text>
-      </Text>
+      <Text color={palette.text}>{f.tagline}</Text>
       <Box marginTop={1}>
         <Text color={palette.amber}>{f.stats ?? " "}</Text>
       </Box>

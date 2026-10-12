@@ -16,6 +16,7 @@ import { Box, Text, useInput } from "ink";
 import { palette } from "../theme.ts";
 import { mne } from "../pixel.ts";
 import { PixelArt } from "./PixelArt.tsx";
+import { Backdrop } from "./Engram.tsx";
 import { MotionContext } from "./motion.ts";
 
 export type OnboardingChoice = "login" | "demo" | "later";
@@ -278,16 +279,31 @@ export function Onboarding({
     ) : (
       <Model selected={selected} hasModel={hasModel} width={width} />
     );
+  // The whole terminal is a living field; the page is a card over it. Small terminals get the page alone.
+  const height = Math.max(1, rows - 1);
+  const field = columns >= width + 8 && height >= 20;
   return (
-    <Box flexDirection="column" alignItems="center" justifyContent="center" width={columns} height={Math.max(1, rows - 1)} overflow="hidden">
-      <Box flexDirection="column" minHeight={Math.min(14, Math.max(6, rows - 5))} width={width}>
-        {page}
-      </Box>
-      <Box marginTop={1} flexDirection="column" alignItems="center">
-        <Progress step={step} />
-        <Text color={palette.faint} wrap="truncate-end">
-          ← → move · {step === last ? (hasModel ? "enter start" : "↑ ↓ choose · enter go") : "enter next"} · esc skip
-        </Text>
+    <Box flexDirection="column" alignItems="center" justifyContent="center" width={columns} height={height} overflow="hidden">
+      {field ? <Backdrop cols={columns} rows={height} seed={11 + step} /> : null}
+      <Box
+        flexDirection="column"
+        alignItems="center"
+        backgroundColor={field ? palette.ground : undefined}
+        borderStyle={field ? "round" : undefined}
+        borderColor={palette.rule}
+        borderBackgroundColor={field ? palette.ground : undefined}
+        paddingX={field ? 3 : 0}
+        paddingY={field ? 1 : 0}
+      >
+        <Box flexDirection="column" minHeight={Math.min(14, Math.max(6, rows - 9))} width={width}>
+          {page}
+        </Box>
+        <Box marginTop={1} flexDirection="column" alignItems="center">
+          <Progress step={step} />
+          <Text color={palette.faint} wrap="truncate-end">
+            ← → move · {step === last ? (hasModel ? "enter start" : "↑ ↓ choose · enter go") : "enter next"} · esc skip
+          </Text>
+        </Box>
       </Box>
     </Box>
   );

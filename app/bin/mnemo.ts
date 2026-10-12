@@ -33,6 +33,7 @@ import { clearReplaced, compareVersions, installKind, latestVersion, manualStep,
 import { bestOf, describeBestOf } from "../src/runtime/best-of.ts";
 import { selfCommand } from "../src/runtime/self.ts";
 import { findProblems } from "../src/runtime/doctor.ts";
+import { describePlan, looksLikeMnemoHome, planUninstall, runUninstall } from "../src/runtime/uninstall.ts";
 
 const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
 
@@ -42,6 +43,8 @@ usage
   mnemo -p "<prompt>"      answer once and print the result (no interface)
   mnemo doctor [--fix]     what is installed, configured and reachable; --fix repairs what it can
   mnemo update             install the latest release · --check · --auto on|off (a daily check, off by default)
+  mnemo uninstall          remove Mnemo; what it learned stays · --deep also deletes memory, sessions,
+                           credentials and settings · --yes skips the question
   mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
 
@@ -286,6 +289,45 @@ async function runBestOf(args: Args, home: string): Promise<number> {
 }
 
 /** `mnemo update [--check] [--auto on|off]` */
+async function ask(question: string): Promise<string> {
+  process.stdout.write(question);
+  for await (const line of console) return String(line).trim();
+  return "";
+}
+
+async function uninstallCommand(argv: string[], home: string): Promise<number> {
+  const unknown = argv.find((a) => a !== "--deep" && a !== "--yes" && a !== "-y");
+  if (unknown) return console.error(`mnemo uninstall: unknown option ${unknown} (--deep, --yes)`), 2;
+  const deep = argv.includes("--deep");
+  const yes = argv.includes("--yes") || argv.includes("-y");
+  const kind = installKind(process.execPath, home);
+  const plan = planUninstall({ kind, home, deep, linkDir: process.env.MNEMO_LINK_DIR });
+  if (plan.data && !looksLikeMnemoHome(plan.data.dir)) {
+    console.error(`mnemo uninstall: ${plan.data.dir} holds files Mnemo did not put there; it is not deleted. Remove what you want from it by hand.`);
+    plan.data = undefined;
+  }
+  if (kind === "source") console.log("You are running from a source checkout: there is no installed program to remove.");
+  const lines = describePlan(plan);
+  if (!plan.files.length && !plan.link && !plan.pathEntry && !plan.data) {
+    for (const l of lines) console.log(l);
+    if (!plan.manager) console.log("Nothing to remove.");
+    return 0;
+  }
+  console.log("mnemo uninstall\n");
+  for (const l of lines) console.log(`  ${l}`);
+  if (!plan.data) console.log(`\n  kept    ${home} (memory, sessions, settings; --deep deletes them too)`);
+  if (!yes) {
+    if (!process.stdin.isTTY) return console.error("\nmnemo uninstall: not a terminal; add --yes to go ahead"), 2;
+    const answer = plan.data ? await ask('\nThis cannot be undone. Type "delete" to go ahead: ') : await ask("\nGo ahead? [y/N] ");
+    if (plan.data ? answer !== "delete" : !/^y(es)?$/i.test(answer)) return console.log("Nothing changed."), 1;
+  }
+  console.log("");
+  for (const l of runUninstall(plan)) console.log(`  ✓ ${l}`);
+  console.log("\nMnemo is uninstalled. If you attached its memory to Claude Code or Codex (mnemo memory setup), remove the mnemo entries from their settings too.");
+  if (plan.manager) console.log(`Then run  ${plan.manager}`);
+  return 0;
+}
+
 async function updateCommand(argv: string[], home: string): Promise<number> {
   const auto = argv[0] === "--auto" ? argv[1] : undefined;
   if (argv[0] === "--auto") {
@@ -314,6 +356,7 @@ async function updateCommand(argv: string[], home: string): Promise<number> {
 
 async function main(): Promise<number> {
   if (process.argv[2] === "update") return updateCommand(process.argv.slice(3), mnemoHome());
+  if (process.argv[2] === "uninstall") return uninstallCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "memory") {
     const home = mnemoHome();
     pointPiAt(agentDir(home));

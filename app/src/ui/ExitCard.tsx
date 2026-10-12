@@ -8,6 +8,7 @@ import { Box, Text, useAnimation } from "ink";
 import type { FleetSummary } from "../runtime/fleet.ts";
 import { MotionContext } from "./components/motion.ts";
 import { PixelArt } from "./components/PixelArt.tsx";
+import { Backdrop } from "./components/Engram.tsx";
 import { mne, pixelText } from "./pixel.ts";
 import { palette } from "./theme.ts";
 import { formatDuration } from "./format.ts";
@@ -38,9 +39,11 @@ export function ExitCard({ summary, width, height }: { summary: FleetSummary; wi
   const { frame } = useAnimation({ interval: 220, isActive: motion });
   // Waving: an ear up, then down.
   const pose = motion && frame % 2 === 1 ? mne.blink : mne.idle;
+  const field = width >= 90 && height >= 16;
   return (
-    <Box width={width} height={height} flexDirection="column" alignItems="center" justifyContent="center">
-      <Box>
+    <Box width={width} height={height} flexDirection="column" alignItems="center" justifyContent="center" overflow="hidden">
+      {field ? <Backdrop cols={width} rows={height} seed={23} /> : null}
+      <Box backgroundColor={field ? palette.ground : undefined} paddingX={field ? 3 : 0} paddingY={field ? 1 : 0}>
         <PixelArt grid={pose} />
         <Box flexDirection="column" marginLeft={3} justifyContent="center">
           <PixelArt grid={pixelText("SEE YOU", { shadow: palette.rule })} />

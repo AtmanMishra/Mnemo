@@ -157,6 +157,13 @@ jobs:
           $env:MNEMO_UNINSTALL = "1"
           & ./app/scripts/get.ps1
           if (Test-Path (Join-Path $env:MNEMO_HOME "bin/mnemo.exe")) { throw "mnemo.exe is still installed after the uninstall" }
+          if (-not (Test-Path $env:MNEMO_HOME)) { throw "a plain uninstall deleted the data folder" }
+          $env:MNEMO_UNINSTALL = $null
+          & ./app/scripts/get.ps1
+          $env:MNEMO_UNINSTALL = "deep"; $env:MNEMO_YES = "1"
+          & ./app/scripts/get.ps1
+          if (Test-Path $env:MNEMO_HOME) { throw "a deep uninstall left $env:MNEMO_HOME" }
+          $env:MNEMO_UNINSTALL = $null; $env:MNEMO_YES = $null
           Remove-Item out/SHA256SUMS
           # The step's exit code is the last native command's; doctor's 1 (no model) is not a failure.
           exit 0

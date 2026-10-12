@@ -16,7 +16,7 @@ const COMMANDS: [string, string][] = [
   ["thinking", "set how hard the model thinks"],
   ["login", "add a provider (API key or subscription)"],
   ["logout", "remove a provider's credentials"],
-  ["theme", "the look: Mnemo Night, Game Boy, Paper"],
+  ["theme", "the look: Mnemo Night, Dracula, Nord, Gruvbox, Tokyo Night, Catppuccin, Synthwave, Amber CRT, Game Boy, Paper, Solarized"],
   ["resume", "continue an earlier session in this folder"],
   ["rewind", "go back to before an earlier message: the conversation, the files, or both (esc esc)"],
   ["new", "start a fresh session"],

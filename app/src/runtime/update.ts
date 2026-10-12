@@ -96,7 +96,8 @@ export async function runInstaller(version: string, home: string, log: (line: st
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-update-"));
   try {
     const script = path.join(dir, name);
-    fs.writeFileSync(script, await res.text(), { mode: 0o700 });
+    // Windows PowerShell 5.1 reads a .ps1 without a byte-order mark as ANSI, which garbles the installer's glyphs.
+    fs.writeFileSync(script, (win ? "\uFEFF" : "") + (await res.text()), { mode: 0o700 });
     const cmd = win ? ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script] : ["sh", script, "--version", `v${version}`];
     const p = Bun.spawn(cmd, {
       env: { ...process.env, MNEMO_HOME: home, MNEMO_VERSION: `v${version}` },

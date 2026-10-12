@@ -29,15 +29,18 @@ The Go interface's design is archived at `docs/archive/DESIGN-go-tui.md`.
 
 ## 2. Palette, pixels and glyphs
 
-One file owns colour: `app/src/ui/theme.ts`. Three themes, switched live with
-`/theme` and remembered: **Mnemo Night** (the identity, below), **Game Boy**
-(four greens: roles told apart by value) and **Paper** (light). A theme changes
+One file owns colour: `app/src/ui/theme.ts`. Eleven themes, switched live with
+`/theme` and remembered: **Mnemo Night** (the identity, below), **Dracula**, **Nord**,
+**Gruvbox**, **Tokyo Night**, **Catppuccin Mocha**, **Synthwave**, **Amber CRT** (one
+phosphor: roles told apart by value), **Game Boy** (four greens, the same way), **Paper** and
+**Solarized Light** (light). Each keeps Night's roles; `test/themes.test.ts` holds every one to
+7:1 contrast for text and 3:1 for accents. A theme changes
 the palette in place; pixel art is drawn in Night and translated, and painted
 themes also set the terminal's default colours (OSC 10/11, restored on exit).
 Truecolor hex; chalk downsamples, `NO_COLOR` turns it off. Pixels: `app/src/ui/pixel.ts`
 (grids → cells → merged runs, a 5×5 pixel font with a drop shadow for the
 wordmark, Mne's sprites, noise and ordered dither). Engram, the field a picture
-settles out of, in three variations (hero, boot, welcome): `app/src/ui/engram.ts`.
+settles out of, in four variations (hero, boot, welcome, ambient): `app/src/ui/engram.ts`.
 
 | Token | Hex | Used for |
 |---|---|---|
@@ -65,9 +68,9 @@ settles out of, in three variations (hero, boot, welcome): `app/src/ui/engram.ts
 
 ## 3. A launch, and the screen
 
-**Boot** (`components/Boot.tsx`, every launch, ~1.6 s): Mne and the wordmark
-are written in from the left out of a drifting field of dither glyphs
-(Engram's boot variation) and the field clears; a magenta scanline sweeps;
+**Boot** (`components/Boot.tsx`, every launch, ~1.6 s): the whole terminal is
+the field. Mne and the wordmark are written in from the left out of drifting
+dither glyphs (Engram's boot variation) and the field quiets; a magenta scanline sweeps;
 the memory wire draws and the tagline types; what memory holds counts up;
 Mne blinks.
 
@@ -79,6 +82,9 @@ clock when it moves into scrollback, so what stays there is the settled frame.
 **Introduction** (`components/Onboarding.tsx`, first run; `--intro`): meet
 Mne · how it learns (a signal travelling session → reflect → memory) · the
 workspace in miniature · your other agents · a model (log in, demo, later).
+The whole terminal is a living field (Engram's ambient variation, `Backdrop`);
+each page is a card over it. The goodbye screen is drawn the same way. Fields
+are drawn as one pre-coloured string per row, so a full screen stays cheap.
 
 **Workspace** (`workspace/Workspace.tsx`):
 

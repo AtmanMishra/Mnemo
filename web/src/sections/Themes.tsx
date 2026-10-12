@@ -2,12 +2,20 @@ import { useState } from "react";
 import { Section } from "./Section";
 import { SPRITE_ROWS } from "../art/sprite";
 
-// The three palettes from app/src/ui/theme.ts. Each theme is a class that sets the
+// The palettes from app/src/ui/theme.ts. Each theme is a class that sets the
 // mock's colour variables in styles.css; the sprite is drawn with those variables.
 const THEMES = [
   { id: "night", label: "Mnemo Night" },
   { id: "gameboy", label: "Game Boy" },
   { id: "paper", label: "Paper" },
+  { id: "dracula", label: "Dracula" },
+  { id: "nord", label: "Nord" },
+  { id: "gruvbox", label: "Gruvbox" },
+  { id: "tokyo", label: "Tokyo Night" },
+  { id: "mocha", label: "Catppuccin" },
+  { id: "solarized", label: "Solarized" },
+  { id: "amber", label: "Amber CRT" },
+  { id: "synthwave", label: "Synthwave" },
 ] as const;
 
 const SPRITE_VARS = ["ground", "outline", "shade", "hide", "blush", "tusk"];
@@ -30,7 +38,7 @@ export function Themes() {
       n="11"
       eyebrow="the interface"
       title="Why does it look like a game?"
-      lead={<>Because a long session should be pleasant to watch. Mne the elephant reacts to the work, diffs and test runs are drawn as pixels, and <code>/theme</code> switches between three palettes that keep the same roles: magenta for the agent, cyan for structure, amber for anything memory did.</>}
+      lead={<>Because a long session should be pleasant to watch. Mne the elephant reacts to the work, diffs and test runs are drawn as pixels, and <code>/theme</code> switches between eleven palettes that keep the same roles: magenta for the agent, cyan for structure, amber for anything memory did.</>}
       figure={{ name: "exploded", label: "An app window in four layers; moving across opens the gap and moving down picks a layer", means: "The interface in layers: the transcript is the application, and everything else floats over it." }}
     >
       <div className="themes" data-reveal="">

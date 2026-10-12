@@ -42,9 +42,9 @@ irm https://mnemo.atmanmishra.dev/install.ps1 | iex
 
 No Bun, Node or Rust is needed: the installer downloads one archive holding
 `mnemo` and its memory sidecar `memsrv`, checks its SHA-256, and puts both in
-`~/.mnemo/bin`. Run it again to upgrade; add `--uninstall` (after `sh -s --`) to
-remove it. Your memory and settings are never touched. Read the script first if
-you like: [`app/scripts/get.sh`](app/scripts/get.sh).
+`~/.mnemo/bin`. On a terminal it draws itself as it goes; piped or with
+`NO_COLOR` it prints plain lines. Read the script first if you like:
+[`app/scripts/get.sh`](app/scripts/get.sh).
 
 Then:
 
@@ -70,6 +70,29 @@ mnemo update --auto on  # a daily check at launch that tells you; never installs
 Inside Mnemo, `/update` does the same. Homebrew and Scoop installs update with
 `brew upgrade mnemo` / `scoop update mnemo`. The daily check is off by default:
 until you turn it on, Mnemo never contacts anything but your model provider.
+
+### Uninstalling
+
+```bash
+mnemo uninstall           # remove the program; memory, sessions and settings stay
+mnemo uninstall --deep    # also delete ~/.mnemo: memory, sessions, credentials, skills, logs
+```
+
+It lists what it will remove and asks first (`--deep` wants you to type
+`delete`; `--yes` skips the question in scripts). The install scripts do the
+same without Mnemo:
+
+```bash
+curl -fsSL https://mnemo.atmanmishra.dev/install.sh | sh -s -- --uninstall   # or --deep
+```
+
+```powershell
+$env:MNEMO_UNINSTALL="1"; irm https://mnemo.atmanmishra.dev/install.ps1 | iex      # or "deep"
+```
+
+`--deep` only deletes a folder that holds nothing but what Mnemo put there. If
+you attached memory to Claude Code or Codex (`mnemo memory setup`), remove the
+`mnemo` entries from their settings too.
 
 <details><summary>From source</summary>
 
@@ -115,7 +138,7 @@ cd app && bun bin/mnemo.ts --demo
   are not tracked.
 - **Stays out of your keys.** Commands the agent runs (bash, the Python kernel)
   do not get your model-provider API keys; see [SECURITY.md](SECURITY.md).
-- **A pixel interface** with Mne the elephant, three themes (`/theme`) and a
+- **A pixel interface** with Mne the elephant, eleven themes (`/theme`) and a
   sidebar for files, memory, sessions, skills and logs. The spec is
   [DESIGN.md](DESIGN.md).
 
