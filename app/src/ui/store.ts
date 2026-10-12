@@ -154,6 +154,12 @@ export class Transcript {
     this.changed();
   }
 
+  /** Print the finished blocks again (after the screen was cleared), e.g. expanded. */
+  reprint(): void {
+    this.epoch++;
+    this.changed();
+  }
+
   get isWorking(): boolean {
     return this.working !== null;
   }

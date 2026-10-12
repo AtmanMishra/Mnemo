@@ -236,3 +236,44 @@ test("/mouse hands the wheel and text selection back and forth", async () => {
   r.unmount();
   mouse.attach(process.stdout);
 });
+
+test("ctrl+f finds an earlier message, ↑↓ step through matches, enter stays there", async () => {
+  const r = await mount();
+  r.e.faux.setResponses([fauxAssistantMessage(fauxText("the walrus lives in the north")), fauxAssistantMessage(fauxText("penguins are south")), fauxAssistantMessage(fauxText("a second walrus"))]);
+  for (const q of ["one", "two", "three"]) {
+    await r.e.controller.submit(q);
+    await r.e.idle();
+  }
+  await wait(80);
+  r.stdin.write("\x06");
+  await wait();
+  for (const ch of "walrus") r.stdin.write(ch);
+  await wait(120);
+  let frame = r.lastFrame()!;
+  expect(frame).toContain("find: walrus");
+  expect(frame).toContain("1/2");
+  expect(frame).toContain("a second walrus");
+  r.stdin.write("\x1b[A");
+  await wait(120);
+  frame = r.lastFrame()!;
+  expect(frame).toContain("2/2");
+  expect(frame.indexOf("lives in the north")).toBeLessThan(frame.indexOf("penguins"));
+  r.stdin.write("\r");
+  await wait(120);
+  frame = r.lastFrame()!;
+  expect(frame).not.toContain("find:");
+  expect(frame).toContain("turn 1/3");
+  r.stdin.write(KEY.esc);
+  await wait(120);
+  expect(r.lastFrame()).not.toContain("turn 1/3");
+  r.unmount();
+});
+
+test("ctrl+o reprints what is already printed, in the new state", async () => {
+  const e = await mnemoEnv();
+  envs.push(e);
+  const epoch = e.controller.transcript.snapshot().epoch;
+  e.controller.toggleExpanded();
+  expect(e.controller.snapshot().expanded).toBe(true);
+  expect(e.controller.transcript.snapshot().epoch).toBe(epoch + 1);
+});

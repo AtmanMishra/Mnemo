@@ -188,6 +188,7 @@ never flips the layout mid-stream.
 | tool scanner | each running tool scans its own two cells | parallel tool calls stay legible |
 | race | `/bestof`: a lane per candidate; the winner keeps its colour, the rest dissolve | test-time compute you can watch |
 | exit card | Mne waves over what the run did; one line stays in the scrollback | a session ends, it does not vanish |
+| notification | a turn of 20 s or more ends, or an approval opens, while the terminal is in the background: a desktop notification (OSC 9) and a bell (`ui/notify.ts`; the terminal reports focus with `?1004`; `MNEMO_NOTIFY=0` turns it off) | you can look away |
 
 Nothing animates in `--dump`, in tests, or when stdout is not a TTY.
 
@@ -206,7 +207,8 @@ Nothing animates in `--dump`, in tests, or when stdout is not a TTY.
 | `tab` | accept the highlighted suggestion | — |
 | `shift+tab` | cycle mode: default → accept edits → plan | |
 | `ctrl+t` | cycle thinking level | |
-| `ctrl+o` | expand / collapse thinking and tool output (blocks still on screen; scrollback is the terminal's) | |
+| `ctrl+o` | expand / collapse thinking and tool output, everywhere: inline, the screen is cleared and the transcript printed again | |
+| `ctrl+f` | find in the conversation (workspace): type, `↑↓` step through matches newest first, `enter` stays at that turn, `esc` closes | |
 | `ctrl+l` | clear the screen (the session is kept) | |
 | `?` on an empty input | shortcuts panel | |
 

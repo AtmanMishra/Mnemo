@@ -118,7 +118,8 @@ export const HELP_TEXT = [
   "Keys",
   "  enter send (queues while Mnemo works) · alt+enter newline · esc interrupt",
   "  ↑/↓ history · tab accept suggestion · @ mention a file · shift+tab mode · ctrl+t thinking level",
-  "  ctrl+o expand output · ctrl+l clear screen · ctrl+c twice / ctrl+d quit",
+  "  ctrl+o expand output (everything printed, too) · ctrl+f find in the conversation · ctrl+l clear screen",
+  "  ctrl+c twice / ctrl+d quit",
 ].join("\n");
 
 function gitBranch(cwd: string): string | undefined {
@@ -341,7 +342,13 @@ export class Controller {
     this.update({ draftRequest: { text, seq: ++this.draftSeq } });
   }
 
+  /**
+   * Blocks already in the terminal's scrollback cannot change, so the screen is
+   * cleared and the whole transcript printed again in the new state.
+   */
   toggleExpanded(): void {
+    this.options.onClearScreen?.();
+    this.transcript.reprint();
     this.update({ expanded: !this.chrome.expanded });
   }
 

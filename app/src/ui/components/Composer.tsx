@@ -59,6 +59,7 @@ const SHORTCUTS: [string, string][] = [
   ["shift+tab", "mode: default → accept edits → plan"],
   ["ctrl+t", "thinking level"],
   ["ctrl+o", "expand output"],
+  ["ctrl+f", "find in the conversation"],
   ["ctrl+l", "clear screen"],
   ["ctrl+c", "clear · interrupt · twice to quit"],
 ];

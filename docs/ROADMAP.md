@@ -90,8 +90,8 @@ pi-ai's faux provider, so none needs a key.
   through them; `/model`, `/logout`, `/thinking`.
 - ▣ 1.6 Footer: model, thinking level, context %, cost, git branch.
 - ▣ 1.7 Sessions: `/new`, `/resume` (pi's session list), `/compact`.
-- ▢ 1.8 `ctrl+o` expand/collapse for thinking and tool output already printed
-  (today it applies to blocks printed after the toggle).
+- ▣ 1.8 `ctrl+o` expand/collapse for thinking and tool output already printed
+  (inline, the transcript is printed again).
 - ▣ 1.9 Memory blocks (`◈ Recalled`, `◈ Learned`, `◈ Memory noted the failure`).
 - ▣ 1.9a First run with no credentials says `/login` (pi reports a placeholder
   model, so "has a model" means "its provider has auth").

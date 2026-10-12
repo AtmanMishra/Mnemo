@@ -33,7 +33,7 @@ import { PixelArt } from "../components/PixelArt.tsx";
 import { mne } from "../pixel.ts";
 import { PANE_ICON, Sidebar } from "./Sidebar.tsx";
 import { MemoryMap, layoutMap } from "./MemoryMap.tsx";
-import { turns as turnsOf } from "../activity.ts";
+import { findBlocks, turns as turnsOf } from "../activity.ts";
 import { outcomeColor, Strip } from "../components/Strip.tsx";
 import { decorateFiles } from "./decorate.ts";
 
@@ -158,6 +158,8 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   const [map, setMap] = useState<number | undefined>(initial?.map ? 0 : undefined);
   /** A turn picked on the timeline: the transcript shows from there. */
   const [turnSel, setTurnSel] = useState<number | undefined>(undefined);
+  /** ctrl+f: what is being looked for, and which match (0 is the newest) is shown. */
+  const [search, setSearch] = useState<{ query: string; at: number } | undefined>(undefined);
   const contentHeight = useRef(0);
 
   // The rows of each pane: files from the tree, the rest from the source.
@@ -208,6 +210,8 @@ export function Workspace({ controller, source, motion, initial, width, height, 
 
   const transcriptBlocks = snap.committed.filter((b) => b.kind !== "welcome");
   const turnList = useMemo(() => turnsOf([...transcriptBlocks, ...snap.live], snap.working !== null), [snap.committed, snap.live, snap.working]);
+  const matches = useMemo(() => (search ? findBlocks(transcriptBlocks, search.query) : []), [search?.query, snap.committed]);
+  const matchAt = search && matches.length ? matches[Math.min(search.at, matches.length - 1)] : undefined;
   const mapNodes = useMemo(() => (map === undefined ? [] : layoutMap(loaded.memory ?? [], mainWidth - 2, mainHeight).nodes), [map !== undefined, loaded.memory, mainWidth, mainHeight]);
   const move = (delta: number) => setSelected((s) => ({ ...s, [pane]: Math.max(0, Math.min(items.length - 1, sel + delta)) }));
   const nextFocus = (from: Focus): Focus => (from === "composer" ? (showSidebar ? "sidebar" : "main") : from === "sidebar" ? "main" : "composer");
@@ -217,6 +221,28 @@ export function Workspace({ controller, source, motion, initial, width, height, 
       if (key.ctrl && input === "b" && !compact) {
         setSidebar((v) => !v);
         if (focus === "sidebar") setFocus("composer");
+        return;
+      }
+      if (key.ctrl && input === "f") {
+        setPreview(undefined);
+        setMap(undefined);
+        return setSearch((s) => s ?? { query: "", at: 0 });
+      }
+      if (search) {
+        if (key.escape) return setSearch(undefined);
+        if (key.return) {
+          // Keep the place: the turn the match is in becomes the selected turn ([ ] move, esc follows).
+          if (matchAt !== undefined) {
+            const t = turnList.findLastIndex((x) => x.at <= matchAt);
+            setTurnSel(t >= 0 ? t : undefined);
+          }
+          setFocus("main");
+          return setSearch(undefined);
+        }
+        if (key.upArrow) return setSearch((s) => s && { ...s, at: Math.min(s.at + 1, Math.max(0, matches.length - 1)) });
+        if (key.downArrow) return setSearch((s) => s && { ...s, at: Math.max(0, s.at - 1) });
+        if (key.backspace || key.delete) return setSearch((s) => s && { query: s.query.slice(0, -1), at: 0 });
+        if (input && !key.ctrl && !key.meta) return setSearch((s) => s && { query: s.query + input, at: 0 });
         return;
       }
       const page = Math.max(1, mainHeight - 2);
@@ -296,7 +322,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   const { stdin } = useStdin();
   const wheel = useRef<(notches: number) => void>(() => {});
   wheel.current = (notches) => {
-    if (!active || dialog || map !== undefined) return;
+    if (!active || dialog || map !== undefined || search) return;
     const rows = notches * WHEEL_ROWS;
     if (preview) setPreviewBack((b) => Math.max(0, b + rows));
     else setBack((b) => Math.min(Math.max(0, b + rows), Math.max(0, contentHeight.current - mainHeight)));
@@ -318,7 +344,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   const dropAge = motion ? dropFrame * 120 : 1000;
   const escalated = snap.working !== null && chrome.activity?.kind === "escalated" && chrome.activity.at >= snap.working.since;
   const mood: MneMood = dialog ? "waiting" : snap.working ? (runningTool ? "tool" : "thinking") : "idle";
-  const fromTurn = turnSel !== undefined ? turnList[turnSel] : undefined;
+  const fromTurn = matchAt !== undefined ? { at: matchAt } : turnSel !== undefined ? turnList[turnSel] : undefined;
   const blocks = fromTurn ? transcriptBlocks.slice(fromTurn.at) : transcriptBlocks.slice(-TRANSCRIPT_BLOCKS);
   const render = (b: (typeof snap.committed)[number]) => <BlockView key={b.id} block={b} cwd={cwd} expanded={chrome.expanded} />;
   const empty = blocks.length === 0 && snap.live.length === 0 && !snap.working && !chrome.race;
@@ -340,12 +366,12 @@ export function Workspace({ controller, source, motion, initial, width, height, 
             />
           ) : null}
           <Box flexDirection="column" width={mainWidth} paddingLeft={showSidebar ? 1 : 0} display={mainHeight > 0 ? "flex" : "none"}>
-            {map !== undefined && focus !== "composer" ? (
+            {map !== undefined && focus !== "composer" && !search ? (
               <>
                 <Bar title="memory map" width={mainWidth - 1} focused={focus === "main"} />
                 <MemoryMap items={loaded.memory ?? []} project={cwd.split("/").filter(Boolean).at(-1) ?? cwd} width={mainWidth - 2} height={mainHeight} selected={map} />
               </>
-            ) : preview && focus !== "composer" ? (
+            ) : preview && focus !== "composer" && !search ? (
               <>
                 <Bar title={`${PANE_ICON[pane]} ${preview.title}`} subtitle={[preview.subtitle, preview.hint].filter(Boolean).join(" · ")} width={mainWidth - 1} focused={focus === "main"} />
                 <PreviewView preview={preview} width={mainWidth - 2} height={mainHeight} back={previewBack} />
@@ -355,7 +381,13 @@ export function Workspace({ controller, source, motion, initial, width, height, 
                 <Bar
                   title="transcript"
                   subtitle={
-                    fromTurn ? `turn ${turnSel! + 1}/${turnList.length} · [ ] move · esc follow` : back > 0 ? `${back} rows up · PgDn to follow` : undefined
+                    search
+                      ? `find: ${search.query}▏ ${matches.length ? `${Math.min(search.at, matches.length - 1) + 1}/${matches.length} · ↑↓ · enter stay` : search.query ? "no match" : ""} · esc`
+                      : fromTurn
+                        ? `turn ${turnSel! + 1}/${turnList.length} · [ ] move · esc follow`
+                        : back > 0
+                          ? `${back} rows up · PgDn to follow`
+                          : undefined
                   }
                   width={mainWidth - 1}
                   focused={focus === "main"}
@@ -405,7 +437,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
         <Box flexDirection="column" flexShrink={0} display={dialog && rows < 24 ? "none" : "flex"}>
         <Composer
           working={snap.working !== null}
-          active={active && !dialog && focus === "composer"}
+          active={active && !dialog && !search && focus === "composer"}
           commands={() => controller.commands()}
           files={() => files}
           footer={chrome.footer}

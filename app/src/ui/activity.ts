@@ -83,3 +83,26 @@ export function testCounts(output: string): TestCounts | undefined {
   if (goOk + goFail > 0) return { passed: goOk, failed: goFail, skipped: 0 };
   return undefined;
 }
+
+/** What a block says, as plain text: what ctrl+f searches. */
+export function blockText(b: Block): string {
+  switch (b.kind) {
+    case "welcome":
+      return "";
+    case "tool":
+      return `${b.name} ${JSON.stringify(b.args)} ${b.output}`;
+    case "memory":
+      return [b.title, ...b.items].join("\n");
+    default:
+      return b.text;
+  }
+}
+
+/** Indices of the blocks that contain `query` (any case), newest first. */
+export function findBlocks(blocks: readonly Block[], query: string): number[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const out: number[] = [];
+  for (let i = blocks.length - 1; i >= 0; i--) if (blockText(blocks[i]!).toLowerCase().includes(q)) out.push(i);
+  return out;
+}

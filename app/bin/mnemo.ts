@@ -27,6 +27,7 @@ import { Fleet } from "../src/runtime/fleet.ts";
 import { exitLine } from "../src/ui/ExitCard.tsx";
 import { applyTheme, themePaints, type ThemeName } from "../src/ui/theme.ts";
 import { mouse } from "../src/ui/mouse.ts";
+import { FOCUS_OFF, FOCUS_ON, Notifier } from "../src/ui/notify.ts";
 import { clearReplaced, compareVersions, installKind, latestVersion, manualStep, runInstaller, shouldCheck } from "../src/runtime/update.ts";
 import { bestOf, describeBestOf } from "../src/runtime/best-of.ts";
 import { selfCommand } from "../src/runtime/self.ts";
@@ -376,6 +377,9 @@ async function main(): Promise<number> {
     install: (version, log) => runInstaller(version, home, log),
     setAuto: (on) => writeState(home, { ...readState(home), autoUpdate: on }),
   };
+  // Long turns and approvals tell a terminal in the background (see ui/notify.ts).
+  const notifier = interactive && process.env.MNEMO_NOTIFY !== "0" ? new Notifier((t) => process.stdout.write(t)) : undefined;
+  const watch = (dir: string, c: Controller) => notifier?.watch(path.basename(dir) || dir, c);
   const saveTheme = (theme: ThemeName) => writeState(home, { ...readState(home), theme });
   // Every agent of this process. The program ends when the last one closes.
   const fleet = new Fleet(
@@ -384,6 +388,7 @@ async function main(): Promise<number> {
       const c = new Controller(made.runtime, { exit, onClearScreen: clearTerminal, host: made.host, onTheme: saveTheme, updater });
       await c.bind();
       c.transcript.push({ kind: "welcome" });
+      watch(agentCwd, c);
       return { controller: c, host: made.host, source: workspaceSource(c, made.host, home) };
     },
     {
@@ -400,6 +405,7 @@ async function main(): Promise<number> {
   const controller = new Controller(runtime, { exit: (code) => fleet.closed(firstId, code ?? 0), onClearScreen: clearTerminal, host, onTheme: saveTheme, updater });
   await controller.bind();
   controller.transcript.push({ kind: "welcome" });
+  watch(cwd, controller);
   firstId = fleet.adopt(cwd, { controller, host, source: workspaceSource(controller, host, home) }).id;
   if (!memsrv && args.memory)
     controller.transcript.notice(`Memory is off: ${memsrvName()} was not found. \`mnemo doctor\` says where it looks.`, "warn");
@@ -454,6 +460,12 @@ async function main(): Promise<number> {
   if (interactive && layout === "workspace" && process.env.MNEMO_MOUSE !== "0") {
     mouse.set(true);
     process.on("exit", () => mouse.set(false));
+  }
+
+  if (notifier) {
+    process.stdout.write(FOCUS_ON);
+    process.stdin.on("data", (chunk) => notifier.input(String(chunk)));
+    process.on("exit", () => process.stdout.write(FOCUS_OFF));
   }
 
   if (interactive && !args.demo) {
