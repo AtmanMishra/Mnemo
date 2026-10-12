@@ -8,6 +8,7 @@ import * as path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { factsOf, factValue, projectIdentity, type MemoryService } from "@mnemo/memory";
 import type { Controller } from "./controller.ts";
+import { summarizeSession, summaryText, titleFrom } from "./sessions.ts";
 import type { Host } from "../extensions/host.ts";
 import { listFiles } from "../ui/files.ts";
 import type { Item, Pane, Preview, PreviewLine, WorkspaceSource } from "../ui/workspace/model.ts";
@@ -132,8 +133,8 @@ export function workspaceSource(controller: Controller, host: Host | undefined, 
         .sort((a, b) => b.modified.getTime() - a.modified.getTime())
         .map((s) => ({
           id: s.path,
-          label: (s.name ?? s.firstMessage ?? "untitled").replace(/\s+/g, " ").slice(0, 80),
-          detail: `${s.modified.toLocaleDateString()} · ${s.messageCount} msgs${s.path === current ? " · now" : ""}`,
+          label: (s.name ?? titleFrom(s.firstMessage ?? "")).replace(/\s+/g, " ").slice(0, 80) || "untitled",
+          detail: [s.modified.toLocaleDateString(), `${s.messageCount} msgs`, summaryText(summarizeSession(s.path)), s.path === current ? "now" : ""].filter(Boolean).join(" · "),
           kind: "session" as const,
           tone: s.path === current ? ("accent" as const) : undefined,
         }));

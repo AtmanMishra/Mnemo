@@ -10,6 +10,7 @@ import chalk from "chalk";
 import { marked, type Token, type Tokens } from "marked";
 import { highlightCode, initTheme } from "@earendil-works/pi-coding-agent";
 import { color, ground } from "../theme.ts";
+import { hyperlink } from "../link.ts";
 
 let themeReady = false;
 
@@ -63,9 +64,13 @@ function Inline({ tokens }: { tokens?: Token[] }): React.ReactElement {
           case "link": {
             const l = t as Tokens.Link;
             const label = l.tokens?.length ? <Inline tokens={l.tokens} /> : l.href;
+            // The escape codes wrap the label: a terminal that knows OSC 8 makes it clickable.
+            const [open, close] = hyperlink(l.href, "\0").split("\0");
             return (
               <Text key={i} color={color.accent2} underline>
+                {open}
                 {label}
+                {close}
                 {l.text !== l.href ? <Text color={color.muted}> ({l.href})</Text> : null}
               </Text>
             );

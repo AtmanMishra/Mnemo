@@ -22,6 +22,8 @@ import { compareVersions, manualStep, type InstallKind } from "./update.ts";
 import { setTheme, themeName, THEMES, type ThemeName } from "../ui/theme.ts";
 import { bestOf, describeBestOf, type CandidateRunner, type LaneState } from "./best-of.ts";
 import { selfCommand } from "./self.ts";
+import { summarizeSession, summaryText, titleFrom } from "./sessions.ts";
+import { readLogs, statsText } from "./stats.ts";
 
 export interface CommandInfo {
   name: string;
@@ -94,6 +96,7 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "rewind", description: "go back to before an earlier message: the conversation, the files, or both (esc esc)" },
   { name: "compact", description: "summarise the conversation to free context" },
   { name: "cost", description: "tokens and spend for this session" },
+  { name: "stats", description: "this session, the last 7 days, and how the tools fared" },
   { name: "clear", description: "clear the screen (the session is kept)" },
   { name: "memory", description: "what Mnemo remembers · /memory <words> searches it" },
   { name: "remember", description: "tell Mnemo something to keep: /remember we deploy with fly" },
@@ -500,6 +503,12 @@ export class Controller {
       }
     }
     void this.refreshMemory();
+    // A session is named after its first message once it has one, so /resume and pi list it by that.
+    const session = this.runtime.session;
+    if (!session.sessionManager.getSessionName()) {
+      const first = session.getUserMessagesForForking()[0]?.text;
+      if (first) session.setSessionName(titleFrom(first));
+    }
   }
 
   get mode(): Mode {
@@ -738,6 +747,18 @@ export class Controller {
         await this.runtime.session.reload();
         this.transcript.notice("Reloaded skills, prompts and extensions");
         return true;
+      case "stats": {
+        const st = this.runtime.session.getSessionStats();
+        const host = this.options.host;
+        this.transcript.notice(
+          statsText({
+            session: { id: st.sessionId, turns: st.userMessages, toolCalls: st.toolCalls, input: st.tokens.input, output: st.tokens.output, cacheRead: st.tokens.cacheRead, cost: st.cost },
+            days: host ? readLogs(host.home, 7, Date.now()) : [],
+            memory: host?.memory ? { nodes: this.chrome.footer.memory?.nodes ?? 0, recalled: host.recalled?.size ?? 0 } : undefined,
+          }),
+        );
+        return true;
+      }
       case "cost": {
         const st = this.runtime.session.getSessionStats();
         this.transcript.notice(
@@ -1004,13 +1025,14 @@ export class Controller {
       return;
     }
     const pick = await this.dialogs.select(
-      "Resume a session",
+      "Resume a session  (type to search what was said)",
       others
         .sort((a, b) => b.modified.getTime() - a.modified.getTime())
         .map((s) => ({
           value: s.path,
-          label: (s.name ?? s.firstMessage ?? "untitled").replace(/\s+/g, " ").slice(0, 70),
-          description: `${s.modified.toLocaleString()} · ${s.messageCount} messages`,
+          label: (s.name ?? titleFrom(s.firstMessage ?? "") ?? "untitled").replace(/\s+/g, " ").slice(0, 70) || "untitled",
+          description: [s.modified.toLocaleString(), `${s.messageCount} messages`, summaryText(summarizeSession(s.path))].filter(Boolean).join(" · "),
+          keywords: s.allMessagesText,
         })),
     );
     if (!pick) return;

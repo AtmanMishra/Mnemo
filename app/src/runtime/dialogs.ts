@@ -10,6 +10,8 @@ export interface Choice {
   value: string;
   label: string;
   description?: string;
+  /** Matched by the filter, never shown (a session's whole text, say). */
+  keywords?: string;
 }
 
 /** A tool call waiting for the user's yes or no. */

@@ -12,6 +12,7 @@ import { Markdown } from "./Markdown.tsx";
 import { Pulse } from "./Pulse.tsx";
 import { Dither } from "./Dither.tsx";
 import { Welcome, type WelcomeInfo } from "./Welcome.tsx";
+import { fileLink } from "../link.ts";
 
 export interface BlockProps {
   block: Block;
@@ -120,6 +121,8 @@ export function TestHeatmap({ output, width }: { output: string; width: number }
   );
 }
 
+const FILE_TOOLS = new Set(["read", "edit", "write", "ls"]);
+
 function ToolView({ block, cwd, expanded }: { block: Extract<Block, { kind: "tool" }>; cwd: string; expanded: boolean }) {
   const { name, arg } = toolTitle(block, cwd);
   const body = toolBody(block, expanded);
@@ -145,7 +148,7 @@ function ToolView({ block, cwd, expanded }: { block: Extract<Block, { kind: "too
           <Text backgroundColor={tile.bg} color={palette.ground} bold>{` ${tile.ch} `}</Text>
           <Text color={color.text}> </Text>
           <Text bold>{name}</Text>
-          {arg ? <Text color={color.muted}>({arg})</Text> : null}
+          {arg ? <Text color={color.muted}>({FILE_TOOLS.has(block.name) && typeof block.args.path === "string" ? fileLink(block.args.path, cwd, arg) : arg})</Text> : null}
           {block.durationMs !== undefined && block.durationMs >= 1000 ? (
             <Text color={color.subtle}> {formatDuration(block.durationMs)}</Text>
           ) : null}

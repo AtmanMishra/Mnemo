@@ -239,8 +239,12 @@ ends the program.
 ## 7. Commands
 
 Built in: `/help`, `/model`, `/login`, `/logout`, `/new`, `/resume`, `/compact`,
-`/thinking`, `/cost`, `/clear`, `/memory [words]`, `/remember key: value`, `/mode`,
-`/plan`, `/skills`, `/reload`, `/quit`, `/theme`, `/bestof N "<check>" <task>`. Everything pi knows —
+`/thinking`, `/cost`, `/stats`, `/clear`, `/memory [words]`, `/remember key: value`, `/mode`,
+`/plan`, `/skills`, `/reload`, `/quit`, `/theme`, `/bestof N "<check>" <task>`, `/rewind`,
+`/update`, `/mouse`. `/resume` lists sessions by title (a session is named after its first
+message), with what each cost and how it ended, and the filter searches everything said in
+them. File paths in tool titles and links in answers are clickable (OSC 8; `MNEMO_LINKS=0`
+turns it off). Everything pi knows —
 extension commands, prompt templates (`/name`), skills (`/skill:name`) — is
 merged into the same menu with its source shown, and runs through pi.
 

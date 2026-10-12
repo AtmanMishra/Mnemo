@@ -49,7 +49,7 @@ you like: [`app/scripts/get.sh`](app/scripts/get.sh).
 Then:
 
 ```bash
-mnemo doctor     # what it found: model, memory, python
+mnemo doctor     # what it found: model, memory, python (--fix repairs what it can)
 mnemo --demo     # a scripted session in a scratch project; needs no API key
 mnemo            # start in this folder
 ```

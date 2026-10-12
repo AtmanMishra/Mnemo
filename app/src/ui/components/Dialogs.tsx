@@ -51,7 +51,7 @@ const usePaste: typeof inkUsePaste = (handler, options) =>
 export function filterChoices(choices: readonly Choice[], query: string): Choice[] {
   const q = query.trim().toLowerCase();
   if (!q) return [...choices];
-  return choices.filter((c) => [c.label, c.value, c.description ?? ""].some((f) => f.toLowerCase().includes(q)));
+  return choices.filter((c) => [c.label, c.value, c.description ?? "", c.keywords ?? ""].some((f) => f.toLowerCase().includes(q)));
 }
 
 function Frame({ tint, title, children, hint }: { tint: string; title: string; children: React.ReactNode; hint: string }) {

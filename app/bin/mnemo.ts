@@ -28,9 +28,11 @@ import { exitLine } from "../src/ui/ExitCard.tsx";
 import { applyTheme, themePaints, type ThemeName } from "../src/ui/theme.ts";
 import { mouse } from "../src/ui/mouse.ts";
 import { FOCUS_OFF, FOCUS_ON, Notifier } from "../src/ui/notify.ts";
+import { setLinks } from "../src/ui/link.ts";
 import { clearReplaced, compareVersions, installKind, latestVersion, manualStep, runInstaller, shouldCheck } from "../src/runtime/update.ts";
 import { bestOf, describeBestOf } from "../src/runtime/best-of.ts";
 import { selfCommand } from "../src/runtime/self.ts";
+import { findProblems } from "../src/runtime/doctor.ts";
 
 const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
 
@@ -38,7 +40,7 @@ usage
   mnemo                    start in this folder
   mnemo -c, --continue     continue the most recent session here
   mnemo -p "<prompt>"      answer once and print the result (no interface)
-  mnemo doctor             what is installed, configured and reachable
+  mnemo doctor [--fix]     what is installed, configured and reachable; --fix repairs what it can
   mnemo update             install the latest release · --check · --auto on|off (a daily check, off by default)
   mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
@@ -66,6 +68,8 @@ state lives in $MNEMO_HOME (default ~/.mnemo); pi's files are in $MNEMO_HOME/age
 
 interface Args {
   command?: "doctor";
+  /** doctor --fix */
+  fix?: boolean;
   help: boolean;
   version: boolean;
   demo: boolean;
@@ -92,6 +96,7 @@ function parse(argv: string[]): Args {
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i]!;
     if (v === "doctor" && i === 0) a.command = "doctor";
+    else if (v === "--fix" && a.command === "doctor") a.fix = true;
     else if (v === "-h" || v === "--help") a.help = true;
     else if (v === "-v" || v === "--version") a.version = true;
     else if (v === "--demo") a.demo = true;
@@ -156,7 +161,7 @@ function silentStdin(): NodeJS.ReadStream {
   return s;
 }
 
-async function doctor(home: string, dir: string): Promise<number> {
+async function doctor(home: string, dir: string, fix: boolean): Promise<number> {
   const ok = (b: boolean) => (b ? "✓" : "✗");
   const lines: string[] = [`mnemo ${pkg.version} · bun ${Bun.version} · ${process.platform}-${process.arch}`, `home    ${home}`];
   const runtime = await startRuntime({ cwd: process.cwd(), agentDir: dir, sessionManager: SessionManager.inMemory(process.cwd()) });
@@ -182,8 +187,33 @@ async function doctor(home: string, dir: string): Promise<number> {
     /* none */
   }
   lines.push(`  skills  ${skills} in ${skillsDir(home)}`);
+  const problems = findProblems(home);
+  for (const p of problems) lines.push(`✗ ${p.problem}`);
   console.log(lines.join("\n"));
-  return usable && memsrv ? 0 : 1;
+  if (!fix) {
+    if (problems.length || (!memsrv && installKind(process.execPath, home) === "installer")) console.log("\nmnemo doctor --fix repairs what it can");
+    return usable && memsrv && !problems.length ? 0 : 1;
+  }
+  console.log("");
+  for (const p of problems) {
+    try {
+      console.log(`fixed   ${p.fix()}`);
+    } catch (error) {
+      console.log(`failed  ${p.problem}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  let memsrvNow = memsrv;
+  if (!memsrv) {
+    if (installKind(process.execPath, home) === "installer") {
+      console.log(`reinstalling v${pkg.version} to put ${memsrvName()} back…`);
+      const code = await runInstaller(pkg.version, home, (l) => console.log(`  ${l}`));
+      memsrvNow = code === 0 ? findMemsrv(home) : undefined;
+      console.log(memsrvNow ? `fixed   ${memsrvNow}` : "failed  the installer did not put memsrv back");
+    } else console.log(`cannot  ${memsrvName()}: build it (cargo build --release --bin memsrv) or reinstall Mnemo the way you installed it`);
+  }
+  if (!usable) console.log("cannot  no model: run mnemo, then /login");
+  if (!problems.length && memsrv && usable) console.log("nothing to fix");
+  return usable && memsrvNow ? 0 : 1;
 }
 
 /** Small per-user state: whether the introduction has been seen. */
@@ -297,7 +327,7 @@ async function main(): Promise<number> {
   const dir = agentDir(home);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   pointPiAt(dir);
-  if (args.command === "doctor") return doctor(home, dir);
+  if (args.command === "doctor") return doctor(home, dir, args.fix === true);
   if (args.bestOf !== undefined) return runBestOf(args, home);
 
   let cwd = path.resolve(args.cwd ?? process.cwd());
@@ -356,6 +386,7 @@ async function main(): Promise<number> {
   }
 
   const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true && !args.dump;
+  setLinks(interactive && process.env.MNEMO_LINKS !== "0");
   let instance: ReturnType<typeof render> | undefined;
   const clearTerminal = () => {
     instance?.clear();
