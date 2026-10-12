@@ -221,24 +221,6 @@ export function hash01(x: number, y: number, seed = 0): number {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
 }
 
-/**
- * A grid resolving out of noise: at `t` = 0 every pixel is static, at 1 the
- * picture is clean. Each pixel settles at its own moment, so the image
- * condenses rather than fades — the boot's "a memory coming back".
- */
-export function resolve(grid: Grid, t: number, seed = 7): Grid {
-  return grid.map((row, y) =>
-    row.map((p, x) => {
-      const at = hash01(x, y, seed);
-      if (t >= 1 || at < t * 1.15 - 0.1) return p;
-      // Not yet settled: static in the palette's dim tones, sparser as t grows.
-      const n = hash01(x, y, seed + Math.floor(t * 30));
-      if (n < 0.55 - t * 0.4) return null;
-      return n < 0.8 ? palette.faint : n < 0.93 ? palette.rule : p ? mix(p, palette.ground, 0.6) : palette.faint;
-    }),
-  );
-}
-
 /** Place `art` on a blank grid of the given size at (x, y). */
 export function place(w: number, h: number, items: { grid: Grid; x: number; y: number }[]): Grid {
   const out: Grid = Array.from({ length: h }, () => Array<Pixel>(w).fill(null));

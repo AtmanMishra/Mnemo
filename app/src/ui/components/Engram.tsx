@@ -4,7 +4,8 @@
  */
 import React, { useContext, useRef } from "react";
 import { Box, Text, useAnimation } from "ink";
-import { engramFrame, type EngramCell } from "../engram.ts";
+import { engramFrame, type EngramCell, type EngramVariant } from "../engram.ts";
+import type { Grid } from "../pixel.ts";
 import { themed } from "../theme.ts";
 import { MotionContext } from "./motion.ts";
 
@@ -20,15 +21,20 @@ function runs(row: EngramCell[]): EngramCell[] {
   return out;
 }
 
-export function Engram({ cols, rows, seed = 7 }: { cols: number; rows: number; seed?: number }): React.ReactElement {
+/** `since`: when its clock started (default: when it mounted). A block printed into scrollback later keeps its age. */
+export function Engram({ cols, rows, seed = 7, variant, art, since }: { cols: number; rows: number; seed?: number; variant?: EngramVariant; art?: Grid; since?: number }): React.ReactElement {
   const motion = useContext(MotionContext);
-  const start = useRef(Date.now());
+  const start = useRef(since ?? Date.now());
   // The frame counter drives re-renders; the picture is a function of real time.
   useAnimation({ interval: FRAME_MS, isActive: motion });
-  const frame = engramFrame({ cols, rows, t: (Date.now() - start.current) / 1000, seed, animate: motion });
+  return <EngramCells cells={engramFrame({ cols, rows, t: (Date.now() - start.current) / 1000, seed, animate: motion, variant, art })} />;
+}
+
+/** A frame of cells, drawn as merged runs in the current theme. */
+export function EngramCells({ cells }: { cells: EngramCell[][] }): React.ReactElement {
   return (
     <Box flexDirection="column">
-      {frame.map((row, y) => (
+      {cells.map((row, y) => (
         <Text key={y}>
           {runs(row).map((r, i) => (
             <Text key={i} color={r.fg && themed(r.fg)} backgroundColor={r.bg && themed(r.bg)}>

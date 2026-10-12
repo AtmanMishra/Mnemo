@@ -36,7 +36,8 @@ the palette in place; pixel art is drawn in Night and translated, and painted
 themes also set the terminal's default colours (OSC 10/11, restored on exit).
 Truecolor hex; chalk downsamples, `NO_COLOR` turns it off. Pixels: `app/src/ui/pixel.ts`
 (grids → cells → merged runs, a 5×5 pixel font with a drop shadow for the
-wordmark, Mne's sprites, noise that resolves into an image).
+wordmark, Mne's sprites, noise and ordered dither). Engram, the field a picture
+settles out of, in three variations (hero, boot, welcome): `app/src/ui/engram.ts`.
 
 | Token | Hex | Used for |
 |---|---|---|
@@ -65,8 +66,15 @@ wordmark, Mne's sprites, noise that resolves into an image).
 ## 3. A launch, and the screen
 
 **Boot** (`components/Boot.tsx`, every launch, ~1.6 s): Mne and the wordmark
-condense out of dither noise; a magenta scanline sweeps; the memory wire
-draws and the tagline types; what memory holds counts up; Mne blinks.
+are written in from the left out of a drifting field of dither glyphs
+(Engram's boot variation) and the field clears; a magenta scanline sweeps;
+the memory wire draws and the tagline types; what memory holds counts up;
+Mne blinks.
+
+**Welcome card** (inline layout): on a terminal 86 columns or wider, Mne
+settles out of a field of the memory wire's glyphs (`· ∙ ◦ ◇ ◆`, amber and
+cyan) beside the wordmark: Engram's welcome variation. The card keeps its
+clock when it moves into scrollback, so what stays there is the settled frame.
 
 **Introduction** (`components/Onboarding.tsx`, first run; `--intro`): meet
 Mne · how it learns (a signal travelling session → reflect → memory) · the

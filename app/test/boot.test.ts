@@ -3,12 +3,11 @@ import React from "react";
 import { render } from "ink-testing-library";
 import { Boot, bootFrame, BOOT_MS } from "../src/ui/components/Boot.tsx";
 import { MotionContext } from "../src/ui/components/motion.ts";
-import { toCells } from "../src/ui/pixel.ts";
 
 const info = { version: "9.9.9", columns: 100, rows: 28, stats: { memories: 412, skills: 9, sessions: 37 } };
-const lit = (g: ReturnType<typeof bootFrame>["grid"]) => g.flat().filter(Boolean).length;
+const pixels = (f: ReturnType<typeof bootFrame>) => f.cells.flat().filter((c) => "▀▄█".includes(c.ch)).length;
 
-test("the sequence: noise condenses into the picture, the wire and tagline draw, the stats count up, and it ends", () => {
+test("the sequence: the picture settles out of a field of glyphs, the wire and tagline draw, the stats count up, and it ends", () => {
   const start = bootFrame(0, info);
   const end = bootFrame(BOOT_MS, info);
   expect(start.wire).toBe("");
@@ -22,8 +21,14 @@ test("the sequence: noise condenses into the picture, the wire and tagline draw,
   expect(n).toBeGreaterThan(0);
   expect(n).toBeLessThan(412);
   // Deterministic: the same moment is the same frame.
-  expect(toCells(bootFrame(300, info).grid)).toEqual(toCells(bootFrame(300, info).grid));
-  expect(lit(end.grid)).toBeGreaterThan(100);
+  expect(bootFrame(300, info).cells).toEqual(bootFrame(300, info).cells);
+  expect(pixels(end)).toBeGreaterThan(100);
+  expect(pixels(start)).toBeLessThan(pixels(end) / 4);
+  // The field is wider than the picture, full of glyphs while it settles, and quieter once it has.
+  const glyphs = (f: ReturnType<typeof bootFrame>) => f.cells.flat().filter((c) => "·░▒".includes(c.ch)).length;
+  expect(end.cells[0]!.length).toBeGreaterThan(52);
+  expect(glyphs(bootFrame(300, info))).toBeGreaterThan(20);
+  expect(glyphs(end)).toBeLessThan(glyphs(bootFrame(300, info)) / 2);
 });
 
 test("without memory there are no stats", () => {

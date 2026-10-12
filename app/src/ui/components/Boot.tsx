@@ -1,8 +1,9 @@
 /**
  * The launch sequence, every time Mnemo opens (about 1.6 s; any key skips):
  *
- *   recall   Mne and the wordmark condense out of dither noise, pixel by
- *            pixel — a memory coming back
+ *   recall   Mne and the wordmark settle out of a drifting field of dither
+ *            glyphs, written in from the left — Engram's boot variation
+ *            (../engram.ts): a memory coming back
  *   scan     a magenta scanline sweeps the picture
  *   wire     the memory wire draws itself, ◆──◆──◆, and the tagline types
  *   stats    what memory holds counts up; Mne blinks; done
@@ -15,8 +16,9 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { mix, palette } from "../theme.ts";
-import { mne, pixelText, place, resolve, type Grid } from "../pixel.ts";
-import { PixelArt } from "./PixelArt.tsx";
+import { mne, pixelText, place, type Grid } from "../pixel.ts";
+import { engramFrame, type EngramCell } from "../engram.ts";
+import { EngramCells } from "./Engram.tsx";
 import { MotionContext } from "./motion.ts";
 
 export interface BootInfo {
@@ -53,7 +55,8 @@ function scene(blinking: boolean, scanRow?: number): Grid {
 }
 
 export interface BootFrame {
-  grid: Grid;
+  /** The picture in its field of glyphs, as the screen draws it. */
+  cells: EngramCell[][];
   wire: string;
   tagline: string;
   stats?: string;
@@ -62,15 +65,22 @@ export interface BootFrame {
 
 const ease = (x: number) => 1 - (1 - Math.min(1, Math.max(0, x))) ** 3;
 
+/** The field around the picture: as much as the terminal allows, up to ten columns a side. */
+function field(info: BootInfo, art: Grid): { cols: number; rows: number } {
+  const w = art[0]!.length;
+  const h = Math.ceil(art.length / 2);
+  const pad = Math.max(0, Math.min(10, Math.floor((info.columns - w - 4) / 2)));
+  return { cols: w + pad * 2, rows: h + (info.rows >= 24 ? 4 : 2) };
+}
+
 /** The frame at `ms` since launch. */
-export function bootFrame(ms: number, info: BootInfo): BootFrame {
+export function bootFrame(ms: number, info: BootInfo, animate = true): BootFrame {
   const t = ms / BOOT_MS;
-  const recall = Math.min(1, t / 0.34);
   const scanning = t >= 0.34 && t < 0.5;
   const scanRow = scanning ? Math.floor(((t - 0.34) / 0.16) * 20) : undefined;
   const blinking = t > 0.86 && t < 0.92;
-  let grid = scene(blinking, scanRow);
-  if (recall < 1) grid = resolve(grid, ease(recall));
+  const art = scene(blinking, scanRow);
+  const cells = engramFrame({ ...field(info, art), t: ms / 1000, art, variant: "boot", seed: 5, animate });
   const wireT = ease((t - 0.5) / 0.25);
   const nodes = 5;
   const wireFull = Array.from({ length: nodes }, () => "◆").join("───");
@@ -82,7 +92,7 @@ export function bootFrame(ms: number, info: BootInfo): BootFrame {
     const n = (x: number) => Math.round(x * k);
     stats = `◈ ${n(info.stats.memories)} memories   ◇ ${n(info.stats.skills)} skills   ▣ ${n(info.stats.sessions)} sessions`;
   }
-  return { grid, wire, tagline, stats, done: t >= 1 };
+  return { cells, wire, tagline, stats, done: t >= 1 };
 }
 
 export function Boot({ info, onDone, at }: { info: BootInfo; onDone: () => void; at?: number }): React.ReactElement {
@@ -113,7 +123,7 @@ export function Boot({ info, onDone, at }: { info: BootInfo; onDone: () => void;
     return () => clearInterval(id);
   }, []);
 
-  const f = bootFrame(ms, info);
+  const f = bootFrame(ms, info, motion);
   const small = info.columns < 50 || info.rows < 16;
   return (
     <Box flexDirection="column" alignItems="center" justifyContent="center" width={info.columns} height={Math.max(8, info.rows - 1)}>
@@ -122,7 +132,7 @@ export function Boot({ info, onDone, at }: { info: BootInfo; onDone: () => void;
           ▞ MNEMO ▚
         </Text>
       ) : (
-        <PixelArt grid={f.grid} />
+        <EngramCells cells={f.cells} />
       )}
       <Box marginTop={1}>
         <Text color={palette.cyan}>{f.wire.padEnd(21)}</Text>

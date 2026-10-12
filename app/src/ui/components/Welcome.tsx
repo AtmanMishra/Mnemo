@@ -1,10 +1,13 @@
 /**
  * The first thing on screen: the wordmark in the brand gradient, where you are,
- * what model is answering, and the three things worth knowing.
+ * what model is answering, and the three things worth knowing. On a wide
+ * terminal, Mne settles out of a field of memory glyphs beside it (Engram's
+ * welcome variation).
  */
 import React from "react";
 import { Box, Text } from "ink";
 import { color, gradientAt, ground } from "../theme.ts";
+import { Engram } from "./Engram.tsx";
 
 export interface WelcomeInfo {
   version: string;
@@ -13,7 +16,12 @@ export interface WelcomeInfo {
   /** Set when no provider is configured yet: the welcome says what to do. */
   needsLogin: boolean;
   columns: number;
+  /** When the session started: the card's animation keeps its age when the card moves into scrollback. */
+  since?: number;
 }
+
+const ART_COLS = 30;
+const ART_ROWS = 9;
 
 /** "mnemo" in a two-row half-block face. */
 const WORDMARK = ["█▀▄▀█ █▄ █ █▀▀ █▀▄▀█ █▀█", "█ ▀ █ █ ▀█ ██▄ █ ▀ █ █▄█"];
@@ -33,8 +41,10 @@ function GradientLine({ text }: { text: string }): React.ReactElement {
 
 export function Welcome({ info }: { info: WelcomeInfo }): React.ReactElement {
   const wide = info.columns >= 40;
+  const art = info.columns >= 86;
   return (
-    <Box flexDirection="column" borderStyle="round" borderBackgroundColor={ground()} borderColor={color.accent} paddingX={2} paddingY={0}>
+    <Box flexDirection="row" borderStyle="round" borderBackgroundColor={ground()} borderColor={color.accent} paddingX={2} paddingY={0}>
+      <Box flexDirection="column" flexGrow={1}>
       {wide ? (
         <Box flexDirection="row" marginTop={1}>
           <Box flexDirection="column">
@@ -70,6 +80,12 @@ export function Welcome({ info }: { info: WelcomeInfo }): React.ReactElement {
           <Text color={color.accent}>esc</Text> interrupt · <Text color={color.accent}>?</Text> shortcuts
         </Text>
       </Box>
+      </Box>
+      {art ? (
+        <Box flexShrink={0} marginTop={1} marginLeft={2}>
+          <Engram cols={ART_COLS} rows={ART_ROWS} variant="welcome" seed={11} since={info.since} />
+        </Box>
+      ) : null}
     </Box>
   );
 }

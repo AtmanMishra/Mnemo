@@ -38,6 +38,7 @@ export function App({ controller, version, home, motion, clearTerminal }: AppPro
       model: chrome.footer.model,
       needsLogin: !controller.hasModel,
       columns,
+      since: Date.now(),
     }),
     [],
   );
