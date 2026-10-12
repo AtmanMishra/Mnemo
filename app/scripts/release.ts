@@ -35,7 +35,11 @@ export function versionOf(text: string, file: string): string | undefined {
 
 function run(cmd: string[], cwd = ROOT, quiet = false): string {
   const r = Bun.spawnSync(cmd, { cwd, stdout: "pipe", stderr: quiet ? "pipe" : "inherit" });
-  if (r.exitCode !== 0) throw new Error(`${cmd.join(" ")} failed${quiet ? `: ${r.stderr?.toString().trim()}` : ""}`);
+  if (r.exitCode !== 0) {
+    // tsc and the test runner report on stdout: show it, or the failure has no reason.
+    const said = [r.stdout?.toString().trim(), quiet ? r.stderr?.toString().trim() : ""].filter(Boolean).join("\n");
+    throw new Error(`${cmd.join(" ")} failed${said ? `:\n${said}` : ""}`);
+  }
   return r.stdout.toString().trim();
 }
 
@@ -60,6 +64,8 @@ function prepare(version: string, skipTests: boolean): void {
   // Cargo.lock records the crate's own version; the release builds with --locked.
   run(["cargo", "update", "--workspace", "--offline"], path.join(ROOT, "memory-layer"));
   if (!skipTests) {
+    // The checks need the dependencies the lockfile names; a fresh clone has none.
+    run(["bun", "install", "--frozen-lockfile"]);
     run(["bunx", "tsc", "--noEmit"], path.join(ROOT, "app"));
     run(["bun", "test", "./test"], path.join(ROOT, "app"));
     run(["bun", "test", "./test"], path.join(ROOT, "packages", "memory"));
