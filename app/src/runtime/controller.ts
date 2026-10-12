@@ -17,6 +17,7 @@ import { createUiContext } from "./ui-context.ts";
 import { CYCLE, type Host, type MemoryNote, type Mode } from "../extensions/host.ts";
 import { projectIdentity, VERIFY } from "@mnemo/memory";
 import { testCounts, type TestCounts } from "../ui/activity.ts";
+import { mouse } from "../ui/mouse.ts";
 import { setTheme, themeName, THEMES, type ThemeName } from "../ui/theme.ts";
 import { bestOf, describeBestOf, type CandidateRunner, type LaneState } from "./best-of.ts";
 import { selfCommand } from "./self.ts";
@@ -99,6 +100,7 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "yolo", description: "toggle bypass: ask for nothing (deny rules in permissions.json still hold)" },
   { name: "accept-edits", description: "toggle accept edits: change project files without asking, still ask before commands" },
   { name: "theme", description: "the look: Mnemo Night, Game Boy, Paper" },
+  { name: "mouse", description: "mouse wheel scrolls the conversation (on) or your terminal selects text (off)" },
   { name: "bestof", description: 'race N attempts at a task, keep the smallest that passes: /bestof 3 "npm test" <task>' },
   { name: "plan", description: "toggle plan mode (read-only)" },
   { name: "skills", description: "the skills Mnemo can load" },
@@ -601,6 +603,15 @@ export class Controller {
           if (!ok) return true;
         }
         void this.raceBestOf(n, check, task);
+        return true;
+      }
+      case "mouse": {
+        const on = mouse.toggle();
+        this.transcript.notice(
+          on
+            ? "Mouse on: the wheel scrolls the conversation. To select text, hold Shift (Option in some terminals), or /mouse to turn it off."
+            : "Mouse off: your terminal selects text again. /mouse turns the wheel back on.",
+        );
         return true;
       }
       case "theme": {

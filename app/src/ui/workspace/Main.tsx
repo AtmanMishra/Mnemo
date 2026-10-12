@@ -2,8 +2,8 @@
  * The main area: the transcript in a scrolling viewport that follows the end
  * until you scroll back, or a preview of what is open in the sidebar.
  */
-import React, { useRef } from "react";
-import { Box, Text, useBoxMetrics, type DOMElement } from "ink";
+import React, { useEffect, useRef, useState } from "react";
+import { Box, Text, measureElement, type DOMElement } from "ink";
 import { palette } from "../theme.ts";
 import type { Preview } from "./model.ts";
 import { toneColor } from "./Sidebar.tsx";
@@ -48,6 +48,28 @@ export function Bar({
 }
 
 /**
+ * The height of a box, measured on a timer rather than in the render that
+ * produced it. Ink's useBoxMetrics measures after every render and sets state;
+ * while an answer streams that chains one update per chunk, and a fast answer
+ * runs past React's limit on nested updates. This measures at most once a frame.
+ */
+export function useMeasuredHeight(ref: React.RefObject<DOMElement | null>): number {
+  const [height, setHeight] = useState(0);
+  const pending = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    if (pending.current) return;
+    pending.current = setTimeout(() => {
+      pending.current = undefined;
+      if (!ref.current) return;
+      const h = measureElement(ref.current).height;
+      setHeight((prev) => (prev === h ? prev : h));
+    }, 16);
+  });
+  useEffect(() => () => clearTimeout(pending.current), []);
+  return height;
+}
+
+/**
  * Children in a viewport of fixed height. `back` is how many rows the view is
  * scrolled up from the end (0 follows new output). Reports how far it can go.
  */
@@ -63,7 +85,7 @@ export function Viewport({
   children: React.ReactNode;
 }): React.ReactElement {
   const inner = useRef<DOMElement>(null);
-  const { height: contentHeight } = useBoxMetrics(inner);
+  const contentHeight = useMeasuredHeight(inner);
   const max = Math.max(0, contentHeight - height);
   const offset = Math.max(0, max - Math.min(back, max));
   const last = useRef(-1);

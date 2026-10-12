@@ -14,7 +14,8 @@
  * PgDn scroll the main area from anywhere.
  */
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Box, Text, useAnimation, useBoxMetrics, useInput, useWindowSize, type DOMElement } from "ink";
+import { Box, Text, useAnimation, useInput, useStdin, useWindowSize, type DOMElement } from "ink";
+import { parseWheel, WHEEL_ROWS } from "../mouse.ts";
 import type { Controller } from "../../runtime/controller.ts";
 import { BlockView } from "../components/Blocks.tsx";
 import { Composer } from "../components/Composer.tsx";
@@ -27,7 +28,7 @@ import { RaceView } from "../components/Race.tsx";
 import { MneBadge, useFresh, type MneMood } from "../components/MneBadge.tsx";
 import { gradientAt, palette } from "../theme.ts";
 import { fileTree, PANES, type Item, type Pane, type Preview, type WorkspaceSource } from "./model.ts";
-import { Bar, PreviewView, Viewport } from "./Main.tsx";
+import { Bar, PreviewView, useMeasuredHeight, Viewport } from "./Main.tsx";
 import { PixelArt } from "../components/PixelArt.tsx";
 import { mne } from "../pixel.ts";
 import { PANE_ICON, Sidebar } from "./Sidebar.tsx";
@@ -190,7 +191,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   }, [focus, pane, current?.id]);
 
   const body = useRef<DOMElement>(null);
-  const { height: bodyHeight } = useBoxMetrics(body);
+  const bodyHeight = useMeasuredHeight(body);
   const mainHeight = Math.max(3, bodyHeight - 1);
   const showSidebar = sidebar && !compact && columns >= 60;
   const mainWidth = columns - (showSidebar ? SIDEBAR_WIDTH : 0);
@@ -278,6 +279,26 @@ export function Workspace({ controller, source, motion, initial, width, height, 
     },
     { isActive: active && !dialog },
   );
+
+  // The mouse wheel scrolls what the main area shows: the conversation, or a preview.
+  // (The memory map has nothing to scroll.) The handler is kept in a ref so the
+  // listener is attached once and always sees the current state.
+  const { stdin } = useStdin();
+  const wheel = useRef<(notches: number) => void>(() => {});
+  wheel.current = (notches) => {
+    if (!active || dialog || map !== undefined) return;
+    const rows = notches * WHEEL_ROWS;
+    if (preview) setPreviewBack((b) => Math.max(0, b + rows));
+    else setBack((b) => Math.min(Math.max(0, b + rows), Math.max(0, contentHeight.current - mainHeight)));
+  };
+  useEffect(() => {
+    const onData = (chunk: Buffer | string) => {
+      const notches = parseWheel(String(chunk));
+      if (notches) wheel.current(notches);
+    };
+    stdin.on("data", onData);
+    return () => void stdin.off("data", onData);
+  }, [stdin]);
 
   const runningTool = snap.live.some((b) => b.kind === "tool" && b.status === "running");
   const writing = snap.live.some((b) => b.kind === "assistant" && !b.done);

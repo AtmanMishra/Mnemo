@@ -26,6 +26,7 @@ import { runMemoryCommand } from "../src/memory-cli.ts";
 import { Fleet } from "../src/runtime/fleet.ts";
 import { exitLine } from "../src/ui/ExitCard.tsx";
 import { applyTheme, themePaints, type ThemeName } from "../src/ui/theme.ts";
+import { mouse } from "../src/ui/mouse.ts";
 import { bestOf, describeBestOf } from "../src/runtime/best-of.ts";
 import { selfCommand } from "../src/runtime/self.ts";
 
@@ -393,6 +394,13 @@ async function main(): Promise<number> {
     },
   );
 
+  // The full-screen workspace has no scrollback, so the wheel is ours: ask the terminal to report it.
+  // Handed back on every way out; MNEMO_MOUSE=0 never takes it (text selection stays the terminal's).
+  if (interactive && layout === "workspace" && process.env.MNEMO_MOUSE !== "0") {
+    mouse.set(true);
+    process.on("exit", () => mouse.set(false));
+  }
+
   if (args.demo && !args.dump) setTimeout(() => void controller.submit(DEMO_PROMPT), 900);
   if (args.dump) {
     if (args.demo) {
@@ -407,6 +415,7 @@ async function main(): Promise<number> {
   }
 
   await done;
+  mouse.set(false);
   memory?.stop();
   instance.unmount();
   // A painted theme changed the terminal's default colours: give them back.

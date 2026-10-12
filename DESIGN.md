@@ -98,7 +98,9 @@ workspace in miniature · your other agents · a model (log in, demo, later).
 Focus is the composer, the sidebar or the main area: `tab` moves on (from the
 composer only when no completion is open), `esc` comes back, `ctrl+b` hides
 the sidebar, `1`–`5` switch panes, `↑↓` move, `→`/enter open, `←` close,
-`PgUp`/`PgDn` scroll the main area from anywhere. Moving through the sidebar
+`PgUp`/`PgDn` scroll the main area from anywhere. The mouse wheel scrolls it too: the
+workspace asks the terminal to report the wheel (hold Shift, or Option in some
+terminals, to select text; `/mouse` or `MNEMO_MOUSE=0` hands the mouse back). Moving through the sidebar
 previews the selection in the main area; a pane's own keys act on it (`r`
 resumes a session, `i` puts `@file` in the prompt).
 

@@ -192,3 +192,47 @@ test("m in the memory pane opens the map; [ ] walk the timeline of turns", async
   expect(r.lastFrame()).not.toContain("turn 1/2");
   r.unmount();
 });
+
+test("the mouse wheel scrolls the conversation, and ignores clicks", async () => {
+  const { parseWheel } = await import("../src/ui/mouse.ts");
+  // SGR reports: 64 up, 65 down, shift (+4) still the wheel, 0 a click, 32 motion.
+  expect(parseWheel("\x1b[<64;10;5M")).toBe(1);
+  expect(parseWheel("\x1b[<65;10;5M\x1b[<65;10;5M")).toBe(-2);
+  expect(parseWheel("\x1b[<68;10;5M")).toBe(1);
+  expect(parseWheel("\x1b[<0;10;5M\x1b[<0;10;5m\x1b[<35;10;5M")).toBe(0);
+  expect(parseWheel("hello")).toBe(0);
+
+  const r = await mount();
+  const long = Array.from({ length: 120 }, (_, i) => `row ${String(i + 1).padStart(3, "0")}`).join("\n\n");
+  r.e.faux.setResponses([fauxAssistantMessage(fauxText(long))]);
+  await r.e.controller.submit("count");
+  await r.e.idle();
+  for (let i = 0; i < 60 && !r.lastFrame()!.includes("row 120"); i++) await wait(100);
+  expect(r.lastFrame()).toContain("row 120");
+  expect(r.lastFrame()).not.toContain("row 001");
+  for (let i = 0; i < 60; i++) r.stdin.write("\x1b[<64;10;5M");
+  await wait(150);
+  expect(r.lastFrame()).not.toContain("row 120");
+  expect(r.lastFrame()).toMatch(/rows? up/);
+  for (let i = 0; i < 80; i++) r.stdin.write("\x1b[<65;10;5M");
+  await wait(150);
+  expect(r.lastFrame()).toContain("row 120");
+  r.unmount();
+});
+
+test("/mouse hands the wheel and text selection back and forth", async () => {
+  const { mouse } = await import("../src/ui/mouse.ts");
+  const written: string[] = [];
+  mouse.attach({ isTTY: true, write: (d) => void written.push(d) });
+  mouse.set(false);
+  const r = await mount();
+  r.e.controller.transcript.snapshot();
+  await r.e.controller.submit("/mouse");
+  expect(mouse.on).toBe(true);
+  expect(written.at(-1)).toContain("?1006h");
+  await r.e.controller.submit("/mouse");
+  expect(mouse.on).toBe(false);
+  expect(written.at(-1)).toContain("?1000l");
+  r.unmount();
+  mouse.attach(process.stdout);
+});
