@@ -4,7 +4,9 @@ import { Install } from "./Install";
 import { Split } from "./Split";
 import { DemoScroll } from "./sections/DemoScroll";
 import { Memory } from "./sections/Memory";
+import { Lessons } from "./sections/Lessons";
 import { Skills } from "./sections/Skills";
+import { Figure } from "./Figure";
 import { Checks } from "./sections/Checks";
 import { Fleet } from "./sections/Fleet";
 import { Modes } from "./sections/Modes";
@@ -14,6 +16,7 @@ import { Palette } from "./sections/Palette";
 import { Themes } from "./sections/Themes";
 import { Measured } from "./sections/Measured";
 import { AUTHOR, BUILD_DATE, REPO } from "./site";
+import { ThemeToggle } from "./ThemeToggle";
 
 const faq: { q: string; a: ReactNode }[] = [
   { q: "What is Mnemo?", a: <>Mnemo is an open-source terminal coding agent with a memory that learns your projects. It reads your files, edits them and runs commands as you, asks before it does, and remembers what it learned for the next session. You bring the model.</> },
@@ -71,6 +74,7 @@ export function App() {
             <a href="#demo">demo</a>
             <a href="#memory">memory</a>
             <a href="#skills">skills</a>
+            <a href="#lessons">lessons</a>
             <a href="#checks">checks</a>
             <a href="#fleet">agents</a>
             <a href="#safety">safety</a>
@@ -78,6 +82,7 @@ export function App() {
             <a href={REPO}>github</a>
             <a className="nav-cta" href="#install">install</a>
           </nav>
+          <ThemeToggle />
         </div>
       </header>
 
@@ -89,6 +94,7 @@ export function App() {
         <DemoScroll />
         <div className="wrap">
           <Memory />
+          <Lessons />
           <Skills />
           <Checks />
           <Fleet />
@@ -100,8 +106,14 @@ export function App() {
           <Measured />
 
           <section className="feature" aria-labelledby="faq">
-            <p className="eyebrow" data-reveal=""><span>12</span> questions</p>
-            <Split id="faq" text="Questions people ask" />
+            <div className="f-head with-fig">
+              <div>
+                <p className="eyebrow" data-reveal=""><span>13</span> questions</p>
+                <Split id="faq" text="Questions people ask" />
+                <p className="lead-sm" data-reveal="">Straight answers, with the details in the repository when you want them.</p>
+              </div>
+              <Figure name="query" label="A question mark built as a bent bar over a loose ball; the hook turns toward the pointer and the ball rolls after it" means="Ask: the answer turns toward you." />
+            </div>
             <div className="faq">
               {faq.map((f) => (
                 <div key={f.q} className="qa" data-reveal="">
@@ -131,6 +143,7 @@ export function App() {
         <a href={`${REPO}/blob/main/SECURITY.md`}>security</a>
         <a href={`${REPO}/blob/main/docs/ROADMAP.md`}>roadmap</a>
         <a href={`${REPO}/blob/main/CONTRIBUTING.md`}>contribute</a>
+        <span>Figures: <a href="https://hairline.lucasmarkes.com">Hairline</a> by Lucas Marques (MIT)</span>
         <span>Updated <time dateTime={BUILD_DATE}>{BUILD_DATE}</time></span>
       </footer>
     </>

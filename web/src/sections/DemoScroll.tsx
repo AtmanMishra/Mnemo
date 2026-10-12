@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Term } from "./Section";
+import { HowItWorks, Term } from "./Section";
 import { Split } from "../Split";
 
 // The turn `mnemo --demo` plays, line for line from app/src/runtime/demo.ts: the
@@ -166,6 +166,18 @@ export function DemoScroll() {
             <span>demo-model</span>
           </div>
         </Term>
+      </div>
+      <div className="wrap">
+        <HowItWorks
+          title="One turn, end to end"
+          items={[
+            { t: "Memory first", d: <>Before the model sees your message, memory is searched for it and what it finds is attached: facts about the project and you, earlier sessions, pitfalls with their fixes, skills. Recalled items are candidates, never presented as fact.</> },
+            { t: "The model streams", d: <>Thinking, text and tool calls stream into the transcript as they arrive. <kbd>enter</kbd> while it works queues your next message, <kbd>alt+enter</kbd> adds a newline, and <kbd>esc</kbd> interrupts the turn.</> },
+            { t: "Every tool call passes the gate", d: <>Reads run. Edits and commands ask, unless your mode or rules say otherwise, and a deny rule always holds. The question names the command or the file it is about.</> },
+            { t: "Everything is logged into the session", d: <>Each tool call and its outcome is recorded with its subject. A failure steers memory right away, once per distinct failure, so the same mistake is less likely in the same run.</> },
+            { t: "After the run, reflection", d: <>A clean run reinforces the memories that fed it. Then one grounded reflection writes the session record, the facts you stated or a tool showed, the fixes that resolved failures, and a skill when one was demonstrated.</> },
+          ]}
+        />
       </div>
     </section>
   );

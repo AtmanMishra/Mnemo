@@ -51,10 +51,17 @@ export function Checks() {
   return (
     <Section
       id="checks"
-      n="04"
+      n="05"
       eyebrow="it checks its work"
       title="How does Mnemo know a change actually works?"
       lead={<>It runs the project's checks before it calls a change done, moves to a stronger model when they keep failing, and can race several attempts and keep the smallest one that passes.</>}
+      figure={{ name: "format", label: "A file of ten crooked lines; the pointer runs the formatter down it and every line above snaps square", means: "Nothing counts as done until the checks have run over it and everything has snapped square." }}
+      how={[
+        { t: "Verify before done", d: <>A run that changed code and ran nothing is sent back once, to run the project's checks: the test, typecheck, lint and build commands memory knows for this project. A change is checked before it is called done.</> },
+        { t: "Escalate when the checks keep failing", d: <>With <code>--escalate provider/id</code>, after the checks fail twice the rest of the run moves to the stronger model, and a note in the transcript says why. The cheap model does the work it can; the expensive one only finishes what it could not.</> },
+        { t: "Best of n", d: <><code>mnemo -p "&lt;task&gt;" --best-of 3 --check "npm test"</code>, or <code>/bestof</code> in the interface, runs attempts in separate git worktrees, runs the check in each, and applies the smallest change that passed. Every candidate's diff is kept, and if none passes nothing is applied.</> },
+        { t: "Headless", d: <><code>mnemo -p "&lt;task&gt;"</code> runs one task and prints the answer, which suits scripts and CI. It never asks, so run it in a container or a throwaway checkout.</> },
+      ]}
     >
       <div className="checks">
         <article className="check" data-reveal="">

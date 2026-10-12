@@ -13,7 +13,7 @@ export function Measured() {
   return (
     <Section
       id="measured"
-      n="11"
+      n="12"
       eyebrow="what we measured"
       title="Does the memory make a small model better?"
       lead={<>On a small, cheap model (DeepSeek v4.1 Flash), through the same agent loop with memory on and off: from 87% to 100% on a six-task repository and from 82% to 99% on two repositories with conflicting rules. On unrelated one-off tasks it made no difference. Small samples: read the direction, not the decimals.</>}

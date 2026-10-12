@@ -14,6 +14,8 @@ in `site/` once the domain moves.
   This reads outside `web/`, so the Vercel project must keep **Include source files outside of the Root
   Directory in the Build Step** on (the default).
 - One section per feature in `web/src/sections/`, each with a working demo built from the app's own text (command and tool descriptions, the `--demo` turn, the gate's rules, the theme palettes). Interactive state is local; the server render and reduced motion show every demo in its finished state.
+- Each feature is paired with a figure from [Hairline](https://hairline.lucasmarkes.com) (`@lucasmarkes/hairline`, MIT): isometric line drawings that answer the pointer, loaded only as they near the screen (`web/src/Figure.tsx`). They style themselves with constructable stylesheets, so the CSP needs no change, and draw with the page's colour tokens.
+- Themes: light and dark tokens at the top of `web/src/styles.css`; the header toggle cycles system → light → dark, kept in `localStorage` and applied by `public/boot.js` before first paint.
 - Motion is loaded after hydration (GSAP + Lenis, one smooth-scroll engine, fine pointers only) and does not
   run under `prefers-reduced-motion`. The hero is `src/art/engram.ts`; the idea behind it is in
   `art/ENGRAM.md`.

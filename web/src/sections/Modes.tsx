@@ -26,10 +26,18 @@ export function Modes() {
   return (
     <Section
       id="safety"
-      n="06"
+      n="07"
       eyebrow="permissions"
       title="Is it safe to let it run commands?"
       lead={<>By default it asks before every edit and command. Four modes set how much it may do on its own, and ordered allow / ask / deny rules in <code>~/.mnemo/permissions.json</code> hold in all of them. The gate filters what runs; it is not a sandbox.</>}
+      figure={{ name: "vault", label: "A vault door with a dial and three bolts; the pointer turns the dial, and on the combination the bolts draw back", means: "Nothing opens by accident: each kind of action has its own combination, and you set it." }}
+      how={[
+        { t: "A deny rule outranks everything", d: <>Rules in <code>~/.mnemo/permissions.json</code> say <code>allow</code>, <code>ask</code> or <code>deny</code> for a tool and a pattern. A deny holds in every mode, <code>/yolo</code> included, with or without a terminal: “stop asking” is a statement about questions, not about permissions.</> },
+        { t: "Approvals generalise by subcommand, never by program", d: <>Approving <code>git status --short</code> “always” covers <code>git status*</code>, never <code>git*</code>, which would also hand over <code>git push</code> and <code>git clean -xdf</code>. Arguments never generalise: a path is not a class.</> },
+        { t: "A compound command never inherits a grant", d: <><code>ls; rm -rf /</code> matches an approved <code>ls*</code> and must not use it. Anything with a shell metacharacter is its own question.</> },
+        { t: "Ask is the default", d: <>There is no fallthrough that quietly allows. Plan mode refuses every change and tells the model to describe it instead. Sub-agents and programs in the Python kernel go through the same gate, and you still answer for every edit and command they make.</> },
+        { t: "A filter, not a sandbox", d: <>Commands run as you and inherit your environment, provider keys included, which a prompt injection could try to read. Use <code>/yolo</code> and headless <code>-p</code> in a container or a throwaway checkout.</> },
+      ]}
     >
       <div className="modes" data-reveal="">
         <div className="seg" role="radiogroup" aria-label="Mode">

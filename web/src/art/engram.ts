@@ -26,9 +26,13 @@ export interface Engram {
 }
 
 const RAMP = [" ", ".", ":", "+", "x", "*", "#"];
-const INKS = ["#9D7BFF", "#3DDBD9", "#FF5C8A", "#FFB547"];
-const DIM = "#6B6178";
-const GROUND = "#0E0B16";
+// The inks come from the page's theme tokens, read again when the theme changes.
+const INK_TOKENS = ["--violet", "--cyan", "--magenta", "--amber"];
+function readInks(): { inks: string[]; dim: string } {
+  const css = getComputedStyle(document.documentElement);
+  const get = (t: string, fallback: string) => css.getPropertyValue(t).trim() || fallback;
+  return { inks: INK_TOKENS.map((t) => get(t, "#888")), dim: get("--faint", "#777") };
+}
 const FRAME_MS = 1000 / 40;
 const RIPPLE_EVERY = 13;
 const RIPPLE_SECONDS = 2.6;
@@ -61,6 +65,7 @@ export function createEngram(
   let last = 0;
   let pointer: { x: number; y: number } | null = null;
   let firstFrame = true;
+  let { inks: INKS, dim: DIM } = readInks();
 
   function layout() {
     const rect = canvas.getBoundingClientRect();
@@ -196,6 +201,10 @@ export function createEngram(
     else stop();
   });
   const onVisibility = () => (document.hidden ? stop() : start());
+  const themed = new MutationObserver(() => {
+    ({ inks: INKS, dim: DIM } = readInks());
+    if (options.reducedMotion) still();
+  });
   const onMove = (e: PointerEvent) => {
     const r = canvas.getBoundingClientRect();
     pointer = { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -209,6 +218,7 @@ export function createEngram(
   layout();
   resize.observe(canvas);
   seen.observe(canvas);
+  themed.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("blur", onLeave);
   canvas.addEventListener("pointermove", onMove);
@@ -233,6 +243,7 @@ export function createEngram(
       stop();
       resize.disconnect();
       seen.disconnect();
+      themed.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("blur", onLeave);
       canvas.removeEventListener("pointermove", onMove);

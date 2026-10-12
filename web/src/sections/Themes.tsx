@@ -27,10 +27,11 @@ export function Themes() {
   return (
     <Section
       id="themes"
-      n="10"
+      n="11"
       eyebrow="the interface"
       title="Why does it look like a game?"
       lead={<>Because a long session should be pleasant to watch. Mne the elephant reacts to the work, diffs and test runs are drawn as pixels, and <code>/theme</code> switches between three palettes that keep the same roles: magenta for the agent, cyan for structure, amber for anything memory did.</>}
+      figure={{ name: "exploded", label: "An app window in four layers; moving across opens the gap and moving down picks a layer", means: "The interface in layers: the transcript is the application, and everything else floats over it." }}
     >
       <div className="themes" data-reveal="">
         <div className="seg" role="radiogroup" aria-label="Theme">

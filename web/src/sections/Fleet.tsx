@@ -26,10 +26,18 @@ export function Fleet() {
   return (
     <Section
       id="fleet"
-      n="05"
+      n="06"
       eyebrow="many agents, one window"
       title="Can I run several agents at once?"
       lead={<>Yes. <kbd>ctrl+n</kbd> starts another agent on this project, <kbd>ctrl+g</kbd> opens the hub, <kbd>ctrl+s</kbd> splits the screen (up to four), <kbd>ctrl+p</kbd> switches project, and a toast tells you when one you are not watching finishes or needs you.</>}
+      figure={{ name: "hub", label: "A hub with eight tiles around it on dashed links; the tile under the pointer rises and its link turns solid", means: "One hub, many agents: the one you point at comes forward, the rest keep working." }}
+      how={[
+        { t: "Another agent, same project", d: <><kbd>ctrl+n</kbd> starts another agent on this project, with its own session. Agents on the same project share one memory, so what one learns, the others recall.</> },
+        { t: "The hub", d: <><kbd>ctrl+g</kbd> shows a card per agent: its status, its last prompt, and one pixel per turn, so a glance says which one is busy, idle or waiting on you.</> },
+        { t: "Split view", d: <><kbd>ctrl+s</kbd> puts up to four agents side by side, each with its own transcript and prompt.</> },
+        { t: "Projects", d: <><kbd>ctrl+p</kbd> switches project. Memory is kept per project, so a command learned in one repository is not offered in another.</> },
+        { t: "Toasts", d: <>When an agent you are not watching finishes or needs an answer, a toast says which one, so a long run never waits on you unnoticed.</> },
+      ]}
     >
       <div className="fleet" data-reveal="" onPointerEnter={() => setArmed(true)} onPointerLeave={() => setArmed(false)}>
         <div className="fleet-keys" role="tablist" aria-label="View">

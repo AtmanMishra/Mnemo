@@ -43,6 +43,12 @@
       "skillPath": "skills/emil-design-eng/SKILL.md",
       "computedHash": "51f2537e04d15911b41d78e2de24c36a0e26d41beae15e82a954fe5496a5eda9"
     },
+    "hairline-create": {
+      "source": "lucasmarkes/hairline",
+      "sourceType": "github",
+      "skillPath": "skills/hairline-create/SKILL.md",
+      "computedHash": "836906905802fe12e344719545b8ff4d99e3741af044454309b1f8dfe793a948"
+    },
     "seo": {
       "source": "AgriciDaniel/claude-seo",
       "sourceType": "github",

@@ -12,7 +12,6 @@ const TOOLS = [
   { name: "ipy_run", group: "kernel", d: "Run Python in a persistent kernel. Inside, tools.read(), tools.bash(), tools.grep(), and tools.parallel([...]) to run several at once." },
   { name: "spawn_subagent", group: "agents", d: "Delegate a self-contained task to a sub-agent that works on its own and reports back: read-only for research, full to edit (you still approve)." },
   { name: "read · edit · write · bash · grep", group: "files", d: "The coding tools every turn uses, each one through the permission gate." },
-  { name: "mcp__server__tool", group: "mcp", d: "Any MCP server in ~/.mnemo/mcp.json, registered under its own name." },
 ];
 
 export function Tools() {
@@ -20,10 +19,17 @@ export function Tools() {
   return (
     <Section
       id="tools"
-      n="07"
+      n="08"
       eyebrow="what it can use"
       title="What tools does the agent have?"
-      lead={<>The usual coding tools, plus memory it can search and correct, skills it can write, a Python kernel that can drive the other tools in parallel, sub-agents, and your MCP servers.</>}
+      lead={<>The usual coding tools, plus memory it can search and correct, skills it can write, a Python kernel that can drive the other tools in parallel, and sub-agents it can hand work to.</>}
+      figure={{ name: "relay", label: "A hub with four branches of tiles; the path to the leaf under the pointer lights hop by hop", means: "Work is handed down a path, hop by hop: to a program, to a sub-agent, and back with an answer." }}
+      how={[
+        { t: "A Python kernel that drives the other tools", d: <><code>ipy_run</code> runs Python in a persistent kernel whose state survives between calls. Inside it, <code>tools.read()</code>, <code>tools.bash()</code> and <code>tools.grep()</code> call the agent's tools, and <code>tools.parallel([...])</code> sends a whole batch at once: one program instead of a dozen round trips.</> },
+        { t: "Sub-agents with a brief, not a transcript", d: <><code>spawn_subagent</code> hands a self-contained task to a child agent: read-only for research, or full to edit. The child gets a brief the parent wrote, the parent's model, and the same memory, so what it learns the parent can recall. Its steps stream into the parent's tool block, delegation is limited in depth, and you still approve its edits and commands.</> },
+        { t: "Memory it can search and correct", d: <><code>memory_search</code> and <code>session_search</code> look things up; <code>memory_remember</code> keeps a durable fact; <code>memory_steer</code> says that something memory supplied was wrong, so it is trusted less next time.</> },
+        { t: "Skills it can write", d: <><code>create_skill</code> and <code>update_skill</code>, described above, plus the coding tools every turn uses: read, edit, write, bash and grep, each through the permission gate.</> },
+      ]}
     >
       <div className="tools" data-reveal="">
         <div className="tool-list" role="listbox" aria-label="Tools" aria-activedescendant={`tool-${cur}`} tabIndex={0}

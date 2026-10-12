@@ -39,10 +39,11 @@ export function Palette() {
   return (
     <Section
       id="commands"
-      n="09"
+      n="10"
       eyebrow="commands"
       title="What can I type?"
       lead={<>Type <kbd>/</kbd> in Mnemo for every command: these built-ins, your skills, and whatever the agent's extensions add. Try it here.</>}
+      figure={{ name: "keyboard", label: "A sixty-key board; the key under the pointer sinks and its neighbours follow it down", means: "Everything is a key or a slash away; the keys you reach for most never animate." }}
     >
       <div className="palette" data-reveal="">
         <div className="pal-in">

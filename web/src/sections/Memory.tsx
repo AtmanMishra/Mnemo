@@ -59,6 +59,15 @@ export function Memory() {
       eyebrow="memory"
       title="What does Mnemo remember, and how do I control it?"
       lead={<>Facts, conventions, pitfalls with their fixes, open threads and skills, stored on your machine and kept per project. Before every model call the relevant ones are recalled; you can read all of it with <code>/memory</code>, add with <code>/remember</code> and retire with <code>/forget</code>. Try it: select a node, steer it, forget it, or tell it something.</>}
+      figure={{ name: "settle", label: "Twelve tiles lying crooked around a hub slide into a tree as the pointer comes near", means: "Scattered runs settle into one structure: what the memory graph does with what each session leaves behind." }}
+      how={[
+        { t: "It writes after every run", d: <>When a run ends, one model call reads a grounded digest of it: your words, the answers, every tool call with its outcome, the failure-and-recovery pairs found in the tool log, and the files that changed. It returns facts, the session record (goal, outcome, what was done, decisions, open threads), fixes, and a skill when one was demonstrated. Only what you said or a tool showed is kept: a guess is not memory.</> },
+        { t: "It recalls before the model is asked", d: <>At the start of each run your message is searched against memory and what it finds travels with the message, beside a standing profile of the project and of you. A small model often will not think to search, so Mnemo does not leave it to the model. The model can still look further itself with <code>memory_search</code> and <code>session_search</code>.</> },
+        { t: "One current value per key", d: <>A fact is a key and a value. Saying something new about the same key supersedes the old value instead of adding a second one, so a changed rule never comes back as two live instructions. The old value keeps its place in history; nothing is erased.</> },
+        { t: "A graph in six areas", d: <>Memories are nodes in areas modelled on the brain: episodic (sessions and outcomes), semantic (facts), procedural (skills), spatial (repositories, paths, services), salience (what hurt) and executive (steering decisions). A question is routed toward the likely areas but still searches all of them, and one hop along the graph's links brings related memories with it.</> },
+        { t: "An append-only journal on your disk", d: <>Every change is one of eleven operations appended to a journal, and replaying the journal rebuilds the memory exactly. The journal is the only source of truth. Mnemo, its sub-agents and Claude Code's hooks can write to it at the same time without corrupting it.</> },
+        { t: "Earned, filtered, redacted", d: <>A recalled memory earns a “useful” vote only when the answer reuses words that are distinctive to it, and votes gently reorder what comes back. Text that tries to instruct the agent, smuggle data out or hide characters is refused, and credential-shaped strings are redacted before anything reaches memory or a log.</> },
+      ]}
     >
       <div className="memx" data-reveal="">
         <div className="mem-map">
