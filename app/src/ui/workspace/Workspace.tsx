@@ -19,6 +19,8 @@ import type { Controller } from "../../runtime/controller.ts";
 import { BlockView } from "../components/Blocks.tsx";
 import { Composer } from "../components/Composer.tsx";
 import { DialogView, InputActive } from "../components/Dialogs.tsx";
+import { Engram } from "../components/Engram.tsx";
+import { ENGRAM_MIN } from "../engram.ts";
 import { MotionContext } from "../components/motion.ts";
 import { WorkingLine } from "../components/Working.tsx";
 import { RaceView } from "../components/Race.tsx";
@@ -278,6 +280,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   );
 
   const runningTool = snap.live.some((b) => b.kind === "tool" && b.status === "running");
+  const writing = snap.live.some((b) => b.kind === "assistant" && !b.done);
   // Something learned: the memory tab animates it in for a few seconds.
   const learnedFresh = useFresh(chrome.activity?.kind === "learned" ? chrome.activity : undefined);
   const { frame: dropFrame } = useAnimation({ interval: 120, isActive: motion && learnedFresh });
@@ -330,7 +333,13 @@ export function Workspace({ controller, source, motion, initial, width, height, 
                 />
                 {empty ? (
                   <Box height={mainHeight} flexDirection="column" justifyContent="center" alignItems="center">
-                    {mainHeight >= 16 ? <IdleMne /> : null}
+                    {mainHeight >= ENGRAM_MIN.rows + 4 && mainWidth >= ENGRAM_MIN.cols + 4 ? (
+                      <Box marginBottom={1}>
+                        <Engram cols={Math.min(mainWidth - 4, 56)} rows={Math.min(mainHeight - 4, 17)} />
+                      </Box>
+                    ) : mainHeight >= 16 ? (
+                      <IdleMne />
+                    ) : null}
                     <Text color={palette.dim}>Ask anything about this project.</Text>
                     <Text color={palette.faint}>/ commands · @ files · tab sidebar · ctrl+b hide it</Text>
                   </Box>
@@ -343,7 +352,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
                         working={snap.working}
                         message={dialog ? "Waiting for you…" : chrome.workingMessage}
                         queue={snap.queue}
-                        mode={dialog ? "wait" : runningTool ? "tool" : "think"}
+                        mode={dialog ? "wait" : runningTool ? "tool" : writing ? "write" : "think"}
                         escalated={escalated}
                       /> : null}
                   </Viewport>

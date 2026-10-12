@@ -10,6 +10,7 @@ import { testCounts } from "../activity.ts";
 import { MotionContext } from "./motion.ts";
 import { Markdown } from "./Markdown.tsx";
 import { Pulse } from "./Pulse.tsx";
+import { Dither } from "./Dither.tsx";
 import { Welcome, type WelcomeInfo } from "./Welcome.tsx";
 
 export interface BlockProps {
@@ -186,12 +187,10 @@ function ThinkingView({ block, expanded }: { block: Extract<Block, { kind: "thin
     const last = block.text.trim().split("\n").at(-1) ?? "";
     return (
       <Gutter mark={glyph.thinking} tint={color.accent}>
-        <Text color={color.text}>
-          <Text color={color.muted} italic>
-            Thinking{" "}
-          </Text>
-          <Pulse mode="think" width={10} />
+        <Text color={color.muted} italic>
+          Thinking
         </Text>
+        <Dither width={28} rows={2} />
         {last ? (
           <Text color={color.subtle} italic wrap="truncate-end">
             {last}

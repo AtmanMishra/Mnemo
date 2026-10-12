@@ -58,7 +58,22 @@ export function App({ controller, version, home, motion, clearTerminal }: AppPro
       </Static>
       <Box flexDirection="column" width={columns}>
         {snap.live.map(render)}
-        {chrome.workingVisible ? <WorkingLine working={snap.working} message={dialog ? "Waiting for you…" : chrome.workingMessage} queue={snap.queue} /> : null}
+        {chrome.workingVisible ? (
+          <WorkingLine
+            working={snap.working}
+            message={dialog ? "Waiting for you…" : chrome.workingMessage}
+            queue={snap.queue}
+            mode={
+              dialog
+                ? "wait"
+                : snap.live.some((b) => b.kind === "tool" && b.status === "running")
+                  ? "tool"
+                  : snap.live.some((b) => b.kind === "assistant" && !b.done)
+                    ? "write"
+                    : "think"
+            }
+          />
+        ) : null}
         {dialog ? <DialogView dialog={dialog} /> : null}
         <Composer
           working={snap.working !== null}

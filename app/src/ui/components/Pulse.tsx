@@ -4,19 +4,21 @@
  *
  *   tool    a scanner: one lit pixel sweeps back and forth, trailing a fade
  *           (cyan → magenta), like a head reading a tape
- *   think   neurons: pixels flicker at random brightness in violet, a field
- *           that settles the moment the answer starts
+ *   think   an ordered-dither field drifting in violet: a picture the
+ *           model has not finished resolving (see ditherFrame)
+ *   write   the answer is streaming: cells fill left to right through the
+ *           eighth-blocks, in magenta, like a line being typed
  *   wait    one amber pixel breathing: the agent waits for you
  *
  * Without motion (tests, --no-motion, a pipe) it is a still row of dim pixels.
  */
 import React from "react";
 import { Text, useAnimation } from "ink";
-import { hash01 } from "../pixel.ts";
+import { ditherFrame } from "../pixel.ts";
 import { mix, palette } from "../theme.ts";
 import { MotionContext } from "./motion.ts";
 
-export type PulseMode = "tool" | "think" | "wait";
+export type PulseMode = "tool" | "think" | "write" | "wait";
 
 /** The colours of each cell at a frame: pure, for tests. */
 export function pulseFrame(mode: PulseMode, width: number, frame: number): { ch: string; color: string }[] {
@@ -32,10 +34,16 @@ export function pulseFrame(mode: PulseMode, width: number, frame: number): { ch:
       cells.push({ ch: d === 0 ? "█" : d === 1 ? "▓" : d === 2 ? "▒" : "░", color: mix(palette.rule, hue, 0.25 + lit * 0.75) });
     }
   } else if (mode === "think") {
-    const glyphs = [" ", "·", "∙", "•", "▪"];
+    for (const c of ditherFrame(width, 1, frame, 11)[0]!)
+      cells.push({ ch: c.ch === " " ? "·" : c.ch, color: mix(palette.rule, c.level > 0.8 ? palette.magenta : palette.violet, 0.35 + c.level * 0.65) });
+  } else if (mode === "write") {
+    const eighths = [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"];
+    const span = width * 8 + 6;
+    const fill = frame % span;
     for (let i = 0; i < width; i++) {
-      const v = hash01(i, Math.floor(frame / 1.5), 11);
-      cells.push({ ch: glyphs[Math.min(glyphs.length - 1, Math.floor(v * glyphs.length))]!, color: mix(palette.rule, v > 0.8 ? palette.magenta : palette.violet, 0.35 + v * 0.65) });
+      const k = Math.max(0, Math.min(8, fill - i * 8));
+      const fade = fill > width * 8 ? 1 - (fill - width * 8) / 6 : 1;
+      cells.push({ ch: eighths[k]!, color: mix(palette.rule, palette.magenta, (0.4 + 0.6 * (k / 8)) * fade) });
     }
   } else {
     const breathe = (Math.sin(frame / 3) + 1) / 2;

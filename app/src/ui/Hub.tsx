@@ -12,6 +12,7 @@ import * as os from "node:os";
 import { Box, Text, useInput } from "ink";
 import type { Agent } from "../runtime/fleet.ts";
 import { turns, type Outcome } from "./activity.ts";
+import { Pulse } from "./components/Pulse.tsx";
 import { PixelArt } from "./components/PixelArt.tsx";
 import { outcomeColor, Strip } from "./components/Strip.tsx";
 import { mne, mneMini, pixelText } from "./pixel.ts";
@@ -101,7 +102,12 @@ function Card({ a, n, s, on, inSplit, width }: { a: Agent; n: number; s: AgentSt
         <Text color={s?.tone ?? palette.faint}>{s?.glyph ?? "·"}</Text>
       </Box>
       <Text color={s?.kind === "waiting" ? palette.amber : s?.kind === "working" ? palette.magenta : palette.dim} wrap="truncate-end">
-        {clip(s?.label ?? "", inner)}
+        {s?.kind === "working" || s?.kind === "waiting" ? (
+          <>
+            <Pulse mode={s.kind === "waiting" ? "wait" : "think"} width={4} />{" "}
+          </>
+        ) : null}
+        {clip(s?.label ?? "", inner - (s?.kind === "working" || s?.kind === "waiting" ? 5 : 0))}
       </Text>
       <Text color={palette.dim} wrap="truncate-end">
         {s?.lastPrompt ? clip(`“${s.lastPrompt.replace(/\s+/g, " ")}”`, inner) : " "}

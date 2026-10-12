@@ -6,7 +6,8 @@ import { test, expect, afterEach } from "bun:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { pulseFrame } from "../src/ui/components/Pulse.tsx";
 import { reaction } from "../src/ui/components/MneBadge.tsx";
-import { mneMini, pixelText } from "../src/ui/pixel.ts";
+import { ditherFrame, mneMini, pixelText } from "../src/ui/pixel.ts";
+import { engramFrame } from "../src/ui/engram.ts";
 import { mnemoEnv } from "./helpers.ts";
 
 const envs: Awaited<ReturnType<typeof mnemoEnv>>[] = [];
@@ -20,6 +21,32 @@ test("the scanner sweeps one lit pixel across and back", () => {
   expect(pulseFrame("think", 8, 3)).toHaveLength(8);
   expect(pulseFrame("think", 8, 3)).not.toEqual(pulseFrame("think", 8, 9));
   expect(pulseFrame("wait", 4, 0)[0]!.ch).toBe("■");
+});
+
+test("thinking is an ordered dither that moves; the answer streaming fills in", () => {
+  const a = ditherFrame(24, 2, 3);
+  expect(a).toHaveLength(2);
+  expect(a[0]).toHaveLength(24);
+  expect(new Set(a.flat().map((c) => c.ch)).size).toBeGreaterThan(2);
+  expect(ditherFrame(24, 2, 3)).toEqual(a);
+  expect(ditherFrame(24, 2, 12)).not.toEqual(a);
+  const fill = (f: number) => pulseFrame("write", 4, f).map((c) => c.ch).join("");
+  expect(fill(0)).toBe("    ");
+  expect(fill(8)).toBe("█   ");
+  expect(fill(32)).toBe("████");
+});
+
+test("Engram settles into Mne in half-block pixels, from a field of glyphs", () => {
+  const half = (cells: ReturnType<typeof engramFrame>) => cells.flat().filter((c) => "▀▄█".includes(c.ch)).length;
+  const settled = engramFrame({ cols: 40, rows: 15, t: 0, animate: false });
+  expect(settled).toHaveLength(15);
+  expect(settled[0]).toHaveLength(40);
+  expect(half(settled)).toBeGreaterThan(60);
+  expect(settled.flat().some((c) => ".:+x*#".includes(c.ch) && c.ch !== " ")).toBe(true);
+  const early = engramFrame({ cols: 40, rows: 15, t: 0.2 });
+  expect(half(early)).toBeLessThan(half(settled) / 4);
+  expect(engramFrame({ cols: 40, rows: 15, t: 1.3, seed: 7 })).toEqual(engramFrame({ cols: 40, rows: 15, t: 1.3, seed: 7 }));
+  expect(engramFrame({ cols: 40, rows: 15, t: 1.3, seed: 8 })).not.toEqual(engramFrame({ cols: 40, rows: 15, t: 1.3, seed: 7 }));
 });
 
 test("Mne's eyes go where it looks; the font draws every letter", () => {

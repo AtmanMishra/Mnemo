@@ -152,11 +152,14 @@ never flips the layout mid-stream.
 
 | What | How | Why |
 |---|---|---|
-| pulse | a pixel scanner sweeping while a tool runs; violet neurons flickering while the model thinks; one amber pixel breathing while it waits for you (there is no spinner) | what kind of work, at a glance |
+| pulse | a pixel scanner sweeping while a tool runs; an ordered (Bayer) dither drifting in violet while the model thinks; magenta eighth-blocks filling while the answer streams; one amber pixel breathing while it waits for you (there is no spinner) | what kind of work, at a glance |
+| thinking | a streaming thought shows a two-row dither field under `Thinking` (`components/Dither.tsx`, `ditherFrame` in `pixel.ts`): a picture the model has not finished resolving | thinking looks like thinking |
+| engram | the empty transcript: a seeded field of ASCII characters drifting on a noise current settles into Mne in half-block pixels; a ring of forgetting crosses it every 13 s (`engram.ts`, the same piece as the site's hero) | the agent's face, before the first word |
 | Mne | at icon size beside the working line: eyes glancing while thinking, down at the work for a tool, amber when waiting, violet with a spark after escalation | the agent has a face |
 | reactions | the header's light and a label for a few seconds: `✓ 12 passed`, `✗ 1 failed`, `✦ recalled 3`, `◈ +2 learned`, `⚡ escalated` | what just happened |
 | dither-in | a new block's mark resolves `░ ▒ ▓` → mark | new things arrive, they do not pop |
 | drop | something learned falls into the memory tab as a pixel and shows `+n` | learning is visible |
+| hub | a working agent's card carries a live dither pulse; one waiting on you breathes amber | which agent is busy, at a glance |
 | toasts | other agents' events slide in at the top right and dissolve | nothing off screen goes unseen |
 | shimmer | a brighter band sweeps across the working verb, 120 ms/step | alive, without blinking |
 | verb | rotates through memory verbs (*Recalling, Connecting, Consolidating, Thinking, Reasoning, Weaving…*) every few seconds | brand voice |

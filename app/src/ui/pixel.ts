@@ -250,3 +250,49 @@ export function place(w: number, h: number, items: { grid: Grid; x: number; y: n
     );
   return out;
 }
+
+/** Smooth value noise in [0, 1] over the plane, seeded: the current every field drifts on. */
+export function valueNoise(x: number, y: number, seed = 0): number {
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const xf = x - xi;
+  const yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  const a = hash01(xi, yi, seed);
+  const b = hash01(xi + 1, yi, seed);
+  const c = hash01(xi, yi + 1, seed);
+  const d = hash01(xi + 1, yi + 1, seed);
+  return a + (b - a) * u + (c - a + (d - c - b + a) * u) * v;
+}
+
+/** The 4×4 Bayer matrix, as thresholds in [0, 1). */
+const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((n) => (n + 0.5) / 16);
+
+/**
+ * Ordered dithering of a drifting field: the thinking animation. Each cell's
+ * value is a slow travelling wave plus noise; the Bayer threshold decides
+ * whether it rounds up or down between two steps of the shade ramp, so the
+ * field reads as a gradient made of a fixed pattern that moves — the look of
+ * an old screen dithering a picture it has not finished.
+ */
+export function ditherFrame(width: number, rows: number, frame: number, seed = 3): { ch: string; level: number }[][] {
+  const ramp = [" ", "░", "▒", "▓", "█"];
+  const steps = ramp.length - 1;
+  const t = frame / 10;
+  const out: { ch: string; level: number }[][] = [];
+  for (let y = 0; y < rows; y++) {
+    const row: { ch: string; level: number }[] = [];
+    for (let x = 0; x < width; x++) {
+      const wave = 0.5 + 0.5 * Math.sin(x * 0.42 - t * 2.1 + Math.sin(y * 1.3 + t) * 0.8);
+      const n = valueNoise(x * 0.35 + t, y * 0.7 - t * 0.6, seed);
+      const v = Math.min(0.999, Math.max(0, wave * 0.6 + n * 0.55 - 0.1));
+      const scaled = v * steps;
+      const lo = Math.floor(scaled);
+      const level = Math.min(steps, lo + (scaled - lo > BAYER4[(y % 4) * 4 + (x % 4)]! ? 1 : 0));
+      row.push({ ch: ramp[level]!, level: level / steps });
+    }
+    out.push(row);
+  }
+  return out;
+}
