@@ -1,6 +1,6 @@
 {
   "name": "@selfev/mnemo-app",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Mnemo: a terminal coding agent built on pi, with an Ink interface, a Rust memory layer and a Python execution kernel.",
   "type": "module",
   "private": true,
