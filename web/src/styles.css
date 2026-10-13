@@ -133,10 +133,6 @@ section > p { max-width: 74ch; }
 .final { padding-bottom: 8px; text-align: center; }
 .final .cta { justify-content: center; }
 
-.foot { margin-top: 64px; padding-top: 26px; padding-bottom: 48px; border-top: 1px solid var(--rule); font: 14px var(--mono); color: var(--dim); display: flex; gap: 10px 22px; flex-wrap: wrap; }
-.foot a { color: var(--dim); }
-@media (hover: hover) and (pointer: fine) { .foot a:hover { color: var(--text); } }
-
 @media (max-width: 820px) {
   body { font-size: 16px; }
   .hero { grid-template-columns: 1fr; gap: 28px; padding-top: 32px; }

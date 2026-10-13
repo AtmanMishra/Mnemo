@@ -7,9 +7,10 @@
   "scripts": {
     "prebuild": "node scripts/installers.mjs",
     "dev": "node scripts/installers.mjs && vite",
-    "build": "tsc --noEmit && vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr && node scripts/prerender.mjs",
+    "build": "tsc --noEmit && vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr && node scripts/prerender.mjs && node scripts/check.mjs",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "node scripts/check.mjs"
   },
   "dependencies": {
     "@lucasmarkes/hairline": "0.5.0",

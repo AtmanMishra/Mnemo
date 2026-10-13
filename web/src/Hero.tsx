@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { VERSION } from "./site";
 import { Split } from "./Split";
 
 const SEEDS = [7, 11, 23, 42, 64, 99];
@@ -45,7 +46,7 @@ export function Hero() {
           <a className="btn primary" href="#install">Install Mnemo</a>
           <a className="btn" href="#demo">See a turn</a>
         </p>
-        <p className="facts" data-intro="">v0.1.0 · macOS · Linux · Windows · no Bun, Node or Rust needed</p>
+        <p className="facts" data-intro="">v{VERSION} · macOS · Linux · Windows · no Bun, Node or Rust needed</p>
       </div>
 
       <figure className="stage-wrap" data-intro="">

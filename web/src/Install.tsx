@@ -71,7 +71,7 @@ export function Install() {
         The installer checks the download's SHA-256 against the release's checksum file (that catches a corrupted download, not a
         compromised release: <a href={`${REPO}/blob/main/docs/RELEASING.md`}>verify provenance</a> if that matters to you), never
         touches your memory or settings, and upgrades in place when you run it again.{" "}
-        <a href={origin ? `${origin}/install.sh` : "/install.sh"}>Read the script first.</a>
+        <a href={origin ? `${origin}/install.sh` : "/install.sh"}>Read the script first.</a> Prefer a download? <a href="/download#all">Every build, with checksums.</a>
       </p>
       <p className="note">
         Then run <code>mnemo doctor</code> to see what it found, <code>mnemo --demo</code> for a scripted session that needs no API

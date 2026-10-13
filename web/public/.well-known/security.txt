@@ -1,5 +1,5 @@
 Contact: https://github.com/AtmanMishra/Mnemo/security/advisories/new
-Expires: 2027-10-11T00:00:00.000Z
+Expires: 2027-10-13T00:00:00.000Z
 Preferred-Languages: en
-Policy: https://github.com/AtmanMishra/Mnemo/blob/main/SECURITY.md
 Canonical: https://mnemo.atmanmishra.dev/.well-known/security.txt
+Policy: https://mnemo.atmanmishra.dev/security

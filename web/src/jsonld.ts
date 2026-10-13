@@ -1,9 +1,12 @@
 import { AUTHOR, BUILD_DATE, DESCRIPTION, LICENSE_URL, REPO, SITE, TITLE, VERSION } from "./site";
+import { routeFor } from "./routes";
 
 // Structured data for the one page. Only facts the page itself states: no ratings,
 // no reviews, no price other than free. FAQPage markup is left out on purpose: Google
 // retired its rich result, and the questions are on the page as plain headings.
-export function jsonLd(): string {
+export function jsonLd(path = "/"): string {
+  const route = routeFor(path);
+  if (route && path !== "/") return JSON.stringify({ "@context": "https://schema.org", "@graph": innerPage(route.title, route.description, path, route.label) }).replace(/</g, "\\u003c");
   const graph = [
     {
       "@type": "WebSite",
@@ -71,4 +74,30 @@ export function jsonLd(): string {
     },
   ];
   return JSON.stringify({ "@context": "https://schema.org", "@graph": graph }).replace(/</g, "\\u003c");
+}
+
+// A page other than the home page: itself, and where it sits.
+function innerPage(title: string, description: string, path: string, label: string) {
+  return [
+    {
+      "@type": "WebPage",
+      "@id": `${SITE}${path}#webpage`,
+      url: `${SITE}${path}`,
+      name: `${title} · Mnemo`,
+      description,
+      inLanguage: "en",
+      isPartOf: { "@id": `${SITE}/#website` },
+      about: { "@id": `${SITE}/#software` },
+      dateModified: BUILD_DATE,
+      breadcrumb: { "@id": `${SITE}${path}#breadcrumb` },
+    },
+    {
+      "@type": "BreadcrumbList",
+      "@id": `${SITE}${path}#breadcrumb`,
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Mnemo", item: `${SITE}/` },
+        { "@type": "ListItem", position: 2, name: label, item: `${SITE}${path}` },
+      ],
+    },
+  ];
 }

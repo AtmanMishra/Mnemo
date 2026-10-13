@@ -1,5 +1,22 @@
 # The website
 
+## Pages
+
+One prerendered file per route (`web/src/routes.ts` is the list): `/`, `/download`, `/docs`, `/shortcuts`,
+`/changelog`, `/roadmap`, `/security`, `/privacy`, `/terms`, plus `404.html`, `sitemap.xml`, the Atom feed
+`/changelog.xml` and `/mnemo-commands-and-shortcuts.md`. `npm run build` ends with `scripts/check.mjs`, which fails on
+a missing page, a wrong `<h1>` count, a duplicate title, a dead internal link or `#fragment`, or a page missing from the sitemap.
+
+Content lives in `web/src/content/`, not in the pages:
+
+- `changelog.ts`: **add an entry here for every release** (the page, the feed, the footer and download version all read it).
+- `roadmap.ts`: the lanes on `/roadmap`. No dates, on purpose.
+- `commands.ts`: the commands, keys and variables; keep it in step with `/help` and the app's key handlers.
+- The privacy and terms pages are in `web/src/pages/`; have them reviewed before relying on them as legal text.
+
+Download links point at `releases/latest/download/<asset>` (`mnemo-<platform>.tar.gz|zip`, `SHA256SUMS`), so they work
+for any version once its release is published.
+
 `web/` is the project site: a Vite + React page, prerendered to static HTML at build time, served from
 Vercel at <https://mnemo.atmanmishra.dev>, with DNS on Cloudflare. It replaces the old GitHub Pages site
 in `site/` once the domain moves.

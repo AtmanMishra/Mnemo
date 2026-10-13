@@ -29,18 +29,18 @@ export async function initMotion(root: HTMLElement): Promise<() => void> {
 
     // Hidden starting states are set here, then the CSS guard comes off in the same
     // frame, so there is no flash and no state the stylesheet has to own.
-    gsap.set(heroWords, { yPercent: 108 });
-    gsap.set(intro, { opacity: 0, y: 14 });
-    gsap.set(reveals, { opacity: 0, y: 16 });
+    // Pages differ in what they have, and GSAP warns about a target that matches nothing.
+    if (heroWords.length) gsap.set(heroWords, { yPercent: 108 });
+    if (intro.length) gsap.set(intro, { opacity: 0, y: 14 });
+    if (reveals.length) gsap.set(reveals, { opacity: 0, y: 16 });
     for (const h of splitHeads) gsap.set(h.querySelectorAll(".wi"), { yPercent: 108 });
     html.classList.remove("motion-pending");
 
-    gsap
-      .timeline({ defaults: { ease: "mnemoOut" } })
-      .to(heroWords, { yPercent: 0, duration: 0.75, stagger: 0.04 })
-      .to(intro, { opacity: 1, y: 0, duration: 0.55, stagger: 0.07, clearProps: "opacity,transform" }, "-=0.45");
+    const tl = gsap.timeline({ defaults: { ease: "mnemoOut" } });
+    if (heroWords.length) tl.to(heroWords, { yPercent: 0, duration: 0.75, stagger: 0.04 });
+    if (intro.length) tl.to(intro, { opacity: 1, y: 0, duration: 0.55, stagger: 0.07, clearProps: "opacity,transform" }, heroWords.length ? "-=0.45" : 0);
 
-    ScrollTrigger.batch(reveals, {
+    if (reveals.length) ScrollTrigger.batch(reveals, {
       start: "top 90%",
       once: true,
       onEnter: (els) =>

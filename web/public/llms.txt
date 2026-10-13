@@ -1,14 +1,21 @@
 # Mnemo
 
-> Mnemo is an open-source (Apache-2.0) terminal coding agent for macOS, Linux and Windows. After each run it writes down what it learned about your project, recalls it next session, and keeps the fix when something failed. Bring your own model; memory stays on your machine.
+> Mnemo is an open-source (Apache-2.0) terminal coding agent for macOS, Linux and Windows. After each run it writes down what it learned about your project, recalls it next session, and keeps the fix when something failed. Bring your own model; memory stays on your machine. No telemetry.
 
 ## Start here
-- [Home](https://mnemo.atmanmishra.dev/): what Mnemo is, a full turn, memory, skills, checks, multiple agents, permission modes, tools, commands, measurements, FAQ
-- [Install script](https://mnemo.atmanmishra.dev/install.sh): macOS and Linux one-liner (read it before you run it)
+- [Home](https://mnemo.atmanmishra.dev/): what Mnemo is, a full turn, memory, skills, checks, multiple agents, permission modes, tools, measurements, FAQ
+- [Download](https://mnemo.atmanmishra.dev/download): one archive per system, the one-line installers, checksums and how to verify them
+- [Documentation](https://mnemo.atmanmishra.dev/docs): quick start, install, first run, permission modes, memory, updating, uninstalling, where files live, troubleshooting
+- [Commands and shortcuts](https://mnemo.atmanmishra.dev/shortcuts): every slash command, key, command-line option and environment variable ([Markdown copy](https://mnemo.atmanmishra.dev/mnemo-commands-and-shortcuts.md))
+
+## Project
+- [Changelog](https://mnemo.atmanmishra.dev/changelog): every release, by type of change, with known issues ([Atom feed](https://mnemo.atmanmishra.dev/changelog.xml))
+- [Roadmap](https://mnemo.atmanmishra.dev/roadmap): in progress, next, later, shipped, not planned
+- [Source](https://github.com/AtmanMishra/Mnemo)
 - [Releases](https://github.com/AtmanMishra/Mnemo/releases): binaries, checksums, build attestations
 
-## Reference
-- [Source](https://github.com/AtmanMishra/Mnemo)
-- [Security policy](https://github.com/AtmanMishra/Mnemo/blob/main/SECURITY.md)
-- [Roadmap](https://github.com/AtmanMishra/Mnemo/blob/main/docs/ROADMAP.md)
-- [Measurements and write-ups](https://github.com/AtmanMishra/Mnemo/tree/main/research)
+## Trust
+- [Security](https://mnemo.atmanmishra.dev/security): what it may do, what leaves your machine, credentials, how to report a vulnerability
+- [Privacy policy](https://mnemo.atmanmishra.dev/privacy)
+- [Terms of use](https://mnemo.atmanmishra.dev/terms)
+- [Install script](https://mnemo.atmanmishra.dev/install.sh): read it before you run it
