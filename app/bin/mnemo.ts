@@ -4,6 +4,8 @@
  * arguments, the terminal, exit codes. Everything else takes what it needs as
  * parameters, so it can be tested without any of these.
  */
+// First: a compiled binary cannot load pi's login flows or Bedrock until this registers them.
+import "../src/runtime/bun-setup.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
