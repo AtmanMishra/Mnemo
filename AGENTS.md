@@ -5,9 +5,10 @@ Mnemo is one Bun application in `app/`, with its memory in Rust (`memory-layer/`
 (`tui-go/`, `agent/`, `harness-engine/`) is on the `legacy` branch and is not
 maintained; read it as a specification, never copy its security posture.
 
-**Start with `docs/ROADMAP.md`** (what is left), then `docs/HANDOFF.md` (the state
-of the Bun code and its conventions); target layout in `docs/REBUILD.md` and
-`docs/PLAN-monorepo.md`.
+**Start with `docs/ROADMAP.md`** (what is left) and `docs/MNEMO-INTERNALS.md` (how it
+works). `docs/HANDOFF.md` is superseded (only its conventions section still holds);
+`docs/REBUILD.md` and `docs/PLAN-monorepo.md` are early plans, not the current layout.
+The project site is `web/` (see `docs/WEB.md`); releases are `docs/RELEASING.md`.
 
 ## Layout
 
@@ -24,11 +25,14 @@ of the Bun code and its conventions); target layout in `docs/REBUILD.md` and
   learning, steering). `MemorySession` is the loop any agent drives; `service.ts` is the
   semantics over the sidecar. Test it alone: `cd packages/memory && bun test ./test`.
 - `memory-layer/`: `memsrv`, the Rust sidecar. `cd memory-layer && cargo test`.
+- `web/`: the site (Vite + React, deployed on Vercel), not part of the Bun workspace.
+  `cd web && npm run build && npm run check`. `site/` and `.github/workflows/pages.yml`
+  are the obsolete GitHub Pages site; leave them alone.
 
 ## Working in `app/`
 
     bun install
-    cd app && bun test ./test && bunx tsc --noEmit
+    cd app && bunx tsc --noEmit && bun test --timeout 30000 ./test
 
 Everything must be verifiable without an API key: tests run real pi sessions against
 pi-ai's faux provider (`src/runtime/demo.ts`), and `bun bin/mnemo.ts --demo --dump`

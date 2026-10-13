@@ -25,203 +25,265 @@ Three claims make that concrete:
    training time live in a searchable graph this agent writes itself, and that
    graph is consulted *before* every model call.
 2. **Experience compounds.** Failures steer the memory — stale facts get
-   superseded, unreliable context sources lose weight, recurring pain becomes a
-   lesson — so the same mistake is less likely twice.
-3. **Skills self-extend.** The agent builds tools for itself mid-task; they
-   persist, get indexed into memory, and are recallable by purpose later.
+   superseded, unreliable context sources lose weight, a recurring failure is
+   counted on one marker with its fix beside it, and what you mark wrong is
+   recalled less and then not at all — so the same mistake is less likely twice.
+3. **Skills self-extend.** The agent writes skills for itself mid-task (a
+   `SKILL.md`, saved after you approve); they persist, get indexed into memory,
+   and are recallable by purpose later.
 
 ## 2. The pieces
 
-**Where this is going:** one Bun application (`app/`) that is the interface *and*
-the agent, the Rust memory sidecar, and a Python kernel for execution. What is
-left to get there is `docs/ROADMAP.md`. Until then both stacks exist in the tree:
+One Bun application (`app/`) is the interface *and* the agent; the memory is a
+Rust sidecar; code execution is a Python kernel.
 
 | Piece | Language | What it owns |
 |---|---|---|
-| `app/` | Bun / TypeScript | **The target.** Interface, session, policy gate, memory and kernel clients, a pi RPC adapter. Interface partly built; agent not yet ported. |
-| `memory-layer/` | Rust | The brain. An append-only journal, a graph store, retrieval, steering, consolidation — and `memsrv`, the JSON-RPC sidecar every other process talks to. Stays. |
-| `agent/` | TypeScript (Node >= 22.18, no build step) | *Legacy, ported into `app/` per the roadmap.* The agent process. Wraps the `pi` coding-agent framework, registers Mnemo's tools, hosts the memory client, the Python kernel, hooks and schedules. |
-| `tui-go/` | Go (Bubble Tea v2) | *Legacy.* The interface that works today. Sections 4–5 below describe it. |
-| `harness-engine/` | TypeScript, zero deps | *Legacy, ported.* Loads and validates tool bundles the agent writes for itself. |
+| `app/` | Bun / TypeScript | The program. The Ink interface, the agent loop (pi's SDK, **in this process**), Mnemo's behaviour as nine pi extensions (policy gate, checkpoints, shell, memory, kernel, sub-agents, skills, escalation, trace), sessions, updates. |
+| `packages/memory/` | TypeScript | `@mnemo/memory`: the memory loop any agent can drive — profiles, recall, learning from a run, failure steering, skills, past-session search, `tidy`; and its attachments for Claude Code (hooks) and MCP clients. |
+| `memory-layer/` | Rust | The brain. An append-only journal, a graph store, retrieval, steering, consolidation — and `memsrv`, the JSON-RPC sidecar. |
+| `app/python/ipy_bridge.py` | Python | The kernel behind the `ipy_run` tool: one long-lived interpreter the agent drives. |
 
-They are separate processes talking **line-delimited JSON over stdio** — the
-same shape four times (pi's RPC, `memsrv`, the Python kernel bridge, MCP). No
-protocol library is a dependency, every client is testable against recorded
-lines, and a human debugging a stuck agent can `cat` the pipe.
+The previous stack (the Go interface `tui-go/`, the Node agent `agent/`,
+`harness-engine/`) is on the `legacy` branch, unmaintained; `docs/LEGACY.md`
+documents it.
+
+The pieces are separate processes where it pays: `memsrv` and the Python kernel
+are children of the app, and each speaks **line-delimited JSON over stdio**; so
+does the MCP server (`mnemo memory mcp`). No protocol library is a dependency,
+every client is testable against recorded lines, and a human debugging a stuck
+agent can `cat` the pipe. pi itself is not a process: it runs in the app.
 
 ## 3. One turn, end to end
 
 ```
-you type ─▶ TUI ──prompt──▶ agent (pi + Mnemo extensions)
-                              │
-                              ├─ before_agent_start: recall from memory (memsrv search)
-                              │                      + the memory directive
-                              ├─ model call ─▶ streaming text/thinking/tool deltas ─▶ TUI
-                              ├─ tool call: approval gate → permissions/plan mode → execute
-                              │             (bash/fs, ipy kernel, subagent, harness, MCP…)
-                              ├─ tool_execution_end: one line into the episode's log
-                              └─ turn_end: tokens/cost; session_shutdown: consolidate
+you type ─▶ interface ─▶ Controller ─▶ pi session (in process, Mnemo's extensions)
+                                         │
+                                         ├─ before_agent_start: recall from memory (memsrv search)
+                                         │                      + the memory directive and profiles
+                                         ├─ model call ─▶ streaming text/thinking/tool deltas ─▶ interface
+                                         ├─ tool call: policy gate (rules → mode → grants → approval)
+                                         │             · a known fix stops a repeated failing command
+                                         │             · edits are checkpointed first
+                                         │             ─▶ execute (read/bash/edit/write, ipy_run, subagent, memory…)
+                                         ├─ tool_execution_end: one line into the episode's log; a failure steers memory
+                                         └─ agent_end: a run that changed code and checked nothing goes back once;
+                                            then, in the background, one reflection writes what was learned
 ```
 
-What makes it *Mnemo* rather than a chat wrapper: step 2 — memory is injected
-before the model is asked anything, because relying on a small model to decide
+What makes it *Mnemo* rather than a chat wrapper: the first hook — memory is
+injected before the model is asked anything, because relying on a small model to decide
 to search costs a round trip and it often just won't. Retrieval is a candidate
 list, never presented as fact.
 
 ## 4. What the interface does
 
-One surface, not six panes. The transcript is the application; everything else
-floats over it and is dismissed with `esc`.
+One surface, not six panes. In a terminal Mnemo is a full-screen workspace; the
+transcript is the application and everything else is previewed in place and
+dismissed with `esc`. (`--inline` keeps the transcript in the terminal's
+scrollback instead.)
 
-**Keys** (all of them are generated from one table, so `^h` cannot drift):
+**Keys** (the full list is `web/src/content/commands.ts`, kept in step with the app
+by hand; `?` on an empty prompt shows the panel):
 
 | key | does |
 |---|---|
 | `enter` | send — or **queue**, if the agent is mid-turn |
-| `alt+enter` | **steer**: interrupt what it is doing with this |
-| `^e` / `^r` / `^a` | open every thinking / tool / all block at once |
-| `^t` | the folder explorer, on the right, focused in the same press |
-| `^s` `^m` `^o` `^l` `^k` | sessions · memory · schedules · logs · palette |
-| `^h` | every key **and** every command, including the agent's own |
-| `/` | the slash menu: built-ins, skills, plugin skills, harness bundles, and the commands the agent implements |
-| `^f` | transcript search — live, case-insensitive, wraps |
-| `^c` | clear the draft, interrupt the turn, or quit (twice) |
-| `^g` | hand mouse selection back to your terminal |
-| `esc` | up one level. Always. That is the whole navigation model |
+| `alt+enter` | new line (or end a line with `\`) |
+| `esc` | interrupt the turn; close a menu; twice clears the draft, or on an empty prompt **rewinds** |
+| `shift+tab` / `ctrl+t` | cycle the mode (default → accept edits → plan) / the thinking level |
+| `ctrl+o` | expand thinking and tool output, including what is already printed |
+| `ctrl+f` | find in the conversation — live; `↑` `↓` step through matches |
+| `ctrl+k` | on an empty prompt: one list of commands, agents, sessions and files |
+| `ctrl+b` · `tab` | show or hide the sidebar · move focus prompt → sidebar → transcript |
+| `1`–`5` (sidebar) | files · memory · sessions · skills · logs |
+| `ctrl+g` `ctrl+p` `ctrl+n` `ctrl+s` | the agent hub · switch project · another agent here · split view (up to four) |
+| `alt+1`…`alt+9`, `alt+,` `alt+.` | go to agent N · previous / next agent |
+| `/` · `@` | the slash menu · mention a file |
+| `ctrl+c` | clear the draft, interrupt the turn, or quit (twice) |
 
-**What is on screen**: a header band that travels while work is happening, a
-labelled region rule that says how many blocks are folded, the transcript with a
-two-cell speaker gutter (`▊` you, `│` Mnemo, `·` thinking, `●` a tool), and a
-status line with the current mode's useful keys on the left and live counts on
-the right. Tool output is captured and rendered natively inside foldable blocks.
+**What is on screen**: a header (project, branch, model, memory node count, cost),
+the sidebar, the transcript with a one-pixel-per-turn timeline in its title bar
+(`[` `]` step through turns), and the composer with a status line under it.
+Tool output is captured and rendered natively inside foldable blocks; file
+paths in tool calls and links in answers are clickable where the terminal
+supports OSC 8 (`MNEMO_LINKS=0` turns it off). In the memory pane `m` draws the
+memory map, `e` edits an item, `d` forgets it, `+` / `-` say it helped or was
+wrong, and *Recalled this session* lists what came back. Every screen is fitted
+to the terminal at any size and across resizes; the mouse wheel scrolls the
+conversation (`/mouse` or `MNEMO_MOUSE=0` hands selection back to the terminal).
+A turn that ends, or an approval that waits, while the terminal is in another
+window sends a desktop notification (OSC 9 and a bell; `MNEMO_NOTIFY=0` turns it
+off). The launch sequence, the first-run introduction and the goodbye screen fill
+the whole terminal, and Engram — the field of characters Mne settles out of —
+also appears in the welcome card and the empty transcript. `/theme` has eleven
+themes.
 
 **Commands** come from four places and land in one list: the interface's own
-built-ins (`/help`, `/sessions`, `/memory`, `/login`, `/model`, `/logout`, …),
-`SKILL.md` skills discovered from `.claude`/`.pi`/`.agents` roots walked up to
-the git root, plugin skills from the plugin cache, harness bundles from disk —
-and, on a live session, **whatever pi answers with** when asked `get_commands`.
-A name the interface does not know but the agent does is routed to the agent
-rather than refused, which is how `/hook`, `/schedule`, prompt templates and
-`/skill:name` work. Offline, the refusal stands.
+built-ins (`/help`, `/model`, `/login`, `/resume`, `/rewind`, `/stats`, `/memory`,
+`/remember`, `/forget`, `/mode`, `/theme`, `/update`, `/bestof`, …), commands
+that pi extensions register, pi's prompt templates, and `SKILL.md` skills
+(`/skill:name`). A name that is none of these is sent to the agent as an
+ordinary message.
 
-**For scripts and screenshots**: `mnemo --dump --rows 30 --cols 100` renders one
-frame to stdout and exits; `--keys "ctrl+k,e,s"` presses keys first. A TUI
-cannot be screenshotted from a script, and "it looked right when I ran it" is
-not a check anybody else can repeat.
+**For scripts and screenshots**: `mnemo --demo --dump` runs the scripted demo turn,
+renders one frame to stdout and exits. A TUI cannot be screenshotted from a
+script, and "it looked right when I ran it" is not a check anybody else can
+repeat.
 
 ## 5. Running it
 
 ```bash
-# 1. the code
-git clone https://github.com/AtmanMishra/self-evolving-agent && cd self-evolving-agent
+# 1. a release — nothing else needed (no Bun, Node or Rust)
+curl -fsSL https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.sh | sh   # macOS / Linux
+irm https://github.com/AtmanMishra/Mnemo/releases/latest/download/install.ps1 | iex        # Windows (PowerShell)
 
-# 2. everything else — checks your toolchain first, then builds
-./scripts/install.sh            # macOS / Linux
-.\scripts\install.ps1           # Windows (PowerShell)
+# 2. or from a checkout (needs Bun 1.3+ and a Rust toolchain)
+git clone https://github.com/AtmanMishra/Mnemo && cd Mnemo
+bun install
+(cd memory-layer && cargo build --release --bin memsrv)
+cd app && bun bin/mnemo.ts --demo     # a scripted session, no key; app/scripts/install.sh installs from here
 
-# 3. run it, pointed at the repository
-mnemo --repo "$(pwd)"
+# 3. run it, in a project
+mnemo doctor      # what it found: model, memory, python (--fix repairs what it can)
+mnemo
 ```
 
-Node **22.18+** is the one hard requirement (that is the first version that runs
-`.ts` with no flag). Rust is needed only for the memory sidecar; Go only if you
-would rather build the interface than download it from
-[Releases](https://github.com/AtmanMishra/self-evolving-agent/releases).
+The installer downloads one archive holding `mnemo` and `memsrv`, checks its
+SHA-256 against the release's `SHA256SUMS`, and puts both in `~/.mnemo/bin`; on a
+terminal it draws itself as it goes. Python is needed only for the `ipy_run` tool
+(`python3` or `python`, or `MNEMO_PYTHON`); without one the tool is simply not
+offered.
 
-**First run**: the transcript says what to do — `/login` walks through picking a
-provider and pasting a key, `/model` picks the default. Both write
-`~/.mnemo/auth.json` (0600, never in the repo).
+**First run**: five short introduction pages, then the transcript says what to do —
+`/login` walks through picking a provider and pasting a key (or a subscription
+login), `/model` picks the default. Both write into `~/.mnemo/agent/`
+(`auth.json`; `mnemo doctor --fix` tightens it to 0600 if it is wider). Mnemo also
+uses credentials it finds in the environment (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, …); see `SECURITY.md`.
 
-**A project's instructions, and its pull request.** `mnemo init` looks at the
-repository — manifests, the scripts they define, top-level layout, CI workflows,
-the docs already there — and proposes the file pi loads at startup for a
-project's instructions (pi's own preference order: `AGENTS.override.md`,
-`AGENTS.md`, `CLAUDE.md`). Creating a file writes it; changing one shows the
-diff and asks, and an unanswered question is a refusal — `--yes` is the same
-consent stated in the command, and with no TTY at all there is no other way to
-give it. The generated part lives between `mnemo:init` markers, so a second run
-refreshes it in place and never reorders a line a person wrote, and a
-`write_file` deny rule blocks the whole command like it blocks any other write.
+**Keeping it**: `mnemo update` installs the latest release with the same
+checksum-checked installer (`--check` only says whether there is one; `/update`
+does it from inside Mnemo; `mnemo update --auto on` adds a daily check at launch
+that tells you and never installs — off by default; Homebrew and Scoop installs
+are left to `brew upgrade` / `scoop update`). `mnemo uninstall` removes the
+program and keeps what it learned; `--deep` also deletes `~/.mnemo` after you type
+`delete`, and only if the folder holds nothing but what Mnemo put there. The
+install scripts do the same with `sh -s -- --uninstall` / `--deep`
+(`MNEMO_UNINSTALL=1` or `deep` on Windows). `mnemo doctor --fix` tightens
+permissions on Mnemo's files, sets a broken `state.json` aside, removes best-of
+runs older than 30 days, and reinstalls a missing `memsrv`.
 
-`mnemo pr` opens a pull request for the current branch from the commits
-themselves: the branch's first commit titles it, the log and the real
-`git diff --stat` are the body, and no model writes a word. It refuses rather
-than guesses — on the base branch, with nothing committed ahead of it, without
-an authenticated `gh`, with no `origin`, and when the remote has commits the
-branch does not have — and it never force-pushes; a branch whose remote moved on
-is a refusal that tells you to merge or rebase yourself. `mnemo pr --review`
-posts a summary of the diff, behind its own flag: a summary, not a verdict,
-because nothing reviewed anything.
+**What the agent's commands inherit.** Bash, the Python kernel and best-of checks
+start without the model-provider API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+and the rest of the list in `app/src/runtime/env.ts`, plus any variable
+`models.json` interpolates). `MNEMO_PASS_ENV=NAME,NAME` hands named ones back. The
+Python kernel has a timeout per call (120 s by default, at most 600 s, the
+`timeout` parameter), is stopped by `esc`, and is capped at 8 GB of address space
+on Linux (`MNEMO_KERNEL_MEMORY_MB`, 0 for none). A cell that times out or is
+stopped loses the interpreter and its namespace.
+
+**Rewind.** Before an `edit` or `write`, the file's bytes are kept under the
+turn's user message. `esc esc` on an empty prompt (or `/rewind`) lists your
+messages and puts back the conversation, the files, or both; your message
+returns to the prompt. Changes made by shell commands are not tracked, and the
+record lives as long as the process.
+
+**Other commands.** `mnemo -p "<prompt>"` answers once and prints (headless: nobody is there to
+ask, so a call that would ask is allowed; `deny` rules and plan mode still hold). `mnemo -p "<task>" --best-of 3
+--check "<cmd>"` (and `/bestof`) races n attempts in separate git worktrees and
+applies the smallest change that passes the check. `--escalate provider/id`
+finishes a run on a stronger model after two failed checks. `mnemo memory …` is
+memory for other agents: `setup claude-code|codex` prints the hooks and MCP entry,
+`ingest` learns from Claude Code sessions, `tidy [--apply]` retires duplicate facts
+and pitfalls, facts about files that are gone, and what you marked wrong twice,
+`curate [--apply]` sorts skills by last use (stale after 30 days, archived after
+90, personal skills only), `status` says what memory holds.
 
 ## 6. Where things live
 
+All of it under `$MNEMO_HOME` (default `~/.mnemo`).
+
 | Path | What it is |
 |---|---|
-| `~/.mnemo/auth.json` | provider credentials and the default model (mode 0600) |
-| `~/.mnemo/permissions.json` | ordered allow/ask/deny rules, first match wins |
-| `~/.mnemo/mcp.json` | MCP servers, registered as `mcp__<server>__<tool>` |
-| `~/.mnemo/schedules.json` | scheduled prompts and triggers |
-| `~/.mnemo/hooks/` | user-scope hooks (project `.mnemo/hooks/` wins over them) |
-| `~/.mnemo/logs/<date>.jsonl` | trace spans, redacted before write |
-| `memory-layer/data/sea-agent-journal.jsonl` | **the memory graph** — an append-only op log, the only source of truth |
-| `~/.pi/agent/sessions/<project>/…jsonl` | conversations (pi writes these; Mnemo reads them) |
+| `bin/` | `mnemo` and `memsrv`, where the installer puts them |
+| `agent/auth.json`, `agent/models.json`, `agent/settings.json` | pi's directory: provider credentials, custom providers, the default model |
+| `agent/sessions/<project>/…jsonl` | conversations (pi writes these; Mnemo reads them) |
+| `agent/skills/` | personal skills (project skills are `.agents/skills/` in the repository) |
+| `permissions.json` | ordered allow/ask/deny rules, first match wins (a deny anywhere wins) |
+| `grants.json` | "don't ask again" grants, per project and global |
+| `state.json` | the theme, recent folders, whether the introduction was seen, the update check |
+| `logs/<date>.jsonl` | one line per tool call and turn, redacted before write |
+| `memory/journal.jsonl` | **the memory graph** — an append-only op log, the only source of truth |
+| `memory/sessions.db` | the past-session search index (SQLite FTS5), derived |
+| `memory/embed/embed-cache.json` | cached embeddings from a remote or local embedding server, derived |
+| `.env` | settings `memsrv` reads for what the real environment does not set (never from a project folder) |
+| `kernel/ipy_bridge.py` | the Python kernel's bridge, written out from the binary on first use |
+| `best-of/<stamp>/` | each best-of candidate's diff |
+| `skill-history/<name>/` | the previous body of a skill changed with `update_skill` (a patch memory proposes after a run keeps its copy in `agent/skill-history/`) |
 
 The journal and the session store are deliberately different things: a session
 is one conversation and is disposable; the journal is cross-session and
-cross-project, and is the thing that makes a fresh session start smart.
+cross-project (a project is its git remote, so every clone shares it), and is the
+thing that makes a fresh session start smart.
 
 ## 7. Checking it
 
-Four suites, all runnable locally and all run by CI:
+Three suites, all runnable locally and all run by CI:
 
 ```bash
-cd agent          && npm test && npx tsc --noEmit
-cd memory-layer   && cargo test
-cd tui-go         && go test ./... && go vet ./...
-cd harness-engine && npm test
+cd app             && bun test --timeout 30000 ./test && bunx tsc --noEmit
+cd packages/memory && bun test ./test && bunx tsc --noEmit
+cd memory-layer    && cargo test
 ```
 
-CI runs the TUI suite on **ubuntu, macos and windows** — portability is a
-property, not a hope — plus a credential-shaped-string scan over the working
-tree and the last 200 commits.
+The app and memory-package tests drive the real `memsrv`; without a built
+sidecar they skip and say so. CI runs the app suite on **ubuntu, macos and
+windows** — portability is a property, not a hope — plus a retrieval gate, a check
+that the compiled binary renders a demo frame, and a credential-shaped-string
+scan over the working tree and the last 200 commits. Everything is verifiable
+without an API key: the app tests run real pi sessions against pi-ai's faux
+provider, and `mnemo --demo --dump` prints a whole scripted turn.
 
 The memory layer has a retrieval eval, `cargo run --bin memeval [--hash]`,
 reporting Hit@1 / Hit@3 / MRR. The `--hash` numbers are deterministic and pinned
-(73% / 77% / 0.743 on 22 cases): any change to retrieval is measured against
-them before and after, and a change that regresses is reverted.
+(73% / 77% / 0.743 on 22 cases, enforced by `tests/memeval_gate.rs`): any change
+to retrieval is measured against them before and after, and a change that
+regresses is reverted.
 
-**Does a constraint survive being stated once?** That question has two halves,
-and they are measured in different places on purpose. The recall half —
-`memory-layer/tests/constraint_probe.rs`, no model, runs on every commit — seeds
-constraints (a package manager, a port, a comment style) and asks for them later
-in the words a person would use. The behavioural half —
-`scripts/eval-constraint-compliance.mjs`, needs a provider key — runs the agent
-against a throwaway project and checks it actually *complies*: the command it
-proposes uses pnpm, the URL it gives is port 4111, the comment it writes explains
-why. Compliance is judged by a deterministic rule over the answer, never by
-another model, because a judge that can be talked into a pass is not a
-measurement. The `.github/workflows/nightly-evals.yml` job runs both weekly and
-skips the second with a notice when no key is configured — a green run that
-measured nothing would be worse than a skipped one.
+**Does memory make the next session better?** That is measured in `app/eval/`
+(see its README): small git projects, a few sessions a person would plausibly
+have, and deterministic checks — no model judges a model — each run with memory
+and without, so a behaviour that passes either way is not credited to memory.
+`bun eval/run.ts` needs a provider key; `--faux` runs the harness alone, and
+`app/test/eval.test.ts` proves the checks discriminate. The recall half of "does
+a constraint survive being stated once" needs no model and runs on every commit:
+`memory-layer/tests/constraint_probe.rs`.
 
 ## 8. The state of it, honestly
 
-**Works**: the interface and its overlays; graph memory with areas, routed
-search, steering and consolidation; automatic recall before every turn; the tool
-set (bash/fs, Python kernel, subagents, harness bundles, MCP, web, images);
-hooks; schedules; traces; permissions and plan mode; a first-run flow a person
-can follow; binaries for five platform pairs.
+**Works**: the interface and its overlays; graph memory with areas, routed search,
+steering, trust-weighted recall and `tidy`; automatic recall before every turn and
+learning after every run; the tool set (pi's file and shell tools, the Python
+kernel, sub-agents, skills); permissions and plan mode; rewind; best-of and
+escalation; several agents in one window; memory attached to Claude Code and
+MCP clients; update and uninstall; a first-run flow a person can follow; binaries
+for five platform pairs.
 
-**Rough**: the agent's test suite has real Windows failures (hooks run through
-`sh -c`); session branching, `/compact` and a theme picker are not wired; mouse
-hit-testing is declared and unimplemented; retrieval has known misses left
-failing on purpose; the kernel has no per-call timeout and no resource bounds.
+**Rough**: the Windows installer and the Windows builds of the newest features have
+had less real-machine testing than macOS and Linux; the kernel is bounded (a
+timeout, a memory cap on Linux only) but is an interpreter, not a sandbox, and
+neither is the permission gate; hooks, schedules, MCP servers as tools and
+harness bundles from the previous stack are not ported; nothing in the app runs
+memory consolidation any more (the sidecar still offers it); the background
+curator that tidies memory while you are away is not in a release (it lives on
+`feature/background-curator`); retrieval has known misses left failing on purpose.
 
 Nothing here is hidden: the open work is
-[in the issue tracker](https://github.com/AtmanMishra/self-evolving-agent/issues),
-and the reviews that produced it are in `research/` (the command surface, the
-capability review, and the design for a memory runtime that improves the graph
-while nobody is watching).
+[in the issue tracker](https://github.com/AtmanMishra/Mnemo/issues), and the
+reviews that produced it are in `research/` (the capability review, the Hermes
+comparison, and the design for a memory runtime that improves the graph while
+nobody is watching).
 
 ## 9. The docs, sorted
 
@@ -232,6 +294,9 @@ while nobody is watching).
 | **`docs/ROADMAP.md`** | you want to know what is left before users can have it, and in what order |
 | `DESIGN.md` | you are touching how it looks: palette, glyphs, mascot, keys, motion |
 | `AGENTS.md` | you are an agent working in this repo (conventions + binding invariants) |
-| `plan.md` / `STATUS.md` | you want the work tracker / the outcome log with evidence |
+| `SECURITY.md` | you want to know what the permission gate does and does not do, or to report a vulnerability |
+| `docs/RELEASING.md` · `docs/releases/` · `web/src/content/changelog.ts` | you are cutting a release / want the release notes / the changelog |
+| `docs/LEGACY.md` | you want the documentation of the previous stack (Go interface + Node agent) |
+| `plan.md` / `STATUS.md` | history: the work tracker and outcome log of the previous stack |
 | `research/` | current design papers (reviews, the memory-runtime design) |
 | `docs/archive/` | history: superseded architecture docs, adoption reports, audit record |

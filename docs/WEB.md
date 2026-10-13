@@ -18,8 +18,7 @@ Download links point at `releases/latest/download/<asset>` (`mnemo-<platform>.ta
 for any version once its release is published.
 
 `web/` is the project site: a Vite + React page, prerendered to static HTML at build time, served from
-Vercel at <https://mnemo.atmanmishra.dev>, with DNS on Cloudflare. It replaces the old GitHub Pages site
-in `site/` once the domain moves.
+Vercel at <https://mnemo.atmanmishra.dev>, with DNS on Cloudflare. It replaced the old GitHub Pages site in `site/`, which is now unused (as is `.github/workflows/pages.yml`).
 
 ## How it is built
 
@@ -41,7 +40,7 @@ in `site/` once the domain moves.
 ## Vercel
 
 1. Add New → Project → import `AtmanMishra/Mnemo`. Root Directory: `web`. Framework preset: Vite.
-2. Production Branch: `main` once `web` is merged (until then, set it to `web`).
+2. Production Branch: `main`. Pull requests get a preview deployment.
 3. Settings → Domains → add `mnemo.atmanmishra.dev`. Vercel shows the record to create; it is a CNAME.
 
 ## Cloudflare (DNS)

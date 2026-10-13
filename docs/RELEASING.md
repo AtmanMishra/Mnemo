@@ -30,7 +30,8 @@ that makes the archives cannot sign anything (a separate job does).
 
 1. **Be on a green `main`.** CI (`ci.yml`) must pass there.
 2. **Rehearse.** *Actions → release → Run workflow* on `main`, leave `tag`
-   empty. That is a dry run: all five platforms are built, smoke-tested (the
+   empty. That is a dry run (setting `tag` and `publish` instead publishes a tag that
+   already exists, if it is on `main`): all five platforms are built, smoke-tested (the
    binary runs a whole scripted turn and finds its sidecar), the one-liner
    installer is run against the archive (install, upgrade, uninstall) and
    attestations are made. Nothing is published; the archives are the run's
@@ -43,8 +44,13 @@ that makes the archives cannot sign anything (a separate job does).
    `packages/memory/package.json` and `memory-layer/Cargo.toml` (and the lockfile,
    which the release builds with `--locked`), runs the type-check and tests, and
    commits. Open a pull request from it and merge it.
-4. **Write the notes (optional).** `docs/releases/v0.1.0.md`, if present, is the
-   release body; otherwise GitHub generates it from the merged pull requests.
+4. **Write the notes.** `docs/releases/v0.1.0.md`, if present, is the release body
+   (the workflow uses it as `--notes-file`); otherwise GitHub generates it from the
+   merged pull requests. Every release so far has one (see `docs/releases/v0.1.2.md`).
+   Also add an entry at the top of `RELEASES` in `web/src/content/changelog.ts`:
+   the site's changelog page, Atom feed, footer and download version all read it,
+   and `release.ts` does not touch it. Land both in the release pull request (or
+   before the tag), and run `cd web && npm run build` to check the site still builds.
 5. **Tag.**
 
        git checkout main && git pull
@@ -80,25 +86,19 @@ re-tag a version people may have installed.
 
 ## The install one-liner and the site
 
-`site/` is the project's page; `pages.yml` publishes it with GitHub Pages and
-copies `app/scripts/get.sh` and `get.ps1` into it as `install.sh` and
-`install.ps1`, so the page, the release asset and the repository always carry
-the same installer. The scripts download from the GitHub release, so the site
-only ever serves a few kilobytes of text.
+`web/` is the project's site (Vite + React, on Vercel at `mnemo.atmanmishra.dev`;
+setup, DNS and content are in `docs/WEB.md`). Its build runs
+`web/scripts/installers.mjs`, which copies `app/scripts/get.sh` and `get.ps1` to
+`/install.sh` and `/install.ps1`, so the site, the release asset and the repository
+always carry the same installer. The scripts download from the GitHub release, so
+the site only ever serves a few kilobytes of text. Vercel deploys `main` on its own;
+a release needs nothing from it except the changelog entry above.
 
-One-time setup:
-
-1. Repository **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-2. **Custom domain** (same page): enter your domain and tick *Enforce HTTPS* once
-   the certificate is issued. DNS at your registrar:
-   - a subdomain such as `get.example.com`: one `CNAME` record to `atmanmishra.github.io`
-   - an apex domain: four `A` records to `185.199.108.153`, `185.199.109.153`,
-     `185.199.110.153`, `185.199.111.153` (and, for IPv6, the four `AAAA` records
-     in GitHub's documentation)
-3. This project's domain is `mnemo.atmanmishra.dev`: a `CNAME` record, host `mnemo`, pointing to `atmanmishra.github.io` (no trailing path, DNS only if your registrar proxies).
-4. Nothing in the repository names the domain: the page builds its one-liner
-   from the address it is served from. Once it works, put the short one-liner
-   in the README.
+**Obsolete:** `site/` and `.github/workflows/pages.yml` are the earlier GitHub Pages
+site. They are kept in the tree but superseded by `web/`; the Pages setup that used
+to be described here (Settings → Pages, a CNAME to `atmanmishra.github.io`) should
+stay off, because the domain now points at Vercel. Do not rely on them or extend
+them.
 
 ## Homebrew and Scoop (optional)
 

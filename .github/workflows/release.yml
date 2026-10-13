@@ -1,7 +1,7 @@
 name: release
 
 # A tag is the trigger: v0.1.0, v0.2.0-rc.1, … Cut it from main with
-# scripts/release.sh (docs/RELEASING.md), which bumps the versions and tags.
+# app/scripts/release.ts (docs/RELEASING.md), which bumps the versions and tags.
 #
 # Run by hand (Actions → release → Run workflow) it is a DRY RUN: all five
 # platforms are built, smoke-tested and attested, the archives are kept as the

