@@ -71,3 +71,12 @@ test("the installers and `mnemo uninstall` agree on what a Mnemo home holds", as
   expect(shList?.sort()).toEqual([...HOME_ENTRIES].sort());
   expect(psList?.sort()).toEqual([...HOME_ENTRIES].sort());
 });
+
+test("test-install.sh: every check in the container can fail the run", () => {
+  const text = fs.readFileSync(path.join(scripts, "test-install.sh"), "utf8");
+  const inner = text.slice(text.indexOf("sh -c '") + "sh -c '".length, text.lastIndexOf("'"));
+  // `cond && echo ✓` is exempt from `set -e`: a false cond printed nothing and the run went on green.
+  const unguarded = inner.split("\n").filter((l) => /echo "✓/.test(l) && !/^\s*echo "✓/.test(l) && !/\|\| \{[^}]*exit 1; \}; echo "✓/.test(l));
+  expect(unguarded).toEqual([]);
+  if (dash) expect(Bun.spawnSync([dash, "-n", "-c", inner]).exitCode).toBe(0);
+});
