@@ -44,7 +44,7 @@ export function Shortcuts() {
         </p>
       </PageHead>
 
-      <div className="tools" role="search">
+      <div className="filters" role="search">
         <label className="visually-hidden" htmlFor="sc-q">Search commands, keys and variables</label>
         <input id="sc-q" ref={search} type="search" placeholder="Search: rewind, ctrl+f, MNEMO_HOME …   (press / to focus)" value={query} onChange={(e) => setQuery(e.target.value)} autoComplete="off" spellCheck={false} />
         <div className="chips" role="group" aria-label="Show">

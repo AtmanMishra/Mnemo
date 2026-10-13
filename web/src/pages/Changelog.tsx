@@ -33,7 +33,7 @@ export function Changelog() {
         lead={<>Every feature, change, fix and security fix, newest first, with the problems known when each version was cut. Subscribe with the <a href="/changelog.xml">Atom feed</a>, or follow the <a href={`${REPO}/releases`}>releases on GitHub</a>.</>}
       />
 
-      <div className="tools">
+      <div className="filters">
         <label className="visually-hidden" htmlFor="cl-q">Search the changelog</label>
         <input id="cl-q" type="search" placeholder="Search the changelog" value={query} onChange={(e) => setQuery(e.target.value)} autoComplete="off" spellCheck={false} />
         <div className="chips" role="group" aria-label="Type of change">
