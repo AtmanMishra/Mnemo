@@ -53,7 +53,10 @@ that makes the archives cannot sign anything (a separate job does).
    The script refuses unless you are on an up-to-date `main` whose three versions
    match. Pushing the tag is the only step that publishes anything.
 6. **Watch it.** The workflow publishes only if the tag names the commit it built
-   and that commit is on `main`. Pre-release tags (`v0.2.0-rc.1`) are marked as
+   and that commit is on `main`, and every version field matches the tag exactly
+   (`v0.2.0-rc.1` needs `0.2.0-rc.1` in all three). The release is made as a
+   draft, the files are attached, and only then is it made public, so a failed
+   upload never leaves a half release behind `releases/latest`. Pre-release tags (`v0.2.0-rc.1`) are marked as
    pre-releases and do not update the tap. That check is a safety net against
    mistakes, not access control: anyone who can push a tag can run the workflow
    file at that tag. Access control is the repository setup below.

@@ -74,13 +74,14 @@ jobs:
         if: ${{ env.TAG != '' }}
         shell: bash
         run: |
-          want="${TAG#v}"; want="${want%%-*}"
+          # The whole version, pre-release part included: v0.2.0-rc.1 on a 0.2.0 tree would ship as 0.2.0.
+          want="${TAG#v}"
           for f in app/package.json packages/memory/package.json; do
             v=$(bun -e "console.log(require('./$f').version)")
-            [ "${v%%-*}" = "$want" ] || { echo "::error::tag $TAG but $f says $v"; exit 1; }
+            [ "$v" = "$want" ] || { echo "::error::tag $TAG but $f says $v"; exit 1; }
           done
           v=$(sed -n 's/^version = "\(.*\)"/\1/p' memory-layer/Cargo.toml | head -1)
-          [ "${v%%-*}" = "$want" ] || { echo "::error::tag $TAG but memory-layer/Cargo.toml says $v"; exit 1; }
+          [ "$v" = "$want" ] || { echo "::error::tag $TAG but memory-layer/Cargo.toml says $v"; exit 1; }
 
       - name: memsrv
         shell: bash
@@ -250,7 +251,9 @@ jobs:
           notes="--generate-notes"
           [ -f "docs/releases/$TAG.md" ] && notes="--notes-file docs/releases/$TAG.md"
           # No --clobber fallback: a release that exists is never overwritten (a bad one is fixed by a new version).
-          gh release create "$TAG" dist/* --title "Mnemo $TAG" $notes $prerelease
+          # A draft first: if an upload fails, nobody (and no installer's releases/latest) sees half a release.
+          gh release create "$TAG" dist/* --draft --title "Mnemo $TAG" $notes $prerelease
+          gh release edit "$TAG" --draft=false
 
       # Optional: keep a Homebrew tap and a Scoop bucket current. Set the
       # TAP_TOKEN secret (a fine-grained token with contents:write on those two
