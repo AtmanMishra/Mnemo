@@ -21,15 +21,17 @@ export function titleFrom(text: string): string {
 }
 
 /** Read once per change of the file: the Sessions pane asks after every run. */
-const cache = new Map<string, { mtime: number; summary: SessionSummary }>();
+const cache = new Map<string, { stamp: string; summary: SessionSummary }>();
 
 export function summarizeSession(file: string): SessionSummary {
-  const mtime = fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs;
-  if (mtime === undefined) return { cost: 0 };
+  const st = fs.statSync(file, { throwIfNoEntry: false });
+  if (!st) return { cost: 0 };
+  // Size as well as time: a file appended to within the clock's resolution (coarse on Windows) has the same mtime.
+  const stamp = `${st.mtimeMs}:${st.size}`;
   const hit = cache.get(file);
-  if (hit?.mtime === mtime) return hit.summary;
+  if (hit?.stamp === stamp) return hit.summary;
   const summary = readSummary(file);
-  cache.set(file, { mtime, summary });
+  cache.set(file, { stamp, summary });
   return summary;
 }
 

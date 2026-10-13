@@ -47,7 +47,7 @@ const TIMELINE_MAX = 24;
 function Header({ controller, columns, brand, mood }: { controller: Controller; columns: number; brand: boolean; mood: MneMood }): React.ReactElement {
   const chrome = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const f = chrome.footer;
-  const repo = f.cwd.split("/").filter(Boolean).at(-1) ?? f.cwd;
+  const repo = f.cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? f.cwd;
   // The right side gives way first: the branch goes, then the model; a long
   // folder name is cut to what is left rather than pushing the row past the edge.
   const narrow = columns < 70;
@@ -399,7 +399,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
             {map !== undefined && focus !== "composer" && !search ? (
               <>
                 <Bar title="memory map" width={mainWidth - 1} focused={focus === "main"} />
-                <MemoryMap items={loaded.memory ?? []} project={cwd.split("/").filter(Boolean).at(-1) ?? cwd} width={mainWidth - 2} height={mainHeight} selected={map} />
+                <MemoryMap items={loaded.memory ?? []} project={cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? cwd} width={mainWidth - 2} height={mainHeight} selected={map} />
               </>
             ) : preview && focus !== "composer" && !search ? (
               <>

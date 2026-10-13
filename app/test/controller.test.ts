@@ -12,6 +12,7 @@ import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { startRuntime } from "../src/runtime/runtime.ts";
 import { Controller } from "../src/runtime/controller.ts";
 import { createDemoProject, createFaux, demoScript, DEMO_PROMPT } from "../src/runtime/demo.ts";
+import { nextDialog } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -86,8 +87,7 @@ test("the slash menu lists built-ins first", async () => {
 test("/model picks from the available models through a dialog", async () => {
   const { controller } = await setup();
   const pending = controller.submit("/model");
-  await new Promise((r) => setTimeout(r, 10));
-  const dialog = controller.dialogs.current();
+  const dialog = await nextDialog(controller);
   expect(dialog?.kind).toBe("select");
   if (dialog?.kind !== "select") throw new Error("no dialog");
   expect(dialog.choices.map((c) => c.value)).toContain("mnemo-demo/demo-model");

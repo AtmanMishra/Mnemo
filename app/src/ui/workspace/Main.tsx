@@ -58,11 +58,21 @@ export function useMeasuredHeight(ref: React.RefObject<DOMElement | null>): numb
   const pending = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     if (pending.current) return;
-    pending.current = setTimeout(() => {
-      pending.current = undefined;
+    const measure = () => {
       if (!ref.current) return;
       const h = measureElement(ref.current).height;
       setHeight((prev) => (prev === h ? prev : h));
+    };
+    // Ink lays the screen out on its own throttled frame (about 33 ms), so a
+    // measurement can come before the layout it is after. Measure again once that
+    // frame has surely passed: otherwise a box first shown, or shown again (an agent
+    // brought forward), can keep a stale height of 0 with nothing to re-render it.
+    pending.current = setTimeout(() => {
+      measure();
+      pending.current = setTimeout(() => {
+        pending.current = undefined;
+        measure();
+      }, 60);
     }, 16);
   });
   useEffect(() => () => clearTimeout(pending.current), []);
