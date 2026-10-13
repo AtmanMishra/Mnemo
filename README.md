@@ -118,6 +118,14 @@ cd app && bun bin/mnemo.ts --demo
   and what was marked wrong (`--apply` retires them). Search can use your own
   embedding server: `MNEMO_EMBED_URL=http://localhost:11434/v1/embeddings
   MNEMO_EMBED_MODEL=nomic-embed-text` (Ollama).
+- **Looks after its own memory.** While you are away (3 minutes idle), a
+  background curator spends a little of your default model on memory itself:
+  it merges duplicate facts and retires contradicted ones, drafts new skills
+  from procedures it has seen in several sessions and fixes for skills that
+  keep failing (you approve them with `/curator review`), and picks what to
+  bring back next time you work here. It stops the moment you type, makes no
+  call when nothing changed, and never spends more than 50k tokens a day
+  (`MNEMO_CURATOR_BUDGET`). `/curator` shows what it did; `/curator off` stops it.
 - **Memory for other agents.** `mnemo memory setup claude-code` prints the hooks
   and MCP entry that give Claude Code (or Codex) the same memory; `mnemo memory
   ingest` learns from Claude Code sessions you already have.

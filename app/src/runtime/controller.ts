@@ -24,6 +24,8 @@ import { bestOf, describeBestOf, type CandidateRunner, type LaneState } from "./
 import { selfCommand } from "./self.ts";
 import { summarizeSession, summaryText, titleFrom } from "./sessions.ts";
 import { readLogs, statsText } from "./stats.ts";
+import { Curator, DAILY_BUDGET, IDLE_MS, type CuratorDeps } from "./curator.ts";
+import { skillsDir } from "./paths.ts";
 
 export interface CommandInfo {
   name: string;
@@ -105,6 +107,7 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "yolo", description: "toggle bypass: ask for nothing (deny rules in permissions.json still hold)" },
   { name: "accept-edits", description: "toggle accept edits: change project files without asking, still ask before commands" },
   { name: "theme", description: "the look: Mnemo Night, Dracula, Nord, Gruvbox, Tokyo Night, Catppuccin, Synthwave, Amber CRT, Game Boy, Paper, Solarized" },
+  { name: "curator", description: "the background memory curator: /curator status · on · off · run · review" },
   { name: "update", description: "install the latest Mnemo · /update auto on|off: a daily check that only tells you" },
   { name: "mouse", description: "mouse wheel scrolls the conversation (on) or your terminal selects text (off)" },
   { name: "bestof", description: 'race N attempts at a task, keep the smallest that passes: /bestof 3 "npm test" <task>' },
@@ -192,6 +195,8 @@ export class Controller {
       updater?: Updater;
       /** How a best-of candidate runs (tests inject one; the default is this program, headless). */
       bestOfRunner?: CandidateRunner;
+      /** The background curator (runtime/curator.ts); off for one agent with false. Tests pass their own deps. */
+      curator?: false | Partial<CuratorDeps>;
     },
   ) {
     this.transcript = new Transcript({ now: options.now });
@@ -206,8 +211,39 @@ export class Controller {
         },
       };
       void this.refreshMemory();
+      if (host.memory && host.depth === 0 && options.curator !== false) {
+        const mem = host.memory;
+        const identity = projectIdentity(runtime.cwd);
+        this.curator = new Curator({
+          home: host.home,
+          memory: mem,
+          projectId: identity.id,
+          projectRoot: identity.root,
+          project: () => mem.project(identity.id, identity.root),
+          userSkillsDir: skillsDir(host.home),
+          ask: (system, user, signal) => this.curatorAsk(system, user, signal),
+          busy: () => this.transcript.isWorking || this.dialogs.current() !== undefined,
+          report: (title, items) => this.transcript.memory(title, items),
+          ...(options.curator || {}),
+        });
+        // What resurfacing found joins the next recall, once.
+        host.takeResurfaced = () => this.curator?.takeResurfaced() ?? [];
+        this.curator.start();
+      }
     }
     this.chrome = { footer: this.readFooter(), statuses: [], workingVisible: true, expanded: false };
+  }
+
+  readonly curator?: Curator;
+
+  /** The curator's one call: the default model, no tools, no session history. */
+  private async curatorAsk(system: string, user: string, signal: AbortSignal): Promise<{ text: string; tokens: number }> {
+    const model = this.runtime.session.model;
+    if (!model || !this.hasModel) throw new Error("no model to curate with (/login)");
+    const answer = await this.runtime.session.modelRuntime.completeSimple(model, { systemPrompt: system, messages: [{ role: "user", content: user, timestamp: Date.now() }] }, { signal });
+    if (answer.stopReason === "error" || answer.stopReason === "aborted") throw new Error(answer.errorMessage ?? "the model did not answer");
+    const text = answer.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+    return { text, tokens: (answer.usage?.input ?? 0) + (answer.usage?.output ?? 0) };
   }
 
   get session(): AgentSession {
@@ -339,6 +375,7 @@ export class Controller {
   /** The input reports its text so extensions can read it. */
   reportDraft(text: string): void {
     this.draft = text;
+    this.curator?.activity();
   }
 
   setDraft(text: string): void {
@@ -376,6 +413,7 @@ export class Controller {
   async submit(text: string, mode: "auto" | "steer" = "auto"): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) return;
+    if (!trimmed.startsWith("/curator")) this.curator?.activity();
     // A finished race has said its piece in the transcript.
     if (this.chrome.race?.done) this.update({ race: undefined });
     if (trimmed.startsWith("/")) {
@@ -400,6 +438,7 @@ export class Controller {
   }
 
   async quit(code = 0): Promise<void> {
+    this.curator?.stop();
     this.dialogs.cancelAll();
     this.unsubscribe?.();
     try {
@@ -460,6 +499,9 @@ export class Controller {
 
   private note(n: MemoryNote): void {
     switch (n.kind) {
+      case "resurfaced":
+        this.transcript.memory("Resurfaced", n.items, { afterNextUser: true });
+        break;
       case "recall":
         this.transcript.memory("Recalled", n.items, { afterNextUser: true });
         this.emit({ kind: "recall", text: n.items[0] ?? "", count: n.items.length });
@@ -542,6 +584,9 @@ export class Controller {
       case "quit":
       case "exit":
         await this.quit();
+        return true;
+      case "curator":
+        await this.curatorCommand(arg);
         return true;
       case "rewind":
         await this.rewind();
@@ -954,6 +999,77 @@ export class Controller {
     this.options.onClearScreen?.();
     this.transcript.clear();
     this.transcript.notice("New session");
+  }
+
+  private async curatorCommand(arg: string): Promise<void> {
+    const c = this.curator;
+    if (!c) {
+      this.transcript.notice(this.options.host?.memory ? "The curator is off for this agent." : "The curator needs memory, which is off: `mnemo doctor` says why.", "warn");
+      return;
+    }
+    const sub = arg.trim().split(/\s+/)[0] || "status";
+    if (sub === "on" || sub === "off") {
+      c.setEnabled(sub === "on");
+      this.transcript.notice(sub === "on" ? "Curator on: it tidies memory, drafts skill changes and resurfaces what matters, while you are away." : "Curator off. /curator run still does one pass when you ask.");
+      return;
+    }
+    if (sub === "run") {
+      this.transcript.notice("Curating memory…");
+      const out = await c.run();
+      if (!out.facts.length && !out.skills.length && !out.resurface.length) this.transcript.memory("Curator", ["nothing needed changing"]);
+      return;
+    }
+    if (sub === "review") return this.reviewSkills(c);
+    const b = c.budget();
+    const inbox = c.inbox().length;
+    this.transcript.memory("Curator", [
+      `${c.enabled ? "on" : "off"} · runs after ${Math.round(IDLE_MS / 60_000)} min idle · resurface every 2 h, facts 6 h, skills 12 h`,
+      `today: ${b.used.toLocaleString()} of ${DAILY_BUDGET.toLocaleString()} tokens`,
+      inbox ? `${inbox} skill change${inbox === 1 ? "" : "s"} waiting: /curator review` : "no skill changes waiting",
+    ]);
+  }
+
+  /** The inbox, one proposal at a time, shown as the file it would write. */
+  private async reviewSkills(c: Curator): Promise<void> {
+    const items = c.inbox();
+    if (!items.length) {
+      this.transcript.notice("No skill changes waiting.");
+      return;
+    }
+    const done: string[] = [];
+    for (const [i, p] of items.entries()) {
+      const old = p.kind === "update" && fs.existsSync(p.file) ? fs.readFileSync(p.file, "utf8") : undefined;
+      const answer = await this.dialogs.approval({
+        tool: p.kind === "new" ? "Save skill" : "Update skill",
+        subject: p.file,
+        preview: p.body.split("\n").map((text) => ({ text: `+ ${text}`, tone: "add" as const })),
+        reason: `${p.reason} (${i + 1} of ${items.length})`,
+      });
+      if (answer.kind === "no") {
+        done.push(`dropped ${p.name}${answer.feedback ? `: ${answer.feedback}` : ""}`);
+        continue;
+      }
+      if (old !== undefined) {
+        const history = path.join(path.dirname(skillsDir(this.options.host!.home)), "skill-history", p.name);
+        fs.mkdirSync(history, { recursive: true });
+        fs.writeFileSync(path.join(history, `${new Date().toISOString().replace(/[:.]/g, "-")}.md`), old);
+      }
+      fs.mkdirSync(path.dirname(p.file), { recursive: true });
+      fs.writeFileSync(p.file, p.body);
+      const mem = this.options.host?.memory;
+      if (mem && p.kind === "new") {
+        const node = await mem.createNode("harness", `skill ${p.name}`, "procedural");
+        if (node !== undefined) {
+          await mem.fact(node, "use when", /description:\s*"?(.*?)"?$/m.exec(p.body)?.[1] ?? p.name);
+          await mem.fact(node, "file", p.file);
+        }
+      }
+      done.push(`${p.kind === "new" ? "saved" : "updated"} skill ${p.name}`);
+    }
+    c.writeInbox([]);
+    this.transcript.memory("Skills reviewed", done);
+    this.needsReload = true;
+    void this.afterRun();
   }
 
   /**

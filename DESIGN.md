@@ -243,6 +243,24 @@ turn; recent projects below).
 Closing an agent (`ctrl+d`, `/quit`) closes that agent; closing the last one
 ends the program.
 
+### The background curator
+
+`runtime/curator.ts` schedules, `packages/memory/src/maintain.ts` does the work. One
+curator per agent, one job at a time per process, each job a single call to the
+session's default model (no tools, no history):
+
+| Job | Every | What | Applied |
+|---|---|---|---|
+| resurface | 2 h | up to 3 lines from memory worth having in mind given the last session | handed to the next recall once, shown as `◈ Resurfaced` |
+| facts | 6 h | the free tidy first (duplicates, files gone, marked wrong), then the model merges facts that say one thing and retires contradicted ones | at once; old values stay as history |
+| skills | 12 h | candidates seen in 2+ sessions become skills; skills whose recent uses failed are rewritten | proposed to `$MNEMO_HOME/curator/inbox.json`; `/curator review` approves each |
+
+It runs only after 3 minutes without a turn, a keystroke or a dialog
+(`MNEMO_CURATOR_IDLE_MS`), stops mid-call when you type (an interrupted job is
+not marked done), makes no call when a job's input is what it last looked at,
+and stops for the day at 50k tokens (`MNEMO_CURATOR_BUDGET`). What a pass did is a
+`◈ Curator` block in the transcript. `/curator` (status) · `on` · `off` · `run` · `review`.
+
 ## 7. Commands
 
 Built in: `/help`, `/model`, `/login`, `/logout`, `/new`, `/resume`, `/compact`,

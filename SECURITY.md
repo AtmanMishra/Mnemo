@@ -84,6 +84,16 @@ in a place you can afford to lose: a container, a throwaway checkout.
   is read from the real environment or `$MNEMO_HOME/.env`, never from the
   folder you are working in.
 
+- **The background curator sends memory to your model provider.** While the
+  agent is idle it asks your default model to tidy facts, draft skills and pick
+  what to resurface, so the text of your memories goes to that provider (the
+  same one your sessions already use), redacted for credential shapes first. At
+  most 50k tokens a day (`MNEMO_CURATOR_BUDGET`); `/curator off` stops it. Fact
+  changes it makes are kept as history; skills it drafts are written only when
+  you approve them (`/curator review`). What it resurfaces is shown to the model
+  labelled as context, not instructions, and passes the same safety scan as
+  anything else memory keeps.
+
 ## Credentials
 
 - Keys you add with `/login` are stored by pi in `$MNEMO_HOME/agent/auth.json`
