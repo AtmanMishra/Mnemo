@@ -369,3 +369,22 @@ describe("memory commands", () => {
     }
   }, T);
 });
+
+describe("a failed model call", () => {
+  test("-p exits 1 and says why when the provider refuses the request", async () => {
+    const w = fresh();
+    play(() => ({ status: 401, error: "invalid api key (mock)" }));
+    const r = await mnemo(w, ["-p", "hi", "--no-reflect"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("invalid api key (mock)");
+    expect(r.stdout.trim()).toBe("");
+  }, T);
+
+  test("--best-of counts a candidate whose model call failed as failed", async () => {
+    const w = fresh();
+    play(() => ({ status: 401, error: "invalid api key (mock)" }));
+    const r = await mnemo(w, ["-p", "hi", "--best-of", "2", "--check", "true"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("exit 1");
+  }, T);
+});

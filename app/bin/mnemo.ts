@@ -421,6 +421,12 @@ async function main(): Promise<number> {
         return 1;
       }
       await session.prompt(args.print);
+      // A refused or failed model call (a bad key, an outage) ends the turn quietly: say so, and fail.
+      const last = session.messages.findLast((m) => m.role === "assistant");
+      if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
+        console.error(`mnemo: the model call failed: ${last.errorMessage || last.stopReason}`);
+        return 1;
+      }
       process.stdout.write(`${session.getLastAssistantText() ?? ""}\n`);
       await settleBackground(host);
       return 0;
