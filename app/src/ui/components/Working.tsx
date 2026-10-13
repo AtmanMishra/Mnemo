@@ -49,8 +49,9 @@ export function WorkingLine({
   const motion = React.useContext(MotionContext);
   const { frame } = useAnimation({ interval: 120, isActive: motion && working !== null });
   if (!working && queue.length === 0) return null;
+  // Only a queue is left once a run is stopped (esc) before it is delivered: no verb then.
   const elapsed = working ? now() - working.since : 0;
-  const verb = message ?? `${workingVerbs[Math.floor(elapsed / 4000 + working!.since / 7) % workingVerbs.length]}…`;
+  const verb = message ?? (working ? `${workingVerbs[Math.floor(elapsed / 4000 + working.since / 7) % workingVerbs.length]}…` : "");
   return (
     <Box flexDirection="column" marginTop={1}>
       {working ? (

@@ -9,6 +9,7 @@ import { DialogView, filterChoices } from "../src/ui/components/Dialogs.tsx";
 import { BlockView } from "../src/ui/components/Blocks.tsx";
 import { Dialogs } from "../src/runtime/dialogs.ts";
 import { MotionContext } from "../src/ui/components/motion.ts";
+import { WorkingLine } from "../src/ui/components/Working.tsx";
 import type { CommandInfo } from "../src/runtime/controller.ts";
 
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
@@ -256,4 +257,15 @@ test("a filter ranks label matches ahead of description matches", () => {
     { value: "f", label: "▤ docs/state.md", description: "mention it" },
   ];
   expect(filterChoices(choices, "sta").map((c) => c.value)).toEqual(["stats", "f", "new"]);
+});
+
+test("a queued message with the run already stopped draws without a working line", () => {
+  // Queue a follow-up, then esc: the run ends before the queue empties.
+  const r = render(
+    <MotionContext.Provider value={false}>
+      <WorkingLine working={null} queue={["more please"]} />
+    </MotionContext.Provider>,
+  );
+  expect(r.lastFrame()).toContain("queued: more please");
+  expect(r.lastFrame()).not.toContain("esc to interrupt");
 });
