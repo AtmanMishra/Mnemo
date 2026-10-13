@@ -304,20 +304,23 @@ async function uninstallCommand(argv: string[], home: string): Promise<number> {
   const yes = argv.includes("--yes") || argv.includes("-y");
   const kind = installKind(process.execPath, home);
   const plan = planUninstall({ kind, home, deep, linkDir: process.env.MNEMO_LINK_DIR });
+  // --deep that cannot delete the data is not a success, whatever else goes.
+  let refused = false;
   if (plan.data && !looksLikeMnemoHome(plan.data.dir)) {
     console.error(`mnemo uninstall: ${plan.data.dir} holds files Mnemo did not put there; it is not deleted. Remove what you want from it by hand.`);
     plan.data = undefined;
+    refused = true;
   }
   if (kind === "source") console.log("You are running from a source checkout: there is no installed program to remove.");
   const lines = describePlan(plan);
   if (!plan.files.length && !plan.link && !plan.pathEntry && !plan.data) {
     for (const l of lines) console.log(l);
-    if (!plan.manager) console.log("Nothing to remove.");
-    return 0;
+    if (!plan.manager && !refused) console.log("Nothing to remove.");
+    return refused ? 1 : 0;
   }
   console.log("mnemo uninstall\n");
   for (const l of lines) console.log(`  ${l}`);
-  if (!plan.data) console.log(`\n  kept    ${home} (memory, sessions, settings; --deep deletes them too)`);
+  if (!plan.data) console.log(`\n  kept    ${home} (memory, sessions, settings${refused ? "" : "; --deep deletes them too"})`);
   if (!yes) {
     if (!process.stdin.isTTY) return console.error("\nmnemo uninstall: not a terminal; add --yes to go ahead"), 2;
     const answer = plan.data ? await ask('\nThis cannot be undone. Type "delete" to go ahead: ') : await ask("\nGo ahead? [y/N] ");
@@ -325,6 +328,11 @@ async function uninstallCommand(argv: string[], home: string): Promise<number> {
   }
   console.log("");
   for (const l of runUninstall(plan)) console.log(`  ✓ ${l}`);
+  if (refused) {
+    console.error(`\nmnemo uninstall: the program is removed, but ${home} was not deleted (it holds files Mnemo did not put there).`);
+    if (plan.manager) console.log(`Then run  ${plan.manager}`);
+    return 1;
+  }
   console.log("\nMnemo is uninstalled. If you attached its memory to Claude Code or Codex (mnemo memory setup), remove the mnemo entries from their settings too.");
   if (plan.manager) console.log(`Then run  ${plan.manager}`);
   return 0;

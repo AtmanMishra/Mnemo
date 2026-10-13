@@ -73,7 +73,7 @@ function Install-Mnemo {
     if (-not (Test-Path $dir)) { return $false }
     $full = (Resolve-Path $dir).Path.TrimEnd("\")
     if ($full -eq (Resolve-Path $HOME).Path.TrimEnd("\") -or $full.Length -le 3) { return $false }
-    $known = "state.json", "agent", "memory", "bin", "logs", "kernel", "best-of"
+    $known = "state.json", "agent", "memory", "bin", "logs", "kernel", "best-of", "permissions.json", "grants.json", "skill-history", "journal.jsonl"
     $items = Get-ChildItem -Force $dir
     if (-not $items) { return $false }
     foreach ($i in $items) { if ($known -notcontains $i.Name -and -not $i.Name.StartsWith(".") -and -not $i.Name.StartsWith("state.json")) { return $false } }

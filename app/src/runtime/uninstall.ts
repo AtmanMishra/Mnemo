@@ -40,6 +40,27 @@ function size(p: string): number {
 }
 
 /**
+ * Everything Mnemo writes at the top of its home (dotfiles such as `.env` aside).
+ * Kept in step with get.sh and get.ps1, which make the same check.
+ */
+export const HOME_ENTRIES = [
+  "state.json",
+  "agent",
+  "memory",
+  "bin",
+  "logs",
+  "kernel",
+  "best-of",
+  // the permission gate: rules, and approvals saved with "always"
+  "permissions.json",
+  "grants.json",
+  // earlier bodies of skills Mnemo rewrote
+  "skill-history",
+  // the journal's place before it moved into memory/
+  "journal.jsonl",
+];
+
+/**
  * A directory is only deleted whole if it is plainly Mnemo's: not a home or a
  * root, and holding what Mnemo puts there. A mistyped MNEMO_HOME must never
  * turn `--deep` into deleting something else.
@@ -48,9 +69,8 @@ export function looksLikeMnemoHome(dir: string, userHome = os.homedir()): boolea
   const abs = path.resolve(dir);
   if (abs === path.parse(abs).root || abs === path.resolve(userHome)) return false;
   if (!fs.existsSync(abs)) return false;
-  const known = ["state.json", "agent", "memory", "bin", "logs", "kernel", "best-of"];
   const entries = fs.readdirSync(abs);
-  return entries.length > 0 && entries.some((e) => known.includes(e)) && entries.every((e) => known.includes(e) || e.startsWith(".") || e.startsWith("state.json"));
+  return entries.length > 0 && entries.some((e) => HOME_ENTRIES.includes(e)) && entries.every((e) => HOME_ENTRIES.includes(e) || e.startsWith(".") || e.startsWith("state.json"));
 }
 
 export function planUninstall(o: { kind: InstallKind; home: string; deep: boolean; linkDir?: string }): UninstallPlan {
@@ -75,6 +95,7 @@ export function planUninstall(o: { kind: InstallKind; home: string; deep: boolea
       ["memory", "memory (what Mnemo learned)"],
       [path.join("agent", "sessions"), "sessions"],
       [path.join("agent", "auth.json"), "credentials from /login"],
+      ["grants.json", "approvals you saved"],
       [path.join("agent", "skills"), "your skills"],
       ["logs", "logs"],
     ];

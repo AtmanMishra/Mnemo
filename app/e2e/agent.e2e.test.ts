@@ -355,6 +355,21 @@ describe("install layout", () => {
     const r = await run(w, i.exe, ["uninstall", "--deep", "--yes"], { MNEMO_LINK_DIR: i.linkDir });
     expect(r.stderr).toContain("not deleted");
     expect(fs.readFileSync(path.join(w.mnemoHome, "my-thesis.docx"), "utf8")).toBe("precious");
+    // What was asked for did not happen: that is not a success.
+    expect(r.code).toBe(1);
+    expect(r.stdout).not.toContain("Mnemo is uninstalled");
+  }, T);
+
+  test("uninstall --deep deletes a home holding saved approvals and permission rules", async () => {
+    const w = fresh();
+    const i = installed(w);
+    fs.writeFileSync(path.join(w.mnemoHome, "grants.json"), JSON.stringify({ "/x": [{ tool: "bash", pattern: "ls*" }] }));
+    fs.writeFileSync(path.join(w.mnemoHome, "permissions.json"), JSON.stringify({ deny: ["bash(rm *)"] }));
+    fs.mkdirSync(path.join(w.mnemoHome, "skill-history"));
+    const r = await run(w, i.exe, ["uninstall", "--deep", "--yes"], { MNEMO_LINK_DIR: i.linkDir });
+    expect(r.code).toBe(0);
+    for (let n = 0; n < 50 && fs.existsSync(w.mnemoHome); n++) await Bun.sleep(100);
+    expect(fs.existsSync(w.mnemoHome)).toBe(false);
   }, T);
 });
 

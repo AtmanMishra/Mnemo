@@ -168,7 +168,7 @@ remove_binaries() {
 }
 
 # A folder is deleted whole only if it is plainly Mnemo's: not / or your home,
-# and holding nothing but what Mnemo puts there.
+# and holding nothing but what Mnemo puts there (the list matches HOME_ENTRIES in src/runtime/uninstall.ts).
 mnemo_home() {
   [ -d "$1" ] || return 1
   case "$(cd "$1" && pwd -P)" in / | "$(cd "$HOME" && pwd -P)") return 1 ;; esac
@@ -176,7 +176,7 @@ mnemo_home() {
   for e in "$1"/* "$1"/.[!.]*; do
     [ -e "$e" ] || continue
     case "${e##*/}" in
-      state.json* | agent | memory | bin | logs | kernel | best-of) found=1 ;;
+      state.json* | agent | memory | bin | logs | kernel | best-of | permissions.json | grants.json | skill-history | journal.jsonl) found=1 ;;
       .*) ;;
       *) return 1 ;;
     esac

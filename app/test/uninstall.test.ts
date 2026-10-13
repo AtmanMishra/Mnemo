@@ -51,6 +51,10 @@ test.skipIf(process.platform === "win32")("deep: says what is in the folder, the
 test("a folder that is not plainly Mnemo's is never deleted whole", () => {
   const { root, home } = installed();
   expect(looksLikeMnemoHome(home)).toBe(true);
+  // What Mnemo writes at the root of its home: saved approvals, permission rules, skill history, state.
+  for (const f of ["grants.json", "permissions.json", "state.json.tmp", ".env", "journal.jsonl"]) fs.writeFileSync(path.join(home, f), "{}");
+  fs.mkdirSync(path.join(home, "skill-history"));
+  expect(looksLikeMnemoHome(home)).toBe(true);
   fs.writeFileSync(path.join(home, "thesis.docx"), "mine");
   expect(looksLikeMnemoHome(home)).toBe(false);
   expect(looksLikeMnemoHome(os.homedir())).toBe(false);
