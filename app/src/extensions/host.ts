@@ -56,8 +56,6 @@ export interface Host {
   escalations: { from: string; to: string; reason: string }[];
   /** Set by the memory extension: the session record learns the model changed. */
   onModelChanged?: (model: string, reason: string) => Promise<void>;
-  /** What the background curator resurfaced for this project, handed to the next recall once. */
-  takeResurfaced?: () => string[];
   /** What memory recalled in this session (node → line), set by the memory extension. */
   recalled?: Map<number, string>;
   /** Files as they were before each turn changed them (shared with sub-agents). */

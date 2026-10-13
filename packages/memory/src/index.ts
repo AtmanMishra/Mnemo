@@ -14,7 +14,6 @@ export { normalizeRemote, projectIdentity, type ProjectIdentity } from "./projec
 export { describeHit, DIRECTIVE, hitLine, profileBlock, recallMessage } from "./recall.ts";
 export { readMemory, type MemoryReader } from "./read.ts";
 export { redact } from "./redact.ts";
-export { curateFacts, proposeSkillChanges, resurface, skillEvidence, type Ask, type SkillProposalItem } from "./maintain.ts";
 export { applyTidy, pathsIn, planTidy, sameMeaning, type TidyItem } from "./tidy.ts";
 export {
   digest,

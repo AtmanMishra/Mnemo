@@ -36,7 +36,6 @@ import { renderSkill, skillPath, writeSkill, type SkillScope } from "./skills.ts
 /** What memory tells the person, for whatever interface the agent has. */
 export type MemoryNote =
   | { kind: "recall"; items: string[] }
-  | { kind: "resurfaced"; items: string[] }
   | { kind: "learned"; items: string[] }
   | { kind: "steer"; text: string }
   | { kind: "skill"; text: string }

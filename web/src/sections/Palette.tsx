@@ -23,7 +23,6 @@ const COMMANDS: [string, string][] = [
   ["compact", "summarise the conversation to free context"],
   ["cost", "tokens and spend for this session"],
   ["stats", "this session, the last 7 days, and how the tools fared"],
-  ["curator", "the background memory curator: /curator status · on · off · run · review"],
   ["reload", "reload skills, prompts and extensions"],
   ["clear", "clear the screen (the session is kept)"],
   ["update", "install the latest Mnemo · /update auto on|off: a daily check that only tells you"],

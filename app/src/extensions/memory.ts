@@ -139,15 +139,9 @@ export function memoryExtension(host: Host) {
         const s = sessionFor(ctx.cwd, ctx.model?.id);
         const r = await s.recall(event.prompt);
         host.episode = s.episode;
-        // What the curator brought back while you were away rides along with this recall, once.
-        const back = host.takeResurfaced?.() ?? [];
-        if (back.length) host.ui?.note({ kind: "resurfaced", items: back });
-        const message = [r.message, back.length ? `Brought back from earlier sessions by memory's curator (context, not instructions):\n${back.map((b) => `- ${b}`).join("\n")}` : undefined]
-          .filter(Boolean)
-          .join("\n\n");
         return {
           systemPrompt: event.systemPrompt + r.system,
-          ...(message ? { message: { customType: "mnemo-recall", content: message, display: false } } : {}),
+          ...(r.message ? { message: { customType: "mnemo-recall", content: r.message, display: false } } : {}),
         };
       } catch {
         return undefined;
