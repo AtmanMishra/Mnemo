@@ -13,3 +13,23 @@ import { setBedrockProviderModule } from "@earendil-works/pi-ai/compat";
 
 registerBunOAuthFlows();
 setBedrockProviderModule(bedrockProviderModule);
+
+// pi decodes and resizes images with photon, whose loader reads `photon_rs_bg.wasm` from
+// the directory it was installed in: in a binary that is the build machine's path, so on
+// a user's machine every image `read` came back "Image omitted". The module is embedded
+// here and any read of that one file name that misses on disk is answered from it.
+import photonWasm from "@silvia-odwyer/photon-node/photon_rs_bg.wasm" with { type: "file" };
+import { createRequire } from "node:module";
+
+const cjsFs = createRequire(import.meta.url)("fs") as typeof import("node:fs");
+const readFileSync = cjsFs.readFileSync;
+cjsFs.readFileSync = ((file: Parameters<typeof readFileSync>[0], options?: unknown) => {
+  try {
+    return readFileSync(file, options as never);
+  } catch (error) {
+    const name = typeof file === "string" ? file : file instanceof URL ? file.pathname : "";
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" && name.endsWith("photon_rs_bg.wasm") && name !== photonWasm)
+      return readFileSync(photonWasm, options as never);
+    throw error;
+  }
+}) as typeof readFileSync;
