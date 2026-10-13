@@ -23,7 +23,7 @@ export function Roadmap() {
       </nav>
 
       {LANES.map((l) => (
-        <section key={l.stage} id={l.stage} aria-labelledby={`${l.stage}-h`} className={`block lane lane-${l.stage}`}>
+        <section key={l.stage} id={l.stage} aria-labelledby={`${l.stage}-h`} className={`block rm-lane rm-${l.stage}`}>
           <h2 id={`${l.stage}-h`}><span className="dot" aria-hidden="true" />{l.title}</h2>
           <p className="lead-sm">{l.blurb}</p>
           <ul className="cards">
