@@ -1,5 +1,10 @@
-//! OpenRouter embedding provider + on-disk response cache.
-//! User choice: OPENROUTER_API_KEY set -> remote embeddings; else offline hashing.
+//! OpenAI-compatible embedding provider + on-disk response cache.
+//! User choice, opt-in: memsrv embeds remotely only when MNEMO_EMBED_URL and
+//! MNEMO_EMBED_MODEL name a server (`local_from_env`; OpenRouter is
+//! `MNEMO_EMBED_URL=https://openrouter.ai/api/v1/embeddings` with
+//! MNEMO_EMBED_KEY); else offline hashing. OPENROUTER_API_KEY alone does not
+//! turn it on: that key is there for the model, and a slow server stalls
+//! memory. `from_env` (the key) is for the benches, memeval and memcli.
 //!
 //! 6f96adc6: embed calls are TIME-BOUNDED and RETRY-BOUNDED. The memsrv RPC
 //! loop is single-threaded by design, and embed() sits on that loop — an
@@ -112,6 +117,8 @@ impl OpenRouterEmbedder {
         Some(Self::new_with_endpoint(key, model, cache_dir, url, timeout))
     }
 
+    /// OpenRouter by OPENROUTER_API_KEY, for the benches (memeval, memcli).
+    /// memsrv never calls this.
     pub fn from_env(cache_dir: &Path) -> Option<Self> {
         let api_key = std::env::var("OPENROUTER_API_KEY").ok()?;
         if api_key.is_empty() { return None; }
@@ -198,9 +205,11 @@ impl OpenRouterEmbedder {
 
 impl OpenRouterEmbedder {
     pub fn model_name(&self) -> String { self.model.clone() }
+    pub fn endpoint(&self) -> &str { &self.endpoint }
 }
 
 impl Embedder for OpenRouterEmbedder {
+    fn model_name(&self) -> String { self.model.clone() }
     fn embed(&self, text: &str) -> Vec<f32> {
         let key = self.key_of(text);
         if let Some(v) = self.cache.lock().unwrap().get(&key) {

@@ -114,14 +114,22 @@ fn main() {
 
     // The embedding cache lives beside the journal, not in whatever folder this was started in.
     let cache_dir = Path::new(&jpath).parent().map(|p| p.join("embed")).unwrap_or_else(|| Path::new("embed").into());
-    // Your own embedding server first, then OpenRouter, then the offline hashing embedder.
-    let embedder: Arc<dyn Embedder> = if let Some(e) = OpenRouterEmbedder::local_from_env(&cache_dir) {
-        eprintln!("[memsrv] embedder=local ({})", e.model_name());
-        Arc::new(e)
-    } else {
-        match OpenRouterEmbedder::from_env(&cache_dir) {
-            Some(e) => { eprintln!("[memsrv] embedder=openrouter ({})", e.model_name()); Arc::new(e) }
-            None => { eprintln!("[memsrv] embedder=hashing (no MNEMO_EMBED_URL or OPENROUTER_API_KEY)"); Arc::new(HashingEmbedder) }
+    // Your own embedding server when MNEMO_EMBED_URL names one, else the offline
+    // hashing embedder. A provider key in the environment (OPENROUTER_API_KEY,
+    // there for the model) is not a request to send every memory's text away:
+    // it once was, and each uncached node then cost a network call under the
+    // journal lock, long enough for the app to call memory off.
+    let (embedder, embedder_kind): (Arc<dyn Embedder>, &str) = match OpenRouterEmbedder::local_from_env(&cache_dir) {
+        Some(e) => {
+            eprintln!("[memsrv] embedder=url ({} at {}): MNEMO_EMBED_URL is set", e.model_name(), e.endpoint());
+            (Arc::new(e), "url")
+        }
+        None => {
+            let ignored = if std::env::var_os("OPENROUTER_API_KEY").is_some() {
+                "; OPENROUTER_API_KEY is not used for memory, set MNEMO_EMBED_URL to opt in"
+            } else { "" };
+            eprintln!("[memsrv] embedder=hashing: no MNEMO_EMBED_URL{ignored}");
+            (Arc::new(HashingEmbedder), "hashing")
         }
     };
     eprintln!("[memsrv] ready: {jpath} ({loaded} ops)");
@@ -180,7 +188,7 @@ fn main() {
             }
             sync(&jpath, &mut offset, &mut s, &mut clock, &mut search_cache);
             clock += 1;
-            let reply = handle(&method, &params, &mut s, &mut journal, embedder.as_ref(), &mut clock, &mut search_cache, guard.is_ok());
+            let reply = handle(&method, &params, &mut s, &mut journal, embedder.as_ref(), embedder_kind, &mut clock, &mut search_cache, guard.is_ok());
             // our appends moved the end of the journal; nobody else's could
             // have, because we hold the lock
             if let Ok(meta) = std::fs::metadata(&jpath) { offset = meta.len(); }
@@ -325,6 +333,7 @@ fn handle(
     s: &mut StoreData,
     j: &mut Journal,
     emb: &dyn Embedder,
+    emb_kind: &str,
     clock: &mut Millis,
     cache: &mut SearchCache<(Vec<serde_json::Value>, Vec<NodeId>)>,
     writable: bool,
@@ -350,11 +359,18 @@ fn handle(
 
         "stats" => {
             // cheap counters for lifecycle decisions (e.g. "enough new
-            // episodes to consolidate"). No deref, no heavy scan beyond count.
-            let episodes = s.nodes.values()
-                .filter(|n| !n.deleted && matches!(n.kind, NodeKind::TaskEpisode))
-                .count();
-            Ok(json!({"episodes": episodes}))
+            // episodes to consolidate") and the app's status line, which once
+            // read a whole dump to count nodes. No deref, one pass. Which
+            // embedder answers searches, for `mnemo doctor`.
+            let mut episodes = 0;
+            let mut areas: std::collections::BTreeMap<String, usize> = Default::default();
+            for n in s.nodes.values().filter(|n| !n.deleted) {
+                if matches!(n.kind, NodeKind::TaskEpisode) { episodes += 1; }
+                *areas.entry(format!("{:?}", n.area)).or_default() += 1;
+            }
+            let nodes: usize = areas.values().sum();
+            Ok(json!({"episodes": episodes, "nodes": nodes, "areas": areas,
+                "embedder": emb_kind, "embed_model": emb.model_name()}))
         }
 
         "dump" => {
