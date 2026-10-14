@@ -460,7 +460,9 @@ async function main(): Promise<number> {
   let instance: ReturnType<typeof render> | undefined;
   const clearTerminal = () => {
     instance?.clear();
-    if (process.stdout.isTTY) process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+    // The workspace is on the alternate screen, which Ink's clear covers; \x1b[3J there would
+    // erase the scrollback the user had before starting Mnemo. Inline, the transcript is the scrollback.
+    if (layout === "inline" && process.stdout.isTTY) process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
   };
   let exitCode = 0;
   let finished!: () => void;
@@ -508,6 +510,12 @@ async function main(): Promise<number> {
   controller.transcript.push({ kind: "welcome" });
   watch(cwd, controller);
   firstId = fleet.adopt(cwd, { controller, host, source: workspaceSource(controller, host, home) }).id;
+  // From here a failure nothing caught (an extension's timer, a stray promise) is a notice in
+  // every open agent, not the end of the session.
+  onStrayError = (kind, error) => {
+    const file = logError(home, kind, error);
+    for (const a of fleet.snapshot().agents) a.controller.transcript.notice(`Something failed in the background: ${message(error)} (details in ${file})`, "warn");
+  };
   if (!memsrv && args.memory)
     controller.transcript.notice(`Memory is off: ${memsrvName()} was not found. \`mnemo doctor\` says where it looks.`, "warn");
   if (args.continueRecent && runtime.session.messages.length > 0) {
@@ -603,6 +611,40 @@ async function main(): Promise<number> {
   await instance.waitUntilExit().catch(() => {});
   return exitCode;
 }
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** A failure nothing caught, appended to $MNEMO_HOME/logs/errors.log. Returns the file. */
+function logError(home: string, kind: string, error: unknown): string {
+  const dir = path.join(home, "logs");
+  const file = path.join(dir, "errors.log");
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.appendFileSync(file, `${new Date().toISOString()} ${kind}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`, { mode: 0o600 });
+  } catch {
+    /* nowhere to write: the message is still shown */
+  }
+  return file;
+}
+
+/** Set once the interface is up. Before that, a stray failure is fatal, as it always was. */
+let onStrayError: ((kind: string, error: unknown) => void) | undefined;
+function strayError(kind: string, error: unknown): void {
+  if (onStrayError) {
+    try {
+      return onStrayError(kind, error);
+    } catch {
+      /* the interface itself is broken: fall through to exiting */
+    }
+  }
+  logError(mnemoHome(), kind, error);
+  console.error(`mnemo: ${message(error)}`);
+  process.exit(1);
+}
+process.on("unhandledRejection", (error) => strayError("unhandled rejection", error));
+process.on("uncaughtException", (error) => strayError("uncaught exception", error));
 
 main().then(
   (code) => process.exit(code),

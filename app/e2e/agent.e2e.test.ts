@@ -7,6 +7,7 @@ import * as path from "node:path";
 import pkg from "../package.json" with { type: "json" };
 import { startMockLLM, systemPrompt, textOf, toolResults, type MockLLM, type Script } from "./mock-llm.ts";
 import { binary, memsrv, mnemo, world, type World } from "./harness.ts";
+import { hasPty, KEY, terminal, type Terminal } from "./pty.ts";
 
 const T = 120_000;
 let script: Script = () => ({ text: "done" });
@@ -438,5 +439,51 @@ describe("arguments", () => {
   test("--help says what a headless run allows", async () => {
     const r = await mnemo(fresh(), ["--help"]);
     expect(r.stdout).toMatch(/-p "<prompt>"[^\n]*asks nothing/);
+  }, T);
+});
+
+describe.if(hasPty)("the terminal", () => {
+  const START = ["--no-boot", "--no-motion"];
+  async function ready(t: Terminal) {
+    await t.waitFor(/for commands/);
+    await Bun.sleep(1200);
+    t.mark();
+  }
+
+  test("/clear in the workspace leaves the terminal's own scrollback alone", async () => {
+    const t = await terminal(fresh(), START);
+    try {
+      await ready(t);
+      await t.type("/clear");
+      await t.type(KEY.enter);
+      await Bun.sleep(1500);
+      // \x1b[3J erases the scrollback the user had before starting Mnemo; the workspace is on the alternate screen.
+      expect(t.raw().includes("\x1b[3J")).toBe(false);
+    } finally {
+      await t.kill();
+    }
+  }, T);
+
+  test("an unhandled rejection mid-session is logged and shown, and the session goes on", async () => {
+    const w = fresh({
+      files: {
+        "README.md": "# demo\n",
+        ".pi/extensions/flaky.ts": `export default function () { setTimeout(() => { Promise.reject(new Error("boom from an extension")); }, 2500); }\n`,
+      },
+    });
+    play(() => ({ text: "still here" }));
+    const t = await terminal(w, [...START, "--trust-project"]);
+    try {
+      await ready(t);
+      await t.waitFor(/boom from an extension/, 15_000);
+      expect(await t.exitWithin(500)).toBeUndefined();
+      await t.type("ping");
+      await t.type(KEY.enter);
+      await t.waitFor(/still here/);
+      const log = fs.readFileSync(path.join(w.mnemoHome, "logs", "errors.log"), "utf8");
+      expect(log).toContain("boom from an extension");
+    } finally {
+      await t.kill();
+    }
   }, T);
 });
