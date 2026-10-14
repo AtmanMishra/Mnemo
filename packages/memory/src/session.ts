@@ -148,6 +148,7 @@ export class MemorySession {
   private userNode: number | undefined;
   private episodeId: number | undefined;
   private creating: Promise<number | undefined> | undefined;
+  private episodeAttached = false;
   private systemText: string | undefined;
   private firstRun = true;
   private readonly linked = new Set<number>();
@@ -194,18 +195,29 @@ export class MemorySession {
     if (this.episodeId !== undefined) return Promise.resolve(this.episodeId);
     this.creating ??= (async () => {
       const id = await this.mem.episode(`task: ${label.replace(/\s+/g, " ").slice(0, 80)}`);
-      if (id !== undefined) {
-        if (this.project !== undefined) await this.mem.link(id, this.project, "part_of");
-        if (this.o.parentEpisode !== undefined) await this.mem.link(id, this.o.parentEpisode, "part_of");
-        if (this.o.source) {
-          await this.mem.fact(id, "agent", this.o.source.agent);
-          if (this.o.source.model) await this.mem.fact(id, "model", this.o.source.model);
-        }
-        this.episodeId = id;
+      if (id === undefined) {
+        // Not cached: a sidecar that was down for the first run must not cost
+        // the whole session its episode.
+        this.creating = undefined;
+        return undefined;
       }
+      await this.attachEpisode(id);
+      if (this.o.parentEpisode !== undefined) await this.mem.link(id, this.o.parentEpisode, "part_of");
+      if (this.o.source) {
+        await this.mem.fact(id, "agent", this.o.source.agent);
+        if (this.o.source.model) await this.mem.fact(id, "model", this.o.source.model);
+      }
+      this.episodeId = id;
       return id;
     })();
     return this.creating;
+  }
+
+  /** The episode is part of the project: linked once, as soon as both exist. */
+  private async attachEpisode(id: number): Promise<void> {
+    if (this.episodeAttached || this.project === undefined) return;
+    this.episodeAttached = true;
+    await this.mem.link(id, this.project, "part_of");
   }
 
   /** A run starts: fresh run state, and the project, user and episode exist. */
@@ -218,7 +230,10 @@ export class MemorySession {
     this.skillsRead.clear();
     this.project ??= await this.mem.project(this.identity.id, this.identity.root);
     this.userNode ??= await this.mem.userNode();
-    return this.ensureEpisode(prompt);
+    const id = await this.ensureEpisode(prompt);
+    // The project may have been unreachable when the episode was made.
+    if (id !== undefined) await this.attachEpisode(id);
+    return id;
   }
 
   /** `begin`, plus what memory has to say about this message. */

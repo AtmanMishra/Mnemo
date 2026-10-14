@@ -194,3 +194,39 @@ t("with copies of a standing node already written, every process picks the lowes
   expect(await fresh.userNode()).toBe(Math.min(...ids));
   fresh.stop();
 });
+
+test("a sidecar that was down for the first run does not cost the session its episode, and the episode joins the project later", async () => {
+  const calls: [string, unknown[]][] = [];
+  let up = false;
+  const fake = {
+    project: async () => (calls.push(["project", []]), up ? 1 : undefined),
+    userNode: async () => (up ? 2 : undefined),
+    episode: async () => (up ? 10 : undefined),
+    link: async (...args: unknown[]) => void calls.push(["link", args]),
+    fact: async () => undefined,
+  } as unknown as MemoryService;
+  const s = new MemorySession({ memory: fake, cwd: os.tmpdir(), userSkillsDir: os.tmpdir() });
+  expect(await s.begin("first try while memory is down")).toBeUndefined();
+  up = true;
+  expect(await s.begin("second try")).toBe(10);
+  expect(calls.filter(([m]) => m === "link")).toEqual([["link", [10, 1, "part_of"]]]);
+});
+
+test("an episode made while the project was unreachable is linked to it once the project appears", async () => {
+  const links: unknown[][] = [];
+  let projectUp = false;
+  const fake = {
+    project: async () => (projectUp ? 1 : undefined),
+    userNode: async () => 2,
+    episode: async () => 10,
+    link: async (...args: unknown[]) => void links.push(args),
+    fact: async () => undefined,
+  } as unknown as MemoryService;
+  const s = new MemorySession({ memory: fake, cwd: os.tmpdir(), userSkillsDir: os.tmpdir() });
+  expect(await s.begin("first")).toBe(10);
+  expect(links).toEqual([]);
+  projectUp = true;
+  await s.begin("second");
+  await s.begin("third");
+  expect(links).toEqual([[10, 1, "part_of"]]);
+});
