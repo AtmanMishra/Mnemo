@@ -445,7 +445,8 @@ export class Controller {
       else await session.prompt(trimmed);
     } catch (error) {
       // Not sent (a compaction is running, say): the message goes back to the prompt rather than being lost.
-      if (!this.draft.includes(trimmed)) this.setDraft([trimmed, this.draft].filter((t) => t.trim()).join("\n\n"));
+      const aborted = error instanceof Error && (error.name === "AbortError" || /abort/i.test(error.message));
+      if (!aborted && !this.draft.includes(trimmed)) this.setDraft([trimmed, this.draft].filter((t) => t.trim()).join("\n\n"));
       this.transcript.notice(errorText(error), "error");
     }
   }
