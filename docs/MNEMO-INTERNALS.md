@@ -115,21 +115,26 @@ pays in read-mostly sessions. Results are cached in a 256-entry LRU keyed on
 (normalized query, area filter, `k`, scope) and cleared on every write, own or
 foreign; the response says `cache: hit|miss`.
 
-Embeddings are pluggable and chosen once, at `memsrv` start, in this order:
+Embeddings are pluggable and chosen once, at `memsrv` start; the startup line in
+`memsrv.log` says which and why, and `stats` (so `mnemo doctor`) names it:
 
-1. **Your own server** — `MNEMO_EMBED_URL` + `MNEMO_EMBED_MODEL` (OpenAI-compatible
-   `/v1/embeddings`: Ollama, LM Studio, llama.cpp, vLLM); `MNEMO_EMBED_KEY` is sent
-   only if set; `MNEMO_EMBED_TIMEOUT_MS` bounds a call.
-2. **OpenRouter** — `OPENROUTER_API_KEY` present (`OPENROUTER_EMBED_MODEL`, default
-   `liquid/lfm-2.5-embedding-350m:free`; `OPENROUTER_EMBED_URL` and
-   `OPENROUTER_EMBED_TIMEOUT_MS` override).
-3. **`HashingEmbedder`** (256-dim, deterministic, offline) — the default and the
-   fallback.
+1. **A server you opt in to** — `MNEMO_EMBED_URL` + `MNEMO_EMBED_MODEL` (OpenAI-compatible
+   `/v1/embeddings`: Ollama, LM Studio, llama.cpp, vLLM, or OpenRouter at
+   `https://openrouter.ai/api/v1/embeddings`); `MNEMO_EMBED_KEY` is sent only if set;
+   `MNEMO_EMBED_TIMEOUT_MS` bounds a call.
+2. **`HashingEmbedder`** (256-dim, deterministic, offline) — the default.
 
-Both remote endpoints must be `https://` or this machine (the key and the text of
-every memory go there). Calls are time- and retry-bound — 10 s, two attempts, 1 s
-apart — and a failed call degrades to an empty vector (that node scores 0), never
-an error or a stall. The disk cache (`embed/embed-cache.json` beside the journal)
+`OPENROUTER_API_KEY` does not choose an embedder (it once did): the key is
+there for the model, and with it every uncached node was embedded over the network,
+one call at a time under the journal lock, until the app's calls timed out and the
+footer read memory as off. The app also starts `memsrv` without `*_API_KEY` /
+`*_TOKEN` variables. (`memeval` and `memcli` still use the key, for comparing
+embedders.)
+
+The endpoint must be `https://` or this machine (the key and the text of every
+memory go there). Calls are time- and retry-bound — 10 s, two attempts, 1 s apart —
+and a failed call degrades to an empty vector (that node scores 0), never an error;
+the request that needed it still waits that long. The disk cache (`embed/embed-cache.json` beside the journal)
 is keyed `sha256(model ‖ text)`; vectors are derived, so switching embedders costs
 one reindex and nothing else. `memsrv` also reads `$MNEMO_HOME/.env` for settings
 the real environment lacks — never a file in the working directory, which could
@@ -222,7 +227,9 @@ node takes no more writes. Methods: `ping`, `dump` (in id order; optional
 `ensure_node` (find-or-create by exact label under the lock, lowest live id
 wins — how the project and user nodes are made), `episode`, `fact`, `link`,
 `commit_log`,
-`steer`, `set_area`, `good`, `forget`, `consolidate`, `mark_useful`, `stats`, `remember`,
+`steer`, `set_area`, `good`, `forget`, `consolidate`, `mark_useful`, `stats` (live
+`nodes`, `episodes`, `areas`, `embedder`, `embed_model`: what the footer and
+`mnemo doctor` read, without a dump), `remember`,
 `recall_brief`, plus the audit-era additions (`unlink`, `reweight`,
 `record_outcome`). `fact` supersedes a same-key value unless `append: true`
 says the key is a set, and answers with the fact id it wrote plus the id it

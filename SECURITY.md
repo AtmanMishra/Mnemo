@@ -101,14 +101,15 @@ in a place you can afford to lose: a container, a throwaway checkout.
   about you.
 - Memory is stored locally under `$MNEMO_HOME` (default `~/.mnemo`) in a
   journal file, readable only by you. It is never uploaded by Mnemo. **One
-  exception, opt in:** if `OPENROUTER_API_KEY` is set, the text of memories is
-  sent to OpenRouter to compute embeddings. Leave it unset and nothing is sent;
-  search then uses a local hashing embedder. `MNEMO_EMBED_URL` and
-  `MNEMO_EMBED_MODEL` send them to an embedding server you choose instead (an
-  Ollama on this machine, say); it is used first, and `MNEMO_EMBED_KEY` is sent
-  to it only if you set one. Either address must be `https://` (or local), and
-  is read from the real environment or `$MNEMO_HOME/.env`, never from the
-  folder you are working in.
+  exception, opt in:** `MNEMO_EMBED_URL` and `MNEMO_EMBED_MODEL` send the text
+  of memories to an embedding server you choose to compute embeddings (an
+  Ollama on this machine, say, or OpenRouter at
+  `https://openrouter.ai/api/v1/embeddings`), and `MNEMO_EMBED_KEY` is sent to
+  it only if you set one. Leave them unset and nothing is sent; search then
+  uses a local hashing embedder. `OPENROUTER_API_KEY` alone does not turn it
+  on: that key is for the model, and memsrv is started without it. The address
+  must be `https://` (or local), and is read from the real environment or
+  `$MNEMO_HOME/.env`, never from the folder you are working in.
 
 ## Credentials
 
