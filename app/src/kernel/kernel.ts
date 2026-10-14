@@ -28,13 +28,18 @@ import type { ChildProcess } from "node:child_process";
 export interface KernelChild {
   stdin: { write(chunk: string): unknown } | null;
   stdout: { on(event: "data", listener: (chunk: Buffer | string) => void): unknown } | null;
+  /** Drained: a pipe nobody reads fills, and the interpreter blocks on its next write. */
+  stderr?: { on(event: "data", listener: (chunk: Buffer | string) => void): unknown } | null;
+  /** Leads its own process group (POSIX), so stopping it stops what the cell started. */
+  pid?: number;
   on(event: "exit" | "error", listener: (...args: unknown[]) => void): unknown;
   kill(signal?: string): unknown;
   exitCode: number | null;
 }
 
 export type KernelSpawn = (interpreter: string, args: string[]) => KernelChild;
-export type ToolDispatcher = (name: string, args: Record<string, unknown>) => Promise<unknown>;
+/** `signal` aborts when the cell that made the call stops (finished, timed out, cancelled). */
+export type ToolDispatcher = (name: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>;
 
 export interface KernelResult {
   ok: boolean;
@@ -62,6 +67,11 @@ export interface KernelClientOptions {
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
+interface Cell {
+  dispatch?: ToolDispatcher;
+  stopped: AbortController;
+}
+
 export class KernelClient {
   #child: KernelChild | null = null;
   #nextId = 1;
@@ -69,6 +79,8 @@ export class KernelClient {
   #pending = new Map<number, (result: KernelResult) => void>();
   #queue: Promise<unknown> = Promise.resolve();
   #options: KernelClientOptions;
+  /** The cell running now: its own dispatcher, and a signal that ends with it. */
+  #cell: Cell | undefined;
 
   constructor(options: KernelClientOptions) {
     this.#options = options;
@@ -85,7 +97,8 @@ export class KernelClient {
 
   /** Run one cell. Never throws: a failure is a result. */
   /** `timeoutMs` overrides the client's for this cell; aborting `signal` restarts the interpreter. */
-  run(code: string, options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<KernelResult> {
+  /** `dispatch` answers this cell's tool calls, so overlapping callers never answer each other's. */
+  run(code: string, options: { timeoutMs?: number; signal?: AbortSignal; dispatch?: ToolDispatcher } = {}): Promise<KernelResult> {
     const task = this.#queue.then(async () => {
       if (options.signal?.aborted) return { ok: false, error: "cancelled" } as KernelResult;
       try {
@@ -93,7 +106,15 @@ export class KernelClient {
       } catch (error) {
         return { ok: false, error: `no interpreter: ${String(error)}` } as KernelResult;
       }
-      return this.#send(code, options.timeoutMs, options.signal);
+      const cell = { dispatch: options.dispatch, stopped: new AbortController() };
+      this.#cell = cell;
+      try {
+        return await this.#send(code, options.timeoutMs, options.signal);
+      } finally {
+        // Tool calls the cell left waiting (an approval dialog, say) end with it.
+        if (this.#cell === cell) this.#cell = undefined;
+        cell.stopped.abort();
+      }
     });
     this.#queue = task.catch(() => undefined);
     return task;
@@ -106,11 +127,7 @@ export class KernelClient {
     for (const [, resolve] of this.#pending) resolve({ ok: false, error: "kernel stopped" });
     this.#pending.clear();
     if (!child) return;
-    try {
-      child.kill("SIGKILL");
-    } catch {
-      /* already gone */
-    }
+    killTree(child);
   }
 
   #start(): void {
@@ -120,6 +137,7 @@ export class KernelClient {
       this.#options.bridgePath,
     ]);
     child.stdout?.on("data", (chunk) => this.#ingest(chunk));
+    child.stderr?.on("data", () => {});
     child.on("exit", () => {
       // A replaced interpreter's exit arrives *after* its replacement is already
       // running — and without this check it resolved the new interpreter's
@@ -249,30 +267,33 @@ export class KernelClient {
       }
     };
 
+    // The cell that is running now made this call; it is the one still blocked on it.
+    const cell = this.#cell;
     if (message.op === "tool_calls") {
       const calls = Array.isArray(message.calls) ? message.calls : [];
       const results = await Promise.all(
         calls.map(async (call) => {
           const { name, args } = (call ?? {}) as { name?: string; args?: Record<string, unknown> };
-          return this.#dispatchOne(String(name ?? ""), args ?? {});
+          return this.#dispatchOne(cell, String(name ?? ""), args ?? {});
         }),
       );
       write({ op: "tool_result", ok: true, results });
       return;
     }
 
-    const outcome = await this.#dispatchOne(String(message.name ?? ""), (message.args as Record<string, unknown>) ?? {});
+    const outcome = await this.#dispatchOne(cell, String(message.name ?? ""), (message.args as Record<string, unknown>) ?? {});
     write({ op: "tool_result", ...outcome });
   }
 
-  async #dispatchOne(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    if (!this.#options.dispatch) {
+  async #dispatchOne(cell: Cell | undefined, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const dispatch = cell?.dispatch ?? this.#options.dispatch;
+    if (!dispatch) {
       // Silence here would be the worst outcome: the cell waits for a reply
       // that never comes, and it looks exactly like a hung kernel.
       return { ok: false, error: `no tool dispatcher is attached, so '${name}' cannot run` };
     }
     try {
-      return { ok: true, result: await this.#options.dispatch(name, args) };
+      return { ok: true, result: await dispatch(name, args, cell?.stopped.signal) };
     } catch (error) {
       return { ok: false, error: String(error) };
     }
@@ -316,7 +337,26 @@ export function probeInterpreter(path: string, script: string): string | null {
   }
 }
 
-/** A spawn wrapper so a caller need not know about node's child_process shape. */
+/**
+ * A spawn wrapper so a caller need not know about node's child_process shape.
+ * On POSIX the interpreter leads its own process group, so stopping it also
+ * stops what a cell started (`subprocess.Popen`); on Windows `taskkill /T` does.
+ */
 export function spawnKernel(interpreter: string, args: string[], cwd?: string, env?: NodeJS.ProcessEnv): ChildProcess {
-  return spawn(interpreter, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+  return spawn(interpreter, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
+}
+
+/** The interpreter and everything it started. */
+function killTree(child: KernelChild): void {
+  try {
+    if (child.pid !== undefined && process.platform === "win32") spawnSync("taskkill", ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore" });
+    else if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+  } catch {
+    /* not a group leader (a test double), or already gone */
+  }
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    /* already gone */
+  }
 }

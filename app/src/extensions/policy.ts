@@ -434,6 +434,13 @@ export function judge(
   return { ask: request };
 }
 
+/**
+ * The signal of a tool that is making calls of its own (the Python cell), by its
+ * call id. A question about one of those calls closes when that tool stops: pi
+ * hands the hook the turn's signal, which a timed-out cell does not abort.
+ */
+export const callerSignals = new Map<string, AbortSignal>();
+
 export function policyExtension(host: Host) {
   return (pi: ExtensionAPI): void => {
     // A factory that throws is dropped by pi, and the session then runs with no gate
@@ -457,7 +464,11 @@ export function policyExtension(host: Host) {
       }
       if ("allow" in verdict) return verdict.allow ? undefined : { block: true, reason: verdict.reason };
       if (!host.ui) return undefined;
-      const answer = await host.ui.approve(verdict.ask, ctx.signal);
+      const caller = event.parentToolCallId === undefined ? undefined : callerSignals.get(event.parentToolCallId);
+      const signal = caller && ctx.signal ? AbortSignal.any([ctx.signal, caller]) : (caller ?? ctx.signal);
+      const answer = await host.ui.approve(verdict.ask, signal);
+      // A cell that stopped while the question was open: its call is not run, whatever the answer.
+      if (caller?.aborted) return { block: true, reason: "The call's Python cell stopped before it was answered." };
       if (answer.kind === "yes") return undefined;
       if (answer.kind === "always") {
         if (verdict.pattern) grants?.add(ctx.cwd, verdict.pattern);
