@@ -403,3 +403,17 @@ describe("a failed model call", () => {
     expect(r.stderr).toContain("exit 1");
   }, T);
 });
+
+describe("system prompt", () => {
+  test("points at no pi documentation the binary does not have", async () => {
+    const w = fresh();
+    play(() => ({ text: "ok" }));
+    const r = await mnemo(w, ["-p", "hi", "--no-reflect"]);
+    expect(r.code).toBe(0);
+    const prompt = systemPrompt(llm.agentRequests()[0]!);
+    // pi names README.md, docs/ and examples/ beside its package; a compiled binary has none of them.
+    for (const [, p] of prompt.matchAll(/(?:Main documentation|Additional docs|Examples): (\S+)/g)) expect({ p, exists: fs.existsSync(p!) }).toEqual({ p, exists: true });
+    expect(prompt).not.toContain(path.join(path.dirname(binary()), "docs"));
+    expect(prompt).toContain("github.com/earendil-works/pi");
+  }, T);
+});
