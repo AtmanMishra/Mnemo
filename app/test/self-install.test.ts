@@ -125,10 +125,23 @@ describe("installing", () => {
 
   test("off Windows the PATH is not edited: it says the line for the shell profile", () => {
     const d = download("linux");
-    const r = selfInstall({ execPath: d.execPath, home: d.home, platform: "linux", env: { PATH: "/usr/bin" } });
+    // A simulated POSIX PATH cannot hold a Windows drive's colon. Give the
+    // installer relative paths and anchor its file operations in the real fixture.
+    const home = path.relative(d.root, d.home);
+    const bin = path.join(home, "bin");
+    const files: Files = {
+      existsSync: (p) => fs.existsSync(path.join(d.root, p)),
+      mkdirSync: (p, o) => fs.mkdirSync(path.join(d.root, p), o),
+      copyFileSync: (a, b) => fs.copyFileSync(path.join(d.root, a), path.join(d.root, b)),
+      renameSync: (a, b) => fs.renameSync(path.join(d.root, a), path.join(d.root, b)),
+      rmSync: (p, o) => fs.rmSync(path.join(d.root, p), o),
+      readdirSync: (p) => fs.readdirSync(path.join(d.root, p)),
+    };
+    const options = { execPath: path.relative(d.root, d.execPath), home, platform: "linux" as const, files };
+    const r = selfInstall({ ...options, env: { PATH: "/usr/bin" } });
     expect(filesIn(d.bin)).toEqual({ memsrv: "new memsrv", mnemo: "new mnemo" });
-    expect(r.next).toContain(`  export PATH="${d.bin}:$PATH"`);
-    expect(selfInstall({ execPath: d.execPath, home: d.home, platform: "linux", env: { PATH: `/usr/bin:${d.bin}` } }).next[0]).toBe("Type  mnemo  to start it");
+    expect(r.next).toContain(`  export PATH="${bin}:$PATH"`);
+    expect(selfInstall({ ...options, env: { PATH: `/usr/bin:${bin}` } }).next[0]).toBe("Type  mnemo  to start it");
   });
 });
 

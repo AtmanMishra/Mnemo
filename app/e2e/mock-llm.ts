@@ -22,8 +22,9 @@ export interface ChatRequest {
   stream?: boolean;
 }
 
-/** What the model "says" next. `agent` requests carry tools; side calls (reflection, titles) do not. */
-export type Script = (req: ChatRequest, ctx: { agentTurn: number; all: ChatRequest[] }) => Reply;
+/** What the model "says" next. Async scripts can hold a turn open until a test releases it.
+ * `agent` requests carry tools; side calls (reflection, titles) do not. */
+export type Script = (req: ChatRequest, ctx: { agentTurn: number; all: ChatRequest[] }) => Reply | Promise<Reply>;
 
 export interface MockLLM {
   url: string;
@@ -53,7 +54,7 @@ function chunk(delta: object, finish: string | null = null): string {
   return `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 0, model: "mock-1", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
 }
 
-function sse(reply: Reply): string {
+function sse(reply: Exclude<Reply, { status: number }>): string {
   let out = chunk({ role: "assistant" });
   if ("tools" in reply) {
     if (reply.text) out += chunk({ content: reply.text });
@@ -76,6 +77,8 @@ export function startMockLLM(script: Script): MockLLM {
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
+    // Tests own their deadlines; a held reply must not expire after Bun's idle timeout.
+    idleTimeout: 0,
     async fetch(req) {
       const url = new URL(req.url);
       if (url.pathname.endsWith("/models")) return Response.json({ data: [{ id: "mock-1", object: "model" }] });
@@ -85,7 +88,7 @@ export function startMockLLM(script: Script): MockLLM {
       const isAgent = (body.tools?.length ?? 0) > 0;
       let reply: Reply;
       try {
-        reply = isAgent ? script(body, { agentTurn: agentTurn++, all: requests }) : { text: "[]" };
+        reply = isAgent ? await script(body, { agentTurn: agentTurn++, all: requests }) : { text: "[]" };
       } catch (e) {
         return new Response(String(e), { status: 500 });
       }

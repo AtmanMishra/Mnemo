@@ -187,26 +187,32 @@ describe.if(hasPty)("interactive", () => {
   }, T);
 
   test("esc with a message queued stops the run and puts the message back, without crashing the screen", async () => {
-    const slow = startMockLLM((_req, { agentTurn }) => (agentTurn === 0 ? { tools: [{ name: "bash", args: { command: "sleep 6" } }] } : { text: "done waiting" }));
+    // Keep the turn open until cleanup, however long this runner needs to type.
+    const reply = Promise.withResolvers<{ text: string }>();
+    const slow = startMockLLM(() => reply.promise);
     const t = await terminal(fresh({ llm: slow.url }), [...START, "--yolo"]);
     try {
       await ready(t);
       await t.type("wait a bit");
+      await t.waitFor(/❯\s+wait a bit/);
       await t.type(KEY.enter);
       await t.waitFor(/esc to interrupt/);
       t.mark();
       await t.type("and then this");
+      // The text must be consumed before Enter, or Ink can parse both as a paste.
+      await t.waitFor(/❯\s+and then this/);
       await t.type(KEY.enter);
-      await t.waitFor(/queued/);
+      await t.waitFor(/queued:\s+and then this/);
       t.mark();
       await t.type(KEY.esc);
       await t.waitFor(/aborted|Interrupted/);
-      await Bun.sleep(800);
-      const screen = t.text();
-      expect(screen).not.toMatch(/TypeError|ERROR|since/);
-      expect(screen).toContain("and then this");
+      // Search only post-Escape output, and require the draft's prompt prefix:
+      // the queued row and earlier frames also contain the same words.
+      await t.waitFor(/❯\s+and then this/);
+      expect(t.text()).not.toMatch(/TypeError|ERROR|since/);
       expect(await t.exitWithin(200)).toBeUndefined();
     } finally {
+      reply.resolve({ text: "done waiting" });
       await t.kill();
       slow.stop();
     }

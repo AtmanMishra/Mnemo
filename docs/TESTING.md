@@ -58,7 +58,12 @@ expect(lastToolResult()).toContain("…");             // what the binary sent b
 - Requests that offer tools are the agent loop. Requests without tools are side calls,
   such as reflection; the mock answers those with `[]`.
 - For the terminal, `await ready(t)` waits until the prompt listens, not just until it is
-  drawn. `t.type()` sends one key at a time, because a burst arrives as a paste.
+  drawn. `t.type()` sends one key at a time, because a burst arrives as a paste. Wait for
+  the complete typed draft to appear before sending Enter: a busy runner can still
+  buffer the final characters and Enter together. Async mock scripts can keep a turn
+  pending until the test releases it, so interruption tests do not race a fixed sleep.
+- In rendered UI tests, wait for the expected frame or source result before sending
+  the next key. A pane heading can appear before its rows load or its viewport is measured.
 
 ## Feature coverage
 
