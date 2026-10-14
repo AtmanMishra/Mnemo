@@ -138,6 +138,8 @@ export function windowsRemovalCommand(files: string[], dataDir: string | undefin
   const literal = (p: string) => `'${path.resolve(p).replace(/'/g, "''")}'`;
   const script = `
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$mnemoLast = ''
 $mnemoOwner = $null
 try { $mnemoOwner = [Diagnostics.Process]::GetProcessById(${ownerPid}) } catch [ArgumentException] {}
 if ($mnemoOwner) {
@@ -166,18 +168,20 @@ for ($mnemoAttempt = 0; $mnemoAttempt -lt 100; $mnemoAttempt++) {
         Clear-MnemoReadOnly $mnemoFile $false
       }
       [IO.File]::Delete($mnemoFile)
-    } catch { $mnemoPending = $true }
+    } catch { $mnemoPending = $true; $mnemoLast = "$($mnemoFile): $($_.Exception.Message)" }
   }
   if ($mnemoData -and [IO.Directory]::Exists($mnemoData)) {
     # Directory.Delete removes junctions/symlinks without traversing their targets.
     try {
       Clear-MnemoReadOnly $mnemoData $true
       [IO.Directory]::Delete($mnemoData, $true)
-    } catch { $mnemoPending = $true }
+    } catch { $mnemoPending = $true; $mnemoLast = "$($mnemoData): $($_.Exception.Message)" }
   }
   if (-not $mnemoPending) { exit 0 }
   Start-Sleep -Milliseconds 100
 }
+# Nobody reads a detached helper's output; a test running it does.
+[Console]::Error.WriteLine("could not remove $mnemoLast")
 exit 1
 `;
   return ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")];
@@ -188,7 +192,7 @@ exit 1
  * (the binaries, and the data folder they live in) is handed to a helper that
  * waits for this process to exit.
  */
-export function runUninstall(plan: UninstallPlan): string[] {
+export function runUninstall(plan: UninstallPlan, io = { windows: win, rm: (f: string) => fs.rmSync(f, { force: true }), rename: fs.renameSync, tmp: os.tmpdir() }): string[] {
   const done: string[] = [];
   if (plan.link) {
     fs.rmSync(plan.link, { force: true });
@@ -200,19 +204,39 @@ export function runUninstall(plan: UninstallPlan): string[] {
     done.push(r.status === 0 ? `removed ${plan.pathEntry} from your PATH` : `could not edit your PATH; remove ${plan.pathEntry} from it by hand`);
   }
   const later: string[] = [];
+  /** Running binaries moved out of the install; nothing waits on them but the clean-up. */
+  const aside: string[] = [];
   for (const f of plan.files) {
     try {
-      fs.rmSync(f, { force: true });
+      io.rm(f);
       done.push(`removed ${f}`);
     } catch (error) {
-      if (!win) throw error;
-      later.push(f);
+      if (!io.windows) throw error;
+      // A running .exe cannot be deleted, but it can be renamed (get.ps1 relies on the same).
+      // Moved to the temporary folder, it leaves the install at once, so nothing below
+      // depends on a helper outliving this process; on another volume the move fails.
+      const moved = path.join(io.tmp, `${path.basename(f)}.${Math.random().toString(36).slice(2)}.old`);
+      try {
+        io.rename(f, moved);
+        aside.push(moved);
+        done.push(`removed ${f}`);
+      } catch {
+        later.push(f);
+      }
     }
+  }
+  if (aside.length) {
+    const [command, ...args] = windowsRemovalCommand(aside, undefined);
+    // Best effort: what is left in the temporary folder harms nothing.
+    spawn(command!, args, { cwd: io.tmp, detached: true, stdio: "ignore", windowsHide: true }).on("error", () => {}).unref();
   }
   let laterData: string | undefined;
   if (plan.data) {
-    if (win && later.length) laterData = plan.data.dir;
+    if (io.windows && later.length) laterData = plan.data.dir;
     else {
+      // Windows will not delete a folder that is some process's working directory, this one's included.
+      const inside = path.relative(plan.data.dir, process.cwd());
+      if (!inside.startsWith("..") && !path.isAbsolute(inside)) process.chdir(io.tmp);
       fs.rmSync(plan.data.dir, { recursive: true, force: true });
       done.push(`deleted ${plan.data.dir}`);
     }

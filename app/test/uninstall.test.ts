@@ -82,3 +82,25 @@ test.skipIf(process.platform === "win32")("plain: copies a Windows update moved 
   const plan = planUninstall({ kind: "installer", home, deep: false, linkDir: links });
   expect(plan.files.map((f) => path.basename(f))).toEqual(expect.arrayContaining(["mnemo.exe.old", "mnemo.exe.k3j2h1g0f9e.old", "memsrv.exe.a1b2c3d4e5f.old"]));
 });
+
+test("Windows: a running binary is moved out of the install, so the install and the home go at once", () => {
+  const { root, home, links } = installed();
+  const tmp = fs.mkdtempSync(path.join(root, "tmp-"));
+  const plan = planUninstall({ kind: "installer", home, deep: true, linkDir: links });
+  const running = plan.files.find((f) => path.basename(f).startsWith("mnemo"))!;
+  // Windows refuses to delete the image of a running process, but lets it be renamed.
+  const rm = (f: string) => {
+    if (f === running) throw Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" });
+    fs.rmSync(f, { force: true });
+  };
+  const before = process.cwd();
+  process.chdir(path.join(home, "bin")); // uninstalling from inside the install
+  try {
+    const done = runUninstall(plan, { windows: true, rm, rename: fs.renameSync, tmp });
+    expect(done.join("\n")).not.toContain("will be removed when");
+  } finally {
+    process.chdir(before);
+  }
+  expect(fs.existsSync(home)).toBe(false);
+  expect(fs.readdirSync(tmp).filter((f) => /^mnemo(\.exe)?\.[a-z0-9]+\.old$/.test(f))).toHaveLength(1);
+});
