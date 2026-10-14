@@ -63,3 +63,16 @@ test("a broken Git fixture reports the failing setup command immediately", () =>
     w?.cleanup();
   }
 });
+
+test("a world exposes native real paths to its callers and child processes", () => {
+  const w = world();
+  try {
+    // Normalizing only the assertion hides a fixture still carrying RUNNER~1.
+    for (const p of [w.home, w.mnemoHome, w.project]) expect(p).toBe(fs.realpathSync.native(p));
+    expect(w.env.HOME).toBe(fs.realpathSync.native(w.home));
+    expect(w.env.USERPROFILE).toBe(fs.realpathSync.native(w.home));
+    expect(w.env.MNEMO_HOME).toBe(fs.realpathSync.native(w.mnemoHome));
+  } finally {
+    w.cleanup();
+  }
+});

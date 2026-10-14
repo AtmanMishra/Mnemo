@@ -5,7 +5,7 @@
  *
  *   const t = await terminal(world, ["--no-boot"]);
  *   await t.waitFor(/Ask Mnemo/);
- *   t.type("/login anthropic\r");
+ *   await submit(t, "/login anthropic");
  *   await t.waitFor(/how do you want to log in/);
  */
 import * as path from "node:path";
@@ -70,6 +70,17 @@ export interface Terminal {
 }
 
 export const KEY = { enter: "\r", esc: "\x1b", ctrlC: "\x03", ctrlD: "\x04", ctrlK: "\x0b", ctrlF: "\x06", down: "\x1b[B", up: "\x1b[A", tab: "\t" };
+
+/** Submit a single-line composer draft only after Ink has consumed its text.
+ * Without the rendered acknowledgment, buffered text + Enter is parsed as a paste. */
+export async function submit(t: Terminal, draft: string): Promise<void> {
+  t.mark();
+  await t.type(draft);
+  const literal = draft.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  await t.waitFor(new RegExp(`❯\\s+${literal}`));
+  t.mark();
+  await t.type(KEY.enter);
+}
 
 /** `opts.exe` runs another copy of the binary (one placed somewhere, as a download is). */
 export async function terminal(w: World, args: string[], opts: { cols?: number; rows?: number; env?: Record<string, string>; exe?: string } = {}): Promise<Terminal> {

@@ -50,7 +50,8 @@ export interface World {
 const DROP = /(_API_KEY|_TOKEN|_SECRET)$|^AWS_|^MNEMO_|^OPENROUTER|^ANTHROPIC|^OPENAI|^GEMINI|^GOOGLE_|^AZURE_|^GIT_/;
 
 export function world(opts: { llm?: string; files?: Record<string, string>; env?: Record<string, string> } = {}): World {
-  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-e2e-")));
+  // Child processes expand Windows 8.3 temp paths; give every fixture the same spelling.
+  const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-e2e-")));
   const home = path.join(base, "home");
   const mnemoHome = path.join(home, ".mnemo");
   const project = path.join(base, "project");

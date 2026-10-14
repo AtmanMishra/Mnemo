@@ -7,7 +7,7 @@ import * as path from "node:path";
 import pkg from "../package.json" with { type: "json" };
 import { startMockLLM, systemPrompt, textOf, toolResults, type MockLLM, type Script } from "./mock-llm.ts";
 import { binary, memsrv, mnemo, world, type World } from "./harness.ts";
-import { hasPty, KEY, terminal, type Terminal } from "./pty.ts";
+import { hasPty, KEY, submit, terminal, type Terminal } from "./pty.ts";
 
 const T = 120_000;
 let script: Script = () => ({ text: "done" });
@@ -435,10 +435,14 @@ describe("install layout", () => {
     expect(fs.existsSync(i.exe)).toBe(true);
   }, T);
 
-  test("uninstall --deep --yes deletes the Mnemo home", async () => {
+  test("uninstall --deep --yes deletes a home with literal path characters, even from its bin", async () => {
     const w = fresh();
+    const home = path.join(w.home, ".mnemo O'Brien [draft] %TEMP% & 日本");
+    fs.renameSync(w.mnemoHome, home);
+    w.mnemoHome = home;
+    w.env.MNEMO_HOME = home;
     const i = installed(w);
-    const r = await run(w, i.exe, ["uninstall", "--deep", "--yes"], { MNEMO_LINK_DIR: i.linkDir });
+    const r = await run({ ...w, project: i.bin }, i.exe, ["uninstall", "--deep", "--yes"], { MNEMO_LINK_DIR: i.linkDir });
     expect(r.code).toBe(0);
     // Windows deletes after the process exits; give it a moment.
     for (let n = 0; n < 50 && fs.existsSync(w.mnemoHome); n++) await Bun.sleep(100);
@@ -550,8 +554,7 @@ describe.if(hasPty)("the terminal", () => {
     const t = await terminal(fresh(), START);
     try {
       await ready(t);
-      await t.type("/clear");
-      await t.type(KEY.enter);
+      await submit(t, "/clear");
       await Bun.sleep(1500);
       // \x1b[3J erases the scrollback the user had before starting Mnemo; the workspace is on the alternate screen.
       expect(t.raw().includes("\x1b[3J")).toBe(false);
@@ -573,8 +576,7 @@ describe.if(hasPty)("the terminal", () => {
       await ready(t);
       await t.waitFor(/boom from an extension/, 15_000);
       expect(await t.exitWithin(500)).toBeUndefined();
-      await t.type("ping");
-      await t.type(KEY.enter);
+      await submit(t, "ping");
       await t.waitFor(/still here/);
       const log = fs.readFileSync(path.join(w.mnemoHome, "logs", "errors.log"), "utf8");
       expect(log).toContain("boom from an extension");

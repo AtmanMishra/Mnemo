@@ -131,9 +131,61 @@ export function human(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
+/** A detached helper can remove the executable only after its owner has exited.
+ * Encoded PowerShell avoids cmd's incompatible argv quoting and path expansion. */
+export function windowsRemovalCommand(files: string[], dataDir: string | undefined, ownerPid = process.pid): string[] {
+  // Resolve relative MNEMO_HOME paths before the helper changes its working directory.
+  const literal = (p: string) => `'${path.resolve(p).replace(/'/g, "''")}'`;
+  const script = `
+$ErrorActionPreference = 'Stop'
+$mnemoOwner = $null
+try { $mnemoOwner = [Diagnostics.Process]::GetProcessById(${ownerPid}) } catch [ArgumentException] {}
+if ($mnemoOwner) {
+  try { $mnemoOwner.WaitForExit() } finally { $mnemoOwner.Dispose() }
+}
+$mnemoFiles = @(${files.map(literal).join(", ")})
+$mnemoData = ${dataDir ? literal(dataDir) : "$null"}
+function Clear-MnemoReadOnly([string] $mnemoPath, [bool] $mnemoRecurse) {
+  $mnemoAttributes = [IO.File]::GetAttributes($mnemoPath)
+  # Never change a link's target, even when it is outside the Mnemo home.
+  if ($mnemoAttributes -band [IO.FileAttributes]::ReparsePoint) { return }
+  if ($mnemoAttributes -band [IO.FileAttributes]::ReadOnly) {
+    [IO.File]::SetAttributes($mnemoPath, [IO.FileAttributes]($mnemoAttributes -band (-bnot [IO.FileAttributes]::ReadOnly)))
+  }
+  if ($mnemoRecurse -and ($mnemoAttributes -band [IO.FileAttributes]::Directory)) {
+    foreach ($mnemoEntry in [IO.Directory]::EnumerateFileSystemEntries($mnemoPath)) {
+      Clear-MnemoReadOnly $mnemoEntry $true
+    }
+  }
+}
+for ($mnemoAttempt = 0; $mnemoAttempt -lt 100; $mnemoAttempt++) {
+  $mnemoPending = $false
+  foreach ($mnemoFile in $mnemoFiles) {
+    try {
+      if ([IO.File]::Exists($mnemoFile)) {
+        Clear-MnemoReadOnly $mnemoFile $false
+      }
+      [IO.File]::Delete($mnemoFile)
+    } catch { $mnemoPending = $true }
+  }
+  if ($mnemoData -and [IO.Directory]::Exists($mnemoData)) {
+    # Directory.Delete removes junctions/symlinks without traversing their targets.
+    try {
+      Clear-MnemoReadOnly $mnemoData $true
+      [IO.Directory]::Delete($mnemoData, $true)
+    } catch { $mnemoPending = $true }
+  }
+  if (-not $mnemoPending) { exit 0 }
+  Start-Sleep -Milliseconds 100
+}
+exit 1
+`;
+  return ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")];
+}
+
 /**
  * Carry it out. On Windows a running .exe cannot be deleted, so the last step
- * (the binaries, and the data folder they live in) is handed to a cmd that
+ * (the binaries, and the data folder they live in) is handed to a helper that
  * waits for this process to exit.
  */
 export function runUninstall(plan: UninstallPlan): string[] {
@@ -152,22 +204,24 @@ export function runUninstall(plan: UninstallPlan): string[] {
     try {
       fs.rmSync(f, { force: true });
       done.push(`removed ${f}`);
-    } catch {
+    } catch (error) {
+      if (!win) throw error;
       later.push(f);
     }
   }
+  let laterData: string | undefined;
   if (plan.data) {
-    if (win && later.length) later.push(plan.data.dir);
+    if (win && later.length) laterData = plan.data.dir;
     else {
       fs.rmSync(plan.data.dir, { recursive: true, force: true });
       done.push(`deleted ${plan.data.dir}`);
     }
   }
   if (later.length) {
-    // Wait for this process to go, then delete what it was holding open.
-    const cmds = later.map((p) => (p === plan.data?.dir ? `rmdir /s /q "${p}"` : `del /f /q "${p}"`)).join(" & ");
-    spawn("cmd", ["/d", "/c", `ping -n 3 127.0.0.1 >nul & ${cmds}`], { detached: true, stdio: "ignore", windowsHide: true }).unref();
-    done.push(`${later.join(", ")} will be removed when this window's mnemo exits`);
+    const [command, ...args] = windowsRemovalCommand(later, laterData);
+    // A helper inside the installation directory would itself keep that directory open.
+    spawn(command!, args, { cwd: os.tmpdir(), detached: true, stdio: "ignore", windowsHide: true }).unref();
+    done.push(`${[...later, ...(laterData ? [laterData] : [])].join(", ")} will be removed when this window's mnemo exits`);
   }
   return done;
 }

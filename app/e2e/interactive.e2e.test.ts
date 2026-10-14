@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { startMockLLM, type MockLLM } from "./mock-llm.ts";
 import { binary, memsrv, world, type World } from "./harness.ts";
-import { hasPty, KEY, terminal, type Terminal } from "./pty.ts";
+import { hasPty, KEY, submit, terminal, type Terminal } from "./pty.ts";
 
 const T = 90_000;
 let llm: MockLLM;
@@ -40,11 +40,7 @@ describe.if(hasPty)("interactive", () => {
     const t = await terminal(fresh(), args, { env: { CI: "true", GITHUB_ACTIONS: "true" } });
     try {
       await ready(t);
-      await t.type("ping");
-      // Wait for the app to consume the text: a buffered "ping\r" is a paste,
-      // not a prompt followed by Enter, when the runner is busy.
-      await t.waitFor(/ping/);
-      await t.type(KEY.enter);
+      await submit(t, "ping");
       await t.waitFor(/pong from the mock/);
     } finally {
       await t.kill();
@@ -55,8 +51,7 @@ describe.if(hasPty)("interactive", () => {
     const t = await terminal(fresh(), START);
     try {
       await ready(t);
-      await t.type("ping");
-      await t.type(KEY.enter);
+      await submit(t, "ping");
       await t.waitFor(/pong from the mock/);
     } finally {
       await t.kill();
@@ -69,8 +64,7 @@ describe.if(hasPty)("interactive", () => {
     const t = await terminal(fresh(), START, { env: { BROWSER: "true" } });
     try {
       await ready(t);
-      await t.type("/login anthropic");
-      await t.type(KEY.enter);
+      await submit(t, "/login anthropic");
       await t.waitFor(/how do you want to log in/);
       await Bun.sleep(600);
       t.mark();
@@ -95,8 +89,7 @@ describe.if(hasPty)("interactive", () => {
     const t = await terminal(w, START);
     try {
       await ready(t);
-      await t.type("/login anthropic");
-      await t.type(KEY.enter);
+      await submit(t, "/login anthropic");
       await t.waitFor(/how do you want to log in/);
       await Bun.sleep(600);
       await t.type(KEY.down);
@@ -104,6 +97,7 @@ describe.if(hasPty)("interactive", () => {
       await t.waitFor(/key/i);
       t.mark();
       await t.type("sk-ant-e2e-test-key");
+      await t.waitFor(new RegExp("•".repeat("sk-ant-e2e-test-key".length)));
       await t.type(KEY.enter);
       await t.waitFor(/Logged in to Anthropic|Login failed/);
       expect(t.text()).not.toContain("Login failed");
@@ -121,9 +115,7 @@ describe.if(hasPty)("interactive", () => {
       const t = await terminal(fresh(), START, { env: { BROWSER: "true" } });
       try {
         await ready(t);
-        t.mark();
-        await t.type(`/login ${id}`);
-        await t.type(KEY.enter);
+        await submit(t, `/login ${id}`);
         await t.waitFor(/how do you want to log in|URL|code|Enter|Login failed|Unknown provider/i);
         if (/how do you want to log in/.test(t.text())) await t.type(KEY.enter);
         await Bun.sleep(1500);
@@ -151,8 +143,7 @@ describe.if(hasPty)("interactive", () => {
     const t = await terminal(w, START);
     try {
       await ready(t);
-      await t.type("/theme dracula");
-      await t.type(KEY.enter);
+      await submit(t, "/theme dracula");
       await Bun.sleep(800);
     } finally {
       await t.kill();
@@ -193,15 +184,9 @@ describe.if(hasPty)("interactive", () => {
     const t = await terminal(fresh({ llm: slow.url }), [...START, "--yolo"]);
     try {
       await ready(t);
-      await t.type("wait a bit");
-      await t.waitFor(/❯\s+wait a bit/);
-      await t.type(KEY.enter);
+      await submit(t, "wait a bit");
       await t.waitFor(/esc to interrupt/);
-      t.mark();
-      await t.type("and then this");
-      // The text must be consumed before Enter, or Ink can parse both as a paste.
-      await t.waitFor(/❯\s+and then this/);
-      await t.type(KEY.enter);
+      await submit(t, "and then this");
       await t.waitFor(/queued:\s+and then this/);
       t.mark();
       await t.type(KEY.esc);
@@ -222,8 +207,7 @@ describe.if(hasPty)("interactive", () => {
     const t = await terminal(fresh(), START, { env: { BROWSER: "none" } });
     try {
       await ready(t);
-      await t.type("/login anthropic");
-      await t.type(KEY.enter);
+      await submit(t, "/login anthropic");
       await t.waitFor(/how do you want to log in/);
       await Bun.sleep(600);
       t.mark();
