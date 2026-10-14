@@ -191,6 +191,19 @@ export function Workspace({ controller, source, motion, initial, width, height, 
     if (!working) void load(pane);
   }, [working]);
 
+  // Another session (/new, /resume): where the view was in the last one means nothing here.
+  const firstSession = useRef(chrome.sessionSeq);
+  useEffect(() => {
+    if (chrome.sessionSeq === firstSession.current) return;
+    setTurnSel(undefined);
+    setSearch(undefined);
+    setBack(0);
+    setPreview(undefined);
+    setPreviewBack(0);
+    setMap(undefined);
+    void load(pane);
+  }, [chrome.sessionSeq]);
+
   // Moving through the sidebar previews what is under the cursor.
   useEffect(() => {
     if (focus !== "sidebar" || !current || current.kind === "dir" || current.kind === "head") return;

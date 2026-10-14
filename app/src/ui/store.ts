@@ -160,6 +160,20 @@ export class Transcript {
     this.changed();
   }
 
+  /**
+   * Another session (/new, /resume, a rewind): nothing of the last one carries
+   * over, neither what is on screen nor a recall waiting for its message, the
+   * queue or a run whose end will now never be reported.
+   */
+  reset(): void {
+    this.pendingRecall = undefined;
+    this.releaseCompaction = undefined;
+    this.queue = [];
+    this.working = null;
+    this.live = [];
+    this.clear();
+  }
+
   /** Print the finished blocks again (after the screen was cleared), e.g. expanded. */
   reprint(): void {
     this.epoch++;

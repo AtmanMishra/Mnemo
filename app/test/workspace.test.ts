@@ -343,3 +343,30 @@ test("a pane that fails to load or act says so instead of rejecting", async () =
   expect(said).toContain("could not resume");
   r.unmount();
 });
+
+test("a picked turn and a search do not survive /new", async () => {
+  const r = await mount();
+  r.e.faux.setResponses([fauxAssistantMessage(fauxText("the walrus")), fauxAssistantMessage(fauxText("a penguin"))]);
+  for (const q of ["one", "two"]) {
+    await r.e.controller.submit(q);
+    await r.e.idle();
+  }
+  await wait(80);
+  r.stdin.write("\x06");
+  await wait();
+  for (const ch of "walrus") r.stdin.write(ch);
+  await wait(120);
+  r.stdin.write("\r");
+  await wait(120);
+  expect(r.lastFrame()).toContain("turn 1/2");
+  await r.e.controller.submit("/new");
+  await wait(120);
+  expect(r.lastFrame()).not.toContain("turn 1/");
+  r.stdin.write("\x06");
+  await wait(80);
+  expect(r.lastFrame()).toContain("find: ▏");
+  await r.e.controller.submit("/new");
+  await wait(120);
+  expect(r.lastFrame()).not.toContain("find:");
+  r.unmount();
+});

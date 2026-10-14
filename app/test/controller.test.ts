@@ -10,7 +10,7 @@ import * as path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { startRuntime } from "../src/runtime/runtime.ts";
-import { Controller } from "../src/runtime/controller.ts";
+import { Controller, gitBranch } from "../src/runtime/controller.ts";
 import { createDemoProject, createFaux, demoScript, DEMO_PROMPT } from "../src/runtime/demo.ts";
 import { nextDialog } from "./helpers.ts";
 
@@ -318,4 +318,47 @@ test("resuming a session file that cannot be read says so instead of rejecting",
   await controller.resumePath(fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-not-a-session-")));
   expect(notices(controller).at(-1)).toStartWith("Could not resume that session");
   expect(controller.session.sessionFile).toBe(before);
+});
+
+test("the branch is read through a worktree's .git file, and again after /new", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-wt-"));
+  const gitdir = path.join(repo, "main-repo", ".git", "worktrees", "fix");
+  fs.mkdirSync(gitdir, { recursive: true });
+  fs.writeFileSync(path.join(gitdir, "HEAD"), "ref: refs/heads/review/fix\n");
+  const tree = path.join(repo, "tree");
+  fs.mkdirSync(path.join(tree, "src"), { recursive: true });
+  fs.writeFileSync(path.join(tree, ".git"), `gitdir: ${gitdir}\n`);
+  expect(gitBranch(path.join(tree, "src"))).toBe("review/fix");
+});
+
+test("/new leaves nothing of the last session behind: statuses, activity, a waiting recall, the branch", async () => {
+  const cwd = createDemoProject();
+  fs.mkdirSync(path.join(cwd, ".git"), { recursive: true });
+  fs.writeFileSync(path.join(cwd, ".git", "HEAD"), "ref: refs/heads/main\n");
+  const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-agent-"));
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  const { modelRuntime, faux } = await createFaux(agentDir);
+  const status = (pi: { registerCommand: (n: string, o: unknown) => void }) =>
+    pi.registerCommand("busy", { description: "", handler: async (_a: string, ctx: { ui: { setStatus: (k: string, t: string) => void; setWorkingMessage: (m: string) => void } }) => {
+      ctx.ui.setStatus("ext", "indexing");
+      ctx.ui.setWorkingMessage("Indexing…");
+    } });
+  const runtime = await startRuntime({ cwd, agentDir, modelRuntime, model: faux.getModel(), sessionManager: SessionManager.inMemory(cwd), extensions: [status as never] });
+  cleanups.push(() => runtime.dispose());
+  const controller = new Controller(runtime, { exit: () => {} });
+  await controller.bind();
+  expect(controller.snapshot().footer.branch).toBe("main");
+  await controller.submit("/busy");
+  expect(controller.snapshot().statuses).toEqual([["ext", "indexing"]]);
+  controller.transcript.memory("Recalled", ["from the old session"], { afterNextUser: true });
+  fs.writeFileSync(path.join(cwd, ".git", "HEAD"), "ref: refs/heads/feature\n");
+  await controller.submit("/new");
+  const chrome = controller.snapshot();
+  expect(chrome.statuses).toEqual([]);
+  expect(chrome.workingMessage).toBeUndefined();
+  expect(chrome.footer.branch).toBe("feature");
+  faux.setResponses([fauxAssistantMessage(fauxText("hi"))]);
+  await controller.submit("hello");
+  await controller.session.waitForIdle();
+  expect(controller.transcript.snapshot().committed.some((b) => b.kind === "memory")).toBe(false);
 });

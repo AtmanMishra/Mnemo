@@ -84,6 +84,8 @@ export interface Chrome {
   expanded: boolean;
   /** Set when something outside the input (an extension, a command) replaces the draft. */
   draftRequest?: { text: string; seq: number };
+  /** Bumped each time another session is bound (/new, /resume): views drop where they were. */
+  sessionSeq: number;
 }
 
 const BUILTINS: Omit<CommandInfo, "source">[] = [
@@ -127,17 +129,28 @@ export const HELP_TEXT = [
   "  ctrl+c twice / ctrl+d quit",
 ].join("\n");
 
-function gitBranch(cwd: string): string | undefined {
-  let dir = cwd;
-  for (;;) {
-    try {
-      const head = fs.readFileSync(path.join(dir, ".git", "HEAD"), "utf8").trim();
-      return head.startsWith("ref: refs/heads/") ? head.slice(16) : head.slice(0, 7);
-    } catch {
-      const up = path.dirname(dir);
-      if (up === dir) return undefined;
-      dir = up;
+/** The checked-out branch (or short commit) of the repository `cwd` is in; a worktree's `.git` is a file naming its git dir. */
+export function gitBranch(cwd: string): string | undefined {
+  for (let dir = path.resolve(cwd); ; ) {
+    const dotgit = path.join(dir, ".git");
+    const st = fs.statSync(dotgit, { throwIfNoEntry: false });
+    if (st) {
+      try {
+        let gitdir = dotgit;
+        if (st.isFile()) {
+          const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotgit, "utf8"));
+          if (!m) return undefined;
+          gitdir = path.resolve(dir, m[1]!.trim());
+        }
+        const head = fs.readFileSync(path.join(gitdir, "HEAD"), "utf8").trim();
+        return head.startsWith("ref: refs/heads/") ? head.slice(16) : head.slice(0, 7);
+      } catch {
+        return undefined;
+      }
     }
+    const up = path.dirname(dir);
+    if (up === dir) return undefined;
+    dir = up;
   }
 }
 
@@ -220,7 +233,7 @@ export class Controller {
       };
       void this.refreshMemory();
     }
-    this.chrome = { footer: this.readFooter(), statuses: [], workingVisible: true, expanded: false };
+    this.chrome = { footer: this.readFooter(), statuses: [], workingVisible: true, expanded: false, sessionSeq: 0 };
   }
 
   get session(): AgentSession {
@@ -250,6 +263,7 @@ export class Controller {
   snapshot = (): Chrome => this.chrome;
 
   private update(patch: Partial<Chrome>): void {
+    if (!this.chrome) return;
     this.chrome = { ...this.chrome, ...patch };
     for (const l of this.listeners) l();
   }
@@ -290,6 +304,17 @@ export class Controller {
   private async attach(): Promise<void> {
     this.unsubscribe?.();
     const session = this.runtime.session;
+    // What the last session's extensions and runs left on screen is not this one's.
+    this.statuses.clear();
+    this.branch = gitBranch(this.runtime.cwd);
+    this.update({
+      statuses: [],
+      workingMessage: undefined,
+      workingVisible: true,
+      activity: undefined,
+      race: this.chrome?.race?.done ? undefined : this.chrome?.race,
+      sessionSeq: (this.chrome?.sessionSeq ?? 0) + 1,
+    });
     await session.bindExtensions({
       uiContext: createUiContext(this.dialogs, {
         notify: (m, tone) => this.transcript.notice(m, tone),
@@ -534,6 +559,8 @@ export class Controller {
         this.transcript.notice(`could not reload skills: ${errorText(error)}`, "warn");
       }
     }
+    // The run may have switched branches (git checkout): the footer catches up.
+    this.branch = gitBranch(this.runtime.cwd);
     void this.refreshMemory();
     // A session is named after its first message once it has one, so /resume and pi list it by that.
     const session = this.runtime.session;
@@ -1033,7 +1060,7 @@ export class Controller {
     const result = await this.runtime.newSession();
     if (result.cancelled) return;
     this.options.onClearScreen?.();
-    this.transcript.clear();
+    this.transcript.reset();
     this.transcript.notice("New session");
   }
 
@@ -1106,7 +1133,7 @@ export class Controller {
         return;
       }
       this.options.onClearScreen?.();
-      this.transcript.clear();
+      this.transcript.reset();
       this.transcript.load(this.runtime.session.messages);
       if (result.editorText) this.setDraft(result.editorText);
     }
@@ -1150,7 +1177,7 @@ export class Controller {
     }
     if (result.cancelled) return;
     this.options.onClearScreen?.();
-    this.transcript.clear();
+    this.transcript.reset();
     this.transcript.load(this.runtime.session.messages);
     this.transcript.notice("Resumed session");
   }
