@@ -157,7 +157,7 @@ function ConfirmDialog({ dialog }: { dialog: Extract<Dialog, { kind: "confirm" }
 }
 
 function TextDialog({ dialog }: { dialog: Extract<Dialog, { kind: "text" }> }) {
-  const [draft, setDraft] = useState<ed.Draft>(ed.empty);
+  const [draft, setDraft] = useState<ed.Draft>(() => (dialog.initial ? { text: dialog.initial, cursor: dialog.initial.length } : ed.empty));
   usePaste((text) => setDraft((d) => ed.insert(d, text.replace(/\r?\n/g, ""))));
   useInput((input, key) => {
     if (key.escape) return dialog.resolve(undefined);

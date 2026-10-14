@@ -13,6 +13,7 @@ import { WorkingLine } from "./components/Working.tsx";
 import type { WelcomeInfo } from "./components/Welcome.tsx";
 import { listFiles } from "./files.ts";
 import { displayCwd } from "./format.ts";
+import { RUN_AS_PICKED } from "./workspace/Workspace.tsx";
 
 export interface AppProps {
   controller: Controller;
@@ -47,6 +48,21 @@ export function App({ controller, version, home, motion, clearTerminal }: AppPro
     let cache: string[] | undefined;
     return () => (cache ??= listFiles(cwd));
   }, [cwd]);
+
+  // ctrl+k on an empty prompt: a command or a file to go to, as in the workspace.
+  const openPalette = async () => {
+    const pick = await controller.dialogs.select("Go to…  commands · files", [
+      ...controller.commands().map((c) => ({ value: `c:${c.name}`, label: `/${c.name}`, description: c.description })),
+      ...files().map((f) => ({ value: `f:${f}`, label: `▤ ${f}`, description: "mention it in the prompt" })),
+    ]);
+    if (!pick) return;
+    const rest = pick.slice(2);
+    if (pick.startsWith("c:")) {
+      const builtin = controller.commands().find((c) => c.name === rest)?.source === "builtin";
+      if (builtin && RUN_AS_PICKED.has(rest)) void controller.submit(`/${rest}`);
+      else controller.setDraft(`/${rest} `);
+    } else controller.setDraft(`${controller.draftText}@${rest} `);
+  };
 
   const render = (b: (typeof snap.committed)[number]) => (
     <BlockView key={b.id} block={b} cwd={cwd} expanded={chrome.expanded} welcome={welcome} />
@@ -101,6 +117,7 @@ export function App({ controller, version, home, motion, clearTerminal }: AppPro
           onCycleThinking={() => controller.cycleThinking()}
           onCycleMode={() => controller.cycleMode()}
           onRewind={() => void controller.rewind()}
+          onPalette={() => void openPalette()}
         />
       </Box>
     </MotionContext.Provider>

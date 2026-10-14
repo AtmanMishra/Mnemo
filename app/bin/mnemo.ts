@@ -4,6 +4,8 @@
  * arguments, the terminal, exit codes. Everything else takes what it needs as
  * parameters, so it can be tested without any of these.
  */
+// First: a compiled binary cannot load pi's login flows or Bedrock until this registers them.
+import "../src/runtime/bun-setup.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -40,7 +42,8 @@ const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
 usage
   mnemo                    start in this folder
   mnemo -c, --continue     continue the most recent session here
-  mnemo -p "<prompt>"      answer once and print the result (no interface)
+  mnemo -p "<prompt>"      answer once and print the result (no interface); asks nothing: what would ask
+                           is allowed, while deny rules and --plan still refuse
   mnemo doctor [--fix]     what is installed, configured and reachable; --fix repairs what it can
   mnemo update             install the latest release · --check · --auto on|off (a daily check, off by default)
   mnemo uninstall          remove Mnemo; what it learned stays · --deep also deletes memory, sessions,
@@ -94,7 +97,17 @@ interface Args {
   cwd?: string;
 }
 
+/** A mistake in the command line: exits 2, like the subcommands' usage errors. */
+class UsageError extends Error {}
+
 function parse(argv: string[]): Args {
+  /** The value after option `v`: there must be one, and it must not be the next option. */
+  const value = (i: number, v: string): string => {
+    const next = argv[i];
+    if (next === undefined || next.trim() === "" || /^--?[A-Za-z]/.test(next))
+      throw new UsageError(`${v} needs a value${next === undefined || next.trim() === "" ? "" : `, not the option ${next}`} — mnemo --help lists them`);
+    return next;
+  };
   const a: Args = { help: false, version: false, demo: false, dump: false, motion: true, boot: true, inline: false, intro: false, memory: true, reflect: true, verify: true, escalate: process.env.MNEMO_ESCALATE_MODEL || undefined, mode: "default", continueRecent: false };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i]!;
@@ -111,17 +124,17 @@ function parse(argv: string[]): Args {
     else if (v === "--no-memory") a.memory = false;
     else if (v === "--no-reflect") a.reflect = false;
     else if (v === "--no-verify") a.verify = false;
-    else if (v === "--escalate") a.escalate = argv[++i];
-    else if (v === "--best-of") a.bestOf = Number(argv[++i]);
-    else if (v === "--check") a.check = argv[++i];
+    else if (v === "--escalate") a.escalate = value(++i, v);
+    else if (v === "--best-of") a.bestOf = Number(value(++i, v));
+    else if (v === "--check") a.check = value(++i, v);
     else if (v === "--plan") a.mode = "plan";
     else if (v === "--accept-edits") a.mode = "accept-edits";
     else if (v === "--yolo") a.mode = "yolo";
     else if (v === "--trust-project") a.trustProject = true;
     else if (v === "-c" || v === "--continue") a.continueRecent = true;
-    else if (v === "-p" || v === "--print") a.print = argv[++i] ?? "";
-    else if (v === "--cwd") a.cwd = argv[++i];
-    else throw new Error(`unknown argument ${v} — mnemo --help lists them`);
+    else if (v === "-p" || v === "--print") a.print = value(++i, v);
+    else if (v === "--cwd") a.cwd = value(++i, v);
+    else throw new UsageError(`unknown argument ${v} — mnemo --help lists them`);
   }
   return a;
 }
@@ -302,20 +315,23 @@ async function uninstallCommand(argv: string[], home: string): Promise<number> {
   const yes = argv.includes("--yes") || argv.includes("-y");
   const kind = installKind(process.execPath, home);
   const plan = planUninstall({ kind, home, deep, linkDir: process.env.MNEMO_LINK_DIR });
+  // --deep that cannot delete the data is not a success, whatever else goes.
+  let refused = false;
   if (plan.data && !looksLikeMnemoHome(plan.data.dir)) {
     console.error(`mnemo uninstall: ${plan.data.dir} holds files Mnemo did not put there; it is not deleted. Remove what you want from it by hand.`);
     plan.data = undefined;
+    refused = true;
   }
   if (kind === "source") console.log("You are running from a source checkout: there is no installed program to remove.");
   const lines = describePlan(plan);
   if (!plan.files.length && !plan.link && !plan.pathEntry && !plan.data) {
     for (const l of lines) console.log(l);
-    if (!plan.manager) console.log("Nothing to remove.");
-    return 0;
+    if (!plan.manager && !refused) console.log("Nothing to remove.");
+    return refused ? 1 : 0;
   }
   console.log("mnemo uninstall\n");
   for (const l of lines) console.log(`  ${l}`);
-  if (!plan.data) console.log(`\n  kept    ${home} (memory, sessions, settings; --deep deletes them too)`);
+  if (!plan.data) console.log(`\n  kept    ${home} (memory, sessions, settings${refused ? "" : "; --deep deletes them too"})`);
   if (!yes) {
     if (!process.stdin.isTTY) return console.error("\nmnemo uninstall: not a terminal; add --yes to go ahead"), 2;
     const answer = plan.data ? await ask('\nThis cannot be undone. Type "delete" to go ahead: ') : await ask("\nGo ahead? [y/N] ");
@@ -323,6 +339,11 @@ async function uninstallCommand(argv: string[], home: string): Promise<number> {
   }
   console.log("");
   for (const l of runUninstall(plan)) console.log(`  ✓ ${l}`);
+  if (refused) {
+    console.error(`\nmnemo uninstall: the program is removed, but ${home} was not deleted (it holds files Mnemo did not put there).`);
+    if (plan.manager) console.log(`Then run  ${plan.manager}`);
+    return 1;
+  }
   console.log("\nMnemo is uninstalled. If you attached its memory to Claude Code or Codex (mnemo memory setup), remove the mnemo entries from their settings too.");
   if (plan.manager) console.log(`Then run  ${plan.manager}`);
   return 0;
@@ -419,6 +440,12 @@ async function main(): Promise<number> {
         return 1;
       }
       await session.prompt(args.print);
+      // A refused or failed model call (a bad key, an outage) ends the turn quietly: say so, and fail.
+      const last = session.messages.findLast((m) => m.role === "assistant");
+      if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
+        console.error(`mnemo: the model call failed: ${last.errorMessage || last.stopReason}`);
+        return 1;
+      }
       process.stdout.write(`${session.getLastAssistantText() ?? ""}\n`);
       await settleBackground(host);
       return 0;
@@ -433,7 +460,9 @@ async function main(): Promise<number> {
   let instance: ReturnType<typeof render> | undefined;
   const clearTerminal = () => {
     instance?.clear();
-    if (process.stdout.isTTY) process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+    // The workspace is on the alternate screen, which Ink's clear covers; \x1b[3J there would
+    // erase the scrollback the user had before starting Mnemo. Inline, the transcript is the scrollback.
+    if (layout === "inline" && process.stdout.isTTY) process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
   };
   let exitCode = 0;
   let finished!: () => void;
@@ -481,6 +510,12 @@ async function main(): Promise<number> {
   controller.transcript.push({ kind: "welcome" });
   watch(cwd, controller);
   firstId = fleet.adopt(cwd, { controller, host, source: workspaceSource(controller, host, home) }).id;
+  // From here a failure nothing caught (an extension's timer, a stray promise) is a notice in
+  // every open agent, not the end of the session.
+  onStrayError = (kind, error) => {
+    const file = logError(home, kind, error);
+    for (const a of fleet.snapshot().agents) a.controller.transcript.notice(`Something failed in the background: ${message(error)} (details in ${file})`, "warn");
+  };
   if (!memsrv && args.memory)
     controller.transcript.notice(`Memory is off: ${memsrvName()} was not found. \`mnemo doctor\` says where it looks.`, "warn");
   if (args.continueRecent && runtime.session.messages.length > 0) {
@@ -577,10 +612,44 @@ async function main(): Promise<number> {
   return exitCode;
 }
 
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** A failure nothing caught, appended to $MNEMO_HOME/logs/errors.log. Returns the file. */
+function logError(home: string, kind: string, error: unknown): string {
+  const dir = path.join(home, "logs");
+  const file = path.join(dir, "errors.log");
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.appendFileSync(file, `${new Date().toISOString()} ${kind}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`, { mode: 0o600 });
+  } catch {
+    /* nowhere to write: the message is still shown */
+  }
+  return file;
+}
+
+/** Set once the interface is up. Before that, a stray failure is fatal, as it always was. */
+let onStrayError: ((kind: string, error: unknown) => void) | undefined;
+function strayError(kind: string, error: unknown): void {
+  if (onStrayError) {
+    try {
+      return onStrayError(kind, error);
+    } catch {
+      /* the interface itself is broken: fall through to exiting */
+    }
+  }
+  logError(mnemoHome(), kind, error);
+  console.error(`mnemo: ${message(error)}`);
+  process.exit(1);
+}
+process.on("unhandledRejection", (error) => strayError("unhandled rejection", error));
+process.on("uncaughtException", (error) => strayError("uncaught exception", error));
+
 main().then(
   (code) => process.exit(code),
   (error) => {
     console.error(`mnemo: ${error instanceof Error ? error.message : String(error)}`);
-    process.exit(1);
+    process.exit(error instanceof UsageError ? 2 : 1);
   },
 );

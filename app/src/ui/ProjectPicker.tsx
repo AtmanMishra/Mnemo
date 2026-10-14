@@ -13,9 +13,22 @@ import * as path from "node:path";
 import { Box, Text, useInput } from "ink";
 import { projectCandidates, type FleetSnapshot } from "../runtime/fleet.ts";
 import { palette, ground } from "./theme.ts";
+import { samePath } from "./files.ts";
 
 const tilde = (p: string) => (p.startsWith(os.homedir()) ? `~${p.slice(os.homedir().length)}` : p);
 const expand = (p: string) => (p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p);
+
+/**
+ * A query that names a folder rather than filters the list: absolute (`/x`,
+ * `C:\\x`, `\\\\server\\share`), from home (`~/x`) or relative (`./x`, `../x`,
+ * `src/x`). Returns it resolved.
+ */
+export function typedPath(query: string, p: typeof path = path): string | undefined {
+  const q = query.trim();
+  if (!q) return undefined;
+  const looks = /[\\/]/.test(q) || q.startsWith("~") || q.startsWith(".") || /^[A-Za-z]:/.test(q);
+  return looks ? p.resolve(expand(q)) : undefined;
+}
 
 /** Subsequence match on the folder name, substring on the path. */
 export function matchProject(cwd: string, query: string): boolean {
@@ -41,8 +54,8 @@ export function ProjectPicker(p: ProjectPickerProps): React.ReactElement {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const all = useMemo(() => projectCandidates(p.fleet, p.current), [p.fleet, p.current]);
-  const typed = query.includes("/") || query.startsWith("~") ? path.resolve(expand(query)) : undefined;
-  const typedOk = typed !== undefined && fs.existsSync(typed) && fs.statSync(typed).isDirectory() && !all.includes(typed);
+  const typed = typedPath(query);
+  const typedOk = typed !== undefined && fs.statSync(typed, { throwIfNoEntry: false })?.isDirectory() === true && !all.some((c) => samePath(c, typed));
   const items = [...(typedOk ? [typed!] : []), ...all.filter((c) => matchProject(c, query))];
   const at = Math.min(index, Math.max(0, items.length - 1));
   const start = Math.max(0, Math.min(at - SHOWN + 1, items.length - SHOWN));

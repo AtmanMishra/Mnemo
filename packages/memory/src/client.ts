@@ -21,6 +21,7 @@
  *     sidecar that could not be spawned took the whole session with it.
  */
 import type { ChildProcess } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 
 export interface MemoryResponse {
   ok: boolean;
@@ -57,6 +58,8 @@ export class MemoryClient {
   #child: MemoryChild | null = null;
   #nextId = 1;
   #buffer = "";
+  /** A chunk can end inside a UTF-8 character: the decoder keeps the partial bytes for the next one. */
+  #decoder = new StringDecoder("utf8");
   #pending = new Map<number, (response: MemoryResponse) => void>();
   /** Every request runs after the previous one settles. */
   #queue: Promise<unknown> = Promise.resolve();
@@ -119,6 +122,8 @@ export class MemoryClient {
   #start(): void {
     if (this.alive) return;
     const child = this.#readonly.spawn(this.#readonly.binaryPath, [this.#readonly.journalPath]);
+    this.#buffer = "";
+    this.#decoder = new StringDecoder("utf8");
     child.stdout?.on("data", (chunk) => this.#ingest(chunk));
     child.on("exit", () => {
       // Only the current child's death is about the current requests: a
@@ -177,7 +182,7 @@ export class MemoryClient {
 
   /** Accumulate, then take whole lines. The remainder stays for the next chunk. */
   #ingest(chunk: Buffer | string): void {
-    this.#buffer += chunk.toString();
+    this.#buffer += typeof chunk === "string" ? chunk : this.#decoder.write(chunk);
     let newline = this.#buffer.indexOf("\n");
     while (newline >= 0) {
       const line = this.#buffer.slice(0, newline).trim();

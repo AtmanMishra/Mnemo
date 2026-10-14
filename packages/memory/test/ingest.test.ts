@@ -105,3 +105,59 @@ t("ingest learns a Claude Code session once, with provenance, and only what is n
   expect(seen[1]).toContain("now lint it with pnpm lint");
   memory.stop();
 }, 30_000);
+
+t("two ingests of one session at once learn it once, and the ledger stays whole", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-ingest-race-"));
+  const cwd = path.join(root, "repo");
+  fs.mkdirSync(cwd);
+  const file = path.join(root, "s-1.jsonl");
+  fs.writeFileSync(file, transcript(cwd));
+  const journal = path.join(root, "memory", "journal.jsonl");
+  let calls = 0;
+  const reflect: Reflector = async () => {
+    calls++;
+    await new Promise((r) => setTimeout(r, 200));
+    return "{}";
+  };
+  const run = () => {
+    const memory = new MemoryService(MEMSRV!, journal);
+    return ingestClaudeCode({ memory, home: root, userSkillsDir: root, reflect, files: [file], settleMs: 0 }).finally(() => memory.stop());
+  };
+  const reports = await Promise.all([run(), run()]);
+  expect(reports.map((r) => r.sessions).sort()).toEqual([0, 1]);
+  expect(calls).toBe(1);
+  const memory = new MemoryService(MEMSRV!, journal);
+  expect((await memory.nodes()).filter((n) => n.kind === "TaskEpisode")).toHaveLength(1);
+  memory.stop();
+  expect(JSON.parse(fs.readFileSync(path.join(root, "memory", "ingested.json"), "utf8"))).toEqual({ "claude-code:s-1": 1 });
+  expect(fs.readdirSync(path.join(root, "memory")).filter((f) => f.startsWith("ingested.json."))).toEqual([]);
+  // Afterwards the session is simply done.
+  expect((await run()).unchanged).toBe(1);
+}, 30_000);
+
+t("a held lock whose owner is gone is taken over", async () => {
+  const { acquireLock } = await import("../src/ingest/index.ts");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-lock-"));
+  const lock = path.join(root, "x.lock");
+  fs.writeFileSync(lock, `999999999 ${os.hostname()}`);
+  const release = await acquireLock(lock, { staleMs: 60_000 });
+  expect(release).toBeDefined();
+  expect(await acquireLock(lock, { staleMs: 60_000 })).toBeUndefined();
+  release!();
+  expect(fs.existsSync(lock)).toBe(false);
+});
+
+t("--under is a folder, not a prefix: /a/proj does not take /a/project2", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-under-"));
+  const proj = path.join(root, "proj");
+  const other = path.join(root, "project2");
+  fs.mkdirSync(proj);
+  fs.mkdirSync(other);
+  const file = path.join(root, "s-1.jsonl");
+  fs.writeFileSync(file, transcript(other));
+  const memory = new MemoryService(MEMSRV!, path.join(root, "journal.jsonl"));
+  const opts = { memory, home: root, userSkillsDir: root, files: [file], settleMs: 0 };
+  expect((await ingestClaudeCode({ ...opts, under: proj })).sessions).toBe(0);
+  expect((await ingestClaudeCode({ ...opts, under: root })).sessions).toBe(1);
+  memory.stop();
+}, 30_000);

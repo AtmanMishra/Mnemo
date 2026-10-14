@@ -312,7 +312,7 @@ mod p1 {
 #[cfg(test)]
 mod p5_feedback {
     use crate::model::*;
-    use crate::search::{build_vectors, search, USEFULNESS_BIAS, SearchOpts};
+    use crate::search::{build_vectors, search, usefulness_bias, USEFULNESS_BIAS, USEFULNESS_VOTE_CAP, SearchOpts};
     use crate::store::StoreData;
     use crate::vec::HashingEmbedder;
 
@@ -391,6 +391,39 @@ mod p5_feedback {
     }
 
     #[test]
+    fn sixty_votes_on_a_weak_match_never_outrank_a_real_one() {
+        let (mut s, a, b, junk) = near_tie_store();
+        // the junk node shares one word with the query: a weak match
+        s.apply(&Op::AddFact { node: junk, fact_id: 9, key: "also".into(),
+            value: "release".into(), at: t() + 1 }).unwrap();
+        for i in 0..60u64 {
+            s.apply(&Op::RecordUsefulness { node: junk, useful: true, at: t() + 10 + i }).unwrap();
+        }
+        let emb = HashingEmbedder;
+        let vectors = build_vectors(&s, &emb);
+        let r = search(&s, &vectors, &emb, "helm rollback release", 5, t() + 100, &SearchOpts::default());
+        assert!(r[0].node == a || r[0].node == b, "votes are capped: {r:?}");
+        assert!(r.iter().any(|x| x.node == junk), "still a (weak) hit: {r:?}");
+        // the cap, not the vote count, bounds the lift
+        assert!(USEFULNESS_VOTE_CAP as f32 * USEFULNESS_BIAS < 0.2);
+    }
+
+    #[test]
+    fn votes_never_turn_a_non_match_into_a_hit() {
+        let (mut s, _, _, junk) = near_tie_store();
+        for i in 0..60u64 {
+            s.apply(&Op::RecordUsefulness { node: junk, useful: true, at: t() + 10 + i }).unwrap();
+        }
+        let emb = HashingEmbedder;
+        let vectors = build_vectors(&s, &emb);
+        // a query with no words matches nothing: its match score is 0 for every node
+        let r = search(&s, &vectors, &emb, "?", 5, t() + 100, &SearchOpts::default());
+        assert!(!r.iter().any(|x| x.node == junk), "a vote is not a match: {r:?}");
+        assert_eq!(usefulness_bias(&s, junk, 0.0), 0.0);
+        assert_eq!(usefulness_bias(&s, junk, 0.3), USEFULNESS_VOTE_CAP as f32 * USEFULNESS_BIAS);
+    }
+
+    #[test]
     fn votes_are_journaled_and_replay_exact() {
         let (mut s, a, b, _) = near_tie_store();
         s.apply(&Op::RecordUsefulness { node: a, useful: true, at: t() + 10 }).unwrap();
@@ -406,12 +439,64 @@ mod p5_feedback {
         for op in &ops { s2.apply(op).unwrap(); }
         assert_eq!(s2.nodes[&1].useful, s.nodes[&a].useful);
         assert_eq!(s2.nodes[&2].unhelpful, s.nodes[&b].unhelpful);
-        // votes must NEVER touch the node log: node_text embeds the last-3
-        // log entries, and vote noise would dilute the very content the
-        // vote rewards (this was a real bug found by the crafted corpus)
+        // votes must NEVER touch the node log: vote noise would bury the
+        // recent log (this was a real bug found by the crafted corpus, when
+        // node_text still embedded the last log entries)
         assert!(!s2.nodes[&1].log.iter().any(|l| l.kind == "useful"));
         // the counters are model-visible through state text instead
         let st = s2.state_of(1).unwrap();
         assert!(st.contains("usefulness votes: 1 useful / 0 unhelpful"));
+    }
+}
+
+/// Search cost: what a node is embedded from does not change with its log, and
+/// graph expansion does not scan every edge once per seed.
+#[cfg(test)]
+mod search_cost {
+    use crate::model::*;
+    use crate::search::{build_vectors, node_text, search, SearchOpts};
+    use crate::store::StoreData;
+    use crate::vec::HashingEmbedder;
+
+    fn t() -> Millis { 1_700_000_000_000 }
+
+    #[test]
+    fn a_log_entry_does_not_change_what_a_node_is_embedded_from() {
+        let mut s = StoreData::new();
+        s.apply(&Op::CreateNode { id: 1, kind: NodeKind::TaskEpisode, label: "task: fix the build".into(), at: t() }).unwrap();
+        s.apply(&Op::AddFact { node: 1, fact_id: 1, key: "goal".into(), value: "green build".into(), at: t() }).unwrap();
+        let before = node_text(&s, 1).unwrap();
+        s.apply(&Op::CommitLog { node: 1, kind: "tool_call".into(), detail: "bash(npm run build)".into(), at: t() + 1 }).unwrap();
+        assert_eq!(node_text(&s, 1).unwrap(), before, "a remote embedder would be asked again for every tool call");
+    }
+
+    #[test]
+    fn expansion_is_linear_in_edges_not_seeds_times_edges() {
+        // 6000 nodes that all match the query a little, 18000 edges. Scanning
+        // every edge for every seed is ~10^8 steps; an adjacency index is ~10^4.
+        let mut s = StoreData::new();
+        let n = 6000u64;
+        let (mut edge, mut fact) = (1u64, 1u64);
+        for i in 1..=n {
+            s.apply(&Op::CreateNode { id: i, kind: NodeKind::TaskEpisode, label: format!("task: build thing {i}"), at: t() }).unwrap();
+            s.apply(&Op::AddFact { node: i, fact_id: fact, key: "goal".into(), value: format!("fix the build {}", i % 97), at: t() }).unwrap();
+            fact += 1;
+        }
+        for i in 1..=n {
+            for d in [1, 2, 3] {
+                let dst = (i + d * 7) % n + 1;
+                s.apply(&Op::Link { id: edge, src: i, dst, kind: EdgeKind::SuppliesContext, at: t() }).unwrap();
+                edge += 1;
+            }
+        }
+        let emb = HashingEmbedder;
+        let vectors = build_vectors(&s, &emb);
+        let start = std::time::Instant::now();
+        for _ in 0..3 {
+            let r = search(&s, &vectors, &emb, "build", 5, t() + 1, &SearchOpts::default());
+            assert_eq!(r.len(), 5);
+        }
+        let took = start.elapsed();
+        assert!(took < std::time::Duration::from_secs(3), "3 searches took {took:?}");
     }
 }

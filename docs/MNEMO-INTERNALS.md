@@ -191,31 +191,40 @@ with state text *always* inlined — never bare scores — and a provenance line
 the app builds its own recall from `search` instead (§2.9).
 `remember(summary)` auto-routes an area and creates node + fact + log in one
 call. Usefulness is captured as `useful`/`unhelpful` counters on nodes
-(`Op::RecordUsefulness`, `mark_useful`), applied inside the sidecar as a
-`(useful − unhelpful) × 0.02` score bias — zero votes, zero bias, so the eval is
-untouched until real signal exists. The counters also travel in `dump` and
-`search` results, which is how the application weighs trust (§2.9).
-Votes deliberately do **not** enter `node_text`: a heavily-voted node would
-otherwise drift away from its own topic, since the embedding includes the last
-few log lines.
+(`Op::RecordUsefulness`), applied as a `(useful − unhelpful) × 0.02` score bias
+with the net vote count clamped to ±5 and only on a node that matches the query
+at all (a vote reorders matches; it never makes a non-match a hit) — zero votes,
+zero bias, so the eval is untouched until real signal exists. The TS recall
+ranks by that score alone; votes are not weighted a second time there.
+Votes deliberately do **not** enter the log. `node_text` (what a node is
+embedded from) is kind, label, active facts and the last few *content* log
+entries (`created`, `fact_added`, `fact_superseded`, `remembered`) — not the
+activity log, so a tool call does not change a node's text and send it back to
+a remote embedder. Graph expansion uses one adjacency index per search and
+expands only the top 2k seeds (exact for the top k).
 
 ### 2.7 `memsrv` — the only integration surface
 
 Line-JSON-RPC over stdio: `{"id":N,"method":"M","params":{…}}` →
-`{"id":N,"ok":true,"result":…}`. It takes the journal path as its argument,
-replays the journal on startup, opens an embedder, and serves one request per line
-until `exit`. A request frame is capped at 1 MiB; an oversize or non-UTF-8 frame is
-answered with an error and drained, and never kills the sidecar. Methods: `ping`,
-`stats`, `dump`, `state`, `history`, `search`, `create_node`, `episode`, `fact`,
-`link`, `unlink`, `reweight`, `record_outcome`, `commit_log`, `steer`, `good`,
-`set_area`, `forget`, `consolidate`, `mark_useful`, `remember`, `recall_brief`.
-`fact` supersedes a same-key value unless `append: true` says the key is a set,
-and answers with the fact id it wrote plus the id it superseded; `history` returns
-every fact a node ever had with its status and `superseded_by`, which is where
-retired values are read. `dump` lists live nodes with `facts`, a `retired` count,
-`useful`/`unhelpful` votes and `feeders`; a forgotten node is gone from it though
-its ops stay in the journal. `search` takes `areas` (a hard filter) and `scope` (a
-project node), and results carry label, kind, area, state text and votes — the
+`{"id":N,"ok":true,"result":…}`. It replays the journal on startup, opens an
+embedder, and serves one request per line until `exit`. Each request runs
+under the journal lock (without it the request is read-only); a write is
+checked, appended, then applied, so nothing is served that the journal does not
+hold. A corrupt journal line is copied once to `journal.corrupt` (0600). The TS
+service writes memsrv's stderr to `$MNEMO_HOME/logs/memsrv.log`. A forgotten
+node takes no more writes. Methods: `ping`, `dump` (in id order; optional
+`scope` as for search), `state`, `history`, `search`, `create_node`,
+`ensure_node` (find-or-create by exact label under the lock, lowest live id
+wins — how the project and user nodes are made), `episode`, `fact`, `link`,
+`commit_log`,
+`steer`, `set_area`, `good`, `consolidate`, `mark_useful`, `stats`, `remember`,
+`recall_brief`, plus the audit-era additions (`unlink`, `reweight`,
+`record_outcome`). `fact` supersedes a same-key value unless `append: true`
+says the key is a set, and answers with the fact id it wrote plus the id it
+superseded; `history` returns every fact a node ever had with its status and
+`superseded_by`, which is where retired values are read. `dump` carries a
+`retired` count beside `facts`. Search results carry label, kind, area and state
+text — the
 project learned once that ids plus scores are useless to a model. Clients:
 `packages/memory/src/client.ts` (`MemoryClient`: requests serialized on one pipe,
 chunks buffered into lines, a dead sidecar answers `{ok:false}` instead of

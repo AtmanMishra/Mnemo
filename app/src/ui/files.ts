@@ -29,12 +29,20 @@ export function listFiles(cwd: string): string[] {
       if (SKIP.has(e.name)) continue;
       const full = path.join(dir, e.name);
       if (e.isDirectory()) walk(full);
-      else out.push(path.relative(cwd, full));
+      // `/` whatever the platform, as git prints them: the file tree splits on it.
+      else out.push(path.relative(cwd, full).split(path.sep).join("/"));
       if (out.length >= LIMIT) return;
     }
   };
   walk(cwd);
   return out;
+}
+
+/** Whether two folders are the same one: resolved, and without regard to case on Windows. */
+export function samePath(a: string, b: string, platform: NodeJS.Platform = process.platform): boolean {
+  const p = platform === "win32" ? path.win32 : path;
+  const norm = (x: string) => p.resolve(x).replace(/[\\/]+$/, "");
+  return platform === "win32" ? norm(a).toLowerCase() === norm(b).toLowerCase() : norm(a) === norm(b);
 }
 
 /** Every character of `query` in order (`sess` finds `sessions`). */

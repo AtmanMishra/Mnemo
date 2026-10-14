@@ -39,6 +39,8 @@ export type Dialog =
       kind: "text";
       title: string;
       placeholder?: string;
+      /** What the field starts with (an edit of a value already there). */
+      initial?: string;
       secret?: boolean;
       resolve: (value: string | undefined) => void;
     };
@@ -94,8 +96,8 @@ export class Dialogs {
     return this.open({ kind: "confirm", title, message }, signal, false);
   }
 
-  text(title: string, options: { placeholder?: string; secret?: boolean; signal?: AbortSignal } = {}): Promise<string | undefined> {
-    return this.open({ kind: "text", title, placeholder: options.placeholder, secret: options.secret }, options.signal, undefined);
+  text(title: string, options: { placeholder?: string; initial?: string; secret?: boolean; signal?: AbortSignal } = {}): Promise<string | undefined> {
+    return this.open({ kind: "text", title, placeholder: options.placeholder, initial: options.initial, secret: options.secret }, options.signal, undefined);
   }
 
   approval(request: ApprovalRequest, signal?: AbortSignal): Promise<ApprovalAnswer> {

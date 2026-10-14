@@ -135,7 +135,7 @@ export interface WorkspaceProps {
 }
 
 /** Commands that run as picked; the rest (they take words) go into the prompt. */
-const RUN_AS_PICKED = new Set(["help", "model", "thinking", "login", "logout", "new", "resume", "compact", "cost", "stats", "clear", "memory", "mode", "yolo", "accept-edits", "theme", "update", "mouse", "plan", "skills", "reload", "rewind", "quit"]);
+export const RUN_AS_PICKED = new Set(["help", "model", "thinking", "login", "logout", "new", "resume", "compact", "cost", "stats", "clear", "memory", "mode", "yolo", "accept-edits", "theme", "update", "mouse", "plan", "skills", "reload", "rewind", "quit"]);
 
 export function Workspace({ controller, source, motion, initial, width, height, active = true, compact = false, brand = true, agents }: WorkspaceProps): React.ReactElement {
   const snap = useSyncExternalStore(controller.transcript.subscribe, controller.transcript.snapshot);
@@ -177,8 +177,12 @@ export function Workspace({ controller, source, motion, initial, width, height, 
 
   const load = async (p: Pane) => {
     if (p === "files") return;
-    const next = p === "memory" ? await source.memory() : p === "sessions" ? await source.sessions() : p === "skills" ? source.skills() : source.logs();
-    setLoaded((l) => ({ ...l, [p]: next }));
+    try {
+      const next = p === "memory" ? await source.memory() : p === "sessions" ? await source.sessions() : p === "skills" ? source.skills() : source.logs();
+      setLoaded((l) => ({ ...l, [p]: next }));
+    } catch (error) {
+      controller.transcript.notice(`Could not load ${p}: ${error instanceof Error ? error.message : String(error)}`, "warn");
+    }
   };
   useEffect(() => void load(pane), [pane]);
   // After each run: memory, sessions and logs have moved on.
@@ -186,6 +190,19 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   useEffect(() => {
     if (!working) void load(pane);
   }, [working]);
+
+  // Another session (/new, /resume): where the view was in the last one means nothing here.
+  const firstSession = useRef(chrome.sessionSeq);
+  useEffect(() => {
+    if (chrome.sessionSeq === firstSession.current) return;
+    setTurnSel(undefined);
+    setSearch(undefined);
+    setBack(0);
+    setPreview(undefined);
+    setPreviewBack(0);
+    setMap(undefined);
+    void load(pane);
+  }, [chrome.sessionSeq]);
 
   // Moving through the sidebar previews what is under the cursor.
   useEffect(() => {
@@ -341,7 +358,10 @@ export function Workspace({ controller, source, motion, initial, width, height, 
       if (key.return || key.rightArrow) return setFocus("main");
       if (input && !key.ctrl && !key.meta)
         // What a key changed (a memory edited or forgotten) shows when the pane reloads.
-        void Promise.resolve(source.act(pane, current.id, input)).then(() => load(pane));
+        void Promise.resolve()
+          .then(() => source.act(pane, current.id, input))
+          .catch((error) => controller.transcript.notice(error instanceof Error ? error.message : String(error), "error"))
+          .then(() => load(pane));
     },
     { isActive: active && !dialog },
   );
@@ -488,6 +508,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
           onRewind={() => void controller.rewind()}
           onFocusNext={() => setFocus(nextFocus("composer"))}
           onPalette={() => void openPalette()}
+          canFind
         />
         </Box>
       </Box>

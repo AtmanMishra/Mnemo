@@ -27,3 +27,9 @@ test("remotes normalize to one identity for every clone", () => {
   expect(normalizeRemote("git@github.com:Owner/Repo.git")).toBe("github.com/owner/repo");
   expect(normalizeRemote("https://user@github.com/Owner/Repo/")).toBe("github.com/owner/repo");
 });
+
+test("ssh:// on port 22 and the scp form name one repository; another port does not", async () => {
+  const { normalizeRemote } = await import("../src/project.ts");
+  expect(normalizeRemote("ssh://git@github.com:22/Acme/Shop.git")).toBe(normalizeRemote("git@github.com:acme/shop.git"));
+  expect(normalizeRemote("ssh://git@git.acme.dev:2222/acme/shop.git")).toBe("git.acme.dev:2222/acme/shop");
+});

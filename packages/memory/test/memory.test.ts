@@ -110,6 +110,28 @@ test("a reply split across chunks is a reply, not a parse error", async () => {
   client.stop();
 });
 
+test("a chunk that ends inside a UTF-8 character does not corrupt it", async () => {
+  let onData: (chunk: Buffer) => void = () => {};
+  const child = {
+    exitCode: null,
+    stdin: {
+      write(line: string) {
+        const { id } = JSON.parse(line) as { id: number };
+        const bytes = Buffer.from(`${JSON.stringify({ id, ok: true, result: { label: "café — naïve" } })}\n`);
+        const cut = bytes.indexOf(Buffer.from("é")) + 1; // between é's two bytes
+        setTimeout(() => (onData(bytes.subarray(0, cut)), onData(bytes.subarray(cut))), 1);
+        return true;
+      },
+    },
+    stdout: { on: (_e: "data", l: (chunk: Buffer) => void) => void (onData = l) },
+    on: () => undefined,
+    kill: () => true,
+  } as unknown as MemoryChild;
+  const client = clientWith(child);
+  assert.deepEqual((await client.request("dump")).result, { label: "café — naïve" });
+  client.stop();
+});
+
 test("an error from the sidecar arrives as a response, not a throw", async () => {
   const client = clientWith(fakeChild((reply) => reply({ ok: false, error: "node 7 does not exist" })));
   const response = await client.request("state", { node: 7 });

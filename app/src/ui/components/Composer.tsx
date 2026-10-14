@@ -31,6 +31,8 @@ export interface ComposerProps {
   onFocusNext?: () => void;
   /** ctrl+k on an empty prompt: the palette. */
   onPalette?: () => void;
+  /** Whether ctrl+f finds in the conversation here (the workspace; inline, the terminal's scrollback has it). */
+  canFind?: boolean;
   /** esc twice on an empty prompt: go back to an earlier message. */
   onRewind?: () => void;
   /** Columns it has (a split pane is narrower than the terminal); default: the terminal's. */
@@ -45,7 +47,8 @@ const DOUBLE_PRESS_MS = 1500;
 export function rankCommands(commands: readonly CommandInfo[], query: string): CommandInfo[] {
   const q = query.toLowerCase();
   const byName = commands.filter((c) => subsequence(c.name, q));
-  const prefix = byName.filter((c) => c.name.toLowerCase().startsWith(q));
+  // A name typed in full comes first: `/mode` + enter runs /mode, not /model.
+  const prefix = byName.filter((c) => c.name.toLowerCase().startsWith(q)).sort((a, b) => Number(b.name.toLowerCase() === q) - Number(a.name.toLowerCase() === q));
   const rest = byName.filter((c) => !c.name.toLowerCase().startsWith(q));
   // Descriptions are prose: substring, never subsequence, or three letters match everything.
   const byDescription = q.length >= 3 ? commands.filter((c) => !byName.includes(c) && c.description.toLowerCase().includes(q)) : [];
@@ -340,7 +343,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
         </Box>
       ) : showShortcuts ? (
         <Box flexDirection="column" paddingX={2}>
-          {SHORTCUTS.map(([k, v]) => (
+          {SHORTCUTS.filter(([k]) => (k !== "ctrl+f" || props.canFind) && (k !== "ctrl+k" || props.onPalette)).map(([k, v]) => (
             <Text key={k}>
               <Text color={color.accent}>{k.padEnd(12)}</Text>
               <Text color={color.muted}>{v}</Text>

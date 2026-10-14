@@ -199,7 +199,12 @@ def limit_memory() -> None:
         import os
         import resource
 
-        mb = int(os.environ.get("MNEMO_KERNEL_MEMORY_MB", "8192"))
+        # A value that is not a whole number ("8g") keeps the default rather than
+        # silently removing the cap; only an explicit 0 (or less) does that.
+        try:
+            mb = int(os.environ.get("MNEMO_KERNEL_MEMORY_MB", "8192").strip())
+        except ValueError:
+            mb = 8192
         if mb <= 0:
             return
         cap = mb * 1024 * 1024

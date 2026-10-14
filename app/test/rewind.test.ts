@@ -77,3 +77,72 @@ test("conversation only leaves the files as they are", async () => {
   expect(fs.readFileSync(a, "utf8")).toBe("two\n");
   expect(e.controller.runtime.session.messages.filter((m) => m.role === "user")).toHaveLength(1);
 });
+
+test("when the conversation cannot move, the files are left alone and it says so", async () => {
+  const { e, a, b } = await twoTurns();
+  (e.controller.runtime.session as unknown as { navigateTree: () => Promise<never> }).navigateTree = async () => {
+    throw new Error("tree is busy");
+  };
+  const done = e.controller.rewind();
+  await pick(e, (l) => l.startsWith("second"));
+  await pick(e, (l) => l.startsWith("The conversation and"));
+  await done;
+  expect(fs.readFileSync(a, "utf8")).toBe("two\n");
+  expect(fs.existsSync(b)).toBe(true);
+  const notices = e.controller.transcript.snapshot().committed.filter((x) => x.kind === "notice").map((x) => ("text" in x ? x.text : ""));
+  expect(notices.at(-1)).toContain("Nothing was changed");
+});
+
+// ── what a security review found ──
+
+import * as os from "node:os";
+import { createWriteToolDefinition } from "@earendil-works/pi-coding-agent";
+import { checkpointsExtension } from "../src/extensions/checkpoints.ts";
+import { Checkpoints } from "../src/runtime/checkpoints.ts";
+
+/** The checkpoint hook, then pi's real write tool, for one path spelling. */
+async function writeAs(proj: string, store: Checkpoints, p: string, content: string) {
+  let hook: ((event: unknown, ctx: unknown) => unknown) | undefined;
+  checkpointsExtension({ checkpoints: store, depth: 0 } as never)({ on: (_: string, h: typeof hook) => (hook = h) } as never);
+  const ctx = { cwd: proj, sessionManager: { getBranch: () => [{ id: "u1", type: "message", message: { role: "user" } }] } };
+  const input = { path: p, content };
+  hook!({ toolName: "write", input }, ctx);
+  await createWriteToolDefinition(proj).execute("1", input, undefined, undefined, ctx as never);
+}
+
+test("a file written as @path or file:// is kept under the path the tool wrote", async () => {
+  const proj = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-ck-")));
+  fs.mkdirSync(path.join(proj, "src"));
+  fs.writeFileSync(path.join(proj, "src", "a.ts"), "original");
+  fs.writeFileSync(path.join(proj, "src", "b.ts"), "original b");
+  const store = new Checkpoints();
+  await writeAs(proj, store, "@src/a.ts", "agent change");
+  await writeAs(proj, store, `file://${proj}/src/b.ts`, "agent change b");
+  expect(store.restore(["u1"]).sort()).toEqual([path.join(proj, "src", "a.ts"), path.join(proj, "src", "b.ts")]);
+  expect(fs.readFileSync(path.join(proj, "src", "a.ts"), "utf8")).toBe("original");
+  expect(fs.readFileSync(path.join(proj, "src", "b.ts"), "utf8")).toBe("original b");
+});
+
+test("a restore does not write through a symlink, and one file in the way does not stop the rest", () => {
+  const proj = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-ck-")));
+  const outside = path.join(proj, "..", `${path.basename(proj)}-outside.txt`);
+  fs.writeFileSync(outside, "do not touch");
+  const a = path.join(proj, "a.txt");
+  const b = path.join(proj, "b.txt");
+  const c = path.join(proj, "c.txt");
+  fs.writeFileSync(a, "a0");
+  fs.writeFileSync(c, "c0");
+  const store = new Checkpoints();
+  store.turn = "u1";
+  for (const f of [a, b, c]) store.keep(f);
+  // Since then: a became a link out of the project, b (new) became a folder, c changed.
+  fs.rmSync(a);
+  fs.symlinkSync(outside, a);
+  fs.mkdirSync(path.join(b, "inner"), { recursive: true });
+  fs.writeFileSync(c, "c1");
+  store.restore(["u1"]);
+  expect(fs.readFileSync(outside, "utf8")).toBe("do not touch");
+  expect(fs.lstatSync(a).isSymbolicLink()).toBe(false);
+  expect(fs.readFileSync(a, "utf8")).toBe("a0");
+  expect(fs.readFileSync(c, "utf8")).toBe("c0");
+});

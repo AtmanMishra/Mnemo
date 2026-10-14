@@ -5,8 +5,9 @@
 import { test, expect, afterEach } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
-import { childEnv, configuredKeys } from "../src/runtime/env.ts";
+import { PROVIDER_KEYS, childEnv, configuredKeys } from "../src/runtime/env.ts";
 import { mnemoEnv } from "./helpers.ts";
 
 test("provider keys are dropped, everything else and MNEMO_PASS_ENV names are kept", () => {
@@ -45,4 +46,23 @@ test("the bash tool runs without the provider keys", async () => {
   await e.idle();
   expect(output).toContain("key=[] home=[set]");
   expect(process.env.OPENAI_API_KEY).toBe("sk-should-not-leak");
+});
+
+test("every key pi-ai reads for a provider is dropped", () => {
+  // Read pi-ai itself rather than trusting a copy of its list: a provider added
+  // upstream must fail here until env.ts knows its key.
+  const dist = path.dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-ai")));
+  const names = new Set<string>();
+  const walk = (dir: string) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".js")) for (const m of fs.readFileSync(p, "utf8").matchAll(/"([A-Z][A-Z0-9_]*_(?:API_KEY|TOKEN))"/g)) names.add(m[1]!);
+    }
+  };
+  walk(dist);
+  // AWS's own session credentials are inherited on purpose (SECURITY.md).
+  names.delete("AWS_SESSION_TOKEN");
+  expect(names.size).toBeGreaterThan(30);
+  expect([...names].filter((n) => !PROVIDER_KEYS.has(n))).toEqual([]);
 });

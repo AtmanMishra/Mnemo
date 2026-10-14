@@ -9,8 +9,13 @@ import React from "react";
 import { render } from "ink-testing-library";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { Workspace } from "../src/ui/workspace/Workspace.tsx";
+import { App } from "../src/ui/App.tsx";
+import * as os from "node:os";
 import { fileTree, type Item, type Pane, type WorkspaceSource } from "../src/ui/workspace/model.ts";
-import { mnemoEnv } from "./helpers.ts";
+import { mnemoEnv, nextDialog } from "./helpers.ts";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { workspaceSource } from "../src/runtime/workspace-source.ts";
 
 const envs: Awaited<ReturnType<typeof mnemoEnv>>[] = [];
 afterEach(async () => {
@@ -313,5 +318,110 @@ test("ctrl+k with words in the prompt still kills to the end of the line", async
   await wait(120);
   expect(r.e.controller.dialogs.current()).toBeUndefined();
   expect(r.lastFrame()).not.toContain("keep this");
+  r.unmount();
+});
+
+test("a pane that fails to load or act says so instead of rejecting", async () => {
+  const e = await mnemoEnv();
+  envs.push(e);
+  const source: WorkspaceSource = {
+    ...fakeSource([]),
+    memory: async () => {
+      throw new Error("memsrv went away");
+    },
+    act: async () => {
+      throw new Error("could not resume");
+    },
+  };
+  const r = render(React.createElement(Workspace, { controller: e.controller, source, motion: false }));
+  await wait(80);
+  r.stdin.write(KEY.tab);
+  await wait();
+  r.stdin.write("2");
+  await wait(80);
+  r.stdin.write("3");
+  await wait(80);
+  r.stdin.write("r");
+  await wait(80);
+  const said = e.controller.transcript.snapshot().committed.flatMap((b) => (b.kind === "notice" ? [b.text] : []));
+  expect(said).toContain("Could not load memory: memsrv went away");
+  expect(said).toContain("could not resume");
+  r.unmount();
+});
+
+test("a picked turn and a search do not survive /new", async () => {
+  const r = await mount();
+  r.e.faux.setResponses([fauxAssistantMessage(fauxText("the walrus")), fauxAssistantMessage(fauxText("a penguin"))]);
+  for (const q of ["one", "two"]) {
+    await r.e.controller.submit(q);
+    await r.e.idle();
+  }
+  await wait(80);
+  r.stdin.write("\x06");
+  await wait();
+  for (const ch of "walrus") r.stdin.write(ch);
+  await wait(120);
+  r.stdin.write("\r");
+  await wait(120);
+  expect(r.lastFrame()).toContain("turn 1/2");
+  await r.e.controller.submit("/new");
+  await wait(120);
+  expect(r.lastFrame()).not.toContain("turn 1/");
+  r.stdin.write("\x06");
+  await wait(80);
+  expect(r.lastFrame()).toContain("find: ▏");
+  await r.e.controller.submit("/new");
+  await wait(120);
+  expect(r.lastFrame()).not.toContain("find:");
+  r.unmount();
+});
+
+test("the logs pane shows the local clock, and a memory edit that did not take says so", async () => {
+  const e = await mnemoEnv();
+  envs.push(e);
+  const tz = process.env.TZ;
+  process.env.TZ = "Asia/Kolkata";
+  try {
+    const ts = new Date();
+    ts.setUTCHours(1, 2, 3, 0);
+    fs.mkdirSync(path.join(e.home, "logs"), { recursive: true });
+    fs.writeFileSync(path.join(e.home, "logs", `${new Date().toISOString().slice(0, 10)}.jsonl`), `${JSON.stringify({ ts: ts.toISOString(), type: "tool", tool: "bash", subject: "ls", ok: true })}\n`);
+    const logs = workspaceSource(e.controller, e.host, e.home).logs();
+    // Bun fixes the zone at the first Date in the process: the label follows whatever zone that is.
+    expect(logs[0]?.label).toBe(`${ts.toTimeString().slice(0, 8)} bash`);
+  } finally {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  }
+  const memory = { profile: async () => [{ key: "pm", value: "pnpm" }], learn: async () => undefined, forget: async () => false };
+  const source = workspaceSource(e.controller, { ...e.host, memory } as never, e.home);
+  const editing = source.act("memory", "p:pm", "e");
+  const ask = await nextDialog(e.controller);
+  if (ask.kind !== "text") throw new Error("expected a text dialog");
+  ask.resolve("bun");
+  await editing;
+  const said = e.controller.transcript.snapshot().committed.flatMap((b) => (b.kind === "notice" ? [b.text] : b.kind === "memory" ? [b.title] : []));
+  expect(said.at(-1)).toBe('Could not change "pm": the memory sidecar did not take it.');
+});
+
+test("inline, ctrl+k opens the palette and the shortcuts promise only what works there", async () => {
+  const e = await mnemoEnv();
+  envs.push(e);
+  const r = render(React.createElement(App, { controller: e.controller, version: "t", home: os.homedir(), motion: false, clearTerminal: () => {} }));
+  await wait(80);
+  r.stdin.write("?");
+  await wait();
+  expect(r.lastFrame()).toContain("ctrl+k");
+  expect(r.lastFrame()).not.toContain("ctrl+f");
+  r.stdin.write("?");
+  await wait();
+  r.stdin.write("\x0b");
+  const d = await nextDialog(e.controller);
+  if (d.kind !== "select") throw new Error("expected the palette");
+  expect(d.choices.some((c) => c.label === "/help")).toBe(true);
+  const file = d.choices.find((c) => c.value.startsWith("f:"))!;
+  d.resolve(file.value);
+  await wait();
+  expect(e.controller.draftText).toBe(`@${file.value.slice(2)} `);
   r.unmount();
 });

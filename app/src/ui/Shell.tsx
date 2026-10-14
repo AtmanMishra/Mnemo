@@ -20,6 +20,7 @@ import { MotionContext } from "./components/motion.ts";
 import { palette, gradientAt, subscribeTheme, terminalColors, themeName, themePaints, ground } from "./theme.ts";
 import { Workspace } from "./workspace/Workspace.tsx";
 import { ProjectPicker } from "./ProjectPicker.tsx";
+import { samePath } from "./files.ts";
 import { Hub, agentState, type AgentState } from "./Hub.tsx";
 import { Toasts, useToasts } from "./Toasts.tsx";
 import { ExitCard } from "./ExitCard.tsx";
@@ -156,7 +157,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   };
   const open = async (cwd: string, fresh: boolean) => {
     setPicker(false);
-    const existing = agents.find((a) => a.cwd === cwd);
+    const existing = agents.find((a) => samePath(a.cwd, cwd));
     if (existing && !fresh) return go(existing.id, screen === "hub" ? "agent" : screen);
     try {
       const a = await fleet.open(cwd);

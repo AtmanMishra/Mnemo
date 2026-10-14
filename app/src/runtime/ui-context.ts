@@ -38,18 +38,29 @@ const plainTheme = new Proxy(
   },
 );
 
+/**
+ * The signal a dialog closes on: the caller's, and the timeout pi's dialog
+ * options allow (`timeout` in ms), whichever comes first.
+ */
+function dialogSignal(opts?: { signal?: AbortSignal; timeout?: number }): AbortSignal | undefined {
+  const signals = [opts?.signal, opts?.timeout && opts.timeout > 0 ? AbortSignal.timeout(opts.timeout) : undefined].filter((x): x is AbortSignal => !!x);
+  return signals.length > 1 ? AbortSignal.any(signals) : signals[0];
+}
+
+type DialogOptions = { signal?: AbortSignal; timeout?: number };
+
 export function createUiContext(dialogs: Dialogs, sink: UiSink): ExtensionUIContext {
   const ctx = {
-    select: (title: string, options: string[], opts?: { signal?: AbortSignal }) =>
+    select: (title: string, options: string[], opts?: DialogOptions) =>
       dialogs.select(
         title,
         options.map((o) => ({ value: o, label: o })),
-        opts?.signal,
+        dialogSignal(opts),
       ),
-    confirm: (title: string, message: string, opts?: { signal?: AbortSignal }) => dialogs.confirm(title, message, opts?.signal),
-    input: (title: string, placeholder?: string, opts?: { signal?: AbortSignal }) =>
-      dialogs.text(title, { placeholder, signal: opts?.signal }),
-    editor: (title: string, prefill?: string) => dialogs.text(title, { placeholder: prefill }),
+    confirm: (title: string, message: string, opts?: DialogOptions) => dialogs.confirm(title, message, dialogSignal(opts)),
+    input: (title: string, placeholder?: string, opts?: DialogOptions) => dialogs.text(title, { placeholder, signal: dialogSignal(opts) }),
+    // The editor's second argument is the text to edit, not a hint.
+    editor: (title: string, prefill?: string) => dialogs.text(title, { initial: prefill }),
     notify: (message: string, type?: "info" | "warning" | "error") =>
       sink.notify(message, type === "warning" ? "warn" : (type ?? "info")),
     onTerminalInput: () => () => {},

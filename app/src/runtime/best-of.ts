@@ -11,10 +11,11 @@
  * linked into each worktree so the check can run there; they stay out of the
  * diffs. Untracked files the working tree has are not copied.
  */
+import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { childEnv } from "./env.ts";
+import { childEnv, configuredKeys } from "./env.ts";
 
 /** Run one candidate in `cwd`; resolves to its final answer. */
 export type CandidateRunner = (i: number, cwd: string) => Promise<string>;
@@ -29,6 +30,8 @@ export interface BestOfOptions {
   /** Where the candidates' diffs are kept. */
   keepDir: string;
   checkTimeoutMs?: number;
+  /** pi's agent folder, for the custom keys models.json names. Default: `<keepDir>/../../agent`, as the controller lays it out. */
+  agentDir?: string;
   /** Each candidate's progress, for an interface to draw (candidates are 0-based here). */
   onProgress?: (i: number, state: LaneState, info?: { size?: number; error?: string }) => void;
 }
@@ -61,12 +64,44 @@ function git(cwd: string, args: string[], input?: string): string {
   return r.stdout.toString();
 }
 
-async function sh(cwd: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }> {
-  const p = Bun.spawn(["sh", "-c", command], { cwd, env: childEnv(), stdout: "pipe", stderr: "pipe" });
-  const timer = setTimeout(() => p.kill(), timeoutMs);
-  const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+/** The check and everything it started: it runs in its own process group (a job tree on Windows). */
+function killTree(pid: number | undefined): void {
+  if (pid === undefined) return;
+  try {
+    if (process.platform === "win32") spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore" });
+    else process.kill(-pid, "SIGKILL");
+  } catch {
+    /* already gone */
+  }
+}
+
+async function sh(cwd: string, command: string, timeoutMs: number, env: Record<string, string>): Promise<{ ok: boolean; output: string }> {
+  const p = spawn("sh", ["-c", command], { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+  let output = "";
+  const take = (chunk: Buffer) => {
+    output = (output + chunk.toString()).slice(-4000);
+  };
+  p.stdout!.on("data", take);
+  p.stderr!.on("data", take);
+  const closed = new Promise<void>((resolve) => p.on("close", () => resolve()));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const code = await Promise.race([
+    new Promise<number | null>((resolve) => {
+      p.on("exit", (c) => resolve(c));
+      p.on("error", () => resolve(null));
+    }),
+    new Promise<"timeout">((resolve) => (timer = setTimeout(() => resolve("timeout"), timeoutMs))),
+  ]);
   clearTimeout(timer);
-  return { ok: code === 0, output: `${out}${err}`.slice(-2000) };
+  // Killing only `sh` left a child it forked holding the pipe, and the wait on the
+  // pipe outlived the timeout. The group goes, and output gets a moment, not forever.
+  if (code === "timeout") killTree(p.pid);
+  await Promise.race([closed, Bun.sleep(1000)]);
+  killTree(p.pid);
+  p.stdout!.destroy();
+  p.stderr!.destroy();
+  if (code === "timeout") output += `\n(the check was stopped after ${timeoutMs}ms)`;
+  return { ok: code === 0, output: output.slice(-2000) };
 }
 
 function sizeOf(patch: string): number {
@@ -124,13 +159,15 @@ export async function bestOf(o: BestOfOptions): Promise<BestOfResult> {
     // The checks run one at a time, once every candidate is done: run side by
     // side they race on shared caches and ports and fail for no fault of the change.
     const candidates: Candidate[] = [];
+    // Without the model keys, models.json's custom ones included, like the agent's own commands.
+    const env = childEnv(process.env, configuredKeys(o.agentDir ?? path.join(o.keepDir, "..", "..", "agent")));
     for (const { cwd, ...c } of done) {
       if (!c.error) o.onProgress?.(c.i - 1, "checking");
-      let check = c.patch ? await sh(cwd, o.check, o.checkTimeoutMs ?? 600_000) : { ok: false, output: "no change" };
+      let check = c.patch ? await sh(cwd, o.check, o.checkTimeoutMs ?? 600_000, env) : { ok: false, output: "no change" };
       // Once more before a change is rejected: the candidates' own runs can
       // leave shared tool caches half-written (seen with npx), failing the
       // first check after them.
-      if (c.patch && !check.ok) check = await sh(cwd, o.check, o.checkTimeoutMs ?? 600_000);
+      if (c.patch && !check.ok) check = await sh(cwd, o.check, o.checkTimeoutMs ?? 600_000, env);
       const passed = !c.error && check.ok;
       candidates.push({ ...c, size: sizeOf(c.patch), passed, checkOutput: check.output });
       if (!c.error) o.onProgress?.(c.i - 1, passed ? "passed" : "failed", { size: sizeOf(c.patch) });

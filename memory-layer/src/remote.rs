@@ -165,10 +165,33 @@ impl OpenRouterEmbedder {
         Err(last_err)
     }
 
-    fn persist(&self, map: &HashMap<String, Vec<f32>>) {
+    /// Replace the cache file whole: written beside it, then renamed over it.
+    /// Two sidecars share one cache, and a reader (or a crash) mid-write must
+    /// never see half a file — a truncated cache parses as nothing and every
+    /// text is embedded again.
+    pub(crate) fn persist(&self, map: &HashMap<String, Vec<f32>>) {
         if let Some(dir) = self.cache_path.parent() { let _ = std::fs::create_dir_all(dir); }
-        if let Ok(raw) = serde_json::to_vec(map) {
-            let _ = std::fs::write(&self.cache_path, raw);
+        let Ok(raw) = serde_json::to_vec(map) else { return };
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let tmp = self.cache_path.with_extension(format!(
+            "json.{}.{}.tmp",
+            std::process::id(),
+            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            o.mode(0o600);
+        }
+        let written = o.open(&tmp).and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(&raw)?;
+            f.sync_all()
+        });
+        if written.and_then(|_| std::fs::rename(&tmp, &self.cache_path)).is_err() {
+            let _ = std::fs::remove_file(&tmp);
         }
     }
 }

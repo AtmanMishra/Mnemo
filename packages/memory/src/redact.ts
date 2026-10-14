@@ -9,7 +9,13 @@ const SECRET = new RegExp(
     "\\bBearer\\s+[A-Za-z0-9._~+/=-]{16,}",
     "\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}", // JWT
     "\\b[a-z][a-z0-9+.-]{1,12}://[^\\s:/@]+:[^\\s/@]+@", // scheme://user:password@
-    "\\b(?:[A-Za-z0-9_]*(?:secret|token|passw(?:or)?d|api[_-]?key|access[_-]?key)[A-Za-z0-9_]*)[\"']?\\s*[:=]\\s*[\"']?[^\\s\"',;]{6,}",
+    "\\b(?:[A-Za-z0-9_]*(?:secret|token|passw(?:or)?d|passphrase|api[_-]?key|access[_-]?key|private[_-]?key)[A-Za-z0-9_]*|(?:[A-Za-z0-9]+_)+(?:pass|pwd|pw)|pass|pwd)[\"']?\\s*[:=]\\s*[\"']?[^\\s\"',;]{6,}",
+    "\\b(?:password|passwd|passphrase)\\s+(?:is|was)\\s+(?!(?:required|needed|stored|missing|wrong|incorrect|expired|rotated|invalid|optional|empty|changed|reset)\\b)[\"']?[^\\s\"',;]{6,}", // "the staging password is …"
+    "\\b(?:Proxy-)?Authorization\\s*:\\s*(?:Basic|Digest|Token|Bearer)\\s+[^\\s\"']{8,}",
+    "https://hooks\\.slack\\.com/(?:services|workflows|triggers)/[A-Za-z0-9/_-]{8,}",
+    "https://(?:discord(?:app)?\\.com)/api/webhooks/[A-Za-z0-9/_-]{8,}",
+    "hf_[A-Za-z0-9]{30,}", // Hugging Face
+    "ya29\\.[A-Za-z0-9_-]{20,}", // Google OAuth access token
     "--(?:password|passwd|token|secret|api-key)[= ]\\S{6,}",
     "glpat-[A-Za-z0-9_-]{16,}",
     "SG\\.[A-Za-z0-9_-]{16,}\\.[A-Za-z0-9_-]{16,}",
@@ -34,4 +40,15 @@ const INVISIBLE = /[\p{Cf}\u034f\u180e\ufe00-\ufe0f\u{E0000}-\u{E007F}]/gu;
 
 export function redact(s: string): string {
   return s.replace(INVISIBLE, "").replace(SECRET, "[redacted]");
+}
+
+/**
+ * A fact's value is a credential when the key names one: `db password` →
+ * `hunter2hunter2` is redacted only when read together ("db password:
+ * hunter2hunter2"), never apart — the value alone is just a word.
+ */
+export function secretUnderKey(key: string, value: string): boolean {
+  const k = redact(key);
+  const v = redact(value);
+  return redact(`${key}: ${value}`) !== `${k}: ${v}`;
 }

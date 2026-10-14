@@ -176,11 +176,11 @@ fn main() {
         let reply = {
             let guard = lock.write();
             if let Err(e) = &guard {
-                eprintln!("[memsrv] journal lock failed ({e}); serving without other writers' updates");
+                eprintln!("[memsrv] journal lock failed ({e}); this request is read-only");
             }
             sync(&jpath, &mut offset, &mut s, &mut clock, &mut search_cache);
             clock += 1;
-            let reply = handle(&method, &params, &mut s, &mut journal, embedder.as_ref(), &mut clock, &mut search_cache);
+            let reply = handle(&method, &params, &mut s, &mut journal, embedder.as_ref(), &mut clock, &mut search_cache, guard.is_ok());
             // our appends moved the end of the journal; nobody else's could
             // have, because we hold the lock
             if let Ok(meta) = std::fs::metadata(&jpath) { offset = meta.len(); }
@@ -229,7 +229,8 @@ fn sync(
         *clock = (*clock).max(op_at(op) + 1);
     }
     if report.skipped > 0 {
-        eprintln!("[memsrv] quarantined {} corrupt journal line(s) to {jpath}.corrupt — check it, never silent amnesia", report.skipped);
+        eprintln!("[memsrv] skipped {} corrupt journal line(s), copied to {} — check it, never silent amnesia",
+            report.skipped, persist::quarantine_path(jpath).display());
     }
     if skipped > 0 {
         eprintln!("[memsrv] skipped {skipped} unappliable op(s) (id collisions / missing refs)");
@@ -304,6 +305,20 @@ fn set_area_param(
     Ok(format!("{:?}", s.nodes.get(&node).map(|n| n.area).unwrap_or_default()))
 }
 
+/// `kind` on create_node/ensure_node (default aspect).
+fn node_kind(params: &serde_json::Value) -> NodeKind {
+    let kind = params.get("kind").and_then(|k| k.as_str()).unwrap_or("aspect");
+    match kind.to_ascii_lowercase().as_str() {
+        "entity" => NodeKind::Entity, "harness" => NodeKind::Harness,
+        "outcome" => NodeKind::Outcome, _ => NodeKind::Aspect,
+    }
+}
+
+/// The live node with exactly this label; the lowest id when there are several.
+fn find_label(s: &StoreData, label: &str) -> Option<NodeId> {
+    s.nodes.values().filter(|n| !n.deleted && n.label == label).map(|n| n.id).min()
+}
+
 fn handle(
     method: &str,
     params: &serde_json::Value,
@@ -312,10 +327,19 @@ fn handle(
     emb: &dyn Embedder,
     clock: &mut Millis,
     cache: &mut SearchCache<(Vec<serde_json::Value>, Vec<NodeId>)>,
+    writable: bool,
 ) -> Result<serde_json::Value, String> {
     let mut apply = |s: &mut StoreData, j: &mut Journal, op: Op| -> Result<(), String> {
-        s.apply(&op)?;
+        // Without the lock another process may be appending: a write now could
+        // reuse its ids or interleave with its lines. Reads are still served.
+        if !writable {
+            return Err("memory is read-only for this request: the journal lock could not be taken".into());
+        }
+        // On disk first, then in memory: a failed append must not leave a
+        // write that this process serves and the journal never had.
+        s.check(&op)?;
         j.append_held(&op).map_err(|e| format!("journal write failed: {e}"))?;
+        s.apply(&op)?;
         // F2: any write can change ranking (a new node can outrank every
         // cached hit without touching one), so the cache is cleared, not pruned.
         cache.clear();
@@ -337,7 +361,17 @@ fn handle(
             // A forgotten memory is gone from the listing even though its
             // ops stay in the journal. The journal is the history; dump is
             // the present.
-            let nodes: Vec<serde_json::Value> = s.nodes.values().filter(|n| !n.deleted).map(|n| json!({
+            // In id order: a listing (and a client picking the first match in
+            // it) must not depend on the map's iteration order.
+            // `scope` (a project node), as for search: what belongs to another
+            // project is left out; what belongs to none stays.
+            let hidden = match params.get("scope").and_then(|v| v.as_u64()) {
+                Some(p) => out_of_scope(s, p, *clock),
+                None => Default::default(),
+            };
+            let mut live: Vec<&Node> = s.nodes.values().filter(|n| !n.deleted && !hidden.contains(&n.id)).collect();
+            live.sort_by_key(|n| n.id);
+            let nodes: Vec<serde_json::Value> = live.into_iter().map(|n| json!({
                 "id": n.id, "kind": n.kind, "area": n.area, "label": n.label,
                 "facts": n.active_facts().count(),
                 // #24: superseded values are kept, so a listing that only
@@ -382,17 +416,33 @@ fn handle(
         }
 
         "create_node" => {
-            let kind = params.get("kind").and_then(|k| k.as_str()).unwrap_or("aspect");
-            let kind = match kind.to_ascii_lowercase().as_str() {
-                "entity" => NodeKind::Entity, "harness" => NodeKind::Harness,
-                "outcome" => NodeKind::Outcome, _ => NodeKind::Aspect,
-            };
+            let kind = node_kind(params);
             let label = params.get("label").and_then(|l| l.as_str())
                 .ok_or("missing 'label'")?.to_string();
             let id = s.next_node;
             apply(s, j, Op::CreateNode { id, kind, label, at: *clock })?;
             let area = set_area_param(s, j, &mut apply, id, params, *clock)?;
             Ok(json!({ "node": id, "area": area }))
+        }
+
+        "ensure_node" => {
+            // A standing node (a project, the user profile) by exact label:
+            // found, or created — in one request, so under the journal lock.
+            // A find-then-create from the client is two requests, and two
+            // processes doing it at once each created their own copy. When
+            // copies already exist the lowest live id is THE node, so every
+            // process agrees on it whatever the map's iteration order.
+            let label = params.get("label").and_then(|l| l.as_str())
+                .ok_or("missing 'label'")?.to_string();
+            if let Some(id) = find_label(s, &label) {
+                let area = format!("{:?}", s.nodes[&id].area);
+                return Ok(json!({ "node": id, "area": area, "created": false }));
+            }
+            let kind = node_kind(params);
+            let id = s.next_node;
+            apply(s, j, Op::CreateNode { id, kind, label, at: *clock })?;
+            let area = set_area_param(s, j, &mut apply, id, params, *clock)?;
+            Ok(json!({ "node": id, "area": area, "created": true }))
         }
 
         "episode" => {
@@ -682,7 +732,7 @@ fn handle(
             Ok(json!({ "forgot": node, "label": label }))
         }
 
-        other => Err(format!("unknown method '{other}' (supported: ping stats dump state history create_node episode fact link unlink reweight record_outcome search recall_brief remember set_area forget steer good consolidate mark_useful)")),
+        other => Err(format!("unknown method '{other}' (supported: ping stats dump state history create_node ensure_node episode fact link unlink reweight record_outcome search recall_brief remember set_area forget steer good consolidate mark_useful)")),
     }
 }
 

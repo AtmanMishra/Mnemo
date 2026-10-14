@@ -94,3 +94,51 @@ test("when nothing passes, nothing is applied", async () => {
   expect(fs.readFileSync(path.join(dir, "value.txt"), "utf8")).toBe("0\n");
   expect(describeBestOf(r)).toContain("nothing applied");
 });
+
+test("the check runs without the keys models.json names, as the agent's commands do", async () => {
+  const dir = repo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-bo-home-"));
+  fs.mkdirSync(path.join(home, "agent"));
+  fs.writeFileSync(path.join(home, "agent", "models.json"), JSON.stringify({ providers: { corp: { apiKey: "$MNEMO_TEST_CORP_KEY" } } }));
+  process.env.MNEMO_TEST_CORP_KEY = "corp-secret";
+  try {
+    const r = await bestOf({
+      n: 1,
+      cwd: dir,
+      check: 'test -z "$MNEMO_TEST_CORP_KEY"',
+      // Where the controller keeps them: $MNEMO_HOME/best-of/<run>.
+      keepDir: path.join(home, "best-of", "run"),
+      run: async (_i, cwd) => {
+        fs.writeFileSync(path.join(cwd, "value.txt"), "2\n");
+        return "ok";
+      },
+    });
+    expect(r.candidates[0]!.passed).toBe(true);
+  } finally {
+    delete process.env.MNEMO_TEST_CORP_KEY;
+  }
+});
+
+test("a check that overruns is stopped with everything it started", async () => {
+  if (process.platform === "win32") return;
+  const dir = repo();
+  const marker = path.join(dir, "..", `${path.basename(dir)}-late`);
+  const t0 = Date.now();
+  const r = await bestOf({
+    n: 1,
+    cwd: dir,
+    // The shell forks `sleep`, which keeps the output pipe open after the shell is killed.
+    check: `sleep 2; touch ${marker}; sleep 30`,
+    checkTimeoutMs: 300,
+    keepDir: fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-bo-keep-")),
+    run: async (_i, cwd) => {
+      fs.writeFileSync(path.join(cwd, "value.txt"), "2\n");
+      return "ok";
+    },
+  });
+  // Twice (the check is retried once), each well under the 2s sleep.
+  expect(Date.now() - t0).toBeLessThan(3500);
+  expect(r.candidates[0]!.passed).toBe(false);
+  await Bun.sleep(2500);
+  expect(fs.existsSync(marker)).toBe(false);
+}, 20_000);

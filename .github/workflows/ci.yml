@@ -100,6 +100,16 @@ jobs:
         run: |
           bun scripts/build.ts
           MNEMO_HOME="$RUNNER_TEMP/mnemo-home" ./dist/mnemo --demo --dump | grep -q "retries"
+      # The built binary, end to end, the way a user meets it: every feature against a mock
+      # model (app/e2e). node_modules is moved away first (and always put back), so anything
+      # the binary still reads from the build tree fails here instead of on a user's machine.
+      # Windows has no pty: the terminal tests skip there, the rest run.
+      - name: binary end to end (no node_modules)
+        working-directory: app
+        shell: bash
+        run: |
+          exe=""; if [ "$RUNNER_OS" = Windows ]; then exe=".exe"; fi
+          MNEMO_E2E_BIN="$PWD/dist/mnemo$exe" sh scripts/without-node-modules.sh bun test --timeout 120000 ./e2e
 
   secrets:
     runs-on: ubuntu-latest
