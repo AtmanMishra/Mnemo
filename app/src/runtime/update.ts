@@ -64,8 +64,20 @@ export function installKind(execPath: string, home: string): InstallKind {
   if (base === "bun" || base === "bun.exe" || base === "node" || base === "node.exe") return "source";
   if (exe.includes("/cellar/") || exe.includes("/homebrew/")) return "homebrew";
   if (exe.includes("/scoop/")) return "scoop";
-  const bin = path.join(home, "bin").replace(/\\/g, "/").toLowerCase();
-  return path.dirname(exe) === bin ? "installer" : "elsewhere";
+  // Compared as written, then as the file system resolves them: MNEMO_HOME may be a
+  // symlink or relative, and Windows may hand back an 8.3 short name for either side.
+  const norm = (p: string) => (process.platform === "win32" ? p.replace(/\\/g, "/").toLowerCase() : p.replace(/\\/g, "/"));
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync.native(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const dir = (p: string) => path.posix.dirname(norm(p));
+  const bin = path.join(home, "bin");
+  if (dir(execPath) === norm(bin).replace(/\/$/, "")) return "installer";
+  return dir(real(execPath)) === norm(real(bin)) ? "installer" : "elsewhere";
 }
 
 /** What to tell someone whose install is not the installer's. */

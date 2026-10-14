@@ -99,3 +99,17 @@ test("clearReplaced deletes every binary the Windows installer moved aside, what
   expect(fs.readdirSync(bin).sort()).toEqual(["mnemo.exe", "notes.txt"]);
   clearReplaced(path.join(home, "nowhere")); // no bin: nothing to do, no throw
 });
+
+test.skipIf(process.platform === "win32")("installKind sees through a symlinked or relative MNEMO_HOME", () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-kind-")));
+  const real = path.join(root, "real-home");
+  fs.mkdirSync(path.join(real, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(real, "bin", "mnemo"), "");
+  const link = path.join(root, "linked-home");
+  fs.symlinkSync(real, link);
+  // MNEMO_HOME names the link; the running binary's path is the real one (or the other way round).
+  expect(installKind(path.join(real, "bin", "mnemo"), link)).toBe("installer");
+  expect(installKind(path.join(link, "bin", "mnemo"), real)).toBe("installer");
+  expect(installKind(path.join(real, "bin", "mnemo"), path.relative(process.cwd(), real))).toBe("installer");
+  expect(installKind(path.join(root, "elsewhere", "mnemo"), link)).toBe("elsewhere");
+});
