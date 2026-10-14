@@ -49,11 +49,11 @@ async function editMemory(controller: Controller, memory: MemoryService, project
     if (key === "e") {
       const value = (await controller.dialogs.text(`New value for "${name}"`, { initial: current.value }))?.trim();
       if (!value || value === current.value) return;
-      await memory.learn(scope, projectId, name, value);
+      if (!(await memory.learn(scope, projectId, name, value))) return controller.transcript.notice(`Could not change "${name}": the memory sidecar did not take it.`, "error");
       say(`Changed "${name}"`, [value, `was: ${current.value}`]);
     } else if (key === "d") {
       if (!(await controller.dialogs.confirm(`Forget "${name}"?`, current.value))) return;
-      await memory.forget(scope, projectId, name);
+      if (!(await memory.forget(scope, projectId, name))) return controller.transcript.notice(`Could not forget "${name}": the memory sidecar did not take it.`, "error");
       say(`Forgot "${name}"`, ["kept as history, never recalled again"]);
     }
     return;
@@ -73,7 +73,7 @@ async function editMemory(controller: Controller, memory: MemoryService, project
     say("Changed the fix", [value, `was: ${fix}`]);
   } else if (key === "d") {
     if (!(await controller.dialogs.confirm("Forget this?", "It stays in the journal as history and is never recalled again."))) return;
-    await memory.forgetNode(node);
+    if (!(await memory.forgetNode(node))) return controller.transcript.notice("Could not forget it: the memory sidecar did not take it.", "error");
     say("Forgot it", ["kept as history, never recalled again"]);
   }
 }
@@ -157,7 +157,9 @@ export function workspaceSource(controller: Controller, host: Host | undefined, 
       return lines.flatMap((l, i): Item[] => {
         try {
           const r = JSON.parse(l) as { ts: string; type: string; tool?: string; subject?: string; ok?: boolean; ms?: number; model?: string; cost?: number; in?: number; out?: number };
-          const at = r.ts.slice(11, 19);
+          // Logged in UTC; shown on the local clock, like everything else on screen.
+          const when = new Date(r.ts);
+          const at = Number.isNaN(when.getTime()) ? r.ts.slice(11, 19) : when.toTimeString().slice(0, 8);
           if (r.type === "tool")
             return [{ id: String(i), label: `${at} ${r.tool}`, detail: `${r.subject ?? ""}${r.ms !== undefined ? ` · ${r.ms}ms` : ""}`, kind: "log" as const, tone: r.ok === false ? ("fail" as const) : undefined }];
           return [{ id: String(i), label: `${at} turn`, detail: `${r.model ?? ""} · ${r.in ?? 0}→${r.out ?? 0} tok · $${(r.cost ?? 0).toFixed(4)}`, kind: "log" as const, tone: "muted" as const }];

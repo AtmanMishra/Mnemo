@@ -8,6 +8,7 @@ import { Composer, rankCommands, type ComposerProps } from "../src/ui/components
 import { DialogView, filterChoices } from "../src/ui/components/Dialogs.tsx";
 import { BlockView } from "../src/ui/components/Blocks.tsx";
 import { Dialogs } from "../src/runtime/dialogs.ts";
+import { Transcript } from "../src/ui/store.ts";
 import { createUiContext } from "../src/runtime/ui-context.ts";
 import { MotionContext } from "../src/ui/components/motion.ts";
 import { WorkingLine } from "../src/ui/components/Working.tsx";
@@ -332,4 +333,13 @@ test("x on an agent that is still working asks for a second x before closing it"
   r.stdin.write("x");
   await tick();
   expect(closed).toEqual([1, 2]);
+});
+
+test("a streamed tool call with no arguments still draws", () => {
+  const t = new Transcript();
+  t.apply({ type: "message_start", message: { role: "assistant" } } as never);
+  t.apply({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: { type: "toolCall", id: "c1", name: "ls" } } } as never);
+  const tool = t.snapshot().live[0];
+  expect(tool?.kind === "tool" && tool.args).toEqual({});
+  expect(() => render(<BlockView block={tool!} cwd="/x" expanded={false} />)).not.toThrow();
 });

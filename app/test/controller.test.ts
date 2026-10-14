@@ -13,6 +13,7 @@ import { startRuntime } from "../src/runtime/runtime.ts";
 import { Controller, gitBranch } from "../src/runtime/controller.ts";
 import { createDemoProject, createFaux, demoScript, DEMO_PROMPT } from "../src/runtime/demo.ts";
 import { nextDialog } from "./helpers.ts";
+import { setTheme } from "../src/ui/theme.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -361,4 +362,54 @@ test("/new leaves nothing of the last session behind: statuses, activity, a wait
   await controller.submit("hello");
   await controller.session.waitForIdle();
   expect(controller.transcript.snapshot().committed.some((b) => b.kind === "memory")).toBe(false);
+});
+
+test("an unknown command is caught, not sent to the model; a path is still words", async () => {
+  const { controller, faux } = await setup();
+  faux.setResponses([fauxAssistantMessage(fauxText("checked"))]);
+  await controller.submit("/modle");
+  expect(notices(controller).at(-1)).toBe("Unknown command /modle (/help lists them)");
+  expect(controller.draftText).toBe("/modle");
+  expect(faux.state.callCount).toBe(0);
+  await controller.submit("/usr/bin/env is missing here");
+  await controller.session.waitForIdle();
+  expect(faux.state.callCount).toBe(1);
+});
+
+test("/theme takes a theme's shown name in any case, and says when there is none", async () => {
+  const { controller } = await setup();
+  const picked: string[] = [];
+  (controller as unknown as { options: { onTheme: (n: string) => void } }).options.onTheme = (n) => void picked.push(n);
+  try {
+    await controller.submit("/theme Tokyo Night");
+    await controller.submit("/theme DRACULA");
+    expect(picked).toEqual(["tokyo", "dracula"]);
+    await controller.submit("/theme bogus");
+    expect(controller.dialogs.current()).toBeUndefined();
+    expect(notices(controller).at(-1)).toBe("No theme called bogus. /theme lists them.");
+  } finally {
+    setTheme("night");
+  }
+});
+
+test("/logout of a provider with no credentials says so instead of claiming it logged out", async () => {
+  const { controller } = await setup();
+  const out: string[] = [];
+  const mr = controller.runtime.session.modelRuntime as unknown as Record<string, unknown>;
+  mr.listCredentials = async () => [{ providerId: "anthropic", type: "api_key" }];
+  mr.logout = async (id: string) => void out.push(id);
+  await controller.submit("/logout typo");
+  expect(out).toEqual([]);
+  expect(notices(controller).at(-1)).toBe("No stored credentials for typo. Stored: anthropic.");
+  await controller.submit("/logout anthropic");
+  expect(out).toEqual(["anthropic"]);
+});
+
+test("/remember says it failed when memory did not keep it", async () => {
+  const { controller } = await setup();
+  const host = { mode: "default", memory: { learn: async () => undefined, stats: async () => undefined } };
+  (controller as unknown as { options: { host: unknown } }).options.host = host;
+  await controller.submit("/remember we deploy with fly");
+  expect(notices(controller).at(-1)).toStartWith("Could not remember that");
+  expect(controller.transcript.snapshot().committed.some((b) => b.kind === "memory" && b.title === "Remembered")).toBe(false);
 });

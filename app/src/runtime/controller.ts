@@ -426,6 +426,13 @@ export class Controller {
         this.transcript.notice(`/${name} failed: ${errorText(error)}`, "error");
         return;
       }
+      // A slip of the keys (`/modle`) is not a message for the model. Templates, skills
+      // and extension commands are pi's to run; a path (`/usr/bin/x is missing`) is words.
+      if (/^[\w:-]+$/.test(name) && !this.commands().some((c) => c.name === name)) {
+        this.transcript.notice(`Unknown command /${name} (/help lists them)`, "warn");
+        this.setDraft(trimmed);
+        return;
+      }
     }
     const session = this.runtime.session;
     if (!this.hasModel) {
@@ -649,7 +656,11 @@ export class Controller {
         }
         const key = arg.split(/[:=]/)[0]!.trim().toLowerCase().slice(0, 40);
         const value = arg.includes(":") || arg.includes("=") ? arg.slice(arg.search(/[:=]/) + 1).trim() : arg;
-        await mem.learn("project", this.projectId, arg.includes(":") || arg.includes("=") ? key : `note ${Date.now().toString(36)}`, value);
+        const kept = await mem.learn("project", this.projectId, arg.includes(":") || arg.includes("=") ? key : `note ${Date.now().toString(36)}`, value);
+        if (!kept) {
+          this.transcript.notice("Could not remember that: the memory sidecar did not take it. `mnemo doctor` checks it.", "error");
+          return true;
+        }
         this.transcript.memory("Remembered", [value]);
         void this.refreshMemory();
         return true;
@@ -760,8 +771,15 @@ export class Controller {
       }
       case "theme": {
         const names = Object.keys(THEMES) as ThemeName[];
+        // By key or by the name shown (`/theme Dracula`, `/theme tokyo night`), in any case.
+        const wanted = arg.trim().toLowerCase();
+        const named = wanted ? names.find((n) => n.toLowerCase() === wanted || THEMES[n].label.toLowerCase() === wanted) : undefined;
+        if (wanted && !named) {
+          this.transcript.notice(`No theme called ${arg}. /theme lists them.`, "warn");
+          return true;
+        }
         const pick =
-          (names.find((n) => n === arg) as ThemeName | undefined) ??
+          named ??
           ((await this.dialogs.select(
             "Theme",
             names.map((n) => ({ value: n, label: THEMES[n].label, description: n === themeName() ? "current" : undefined })),
@@ -1051,8 +1069,13 @@ export class Controller {
         creds.map((c) => ({ value: c.providerId, label: modelRuntime.getProvider(c.providerId)?.name ?? c.providerId, description: c.type })),
       ));
     if (!id) return;
-    await modelRuntime.logout(id);
-    this.transcript.notice(`Logged out of ${id}.`);
+    const cred = creds.find((c) => c.providerId === id || modelRuntime.getProvider(c.providerId)?.name.toLowerCase() === id.toLowerCase());
+    if (!cred) {
+      this.transcript.notice(`No stored credentials for ${id}. Stored: ${creds.map((c) => c.providerId).join(", ")}.`, "warn");
+      return;
+    }
+    await modelRuntime.logout(cred.providerId);
+    this.transcript.notice(`Logged out of ${modelRuntime.getProvider(cred.providerId)?.name ?? cred.providerId}.`);
     this.refreshFooter();
   }
 

@@ -397,7 +397,7 @@ export class Transcript {
             kind: "tool",
             id: e.toolCall.id,
             name: e.toolCall.name,
-            args: e.toolCall.arguments as Record<string, unknown>,
+            args: (e.toolCall.arguments ?? {}) as Record<string, unknown>,
             status: "pending",
             output: "",
           });

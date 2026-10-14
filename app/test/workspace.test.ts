@@ -10,7 +10,10 @@ import { render } from "ink-testing-library";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { Workspace } from "../src/ui/workspace/Workspace.tsx";
 import { fileTree, type Item, type Pane, type WorkspaceSource } from "../src/ui/workspace/model.ts";
-import { mnemoEnv } from "./helpers.ts";
+import { mnemoEnv, nextDialog } from "./helpers.ts";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { workspaceSource } from "../src/runtime/workspace-source.ts";
 
 const envs: Awaited<ReturnType<typeof mnemoEnv>>[] = [];
 afterEach(async () => {
@@ -369,4 +372,31 @@ test("a picked turn and a search do not survive /new", async () => {
   await wait(120);
   expect(r.lastFrame()).not.toContain("find:");
   r.unmount();
+});
+
+test("the logs pane shows the local clock, and a memory edit that did not take says so", async () => {
+  const e = await mnemoEnv();
+  envs.push(e);
+  const tz = process.env.TZ;
+  process.env.TZ = "Asia/Kolkata";
+  try {
+    const ts = new Date();
+    ts.setUTCHours(1, 2, 3, 0);
+    fs.mkdirSync(path.join(e.home, "logs"), { recursive: true });
+    fs.writeFileSync(path.join(e.home, "logs", `${new Date().toISOString().slice(0, 10)}.jsonl`), `${JSON.stringify({ ts: ts.toISOString(), type: "tool", tool: "bash", subject: "ls", ok: true })}\n`);
+    const logs = workspaceSource(e.controller, e.host, e.home).logs();
+    expect(logs[0]?.label).toBe("06:32:03 bash");
+  } finally {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  }
+  const memory = { profile: async () => [{ key: "pm", value: "pnpm" }], learn: async () => undefined, forget: async () => false };
+  const source = workspaceSource(e.controller, { ...e.host, memory } as never, e.home);
+  const editing = source.act("memory", "p:pm", "e");
+  const ask = await nextDialog(e.controller);
+  if (ask.kind !== "text") throw new Error("expected a text dialog");
+  ask.resolve("bun");
+  await editing;
+  const said = e.controller.transcript.snapshot().committed.flatMap((b) => (b.kind === "notice" ? [b.text] : b.kind === "memory" ? [b.title] : []));
+  expect(said.at(-1)).toBe('Could not change "pm": the memory sidecar did not take it.');
 });
