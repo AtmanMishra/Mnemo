@@ -4,7 +4,7 @@
 import { test, expect } from "bun:test";
 import React from "react";
 import { render } from "ink-testing-library";
-import { Composer, type ComposerProps } from "../src/ui/components/Composer.tsx";
+import { Composer, rankCommands, type ComposerProps } from "../src/ui/components/Composer.tsx";
 import { DialogView, filterChoices } from "../src/ui/components/Dialogs.tsx";
 import { BlockView } from "../src/ui/components/Blocks.tsx";
 import { Dialogs } from "../src/runtime/dialogs.ts";
@@ -268,4 +268,13 @@ test("a queued message with the run already stopped draws without a working line
   );
   expect(r.lastFrame()).toContain("queued: more please");
   expect(r.lastFrame()).not.toContain("esc to interrupt");
+});
+
+test("a command typed in full runs itself, not a longer one it is the start of", async () => {
+  const cmds: CommandInfo[] = ["model", "mode", "remember", "rewind"].map((name) => ({ name, description: "", source: "builtin" as const }));
+  expect(rankCommands(cmds, "mode")[0]?.name).toBe("mode");
+  const c = composer({ commands: () => cmds });
+  await c.type("/mode");
+  await c.type(KEY.enter);
+  expect(c.calls.submit).toEqual([["/mode", "auto"]]);
 });

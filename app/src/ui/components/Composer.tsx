@@ -45,7 +45,8 @@ const DOUBLE_PRESS_MS = 1500;
 export function rankCommands(commands: readonly CommandInfo[], query: string): CommandInfo[] {
   const q = query.toLowerCase();
   const byName = commands.filter((c) => subsequence(c.name, q));
-  const prefix = byName.filter((c) => c.name.toLowerCase().startsWith(q));
+  // A name typed in full comes first: `/mode` + enter runs /mode, not /model.
+  const prefix = byName.filter((c) => c.name.toLowerCase().startsWith(q)).sort((a, b) => Number(b.name.toLowerCase() === q) - Number(a.name.toLowerCase() === q));
   const rest = byName.filter((c) => !c.name.toLowerCase().startsWith(q));
   // Descriptions are prose: substring, never subsequence, or three letters match everything.
   const byDescription = q.length >= 3 ? commands.filter((c) => !byName.includes(c) && c.description.toLowerCase().includes(q)) : [];
