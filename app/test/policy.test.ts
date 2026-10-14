@@ -211,3 +211,24 @@ test("accept-edits asks for nested control folders, editor and hook folders, and
   const home = os.homedir();
   for (const p of [".bashrc", ".profile", ".zshrc", ".ssh/authorized_keys"]) expect("ask" in w(p, home), p).toBe(true);
 });
+
+// ── 13. a running sub-agent follows the mode the user picks ──
+
+test("switching to plan mode reaches a sub-agent that is already running", async () => {
+  const e = await mnemoEnv({ mode: "yolo" });
+  envs.push(e);
+  const marker = path.join(e.cwd, "child-ran");
+  e.faux.setResponses([
+    fauxAssistantMessage([fauxToolCall("spawn_subagent", { task: "touch a file", access: "full" })], { stopReason: "toolUse" }),
+    () => {
+      // The user presses shift+tab to plan while the child works.
+      e.host.mode = "plan";
+      return fauxAssistantMessage([fauxToolCall("bash", { command: `touch ${marker}` })], { stopReason: "toolUse" });
+    },
+    fauxAssistantMessage(fauxText("child done")),
+    fauxAssistantMessage(fauxText("parent done")),
+  ]);
+  await e.controller.submit("delegate");
+  await e.idle();
+  expect(fs.existsSync(marker)).toBe(false);
+});
