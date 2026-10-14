@@ -14,14 +14,21 @@ What it keeps, per project (git remote, so every clone shares it) and per user:
 - **skills** — procedures, as `SKILL.md` files in `.agents/skills/`
 - **provenance** — which agent and model taught each of these
 
+Recall weighs trust: an item that helped ranks higher and one marked wrong twice
+is no longer recalled. `mnemo memory tidy` (`--apply` to act) finds duplicate
+facts and pitfalls, facts about files that are gone, and what was marked wrong
+(`planTidy` / `applyTidy` in code). Search uses a local hashing embedder unless
+you set `MNEMO_EMBED_URL` and `MNEMO_EMBED_MODEL` (or `OPENROUTER_API_KEY`); see
+`SECURITY.md` for what that sends where.
+
 ## Attach it to an agent
 
 | agent | how | what it gets |
 |---|---|---|
 | Mnemo | built in (`app/src/extensions/memory.ts`) | everything, live |
-| Claude Code | hooks + MCP: `mnemo memory setup claude-code` prints both | profiles at session start, recall per prompt, learning after each run (async `Stop` hook), and the three tools |
+| Claude Code | hooks + MCP: `mnemo memory setup claude-code` prints both | profiles at session start, recall per prompt, learning after each run (async `Stop` hook), and the four tools (`memory_recall`, `memory_search`, `memory_remember`, `session_search`) |
 | Claude Code (past sessions) | `mnemo memory ingest --model <provider/id>` | learns from every saved session in `~/.claude/projects`, once each |
-| Codex, Cursor, opencode … | MCP: `mnemo memory setup codex` prints the entry | `memory_recall`, `memory_search`, `memory_remember` |
+| Codex, Cursor, opencode … | MCP: `mnemo memory setup codex` prints the entry | `memory_recall`, `memory_search`, `memory_remember`, `session_search` |
 
 Learning needs one model call per run (reflection). Any pi model works and a
 cheap one is enough: `--model`, else `$MNEMO_MEMORY_MODEL`, else Mnemo's

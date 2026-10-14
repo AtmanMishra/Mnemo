@@ -108,8 +108,8 @@ in a place you can afford to lose: a container, a throwaway checkout.
   `curl`/`wget` to unknown hosts in `permissions.json`.
 - **The Python kernel is an interpreter, not a sandbox.** Each cell is stopped
   after 120 seconds (the model may ask for up to 600), stopping a turn stops the
-  cell, and on Linux its memory is capped at 8 GB (`MNEMO_KERNEL_MEMORY_MB`, `0`
-  for no cap). It can read and write what you can.
+  cell, and on Linux its address space is capped at 8 GB (`MNEMO_KERNEL_MEMORY_MB`, `0`
+  for no cap; macOS and Windows have no cap). It can read and write what you can.
 - Memory writes and session ingestion are redacted for common credential
   shapes (`sk-…`, `ghp_…`, `AKIA…`, private keys, and similar) before they are
   stored. Redaction is pattern-based and best effort: do not rely on it. Eval
@@ -156,3 +156,16 @@ commit and carry a build-provenance attestation:
 
 The checksum catches a corrupted download, not a compromised release (it is
 published beside the archive); the attestation is the provenance check.
+
+`mnemo update` (and `/update`) downloads the installer from the release and runs
+it, with the same checksum check and the same limit: the checksum is not
+provenance, so verify the attestation yourself if that matters.
+
+## Uninstalling
+
+`mnemo uninstall` removes the program (`mnemo` and `memsrv` in `$MNEMO_HOME/bin`,
+the link on your `PATH`) and keeps what Mnemo learned. `--deep` also deletes
+`$MNEMO_HOME` (memory, sessions, the credentials from `/login`, skills, logs,
+settings) after you type `delete` (`--yes` skips the question). The install scripts do the same
+(`sh -s -- --uninstall` / `--deep`, or `MNEMO_UNINSTALL=1` / `deep` on Windows).
+Keys that live in your environment or in other tools are not touched.
