@@ -8,7 +8,7 @@ import React from "react";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { render } from "ink-testing-library";
+import { cleanup, render } from "ink-testing-library";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { Fleet, projectCandidates } from "../src/runtime/fleet.ts";
 import { workspaceSource } from "../src/runtime/workspace-source.ts";
@@ -17,9 +17,11 @@ import { matchProject, typedPath } from "../src/ui/ProjectPicker.tsx";
 import { listFiles, samePath } from "../src/ui/files.ts";
 import { turns, testCounts } from "../src/ui/activity.ts";
 import { mnemoEnv } from "./helpers.ts";
+import { waitFor } from "./wait-for.ts";
 
 const envs: Awaited<ReturnType<typeof mnemoEnv>>[] = [];
 afterEach(async () => {
+  cleanup();
   for (const e of envs.splice(0)) await e.close().catch(() => {});
 });
 const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
@@ -49,32 +51,42 @@ async function fleetOf(names: string[]) {
 test("the tab bar names every agent; alt+2 goes to the second", async () => {
   const { fleet } = await fleetOf(["alpha", "beta"]);
   const r = render(React.createElement(Shell, { fleet, motion: false }));
-  await wait();
-  expect(r.lastFrame()).toContain("1 alpha");
-  expect(r.lastFrame()).toContain("2 beta");
+  await waitFor(() => {
+    expect(r.lastFrame()).toContain("1 alpha");
+    expect(r.lastFrame()).toContain("2 beta");
+    expect(r.lastFrame()).toContain("Ask anything about this project.");
+  });
   const agents = fleet.snapshot().agents;
   agents[1]!.controller.transcript.notice("this is beta speaking");
   r.stdin.write(KEY.alt("2"));
-  await wait();
-  expect(r.lastFrame()).toContain("this is beta speaking");
+  // The tab/header update precedes measuring the newly visible transcript.
+  await waitFor(() => expect(r.lastFrame()).toContain("this is beta speaking"));
   r.unmount();
 });
 
 test("ctrl+g opens the hub with a card per agent; enter opens the chosen one", async () => {
   const { fleet } = await fleetOf(["alpha", "beta"]);
   const r = render(React.createElement(Shell, { fleet, motion: false }));
-  await wait();
+  await waitFor(() => expect(r.lastFrame()).toContain("Ask anything about this project."));
   r.stdin.write(KEY.ctrlG);
-  await wait();
-  expect(r.lastFrame()).toContain("2 open");
-  expect(r.lastFrame()).toContain("alpha");
-  expect(r.lastFrame()).toContain("new · ready");
+  await waitFor(() => {
+    expect(r.lastFrame()).toContain("2 open");
+    expect(r.lastFrame()).toContain("alpha");
+    expect(r.lastFrame()).toContain("new · ready");
+  });
+  // Show one card at a time so selection is observable even without ANSI colors.
+  Object.defineProperty(r.stdout, "columns", { get: () => 80 });
+  Object.defineProperty(r.stdout, "rows", { get: () => 16 });
+  r.stdout.emit("resize");
+  await waitFor(() => {
+    expect(r.lastFrame()).toMatch(/│[^\n]*1 alpha/);
+    expect(r.lastFrame()).not.toMatch(/│[^\n]*2 beta/);
+  });
   r.stdin.write("\x1b[C"); // → beta
-  await wait();
+  await waitFor(() => expect(r.lastFrame()).toMatch(/│[^\n]*2 beta/));
   fleet.snapshot().agents[1]!.controller.transcript.notice("beta opened");
   r.stdin.write(KEY.enter);
-  await wait();
-  expect(r.lastFrame()).toContain("beta opened");
+  await waitFor(() => expect(r.lastFrame()).toContain("beta opened"));
   r.unmount();
 });
 

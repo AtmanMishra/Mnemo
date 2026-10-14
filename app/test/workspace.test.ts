@@ -6,45 +6,56 @@
  */
 import { test, expect, afterEach } from "bun:test";
 import React from "react";
-import { render } from "ink-testing-library";
+import { cleanup, render } from "ink-testing-library";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { Workspace } from "../src/ui/workspace/Workspace.tsx";
 import { App } from "../src/ui/App.tsx";
 import * as os from "node:os";
 import { fileTree, type Item, type Pane, type WorkspaceSource } from "../src/ui/workspace/model.ts";
 import { mnemoEnv, nextDialog } from "./helpers.ts";
+import { waitFor } from "./wait-for.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { workspaceSource } from "../src/runtime/workspace-source.ts";
 
 const envs: Awaited<ReturnType<typeof mnemoEnv>>[] = [];
 afterEach(async () => {
+  cleanup();
   for (const e of envs.splice(0)) await e.close();
 });
 const wait = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 const KEY = { tab: "\t", esc: "\x1b", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D", ctrlB: "\x02" };
 
-function fakeSource(acts: string[]): WorkspaceSource {
+function fakeSource(acts: string[], delay = 0): WorkspaceSource {
   return {
     files: () => ["README.md", "src/app.ts", "src/lib/util.ts"],
-    memory: async () => [
-      { id: "h", label: "This project", kind: "head", detail: "1" },
-      { id: "p:pm", label: "package manager", detail: "pnpm", kind: "fact", depth: 1 },
-    ],
-    sessions: async () => [{ id: "/s/1.jsonl", label: "fix the login bug", detail: "today", kind: "session" }],
+    memory: async () => {
+      await wait(delay);
+      return [
+        { id: "h", label: "This project", kind: "head", detail: "1" },
+        { id: "p:pm", label: "package manager", detail: "pnpm", kind: "fact", depth: 1 },
+      ];
+    },
+    sessions: async () => {
+      await wait(delay);
+      return [{ id: "/s/1.jsonl", label: "fix the login bug", detail: "today", kind: "session" }];
+    },
     skills: () => [{ id: "/k/release/SKILL.md", label: "release", detail: "Cut a release", kind: "skill" }],
     logs: () => [{ id: "0", label: "12:00 bash", detail: "pnpm test", kind: "log" }],
     preview: async (pane: Pane, id: string) => ({ title: id, lines: [{ text: `contents of ${pane}:${id}`, gutter: "1" }] }),
-    act: (pane: Pane, id: string, key: string) => void acts.push(`${pane}:${id}:${key}`),
+    act: async (pane: Pane, id: string, key: string) => {
+      await wait(delay);
+      acts.push(`${pane}:${id}:${key}`);
+    },
   };
 }
 
-async function mount() {
+async function mount(delay = 0) {
   const e = await mnemoEnv();
   envs.push(e);
   const acts: string[] = [];
-  const r = render(React.createElement(Workspace, { controller: e.controller, source: fakeSource(acts), motion: false }));
-  await wait(80);
+  const r = render(React.createElement(Workspace, { controller: e.controller, source: fakeSource(acts, delay), motion: false }));
+  await waitFor(() => expect(r.lastFrame()).toContain("Ask anything about this project."));
   return { ...r, e, acts };
 }
 
@@ -87,19 +98,19 @@ test("a directory opens with → and closes with ←", async () => {
 });
 
 test("1–5 switch panes, and a pane's own keys reach the source", async () => {
-  const r = await mount();
+  // Exercise sources slower than the old 80 ms sleeps, on every platform.
+  const r = await mount(200);
   r.stdin.write(KEY.tab);
-  await wait();
+  await waitFor(() => expect(r.lastFrame()).toContain("❯ Ask Mnemo anything")); // composer lost its cursor
   r.stdin.write("2");
-  await wait(80);
-  expect(r.lastFrame()).toContain("MEMORY");
-  expect(r.lastFrame()).toContain("package manager");
+  await waitFor(() => {
+    expect(r.lastFrame()).toContain("MEMORY");
+    expect(r.lastFrame()).toContain("package manager");
+  });
   r.stdin.write("3");
-  await wait(80);
-  expect(r.lastFrame()).toContain("fix the login bug");
+  await waitFor(() => expect(r.lastFrame()).toContain("fix the login bug"));
   r.stdin.write("r");
-  await wait();
-  expect(r.acts).toEqual(["sessions:/s/1.jsonl:r"]);
+  await waitFor(() => expect(r.acts).toEqual(["sessions:/s/1.jsonl:r"]));
   r.unmount();
 });
 
@@ -325,27 +336,31 @@ test("a pane that fails to load or act says so instead of rejecting", async () =
   const e = await mnemoEnv();
   envs.push(e);
   const source: WorkspaceSource = {
-    ...fakeSource([]),
+    ...fakeSource([], 200),
     memory: async () => {
+      await wait(200);
       throw new Error("memsrv went away");
     },
     act: async () => {
+      await wait(200);
       throw new Error("could not resume");
     },
   };
   const r = render(React.createElement(Workspace, { controller: e.controller, source, motion: false }));
-  await wait(80);
+  const notices = () => e.controller.transcript.snapshot().committed.flatMap((b) => (b.kind === "notice" ? [b.text] : []));
+  await waitFor(() => expect(r.lastFrame()).toContain("Ask anything about this project."));
   r.stdin.write(KEY.tab);
-  await wait();
+  await waitFor(() => expect(r.lastFrame()).toContain("❯ Ask Mnemo anything"));
   r.stdin.write("2");
-  await wait(80);
+  await waitFor(() => expect(notices()).toContain("Could not load memory: memsrv went away"));
   r.stdin.write("3");
-  await wait(80);
+  // Resume is meaningful only after the session is present and selected.
+  await waitFor(() => expect(r.lastFrame()).toContain("fix the login bug"));
   r.stdin.write("r");
-  await wait(80);
-  const said = e.controller.transcript.snapshot().committed.flatMap((b) => (b.kind === "notice" ? [b.text] : []));
-  expect(said).toContain("Could not load memory: memsrv went away");
-  expect(said).toContain("could not resume");
+  await waitFor(() => {
+    expect(notices()).toContain("Could not load memory: memsrv went away");
+    expect(notices()).toContain("could not resume");
+  });
   r.unmount();
 });
 

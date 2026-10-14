@@ -144,10 +144,23 @@ test("the question shows the tail of a long command and no terminal escapes", ()
 });
 
 test("credential files are not read, in any mode", () => {
-  const home = "/h/.mnemo";
-  expect(judge({ mode: "yolo", home }, [], noGrants, "/p", "read", { path: "/h/.mnemo/agent/auth.json" })).toMatchObject({ allow: false });
-  expect(judge({ mode: "yolo", home }, [], noGrants, "/p", "read", { path: path.join(os.homedir(), ".ssh", "id_ed25519") })).toMatchObject({ allow: false });
-  expect(judge({ mode: "yolo", home }, [], noGrants, "/p", "read", { path: "src/a.ts" })).toEqual({ allow: true });
+  // A tool reads /h/... as the H: drive on Windows; the host uses native paths.
+  const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-credentials-")));
+  const project = path.join(home, "project");
+  fs.mkdirSync(project);
+  try {
+    const credentials = [path.join(home, "agent", "auth.json"), path.join(os.homedir(), ".ssh", "id_ed25519")];
+    for (const mode of ["default", "accept-edits", "plan", "yolo"] as const) {
+      for (const credential of credentials) {
+        for (const spelling of new Set([credential, credential.replaceAll("\\", "/")])) {
+          expect(judge({ mode, home }, [], noGrants, project, "read", { path: spelling }), `${mode}: ${spelling}`).toMatchObject({ allow: false });
+        }
+      }
+      expect(judge({ mode, home }, [], noGrants, project, "read", { path: "src/a.ts" })).toEqual({ allow: true });
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("a deny rule beats every mode, yolo included", () => {

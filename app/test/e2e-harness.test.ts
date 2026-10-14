@@ -40,7 +40,8 @@ test("a world has a real initial commit despite inherited Git configuration", ()
     const git = (...args: string[]) => Bun.spawnSync(["git", ...args], { cwd: w!.project, env: w!.env, stdout: "pipe", stderr: "pipe" });
     const head = git("rev-parse", "--verify", "HEAD");
     expect({ code: head.exitCode, stderr: head.stderr.toString() }).toEqual({ code: 0, stderr: "" });
-    expect(fs.realpathSync(git("rev-parse", "--show-toplevel").stdout.toString().trim())).toBe(w.project);
+    // Git expands Windows 8.3 temp paths (RUNNER~1); compare both native real paths.
+    expect(fs.realpathSync.native(git("rev-parse", "--show-toplevel").stdout.toString().trim())).toBe(fs.realpathSync.native(w.project));
     expect(git("status", "--porcelain").stdout.toString()).toBe("");
     // A normal file works for Git for Windows too; os.devNull is a device path there.
     expect(fs.statSync(w.env.GIT_CONFIG_GLOBAL!).isFile()).toBe(true);
