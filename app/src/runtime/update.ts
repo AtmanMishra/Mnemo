@@ -144,17 +144,17 @@ export function shouldCheck(o: { auto?: boolean; checkedAt?: number; now: number
  * new name each time since an earlier one may still be running); clear those that no
  * longer are.
  */
-export function clearReplaced(home: string): void {
+export function clearReplaced(home: string, files: { readdirSync(p: string): string[]; rmSync(p: string, o: { force: true }): void } = fs): void {
   const bin = path.join(home, "bin");
   let names: string[];
   try {
-    names = fs.readdirSync(bin).filter((f) => f.endsWith(".old"));
+    names = files.readdirSync(bin).filter((f) => f.endsWith(".old"));
   } catch {
     return;
   }
   for (const f of names) {
     try {
-      fs.rmSync(path.join(bin, f), { force: true });
+      files.rmSync(path.join(bin, f), { force: true });
     } catch {
       /* still running in another window: next time */
     }
