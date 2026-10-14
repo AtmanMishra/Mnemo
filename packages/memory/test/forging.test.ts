@@ -73,3 +73,16 @@ t("a .env in the folder memsrv starts in cannot redirect its embedding requests"
   expect(hits).toBe(0);
   expect(fs.existsSync(path.join(repo, "data"))).toBe(false);
 }, 30_000);
+
+t("a password under a key that names it is not kept, by the service or the session", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-secret-key-"));
+  const cwd = path.join(root, "repo");
+  fs.mkdirSync(cwd);
+  const memory = new MemoryService(MEMSRV!, path.join(root, "memory", "journal.jsonl"));
+  const s = new MemorySession({ memory, cwd, userSkillsDir: path.join(root, "skills") });
+  await memory.learn("project", s.identity.id, "db password", "hunter2hunter2");
+  expect(await memory.profile("project", s.identity.id)).toEqual([{ key: "db password", value: "[redacted]" }]);
+  expect(fs.readFileSync(path.join(root, "memory", "journal.jsonl"), "utf8")).not.toContain("hunter2hunter2");
+  await expect(s.remember("project", "staging password", "Tr0ub4dor&3xx")).rejects.toThrow(/credentials/);
+  memory.stop();
+}, 30_000);

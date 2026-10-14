@@ -22,7 +22,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { MemoryClient, type MemoryChild } from "./client.ts";
-import { redact } from "./redact.ts";
+import { redact, secretUnderKey } from "./redact.ts";
 
 export interface Hit {
   node: number;
@@ -102,6 +102,11 @@ export function factValue(state: string, key: string): string | undefined {
  */
 function oneLine(text: string, max: number): string {
   return redact(text).replace(/[\r\n\u2028\u2029\u0085]+/g, " ").slice(0, max);
+}
+
+/** A fact as written: one line each, and a credential under a key that names one is not kept. */
+function factParams(key: string, value: string): { key: string; value: string } {
+  return { key: oneLine(key, 120), value: secretUnderKey(key, value) ? "[redacted]" : oneLine(value, 4000) };
 }
 
 export function spawnMemsrv(binary: string, args: string[]): MemoryChild {
@@ -197,7 +202,7 @@ export class MemoryService {
   async learn(scope: Scope, projectId: string, key: string, value: string): Promise<{ superseded: boolean } | undefined> {
     const node = await this.profileNode(scope, projectId);
     if (node === undefined) return undefined;
-    const r = await this.call<{ fact: number; superseded: number | null }>("fact", { node, key: oneLine(key, 120), value: oneLine(value, 4000) });
+    const r = await this.call<{ fact: number; superseded: number | null }>("fact", { node, ...factParams(key, value) });
     return r ? { superseded: r.superseded !== null } : undefined;
   }
 
@@ -251,7 +256,7 @@ export class MemoryService {
   }
 
   async fact(node: number, key: string, value: string): Promise<void> {
-    await this.call("fact", { node, key: oneLine(key, 120), value: oneLine(value, 4000) });
+    await this.call("fact", { node, ...factParams(key, value) });
   }
 
   async link(src: number, dst: number, kind: EdgeKind = "supplies_context"): Promise<void> {

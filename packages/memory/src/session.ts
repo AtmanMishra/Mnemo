@@ -26,7 +26,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Credit } from "./credit.ts";
 import { projectIdentity, type ProjectIdentity } from "./project.ts";
-import { redact } from "./redact.ts";
+import { redact, secretUnderKey } from "./redact.ts";
 import { unsafeMemory } from "./safety.ts";
 import { describeHit, hitLine, profileBlock, recallMessage } from "./recall.ts";
 import { digest, parseReflection, REFLECT_PROMPT, worthReflecting, type Reflection, type ToolEvent } from "./reflect.ts";
@@ -286,6 +286,7 @@ export class MemorySession {
     if (key.toLowerCase() === "last session") throw new Error("\"last session\" is written by Mnemo from the session record; choose another key");
     const unsafe = unsafeMemory(`${key} ${value}`);
     if (unsafe) throw new Error(`memory refused this: it ${unsafe}`);
+    if (secretUnderKey(key, value)) throw new Error("memory does not keep credentials: remember where to find it (a vault, an env var's name) instead");
     const r = await this.learnFact(scope, key.toLowerCase(), value);
     if (!r) throw new Error("memory is not reachable");
     this.note({ kind: "learned", items: [`${scope} · ${key}: ${value}`] });
