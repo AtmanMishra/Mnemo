@@ -6,11 +6,19 @@
  * './anthropic.js'" and Bedrock could not load. pi's own binary registers static
  * copies in `pi-coding-agent/dist/bun/runtime-setup.js`; this does the same.
  * Harmless when running from source: the static copies are the same modules.
+ *
+ * Not mirrored from pi's setup: `setEmbeddedQuickJSWasmPath` (the codemode VM). pi does
+ * not export it, and Mnemo registers no codemode extension.
  */
+// Before anything that reads the environment as it loads (see sandbox-env.ts).
+import "./sandbox-env.ts";
 import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { bedrockProviderModule } from "@earendil-works/pi-ai/bedrock-provider";
 import { setBedrockProviderModule } from "@earendil-works/pi-ai/compat";
 
+process.title = "mnemo";
+// As pi's binary does: Node-compat deprecation and experimental notices would print over the interface.
+process.emitWarning = () => {};
 registerBunOAuthFlows();
 setBedrockProviderModule(bedrockProviderModule);
 

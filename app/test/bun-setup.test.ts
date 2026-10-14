@@ -46,3 +46,23 @@ describe("compiled binary", () => {
     expect(first).toBe('import "../src/runtime/bun-setup.ts";');
   });
 });
+
+describe("the rest of pi's binary setup", () => {
+  test("an empty environment (Bun bug 27802, in a sandbox) is restored from /proc/self/environ", async () => {
+    const { restoreSandboxEnv } = await import("../src/runtime/sandbox-env.ts");
+    const env: Record<string, string | undefined> = {};
+    restoreSandboxEnv(env, () => "HOME=/home/a\0OPENAI_API_KEY=k=v\0\0junk\0");
+    expect(env).toEqual({ HOME: "/home/a", OPENAI_API_KEY: "k=v" });
+    const full: Record<string, string | undefined> = { HOME: "/x" };
+    restoreSandboxEnv(full, () => "HOME=/other\0");
+    expect(full).toEqual({ HOME: "/x" });
+  });
+
+  test("bun-setup restores the environment before pi-ai loads, and silences runtime warnings like pi", () => {
+    const setup = fs.readFileSync(path.join(app, "src", "runtime", "bun-setup.ts"), "utf8");
+    expect(setup.match(/^import .*$/m)?.[0]).toBe('import "./sandbox-env.ts";');
+    const r = Bun.spawnSync(["bun", "-e", 'await import("./src/runtime/bun-setup.ts"); process.emitWarning("a runtime warning"); console.log(process.title)'], { cwd: app, stdout: "pipe", stderr: "pipe" });
+    expect(r.stderr.toString()).not.toContain("a runtime warning");
+    expect(r.stdout.toString().trim()).toBe("mnemo");
+  });
+});
