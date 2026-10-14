@@ -134,7 +134,6 @@ export const GROUPS: Group[] = [
       ["`MNEMO_LINKS=0`", "no clickable links"],
       ["`MNEMO_NOTIFY=0`", "no desktop notifications when a turn ends in the background"],
       ["`MNEMO_EMBED_URL`, `MNEMO_EMBED_MODEL`, `MNEMO_EMBED_KEY`, `MNEMO_EMBED_TIMEOUT_MS`", "use your own embedding server (e.g. Ollama) for memory search"],
-      ["`OPENROUTER_API_KEY`", "use OpenRouter for memory embeddings (text of memories is sent there)"],
       ["`MNEMO_MEMORY_MODEL`, `MNEMO_ESCALATE_MODEL`", "models for memory reflection and escalation"],
       ["`MNEMO_PYTHON`", "which Python runs the `ipy_run` tool"],
     ],

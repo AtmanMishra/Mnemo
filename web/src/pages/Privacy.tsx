@@ -44,8 +44,7 @@ const sections: DocSection[] = [
               <tr><td>You send a prompt</td><td>Your prompt, the files and command output the model reads, recalled memory</td><td>The model provider you configured</td></tr>
               <tr><td>You run <code>mnemo update</code></td><td>A request for the latest release and its files</td><td>GitHub</td></tr>
               <tr><td>You turned on the daily check (off by default)</td><td>A request for the latest release; nothing about you</td><td>GitHub</td></tr>
-              <tr><td>You set <code>OPENROUTER_API_KEY</code> (off by default)</td><td>The text of memories, to compute embeddings</td><td>OpenRouter</td></tr>
-              <tr><td>You set <code>MNEMO_EMBED_URL</code></td><td>The text of memories, to compute embeddings</td><td>The server you chose (an Ollama on your machine, say)</td></tr>
+              <tr><td>You set <code>MNEMO_EMBED_URL</code></td><td>The text of memories, to compute embeddings</td><td>The server you chose (OpenRouter, or an Ollama on your machine)</td></tr>
               <tr><td>You run an installer</td><td>A download request</td><td>This site or GitHub</td></tr>
             </tbody>
           </table>

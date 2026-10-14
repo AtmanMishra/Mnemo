@@ -110,7 +110,7 @@ const sections: DocSection[] = [
         <h3>Search quality</h3>
         <p>
           Search uses a local hashing embedder, which is offline and plain. To do better, point it at your own embedding server (an Ollama on this machine, say) with{" "}
-          <code>MNEMO_EMBED_URL</code> and <code>MNEMO_EMBED_MODEL</code>. If <code>OPENROUTER_API_KEY</code> is set, the text of memories goes to OpenRouter to compute embeddings; leave it unset and nothing is sent.
+          <code>MNEMO_EMBED_URL</code> and <code>MNEMO_EMBED_MODEL</code>. For OpenRouter, set <code>MNEMO_EMBED_URL=https://openrouter.ai/api/v1/embeddings</code> and the key in <code>MNEMO_EMBED_KEY</code>. A model key alone sends nothing: until you set <code>MNEMO_EMBED_URL</code>, memory never leaves your machine.
         </p>
         <h3>Share it with other agents</h3>
         <p>The same memory can serve Claude Code (hooks) and Codex, Cursor and opencode (MCP):</p>
