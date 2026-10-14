@@ -80,7 +80,7 @@ describe("doctor", () => {
     if (process.platform !== "win32") fs.chmodSync(w.mnemoHome, 0o755);
     const r = await mnemo(w, ["doctor"]);
     expect(r.stdout).toContain("✓ model   mock/mock-1");
-    if (memsrv()) expect(r.stdout).toMatch(/✓ memory/);
+    if (memsrv()) expect(r.stdout).toMatch(/✓ memory  .* · \d+ nodes · answered in \d+ ms\n  embed   hashing/);
     if (process.platform === "win32") return;
     expect(r.stdout).toContain("readable by others");
     expect(r.code).toBe(1);
@@ -222,6 +222,31 @@ describe("memory", () => {
     await mnemo(w, ["-p", "how do we deploy?", "--no-reflect"]);
     const req = llm.agentRequests()[0]!;
     expect(systemPrompt(req) + JSON.stringify(req.messages)).toContain("flyctl");
+  }, T);
+
+  test.if(hasMemsrv)("an OpenRouter key does not send memory to OpenRouter, so memory keeps answering", async () => {
+    // Takes the connection and never answers: memsrv embedding through it
+    // would stall every memory call until the app gave up on memory.
+    let connections = 0;
+    const hung = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { open: () => void connections++, data: () => {} } });
+    try {
+      const url = `http://127.0.0.1:${hung.port}/api/v1/embeddings`;
+      const w = fresh({ env: { OPENROUTER_API_KEY: "sk-or-e2e-not-a-key", OPENROUTER_EMBED_URL: url } });
+      // memsrv also reads $MNEMO_HOME/.env, which the app's own environment does not reach.
+      fs.writeFileSync(path.join(w.mnemoHome, ".env"), `OPENROUTER_API_KEY=sk-or-e2e-not-a-key\nOPENROUTER_EMBED_URL=${url}\n`);
+      play(steps({ tools: [{ name: "memory_remember", args: { scope: "project", key: "deploy target", value: "we deploy with flyctl to region ams" } }] }, { text: "noted" }));
+      expect((await mnemo(w, ["-p", "remember how we deploy", "--no-reflect"])).code).toBe(0);
+      play(steps({ tools: [{ name: "memory_search", args: { query: "how do we deploy flyctl" } }] }, { text: "ok" }));
+      await mnemo(w, ["-p", "how do we deploy?", "--no-reflect"]);
+      const req = llm.agentRequests()[0]!;
+      expect(systemPrompt(req) + JSON.stringify(req.messages)).toContain("flyctl");
+      expect(lastToolResult()).toContain("flyctl");
+      const doctor = await mnemo(w, ["doctor"]);
+      expect(doctor.stdout).toContain("  embed   hashing");
+      expect(connections).toBe(0);
+    } finally {
+      hung.stop(true);
+    }
   }, T);
 
   test.if(hasMemsrv)("memory_search finds what was remembered", async () => {
