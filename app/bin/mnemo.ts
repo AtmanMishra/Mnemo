@@ -34,7 +34,7 @@ import { setLinks } from "../src/ui/link.ts";
 import { clearReplaced, compareVersions, installKind, latestVersion, manualStep, runInstaller, shouldCheck } from "../src/runtime/update.ts";
 import { bestOf, describeBestOf } from "../src/runtime/best-of.ts";
 import { selfCommand } from "../src/runtime/self.ts";
-import { findProblems } from "../src/runtime/doctor.ts";
+import { checkMemory, findProblems } from "../src/runtime/doctor.ts";
 import { describePlan, looksLikeMnemoHome, planUninstall, runUninstall } from "../src/runtime/uninstall.ts";
 
 const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
@@ -186,12 +186,9 @@ async function doctor(home: string, dir: string, fix: boolean): Promise<number> 
   lines.push(`${ok(usable)} model   ${usable ? `${model!.provider}/${model!.id}` : "none — run mnemo, then /login"}`);
   await runtime.dispose();
   const memsrv = findMemsrv(home);
-  if (memsrv) {
-    const mem = new MemoryService(memsrv, journalPath(home));
-    const stats = await mem.stats();
-    mem.stop();
-    lines.push(`${ok(!!stats)} memory  ${memsrv}${stats ? ` · ${stats.nodes} nodes · ${journalPath(home)}` : " (did not answer)"}`);
-  } else {
+  const memory = memsrv ? await checkMemory(memsrv, journalPath(home), home) : undefined;
+  if (memory) lines.push(...memory.lines);
+  else {
     lines.push(`✗ memory  ${memsrvName()} not found — put it in ${path.join(home, "bin")} or set MNEMO_MEMSRV (cargo build --release --bin memsrv)`);
   }
   const python = createHost({ home, agentDir: dir, modelRuntime: runtime.session.modelRuntime }).python();
@@ -208,7 +205,7 @@ async function doctor(home: string, dir: string, fix: boolean): Promise<number> 
   console.log(lines.join("\n"));
   if (!fix) {
     if (problems.length || (!memsrv && installKind(process.execPath, home) === "installer")) console.log("\nmnemo doctor --fix repairs what it can");
-    return usable && memsrv && !problems.length ? 0 : 1;
+    return usable && memory?.ok && !problems.length ? 0 : 1;
   }
   console.log("");
   for (const p of problems) {
@@ -228,8 +225,9 @@ async function doctor(home: string, dir: string, fix: boolean): Promise<number> 
     } else console.log(`cannot  ${memsrvName()}: build it (cargo build --release --bin memsrv) or reinstall Mnemo the way you installed it`);
   }
   if (!usable) console.log("cannot  no model: run mnemo, then /login");
-  if (!problems.length && memsrv && usable) console.log("nothing to fix");
-  return usable && memsrvNow ? 0 : 1;
+  if (memory && !memory.ok) console.log("cannot  memsrv did not answer: its log says why");
+  if (!problems.length && memory?.ok && usable) console.log("nothing to fix");
+  return usable && memsrvNow && memory?.ok !== false ? 0 : 1;
 }
 
 /** Small per-user state: whether the introduction has been seen. */

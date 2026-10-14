@@ -40,8 +40,12 @@ export interface Footer {
   cwd: string;
   branch?: string;
   mode: Mode;
-  /** null when the memory sidecar is not installed. */
-  memory: { nodes: number } | null;
+  /**
+   * null when the memory sidecar is not installed. Installed: `nodes` is the
+   * last count it gave (null before the first), and `answering` false when the
+   * last ask got no answer — memsrv is there, busy or stuck, not off.
+   */
+  memory: { nodes: number | null; answering: boolean } | null;
 }
 
 /**
@@ -197,6 +201,7 @@ export class Controller {
   private statuses = new Map<string, string>();
   private branch: string | undefined;
   private memoryNodes: number | null = null;
+  private memoryAnswering = true;
   private needsReload = false;
   /** A login in progress, which esc cancels. */
   private loginAbort: AbortController | undefined;
@@ -288,7 +293,7 @@ export class Controller {
       cwd: this.runtime.cwd,
       branch: this.branch,
       mode: this.options.host?.mode ?? "default",
-      memory: this.memoryNodes === null ? null : { nodes: this.memoryNodes },
+      memory: this.options.host?.memory ? { nodes: this.memoryNodes, answering: this.memoryAnswering } : null,
     };
   }
 
@@ -554,8 +559,12 @@ export class Controller {
   }
 
   private async refreshMemory(): Promise<void> {
-    const stats = await this.options.host?.memory?.stats();
-    this.memoryNodes = stats ? stats.nodes : null;
+    const memory = this.options.host?.memory;
+    if (!memory) return;
+    // No answer keeps the last count and is asked again on the next refresh.
+    const stats = await memory.stats().catch(() => undefined);
+    if (stats) this.memoryNodes = stats.nodes;
+    this.memoryAnswering = !!stats;
     this.refreshFooter();
   }
 
@@ -879,9 +888,13 @@ export class Controller {
       return;
     }
     const [stats, project, user] = await Promise.all([mem.stats(), mem.profile("project", id), mem.profile("user", id)]);
-    const areas = stats ? Object.entries(stats.byArea).map(([a, n]) => `${a.toLowerCase()} ${n}`).join(" · ") : "";
+    if (!stats) {
+      this.transcript.notice("Memory is not answering: memsrv is installed but did not reply. `mnemo doctor` checks it.", "warn");
+      return;
+    }
+    const areas = Object.entries(stats.byArea).map(([a, n]) => `${a.toLowerCase()} ${n}`).join(" · ");
     const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
-    this.transcript.memory(`Memory · ${plural(stats?.nodes ?? 0, "node")} · ${plural(stats?.episodes ?? 0, "episode")}${areas ? ` · ${areas}` : ""}`, [
+    this.transcript.memory(`Memory · ${plural(stats.nodes, "node")} · ${plural(stats.episodes, "episode")}${areas ? ` · ${areas}` : ""}`, [
       ...(project.length ? ["This project:", ...project.map((f) => `· ${f.key}: ${f.value}`)] : ["Nothing about this project yet."]),
       ...(user.length ? ["You:", ...user.map((f) => `· ${f.key}: ${f.value}`)] : []),
     ]);

@@ -145,7 +145,7 @@ bun install
 cd app && bun bin/mnemo.ts --demo     # a scripted session, no key; app/scripts/install.sh installs from here
 
 # 3. run it, in a project
-mnemo doctor      # what it found: model, memory, python (--fix repairs what it can)
+mnemo doctor      # what it found: model, memory (answers? count, embedder, log), python (--fix repairs what it can)
 mnemo
 ```
 

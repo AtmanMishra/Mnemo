@@ -19,6 +19,7 @@ import { parseWheel, WHEEL_ROWS } from "../mouse.ts";
 import type { Controller } from "../../runtime/controller.ts";
 import { BlockView } from "../components/Blocks.tsx";
 import { Composer } from "../components/Composer.tsx";
+import { memoryText } from "../components/Footer.tsx";
 import { DialogSpace, DialogView, InputActive } from "../components/Dialogs.tsx";
 import { Engram } from "../components/Engram.tsx";
 import { ENGRAM_MIN } from "../engram.ts";
@@ -87,7 +88,7 @@ function Header({ controller, columns, brand, mood }: { controller: Controller; 
               <Text color={palette.text}>{f.model}</Text>
             </>
           )}
-          <Text color={f.memory ? palette.amber : palette.faint}>{`  ${f.memory ? `◈ ${f.memory.nodes}` : "◈ off"}`}</Text>
+          <Text color={!f.memory || (f.memory.nodes === null && f.memory.answering) ? palette.faint : f.memory.answering ? palette.amber : palette.dim}>{`  ${memoryText(f.memory)}`}</Text>
           {f.cost > 0 ? <Text color={palette.dim}>{`  $${f.cost.toFixed(2)}`}</Text> : null}
           <Text> </Text>
         </Text>
