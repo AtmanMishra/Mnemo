@@ -123,7 +123,9 @@ impl StoreData {
                 self.state_memo.remove(node);
             }
             Op::DeleteNode { node, hard, at } => {
-                let n = self.get_mut(*node)?;
+                // forgetting a forgotten node again is allowed (a soft forget
+                // then a hard one); every other write to it is not
+                let n = self.nodes.get_mut(node).ok_or_else(|| format!("node {node} missing"))?;
                 n.deleted = true;
                 n.log.push(LogEntry { at: *at, kind: "deleted".into(), detail: format!("hard={hard}") });
                 if *hard {
@@ -187,11 +189,22 @@ impl StoreData {
         Ok(())
     }
 
+    /// A live node to write to. A forgotten (soft-deleted) node takes no more
+    /// writes: it is history, and a fact or link added to it would be a write
+    /// nobody can see — or, once something reads it again, a resurrection.
     fn get_mut(&mut self, id: NodeId) -> Result<&mut Node, String> {
-        self.nodes.get_mut(&id).ok_or_else(|| format!("node {id} missing"))
+        match self.nodes.get_mut(&id) {
+            Some(n) if n.deleted => Err(format!("node {id} was forgotten")),
+            Some(n) => Ok(n),
+            None => Err(format!("node {id} missing")),
+        }
     }
     fn must_exist(&self, id: NodeId) -> Result<(), String> {
-        if self.nodes.contains_key(&id) { Ok(()) } else { Err(format!("node {id} missing")) }
+        match self.nodes.get(&id) {
+            Some(n) if n.deleted => Err(format!("node {id} was forgotten")),
+            Some(_) => Ok(()),
+            None => Err(format!("node {id} missing")),
+        }
     }
     fn edge_mut(&mut self, id: EdgeId) -> Result<&mut Edge, String> {
         self.edges.get_mut(&id).ok_or_else(|| format!("edge {id} missing"))

@@ -230,3 +230,15 @@ test("an episode made while the project was unreachable is linked to it once the
   await s.begin("third");
   expect(links).toEqual([[10, 1, "part_of"]]);
 });
+
+t("a forgotten node is not found by its label any more, in the process that forgot it", async () => {
+  const { memory } = setup();
+  const old = (await memory.createNode("harness", "skill deploy", "procedural"))!;
+  expect(await memory.findLabel("skill deploy")).toBe(old);
+  expect(await memory.forgetNode(old)).toBe(true);
+  expect(await memory.findLabel("skill deploy")).toBeUndefined();
+  // and the sidecar refuses writes to it
+  await memory.fact(old, "last used", "today");
+  expect(await memory.state(old)).not.toContain("last used");
+  memory.stop();
+});

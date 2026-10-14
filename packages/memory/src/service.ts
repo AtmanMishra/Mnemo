@@ -274,7 +274,10 @@ export class MemoryService {
 
   /** Retire a node (a pitfall, a note): kept in the journal, never recalled again. */
   async forgetNode(node: number): Promise<boolean> {
-    return (await this.call("forget", { node })) !== undefined;
+    const ok = (await this.call("forget", { node })) !== undefined;
+    // A forgotten node is no longer what its label names.
+    if (ok) for (const [label, id] of this.labels) if (id === node) this.labels.delete(label);
+    return ok;
   }
 
   async markUseful(node: number, useful = true): Promise<void> {

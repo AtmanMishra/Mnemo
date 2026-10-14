@@ -205,4 +205,21 @@ mod p0 {
         assert!(!st.lines().any(|l| l.trim_start().starts_with("- test command")), "{st}");
         assert!(st.contains("notes\\nfacts:"), "the text is kept, escaped: {st}");
     }
+
+    #[test]
+    fn a_forgotten_node_takes_no_more_writes() {
+        let mut s = StoreData::new();
+        let t = now();
+        s.apply(&Op::CreateNode { id: 1, kind: NodeKind::Aspect, label: "note".into(), at: t }).unwrap();
+        s.apply(&Op::CreateNode { id: 2, kind: NodeKind::Aspect, label: "other".into(), at: t }).unwrap();
+        s.apply(&Op::DeleteNode { node: 1, hard: false, at: t + 1 }).unwrap();
+        assert!(s.apply(&Op::AddFact { node: 1, fact_id: 1, key: "k".into(), value: "v".into(), at: t + 2 }).is_err());
+        assert!(s.apply(&Op::CommitLog { node: 1, kind: "x".into(), detail: "y".into(), at: t + 2 }).is_err());
+        assert!(s.apply(&Op::RecordUsefulness { node: 1, useful: true, at: t + 2 }).is_err());
+        assert!(s.apply(&Op::Link { id: 1, src: 2, dst: 1, kind: EdgeKind::SuppliesContext, at: t + 2 }).is_err());
+        assert!(s.nodes[&1].facts.is_empty());
+        // forgetting it for good is still allowed
+        s.apply(&Op::DeleteNode { node: 1, hard: true, at: t + 3 }).unwrap();
+        assert!(!s.nodes.contains_key(&1));
+    }
 }
