@@ -614,7 +614,10 @@ async function main(): Promise<number> {
       patchConsole: true,
       kittyKeyboard: { mode: "auto" },
       alternateScreen: layout === "workspace",
-      ...(interactive ? {} : { stdin: silentStdin(), interactive: false }),
+      // Ink otherwise treats even a real terminal as non-interactive under CI.
+      // Use the same TTY decision for rendering and for waiting on user input.
+      interactive,
+      ...(interactive ? {} : { stdin: silentStdin() }),
     },
   );
 

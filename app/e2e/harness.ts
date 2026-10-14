@@ -31,7 +31,8 @@ export function binary(): string {
 /** The memory sidecar, as CI and contributors build it. */
 export function memsrv(): string | undefined {
   const candidates = [process.env.MNEMO_MEMSRV, path.join(root, "memory-layer", "target", "release", `memsrv${exe}`), path.join(root, "memory-layer", "target", "debug", `memsrv${exe}`)];
-  return candidates.find((p) => p && fs.existsSync(p));
+  // Normalize Git Bash's forward slashes and /../ before Windows filesystem calls.
+  return candidates.filter((p): p is string => !!p).map((p) => path.resolve(p)).find((p) => fs.existsSync(p));
 }
 
 export interface World {
@@ -45,8 +46,8 @@ export interface World {
   cleanup(): void;
 }
 
-/** Provider keys and Mnemo settings from the developer's shell must not leak into a test. */
-const DROP = /(_API_KEY|_TOKEN|_SECRET)$|^AWS_|^MNEMO_|^OPENROUTER|^ANTHROPIC|^OPENAI|^GEMINI|^GOOGLE_|^AZURE_/;
+/** Provider keys, Mnemo settings and Git overrides must not leak into a test. */
+const DROP = /(_API_KEY|_TOKEN|_SECRET)$|^AWS_|^MNEMO_|^OPENROUTER|^ANTHROPIC|^OPENAI|^GEMINI|^GOOGLE_|^AZURE_|^GIT_/;
 
 export function world(opts: { llm?: string; files?: Record<string, string>; env?: Record<string, string> } = {}): World {
   const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-e2e-")));
@@ -59,10 +60,6 @@ export function world(opts: { llm?: string; files?: Record<string, string>; env?
     fs.mkdirSync(path.dirname(path.join(project, rel)), { recursive: true });
     fs.writeFileSync(path.join(project, rel), body);
   }
-  const git = (...a: string[]) => Bun.spawnSync(["git", ...a], { cwd: project, env: { ...process.env, GIT_CONFIG_GLOBAL: os.devNull } });
-  git("init", "-q");
-  git("-c", "user.email=e2e@example.com", "-c", "user.name=e2e", "add", "-A");
-  git("-c", "user.email=e2e@example.com", "-c", "user.name=e2e", "commit", "-qm", "init");
   // The first-run introduction covers the prompt; tests that want it pass --intro.
   fs.writeFileSync(path.join(mnemoHome, "state.json"), JSON.stringify({ onboarded: true }));
   if (opts.llm) {
@@ -74,9 +71,15 @@ export function world(opts: { llm?: string; files?: Record<string, string>; env?
   }
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !DROP.test(k)) env[k] = v;
+  // Use a regular config file instead of a platform's null-device path, and
+  // isolate signing, hooks and identity from the developer's machine.
+  const gitConfig = path.join(home, ".gitconfig");
+  fs.writeFileSync(gitConfig, "");
   Object.assign(env, {
     HOME: home,
     USERPROFILE: home,
+    GIT_CONFIG_GLOBAL: gitConfig,
+    GIT_CONFIG_NOSYSTEM: "1",
     MNEMO_HOME: mnemoHome,
     NO_COLOR: "1",
     MNEMO_LINKS: "0",
@@ -85,6 +88,18 @@ export function world(opts: { llm?: string; files?: Record<string, string>; env?
     ...(memsrv() ? { MNEMO_MEMSRV: memsrv()! } : {}),
     ...opts.env,
   });
+  const git = (command: string, ...args: string[]) => {
+    const r = Bun.spawnSync(["git", "-c", "user.email=e2e@example.com", "-c", "user.name=e2e", command, ...args], { cwd: project, env, stdout: "pipe", stderr: "pipe" });
+    if (r.exitCode !== 0) throw new Error(`git ${command} failed (${r.exitCode}):\n${r.stderr.toString()}${r.stdout.toString()}`);
+  };
+  try {
+    git("init", "-q");
+    git("add", "-A");
+    git("commit", "-qm", "init");
+  } catch (error) {
+    fs.rmSync(base, { recursive: true, force: true });
+    throw error;
+  }
   return { home, mnemoHome, project, env, cleanup: () => fs.rmSync(base, { recursive: true, force: true }) };
 }
 

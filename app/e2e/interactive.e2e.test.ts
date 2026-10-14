@@ -33,6 +33,24 @@ afterAll(() => {
 });
 
 describe.if(hasPty)("interactive", () => {
+  test.each(["workspace", "inline"])("a %s terminal remains interactive under CI", async (layout) => {
+    // Ink defaults to non-interactive under CI even with a PTY. Mnemo's TTY
+    // decision must reach the renderer, or the prompt stays blank forever.
+    const args = layout === "inline" ? [...START, "--inline"] : START;
+    const t = await terminal(fresh(), args, { env: { CI: "true", GITHUB_ACTIONS: "true" } });
+    try {
+      await ready(t);
+      await t.type("ping");
+      // Wait for the app to consume the text: a buffered "ping\r" is a paste,
+      // not a prompt followed by Enter, when the runner is busy.
+      await t.waitFor(/ping/);
+      await t.type(KEY.enter);
+      await t.waitFor(/pong from the mock/);
+    } finally {
+      await t.kill();
+    }
+  }, T);
+
   test("a prompt typed in the workspace gets an answer", async () => {
     const t = await terminal(fresh(), START);
     try {

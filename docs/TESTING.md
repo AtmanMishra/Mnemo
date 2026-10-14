@@ -19,6 +19,10 @@ machine has none: anything the binary still reads from the build tree fails ther
 of in a release. The release workflow runs the same suite again against each archive's own
 `mnemo` and `memsrv` before the draft release is published.
 
+The terminal suite also starts both layouts with `CI=true`: a real terminal must
+still render and accept input there. Mnemo passes its TTY decision explicitly to
+Ink, whose default would otherwise suppress interactive rendering on CI runners.
+
 ## Rules
 
 1. **A feature is not done until the binary test exercises it.** If it is reached
