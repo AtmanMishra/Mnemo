@@ -116,6 +116,7 @@ export const GROUPS: Group[] = [
       ["`mnemo -c` / `--continue`", "continue the most recent session here"],
       ["`mnemo -p \"<prompt>\"`", "answer once and print the result (no interface)"],
       ["`mnemo doctor [--fix]`", "what is installed, configured and reachable; `--fix` repairs what it can"],
+      ["`mnemo install [--yes]`", "put this copy and its `memsrv` in `~/.mnemo/bin` and on your PATH (a downloaded `mnemo.exe` offers this on its own)"],
       ["`mnemo update [--check] [--auto on|off]`", "install the latest release; `--check` only says if one exists; `--auto` sets the daily check (off by default)"],
       ["`mnemo uninstall [--deep] [--yes]`", "remove the program; `--deep` also deletes memory, sessions, credentials and settings"],
       ["`mnemo memory …`", "memory for other agents: `setup claude-code|codex`, `ingest`, `tidy [--apply]`, `curate [--apply]`, `status`"],

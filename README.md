@@ -40,6 +40,12 @@ curl -fsSL https://mnemo.atmanmishra.dev/install.sh | sh
 irm https://mnemo.atmanmishra.dev/install.ps1 | iex
 ```
 
+Or, on Windows, download `mnemo-windows-x64.zip` from
+[the download page](https://mnemo.atmanmishra.dev/download), unzip it, and
+double-click `mnemo.exe`: it offers to install itself to
+`%USERPROFILE%\.mnemo\bin` and add that to your PATH (`mnemo install --yes`
+does the same from a script). Then open a new terminal and type `mnemo`.
+
 No Bun, Node or Rust is needed: the installer downloads one archive holding
 `mnemo` and its memory sidecar `memsrv`, checks its SHA-256, and puts both in
 `~/.mnemo/bin`. On a terminal it draws itself as it goes; piped or with
