@@ -413,3 +413,25 @@ test("/remember says it failed when memory did not keep it", async () => {
   expect(notices(controller).at(-1)).toStartWith("Could not remember that");
   expect(controller.transcript.snapshot().committed.some((b) => b.kind === "memory" && b.title === "Remembered")).toBe(false);
 });
+
+test("memory that stops answering is busy in the footer, not off, and keeps its last count", async () => {
+  const answers: ({ nodes: number; episodes: number; byArea: Record<string, number> } | undefined)[] = [{ nodes: 5, episodes: 1, byArea: {} }, undefined, { nodes: 6, episodes: 1, byArea: {} }];
+  const host = { mode: "default", memory: { stats: async () => answers.shift() } };
+  const { controller } = await setup(undefined, { options: { host } as never });
+  const refresh = () => (controller as unknown as { refreshMemory(): Promise<void> }).refreshMemory();
+  for (let i = 0; i < 50 && controller.snapshot().footer.memory?.nodes !== 5; i++) await new Promise((r) => setTimeout(r, 10));
+  expect(controller.snapshot().footer.memory).toEqual({ nodes: 5, answering: true });
+  await refresh();
+  expect(controller.snapshot().footer.memory).toEqual({ nodes: 5, answering: false });
+  await refresh();
+  expect(controller.snapshot().footer.memory).toEqual({ nodes: 6, answering: true });
+});
+
+test("memory installed but never answering is busy from the start; /memory says so", async () => {
+  const host = { mode: "default", memory: { stats: async () => undefined, profile: async () => [] } };
+  const { controller } = await setup(undefined, { options: { host } as never });
+  for (let i = 0; i < 50 && controller.snapshot().footer.memory?.answering !== false; i++) await new Promise((r) => setTimeout(r, 10));
+  expect(controller.snapshot().footer.memory).toEqual({ nodes: null, answering: false });
+  await controller.submit("/memory");
+  expect(notices(controller).at(-1)).toStartWith("Memory is not answering");
+});

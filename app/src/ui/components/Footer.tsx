@@ -12,6 +12,16 @@ export function contextGauge(pct: number): { bar: string; tone: string } {
 }
 
 /**
+ * Memory on the status line: `off` only when memsrv is not installed; a count;
+ * `…` before the first one; `busy` (beside the last count) when it did not answer.
+ */
+export function memoryText(m: FooterData["memory"]): string {
+  if (!m) return "◈ off";
+  if (!m.answering) return m.nodes === null ? "◈ busy" : `◈ ${m.nodes} busy`;
+  return m.nodes === null ? "◈ …" : `◈ ${m.nodes}`;
+}
+
+/**
  * The status line, one row at any width. Facts on the right, by priority: the
  * model always; then memory, the context gauge, the branch, the thinking level
  * and cost, the least important dropped first when the row would not fit. The
@@ -51,8 +61,9 @@ export function Footer({
     all.push([5, Bun.stringWidth(cost), <Text key="$" color={palette.amber}>{cost}</Text>]);
   }
   if (data.branch) all.push([3, 2 + Bun.stringWidth(data.branch), <Text key="b">⎇ {data.branch}</Text>]);
-  const mem = data.memory ? `◈ ${data.memory.nodes}` : "◈ off";
-  all.push([1, Bun.stringWidth(mem), <Text key="mem" color={data.memory ? color.accent : color.subtle}>{mem}</Text>]);
+  const mem = memoryText(data.memory);
+  const memColor = !data.memory || (data.memory.nodes === null && data.memory.answering) ? color.subtle : data.memory.answering ? color.accent : color.warning;
+  all.push([1, Bun.stringWidth(mem), <Text key="mem" color={memColor}>{mem}</Text>]);
   // Keep the most important that fit beside a minimal hint (paddingX 1 each side, a 2-column gap).
   const short = data.mode === "yolo" ? ["⚠ yolo", color.error] : data.mode === "plan" ? ["⏸ plan", color.accent2] : data.mode === "accept-edits" ? ["⏵⏵ edits", color.success] : undefined;
   const budget = width - 2 - (width >= 50 ? 14 : short ? Bun.stringWidth(short[0]!) + 3 : 0);
