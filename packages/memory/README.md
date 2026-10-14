@@ -18,8 +18,9 @@ Recall weighs trust: an item that helped ranks higher and one marked wrong twice
 is no longer recalled. `mnemo memory tidy` (`--apply` to act) finds duplicate
 facts and pitfalls, facts about files that are gone, and what was marked wrong
 (`planTidy` / `applyTidy` in code). Search uses a local hashing embedder unless
-you set `MNEMO_EMBED_URL` and `MNEMO_EMBED_MODEL` (or `OPENROUTER_API_KEY`); see
-`SECURITY.md` for what that sends where.
+you set `MNEMO_EMBED_URL` and `MNEMO_EMBED_MODEL` (a key in `MNEMO_EMBED_KEY`;
+`OPENROUTER_API_KEY` alone does not turn it on); see `SECURITY.md` for what that
+sends where.
 
 ## Attach it to an agent
 

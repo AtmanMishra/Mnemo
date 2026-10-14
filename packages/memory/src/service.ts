@@ -135,10 +135,25 @@ export function memsrvLog(home = mnemoHome()): number | undefined {
   }
 }
 
+/**
+ * The environment memsrv is started with: this one, minus keys and tokens. It
+ * reads `MNEMO_*` and finds its home; a model provider's key is no business of
+ * its own, and an older memsrv took OPENROUTER_API_KEY as a request to send
+ * every memory's text to OpenRouter.
+ */
+export function memsrvEnv(env: Record<string, string | undefined> = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined || /(_API_KEY|_TOKEN|_SECRET|_SECRET_ACCESS_KEY)$/i.test(name)) continue;
+    out[name] = value;
+  }
+  return out;
+}
+
 export function spawnMemsrv(binary: string, args: string[]): MemoryChild {
   const log = memsrvLog();
   try {
-    return spawn(binary, args, { stdio: ["pipe", "pipe", log ?? "ignore"] }) as unknown as MemoryChild;
+    return spawn(binary, args, { stdio: ["pipe", "pipe", log ?? "ignore"], env: memsrvEnv() }) as unknown as MemoryChild;
   } finally {
     // The child has its own copy of the descriptor.
     if (log !== undefined) fs.closeSync(log);
@@ -340,7 +355,17 @@ export class MemoryService {
     return (await this.call<{ nodes: { id: number; label: string; kind: string; area: string; useful?: number; unhelpful?: number }[] }>("dump", scope === undefined ? {} : { scope }))?.nodes ?? [];
   }
 
-  async stats(): Promise<{ nodes: number; episodes: number; byArea: Record<string, number> } | undefined> {
+  /**
+   * How much memory holds, and (from a current sidecar) which embedder answers
+   * searches. Counted by memsrv's `stats`; a sidecar older than its node count
+   * is asked for a dump of every node instead.
+   */
+  async stats(): Promise<{ nodes: number; episodes: number; byArea: Record<string, number>; embedder?: string; embedModel?: string } | undefined> {
+    const st = await this.call<{ episodes: number; nodes?: number; areas?: Record<string, number>; embedder?: string; embed_model?: string }>("stats");
+    // Not answering is not a reason to ask for something heavier.
+    if (!st) return undefined;
+    if (typeof st.nodes === "number")
+      return { nodes: st.nodes, episodes: st.episodes, byArea: st.areas ?? {}, embedder: st.embedder, embedModel: st.embed_model };
     const dump = await this.call<{ nodes: { kind: string; area: string }[] }>("dump");
     if (!dump) return undefined;
     const byArea: Record<string, number> = {};
