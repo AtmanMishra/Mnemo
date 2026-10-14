@@ -71,9 +71,10 @@ export interface Terminal {
 
 export const KEY = { enter: "\r", esc: "\x1b", ctrlC: "\x03", ctrlD: "\x04", ctrlK: "\x0b", ctrlF: "\x06", down: "\x1b[B", up: "\x1b[A", tab: "\t" };
 
-export async function terminal(w: World, args: string[], opts: { cols?: number; rows?: number; env?: Record<string, string> } = {}): Promise<Terminal> {
+/** `opts.exe` runs another copy of the binary (one placed somewhere, as a download is). */
+export async function terminal(w: World, args: string[], opts: { cols?: number; rows?: number; env?: Record<string, string>; exe?: string } = {}): Promise<Terminal> {
   const python = Bun.which("python3") ?? Bun.which("python")!;
-  const p = Bun.spawn([python, "-c", BRIDGE, String(opts.cols ?? 120), String(opts.rows ?? 40), binary(), ...args], {
+  const p = Bun.spawn([python, "-c", BRIDGE, String(opts.cols ?? 120), String(opts.rows ?? 40), opts.exe ?? binary(), ...args], {
     cwd: w.project,
     env: { ...w.env, TERM: "xterm-256color", COLORTERM: "truecolor", ...opts.env },
     stdin: "pipe",

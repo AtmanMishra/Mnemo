@@ -33,7 +33,7 @@ function composer(overrides: Partial<ComposerProps> = {}) {
     active: true,
     commands: () => COMMANDS,
     files: () => ["src/fetch.ts", "src/net/retry.ts", "README.md"],
-    footer: { model: "demo-model", thinking: "medium", contextPercent: 12, cost: 0.04, cwd: "/x", branch: "main", mode: "default", memory: { nodes: 7 } },
+    footer: { model: "demo-model", thinking: "medium", contextPercent: 12, cost: 0.04, cwd: "/x", branch: "main", mode: "default", memory: { nodes: 7, answering: true } },
     statuses: [],
     onSubmit: (t, m) => calls.submit.push([t, m]),
     onInterrupt: () => calls.interrupt++,
@@ -73,6 +73,17 @@ test("the footer shows model, thinking, context, cost and branch", () => {
   const c = composer();
   const f = c.lastFrame()!;
   for (const s of ["demo-model", "think:medium", "▓░░░░░░░ 12%", "◉ $0.040", "main", "? for shortcuts"]) expect(f).toContain(s);
+});
+
+test("the footer says memory is off only when memsrv is not installed", () => {
+  const frame = (memory: { nodes: number | null; answering: boolean } | null) =>
+    composer({ footer: { model: "demo-model", thinking: "", contextPercent: null, cost: 0, cwd: "/x", mode: "default", memory } }).lastFrame()!;
+  expect(frame(null)).toContain("◈ off");
+  expect(frame({ nodes: 7, answering: true })).toContain("◈ 7");
+  expect(frame({ nodes: null, answering: true })).toContain("◈ …");
+  expect(frame({ nodes: 7, answering: false })).toContain("◈ 7 busy");
+  expect(frame({ nodes: null, answering: false })).toContain("◈ busy");
+  for (const m of [{ nodes: 7, answering: false }, { nodes: null, answering: false }, { nodes: null, answering: true }]) expect(frame(m)).not.toContain("off");
 });
 
 test("/ opens the command menu, filtered by name, and enter runs the highlighted one", async () => {

@@ -56,3 +56,11 @@ test.skipIf(!MEMSRV)("what a turn recalled is listed under Recalled this session
   expect(items.some((i) => i.id === "h:recalled")).toBe(true);
   expect(items.some((i) => i.id === `r:${node}`)).toBe(true);
 });
+
+test.skipIf(!MEMSRV)("memsrv that does not answer is not answering, not off and not empty", async () => {
+  const e = await mnemoEnv({ memory: true });
+  envs.push(e);
+  e.memory!.stats = async () => undefined;
+  const items = await workspaceSource(e.controller, e.host, e.home).memory();
+  expect(items.map((i) => i.label)).toEqual(["memory is not answering"]);
+});

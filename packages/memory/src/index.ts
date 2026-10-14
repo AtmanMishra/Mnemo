@@ -31,6 +31,7 @@ export {
   factValue,
   MemoryService,
   projectLabel,
+  memsrvEnv,
   spawnMemsrv,
   USER_LABEL,
   type EdgeKind,

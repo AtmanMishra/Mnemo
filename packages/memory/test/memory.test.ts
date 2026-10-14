@@ -17,7 +17,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { MemoryClient, type MemoryChild } from "../src/index.ts";
+import { MemoryClient, MemoryService, memsrvEnv, type MemoryChild } from "../src/index.ts";
 import { findMemsrv } from "../src/index.ts";
 
 /** A reply the fake sidecar can send: an object (framed for you) or raw text. */
@@ -31,7 +31,7 @@ export interface FakeControl {
 
 /** A child process that answers from a script, and can be told to misbehave. */
 function fakeChild(
-  behaviour: (reply: (response: FakeReply) => void) => void,
+  behaviour: (reply: (response: FakeReply) => void, request: { method: string; params?: Record<string, unknown> }) => void,
   control: FakeControl = { exit: () => {} },
 ): MemoryChild {
   const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
@@ -50,7 +50,7 @@ function fakeChild(
         while (newline >= 0) {
           const line = buffer.slice(0, newline);
           buffer = buffer.slice(newline + 1);
-          const request = JSON.parse(line) as { id?: number; method: string };
+          const request = JSON.parse(line) as { id?: number; method: string; params?: Record<string, unknown> };
           if (request.method === "exit") return true;
           behaviour(
             (reply) => {
@@ -63,6 +63,7 @@ function fakeChild(
               emit(`${payload.slice(0, half)}`);
               emit(`${payload.slice(half)}\n`);
             },
+            request,
           );
           newline = buffer.indexOf("\n");
         }
@@ -180,6 +181,50 @@ test("a sidecar that dies mid-request resolves the callers instead of stranding 
   assert.equal(response.ok, false);
   assert.match(String(response.error), /exited/);
   client.stop();
+});
+
+/** A MemoryService over a fake sidecar that answers by method; `seen` lists what it was asked. */
+function serviceWith(answers: Record<string, FakeReply>) {
+  const seen: string[] = [];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-stats-"));
+  const child = fakeChild((reply, request) => {
+    seen.push(request.method);
+    reply(answers[request.method] ?? { ok: false, error: `unknown method '${request.method}'` });
+  });
+  return { seen, dir, mem: new MemoryService("/fake/memsrv", path.join(dir, "journal.jsonl"), () => child) };
+}
+
+test("stats counts with the sidecar's stats op, not a dump of every node", async () => {
+  const { seen, dir, mem } = serviceWith({
+    stats: { ok: true, result: { episodes: 1, nodes: 3, areas: { Semantic: 2, Episodic: 1 }, embedder: "hashing", embed_model: "hashing-v1" } },
+    dump: { ok: false, error: "too slow to be asked" },
+  });
+  try {
+    assert.deepEqual(await mem.stats(), { nodes: 3, episodes: 1, byArea: { Semantic: 2, Episodic: 1 }, embedder: "hashing", embedModel: "hashing-v1" });
+    assert.deepEqual(seen, ["stats"]);
+  } finally {
+    mem.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("stats from an older sidecar, whose stats op has no node count, falls back to the dump", async () => {
+  const { seen, dir, mem } = serviceWith({
+    stats: { ok: true, result: { episodes: 1 } },
+    dump: { ok: true, result: { nodes: [{ id: 1, kind: "Aspect", area: "Semantic" }, { id: 2, kind: "TaskEpisode", area: "Episodic" }] } },
+  });
+  try {
+    assert.deepEqual(await mem.stats(), { nodes: 2, episodes: 1, byArea: { Semantic: 1, Episodic: 1 } });
+    assert.deepEqual(seen, ["stats", "dump"]);
+  } finally {
+    mem.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memsrv is not handed the keys that pay for a model", () => {
+  const env = memsrvEnv({ HOME: "/home/u", MNEMO_HOME: "/m", MNEMO_EMBED_KEY: "e", OPENROUTER_API_KEY: "k", ANTHROPIC_AUTH_TOKEN: "t", PATH: "/bin" });
+  assert.deepEqual(env, { HOME: "/home/u", MNEMO_HOME: "/m", MNEMO_EMBED_KEY: "e", PATH: "/bin" });
 });
 
 // ---------------------------------------------------------------------------

@@ -80,7 +80,7 @@ describe("doctor", () => {
     if (process.platform !== "win32") fs.chmodSync(w.mnemoHome, 0o755);
     const r = await mnemo(w, ["doctor"]);
     expect(r.stdout).toContain("✓ model   mock/mock-1");
-    if (memsrv()) expect(r.stdout).toMatch(/✓ memory/);
+    if (memsrv()) expect(r.stdout).toMatch(/✓ memory  .* · \d+ nodes · answered in \d+ ms\n  embed   hashing/);
     if (process.platform === "win32") return;
     expect(r.stdout).toContain("readable by others");
     expect(r.code).toBe(1);
@@ -224,6 +224,31 @@ describe("memory", () => {
     expect(systemPrompt(req) + JSON.stringify(req.messages)).toContain("flyctl");
   }, T);
 
+  test.if(hasMemsrv)("an OpenRouter key does not send memory to OpenRouter, so memory keeps answering", async () => {
+    // Takes the connection and never answers: memsrv embedding through it
+    // would stall every memory call until the app gave up on memory.
+    let connections = 0;
+    const hung = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { open: () => void connections++, data: () => {} } });
+    try {
+      const url = `http://127.0.0.1:${hung.port}/api/v1/embeddings`;
+      const w = fresh({ env: { OPENROUTER_API_KEY: "sk-or-e2e-not-a-key", OPENROUTER_EMBED_URL: url } });
+      // memsrv also reads $MNEMO_HOME/.env, which the app's own environment does not reach.
+      fs.writeFileSync(path.join(w.mnemoHome, ".env"), `OPENROUTER_API_KEY=sk-or-e2e-not-a-key\nOPENROUTER_EMBED_URL=${url}\n`);
+      play(steps({ tools: [{ name: "memory_remember", args: { scope: "project", key: "deploy target", value: "we deploy with flyctl to region ams" } }] }, { text: "noted" }));
+      expect((await mnemo(w, ["-p", "remember how we deploy", "--no-reflect"])).code).toBe(0);
+      play(steps({ tools: [{ name: "memory_search", args: { query: "how do we deploy flyctl" } }] }, { text: "ok" }));
+      await mnemo(w, ["-p", "how do we deploy?", "--no-reflect"]);
+      const req = llm.agentRequests()[0]!;
+      expect(systemPrompt(req) + JSON.stringify(req.messages)).toContain("flyctl");
+      expect(lastToolResult()).toContain("flyctl");
+      const doctor = await mnemo(w, ["doctor"]);
+      expect(doctor.stdout).toContain("  embed   hashing");
+      expect(connections).toBe(0);
+    } finally {
+      hung.stop(true);
+    }
+  }, T);
+
   test.if(hasMemsrv)("memory_search finds what was remembered", async () => {
     const w = fresh();
     play(steps({ tools: [{ name: "memory_remember", args: { scope: "project", key: "test runner", value: "tests run with vitest --run" } }] }, { text: "ok" }));
@@ -319,6 +344,31 @@ describe("install layout", () => {
     const out = await new Response(p.stdout).text();
     await p.exited;
     expect(out).toContain(`✓ memory  ${path.join(i.bin, "memsrv")}`);
+  }, T);
+
+  test.if(!!memsrv())("install --yes copies a download into $MNEMO_HOME/bin, where it finds its sidecar", async () => {
+    const w = fresh();
+    const dl = path.join(w.home, "Downloads", "mnemo");
+    fs.mkdirSync(dl, { recursive: true });
+    fs.copyFileSync(binary(), path.join(dl, "mnemo"));
+    fs.chmodSync(path.join(dl, "mnemo"), 0o755);
+    fs.copyFileSync(memsrv()!, path.join(dl, "memsrv"));
+    const env = { ...w.env, PATH: process.env.PATH! };
+    delete env.MNEMO_MEMSRV;
+    const bin = path.join(w.mnemoHome, "bin");
+    const r = await run({ ...w, env }, path.join(dl, "mnemo"), ["install", "--yes"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain(`copied mnemo and memsrv to ${bin}`);
+    // Off Windows nothing edits a shell profile: it says the line instead.
+    expect(r.stdout).toContain(`export PATH="${bin}:$PATH"`);
+    expect(fs.readdirSync(bin).sort()).toEqual(["memsrv", "mnemo"]);
+    const doctor = await run({ ...w, env }, path.join(bin, "mnemo"), ["doctor"]);
+    expect(doctor.stdout).toContain(`✓ memory  ${path.join(bin, "memsrv")}`);
+    // The download, run again while the installed copy is first on the PATH, says so.
+    const again = await run({ ...w, env: { ...env, PATH: `${bin}:${process.env.PATH}` } }, path.join(dl, "mnemo"), ["doctor"]);
+    expect(again.stdout).toContain(`! path    mnemo in a new terminal is ${path.join(bin, "mnemo")}, not this one (${path.join(dl, "mnemo")})`);
+    const installed = await run({ ...w, env }, path.join(bin, "mnemo"), ["install", "--yes"]);
+    expect(installed.stdout).toContain(`Mnemo is installed in ${bin}`);
   }, T);
 
   test("uninstall --yes removes the program and keeps what it learned", async () => {

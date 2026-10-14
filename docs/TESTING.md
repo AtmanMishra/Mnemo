@@ -63,7 +63,7 @@ expect(lastToolResult()).toContain("…");             // what the binary sent b
 | Feature | Unit / sidecar | Binary e2e | Terminal e2e |
 |---|---|---|---|
 | `--version`, `--help`, bad arguments (exit 2) | | ✓ | |
-| `doctor`, `doctor --fix` | ◐ `doctor.test` | ✓ finds model, sidecar, Python; fixes permissions | |
+| `doctor`, `doctor --fix` | ◐ `doctor.test` (memsrv timed, embedder named, no answer fails) | ✓ finds model, sidecar, Python; names the embedder; fixes permissions | |
 | `--demo --dump` | | ✓ | |
 | `-p` answer, tool loop (`read`, `write`, `edit`, `bash`) | ✓ `extensions.test` | ✓ | |
 | `-p` exit code on a model error | | ✓ exit 1 with the reason; best-of counts it failed | |
@@ -74,8 +74,10 @@ expect(lastToolResult()).toContain("…");             // what the binary sent b
 | Python kernel (`ipy_run`) | ✓ `kernel.test`, `kernel-cells.test` | ✓ runs from the binary | |
 | Sub-agents | ✓ | ✓ | |
 | Memory across sessions, `memory_search` | ✓ `memory-loop.test`, `packages/memory` | ✓ | |
+| Embedder opt-in: `OPENROUTER_API_KEY` alone keeps memory local; footer `◈ busy`, not `off`, when memsrv does not answer | ✓ `embedder_rpc`, `controller.test`, `ui.test`, `memory-pane.test` | ✓ key in env and `.env`, hung server never reached | |
 | `mnemo memory status / tidy / setup / --help` | ✓ `tidy.test`, `memory-cli.test` | ✓ runs against a real journal | |
 | Images in `read` | | ✓ (v0.1.3) | |
+| `mnemo install`, a download installing itself, doctor's PATH check | ✓ `self-install.test` (Windows paths with stubs; the PATH through pwsh when present) | ✓ `install --yes` from a download, doctor from both copies | ✓ the question: no is remembered, yes installs |
 | Uninstall, `--deep`, the refusal to delete foreign files | ✓ `uninstall.test` | ✓ installer layout, saved grants, refusal exits 1 | |
 | Update, `--check`, auto check | ✓ `update.test` | ✗ needs a mock GitHub | |
 | Installers `get.sh` / `get.ps1` | ✓ `installers.test` (dash; pwsh when present), release workflow | ◐ `scripts/test-install.sh` (Docker) | |

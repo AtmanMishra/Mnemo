@@ -5,6 +5,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { MemoryService } from "@mnemo/memory";
 
 export interface Finding {
   problem: string;
@@ -69,4 +70,32 @@ export function findProblems(home: string, now = Date.now()): Finding[] {
       });
   }
   return out;
+}
+
+/** How long `mnemo doctor` waits for memsrv to count what it holds. */
+export const MEMORY_ANSWER_MS = 5_000;
+
+/**
+ * `mnemo doctor`'s memory lines: memsrv started on the real journal and asked
+ * for its count, timed. Found is not enough: a memsrv that does not answer is
+ * what the footer shows as busy, and its log says why.
+ */
+export async function checkMemory(memsrv: string, journal: string, home: string, timeoutMs = MEMORY_ANSWER_MS): Promise<{ ok: boolean; lines: string[] }> {
+  const log = path.join(home, "logs", "memsrv.log");
+  const mem = new MemoryService(memsrv, journal);
+  const started = performance.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), timeoutMs);
+  });
+  const stats = await Promise.race([mem.stats(), late]);
+  const ms = Math.round(performance.now() - started);
+  clearTimeout(timer);
+  mem.stop();
+  if (!stats) return { ok: false, lines: [`✗ memory  ${memsrv} did not answer within ${timeoutMs / 1000} s — its log: ${log}`] };
+  const embed = stats.embedder === undefined ? "not reported (an older memsrv)" : stats.embedder === "hashing" ? "hashing (offline; MNEMO_EMBED_URL opts in to a server)" : `${stats.embedder} · ${stats.embedModel}`;
+  return {
+    ok: true,
+    lines: [`✓ memory  ${memsrv} · ${stats.nodes} nodes · answered in ${ms} ms`, `  embed   ${embed}`, `  journal ${journal}`, `  log     ${log}`],
+  };
 }

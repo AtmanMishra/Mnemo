@@ -145,13 +145,15 @@ bun install
 cd app && bun bin/mnemo.ts --demo     # a scripted session, no key; app/scripts/install.sh installs from here
 
 # 3. run it, in a project
-mnemo doctor      # what it found: model, memory, python (--fix repairs what it can)
+mnemo doctor      # what it found: model, memory (answers? count, embedder, log), python (--fix repairs what it can)
 mnemo
 ```
 
 The installer downloads one archive holding `mnemo` and `memsrv`, checks its
 SHA-256 against the release's `SHA256SUMS`, and puts both in `~/.mnemo/bin`; on a
-terminal it draws itself as it goes. Python is needed only for the `ipy_run` tool
+terminal it draws itself as it goes. A `mnemo.exe` double-clicked where the
+Windows zip was unpacked offers to do the same for itself (`mnemo install`).
+Python is needed only for the `ipy_run` tool
 (`python3` or `python`, or `MNEMO_PYTHON`); without one the tool is simply not
 offered.
 

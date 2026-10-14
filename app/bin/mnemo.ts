@@ -34,8 +34,9 @@ import { setLinks } from "../src/ui/link.ts";
 import { clearReplaced, compareVersions, installKind, latestVersion, manualStep, runInstaller, shouldCheck } from "../src/runtime/update.ts";
 import { bestOf, describeBestOf } from "../src/runtime/best-of.ts";
 import { selfCommand } from "../src/runtime/self.ts";
-import { findProblems } from "../src/runtime/doctor.ts";
+import { checkMemory, findProblems } from "../src/runtime/doctor.ts";
 import { describePlan, looksLikeMnemoHome, planUninstall, runUninstall } from "../src/runtime/uninstall.ts";
+import { mayOffer, ownConsole, placementProblems, selfInstall, selfInstallOffer } from "../src/runtime/self-install.ts";
 
 const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
 
@@ -45,6 +46,7 @@ usage
   mnemo -p "<prompt>"      answer once and print the result (no interface); asks nothing: what would ask
                            is allowed, while deny rules and --plan still refuse
   mnemo doctor [--fix]     what is installed, configured and reachable; --fix repairs what it can
+  mnemo install [--yes]    put this copy in $MNEMO_HOME/bin and on your PATH (a downloaded mnemo.exe offers it)
   mnemo update             install the latest release · --check · --auto on|off (a daily check, off by default)
   mnemo uninstall          remove Mnemo; what it learned stays · --deep also deletes memory, sessions,
                            credentials and settings · --yes skips the question
@@ -186,12 +188,9 @@ async function doctor(home: string, dir: string, fix: boolean): Promise<number> 
   lines.push(`${ok(usable)} model   ${usable ? `${model!.provider}/${model!.id}` : "none — run mnemo, then /login"}`);
   await runtime.dispose();
   const memsrv = findMemsrv(home);
-  if (memsrv) {
-    const mem = new MemoryService(memsrv, journalPath(home));
-    const stats = await mem.stats();
-    mem.stop();
-    lines.push(`${ok(!!stats)} memory  ${memsrv}${stats ? ` · ${stats.nodes} nodes · ${journalPath(home)}` : " (did not answer)"}`);
-  } else {
+  const memory = memsrv ? await checkMemory(memsrv, journalPath(home), home) : undefined;
+  if (memory) lines.push(...memory.lines);
+  else {
     lines.push(`✗ memory  ${memsrvName()} not found — put it in ${path.join(home, "bin")} or set MNEMO_MEMSRV (cargo build --release --bin memsrv)`);
   }
   const python = createHost({ home, agentDir: dir, modelRuntime: runtime.session.modelRuntime }).python();
@@ -205,10 +204,11 @@ async function doctor(home: string, dir: string, fix: boolean): Promise<number> 
   lines.push(`  skills  ${skills} in ${skillsDir(home)}`);
   const problems = findProblems(home);
   for (const p of problems) lines.push(`✗ ${p.problem}`);
+  lines.push(...placement(home));
   console.log(lines.join("\n"));
   if (!fix) {
     if (problems.length || (!memsrv && installKind(process.execPath, home) === "installer")) console.log("\nmnemo doctor --fix repairs what it can");
-    return usable && memsrv && !problems.length ? 0 : 1;
+    return usable && memory?.ok && !problems.length ? 0 : 1;
   }
   console.log("");
   for (const p of problems) {
@@ -228,8 +228,14 @@ async function doctor(home: string, dir: string, fix: boolean): Promise<number> 
     } else console.log(`cannot  ${memsrvName()}: build it (cargo build --release --bin memsrv) or reinstall Mnemo the way you installed it`);
   }
   if (!usable) console.log("cannot  no model: run mnemo, then /login");
-  if (!problems.length && memsrv && usable) console.log("nothing to fix");
-  return usable && memsrvNow ? 0 : 1;
+  if (memory && !memory.ok) console.log("cannot  memsrv did not answer: its log says why");
+  if (!problems.length && memory?.ok && usable) console.log("nothing to fix");
+  return usable && memsrvNow && memory?.ok !== false ? 0 : 1;
+}
+
+/** Whether a new terminal's `mnemo` is this one (it is not when a download was never installed). */
+function placement(home: string): string[] {
+  return placementProblems({ execPath: process.execPath, home, platform: process.platform, kind: installKind(process.execPath, home), which: (n) => Bun.which(n) });
 }
 
 /** Small per-user state: whether the introduction has been seen. */
@@ -242,6 +248,8 @@ interface State {
   /** Folders agents were opened in, most recent first. */
   recent?: string[];
   theme?: ThemeName;
+  /** The folder a downloaded copy was told not to install itself from. */
+  selfInstallDeclined?: string;
 }
 
 function readState(home: string): State {
@@ -349,6 +357,57 @@ async function uninstallCommand(argv: string[], home: string): Promise<number> {
   return 0;
 }
 
+/** `mnemo install [--yes]`: this copy, with the memsrv beside it, into $MNEMO_HOME/bin. */
+async function installCommand(argv: string[], home: string): Promise<number> {
+  const unknown = argv.find((a) => a !== "--yes" && a !== "-y");
+  if (unknown) return console.error(`mnemo install: unknown option ${unknown} (--yes)`), 2;
+  const kind = installKind(process.execPath, home);
+  if (kind === "installer") return console.log(`Mnemo is installed in ${path.dirname(process.execPath)}`), 0;
+  if (kind === "source") return console.error("mnemo install: this is a source checkout; build a binary first (bun run build)"), 1;
+  if (kind !== "elsewhere") return console.error(`mnemo install: this copy is managed by ${kind}; ${manualStep(kind, pkg.version)} keeps it up to date`), 1;
+  if (!argv.length) {
+    if (!process.stdin.isTTY) return console.error("mnemo install: not a terminal; add --yes to go ahead"), 2;
+    if (!/^(y(es)?)?$/i.test(await ask(`Install Mnemo to ${path.join(home, "bin")} and add it to your PATH? [Y/n] `))) return console.log("Nothing changed."), 1;
+  }
+  return installHere(home);
+}
+
+function installHere(home: string): number {
+  try {
+    const { done, next } = selfInstall({ execPath: process.execPath, home, platform: process.platform, env: process.env });
+    for (const l of done) console.log(`  ✓ ${l}`);
+    console.log(`\nMnemo is installed. ${next.join("\n")}`);
+    return 0;
+  } catch (error) {
+    console.error(`mnemo install: ${message(error)}`);
+    return 1;
+  }
+}
+
+/**
+ * A copy started from where it was unzipped offers, once, to install itself. Yes ends
+ * with what to do next instead of starting Mnemo: this window was opened in the download
+ * folder, which is no project to work in, and only a new terminal sees the new PATH.
+ * Returns an exit code when Mnemo should stop here.
+ */
+async function offerInstall(home: string): Promise<number | undefined> {
+  const offer = selfInstallOffer({ platform: process.platform, execPath: process.execPath, home, version: pkg.version, env: process.env, declined: readState(home).selfInstallDeclined });
+  if (!offer) return undefined;
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    if (!/^(y(es)?)?$/i.test((await rl.question(`${offer.question} [Y/n] `)).trim())) {
+      writeState(home, { ...readState(home), selfInstallDeclined: offer.from });
+      console.log(`Running from ${offer.from}. mnemo install installs it later.\n`);
+      return undefined;
+    }
+    const code = installHere(home);
+    if (await ownConsole()) await rl.question("\nPress Enter to close.");
+    return code;
+  } finally {
+    rl.close();
+  }
+}
+
 async function updateCommand(argv: string[], home: string): Promise<number> {
   const auto = argv[0] === "--auto" ? argv[1] : undefined;
   if (argv[0] === "--auto") {
@@ -377,6 +436,7 @@ async function updateCommand(argv: string[], home: string): Promise<number> {
 
 async function main(): Promise<number> {
   if (process.argv[2] === "update") return updateCommand(process.argv.slice(3), mnemoHome());
+  if (process.argv[2] === "install") return installCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "uninstall") return uninstallCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "memory") {
     const home = mnemoHome();
@@ -386,6 +446,10 @@ async function main(): Promise<number> {
   const args = parse(process.argv.slice(2));
   if (args.help) return console.log(USAGE), 0;
   if (args.version) return console.log(pkg.version), 0;
+  if (mayOffer(process.argv.slice(2), process.stdin.isTTY === true && process.stdout.isTTY === true, process.env)) {
+    const code = await offerInstall(mnemoHome());
+    if (code !== undefined) return code;
+  }
 
   const home = mnemoHome();
   const dir = agentDir(home);

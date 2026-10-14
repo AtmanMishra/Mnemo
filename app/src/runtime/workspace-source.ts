@@ -93,6 +93,8 @@ export function workspaceSource(controller: Controller, host: Host | undefined, 
 
     async memory(): Promise<Item[]> {
       if (!memory) return [{ id: "off", label: "memory is off", detail: "memsrv not found — mnemo doctor", tone: "muted", kind: "head" }];
+      // Installed but not answering is not "nothing remembered".
+      if (!(await memory.stats())) return [{ id: "off", label: "memory is not answering", detail: "memsrv did not reply — mnemo doctor", tone: "muted", kind: "head" }];
       const [project, user, nodes] = await Promise.all([memory.profile("project", identity.id), memory.profile("user", identity.id), memory.nodes()]);
       const items: Item[] = [];
       const head = (id: string, label: string, n: number) => items.push({ id, label, detail: String(n), kind: "head", tone: "link" });

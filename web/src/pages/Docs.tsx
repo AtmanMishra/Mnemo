@@ -32,7 +32,7 @@ const sections: DocSection[] = [
         <h3>Three ways</h3>
         <ul>
           <li><strong>One-line installer</strong>: the commands above. <a href="/install.sh">Read the script first</a> if you like.</li>
-          <li><strong>A downloaded archive</strong>: from <a href="/download">/download</a>. Unpack it and keep <code>mnemo</code> and <code>memsrv</code> in the same folder on your PATH.</li>
+          <li><strong>A downloaded archive</strong>: from <a href="/download">/download</a>. Unpack it and keep <code>mnemo</code> and <code>memsrv</code> in the same folder on your PATH. On Windows, double-click <code>mnemo.exe</code> in the unzipped folder instead: it offers to put both in <code>%USERPROFILE%\.mnemo\bin</code> and add that to your PATH (<code>mnemo install</code> does the same from a terminal; <code>--yes</code> skips the question).</li>
           <li><strong>From source</strong>: needs Bun and a Rust toolchain. <a href={`${REPO}/blob/main/CONTRIBUTING.md`}>CONTRIBUTING.md</a> has the steps.</li>
         </ul>
         <h3>Installer options</h3>
@@ -110,7 +110,7 @@ const sections: DocSection[] = [
         <h3>Search quality</h3>
         <p>
           Search uses a local hashing embedder, which is offline and plain. To do better, point it at your own embedding server (an Ollama on this machine, say) with{" "}
-          <code>MNEMO_EMBED_URL</code> and <code>MNEMO_EMBED_MODEL</code>. If <code>OPENROUTER_API_KEY</code> is set, the text of memories goes to OpenRouter to compute embeddings; leave it unset and nothing is sent.
+          <code>MNEMO_EMBED_URL</code> and <code>MNEMO_EMBED_MODEL</code>. For OpenRouter, set <code>MNEMO_EMBED_URL=https://openrouter.ai/api/v1/embeddings</code> and the key in <code>MNEMO_EMBED_KEY</code>. A model key alone sends nothing: until you set <code>MNEMO_EMBED_URL</code>, memory never leaves your machine.
         </p>
         <h3>Share it with other agents</h3>
         <p>The same memory can serve Claude Code (hooks) and Codex, Cursor and opencode (MCP):</p>
@@ -190,7 +190,7 @@ const sections: DocSection[] = [
           <dt>"It is not using my model" / "no model"</dt>
           <dd>Run <code>/login</code> then <code>/model</code>. Mnemo also picks up provider keys from your environment, which can choose a provider by default; unset the ones you do not want.</dd>
           <dt>The memory sidecar is missing or will not start</dt>
-          <dd><code>mnemo doctor --fix</code> reinstalls it. If you keep the binaries in different folders, put <code>memsrv</code> beside <code>mnemo</code>.</dd>
+          <dd><code>mnemo doctor --fix</code> reinstalls it. If you keep the binaries in different folders, put <code>memsrv</code> beside <code>mnemo</code>. On Windows, a <code>mnemo.exe</code> run from where it was unzipped, or another <code>mnemo</code> earlier on your PATH, is a common cause: <code>mnemo doctor</code> says so, and <code>mnemo install</code> from the unzipped folder fixes it.</dd>
           <dt>Edits and commands are refused</dt>
           <dd>A <code>permissions.json</code> that cannot be parsed blocks them on purpose. Fix the file (or set it aside) and restart. <code>doctor --fix</code> sets a broken settings file aside.</dd>
           <dt>The mouse wheel scrolls Mnemo and I want to select text</dt>
