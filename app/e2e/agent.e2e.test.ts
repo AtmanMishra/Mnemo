@@ -1,7 +1,7 @@
 // The compiled binary, end to end, against the mock provider: the CLI surface, the
 // tool loop, the permission gate, key scrubbing, memory across sessions, the Python
 // kernel, sub-agents, sessions. Each test is one thing a user does.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import pkg from "../package.json" with { type: "json" };
@@ -313,20 +313,59 @@ describe("sub-agents", () => {
 });
 
 describe("install layout", () => {
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  const mnemoName = `mnemo${suffix}`;
+  const memsrvName = `memsrv${suffix}`;
+
+  // HOME does not isolate HKCU. Both install and uninstall edit the real user
+  // PATH, so restore its raw value, registry type and absence after each test.
+  let savedUserPath: string | undefined;
+  const powershell = (script: string, env: Record<string, string> = {}) => {
+    const encoded = Buffer.from(`$ErrorActionPreference = 'Stop'\n${script}`, "utf16le").toString("base64");
+    const r = Bun.spawnSync(["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" });
+    if (r.exitCode !== 0) throw new Error(`Windows PATH fixture failed (${r.exitCode}): ${r.stderr.toString()}`);
+    return r.stdout.toString().trim();
+  };
+  beforeEach(() => {
+    if (process.platform !== "win32") return;
+    savedUserPath = powershell(`
+      $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+      $saved = @{ present = $false }
+      try {
+        if ($key -and @($key.GetValueNames()) -contains 'Path') {
+          $saved = @{ present = $true; value = $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); kind = [int]$key.GetValueKind('Path') }
+        }
+      } finally { if ($key) { $key.Close() } }
+      [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($saved | ConvertTo-Json -Compress)))
+    `);
+  });
+  afterEach(() => {
+    const saved = savedUserPath;
+    savedUserPath = undefined;
+    if (saved === undefined) return;
+    powershell(`
+      $saved = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:MNEMO_E2E_USER_PATH)) | ConvertFrom-Json
+      $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+      try {
+        if ($saved.present) { $key.SetValue('Path', $saved.value, [Microsoft.Win32.RegistryValueKind]$saved.kind) }
+        else { $key.DeleteValue('Path', $false) }
+      } finally { $key.Close() }
+    `, { MNEMO_E2E_USER_PATH: saved });
+  });
+
   /** The binary and sidecar where the installer puts them, with the PATH link it makes. */
   function installed(w: World) {
-    const exe = process.platform === "win32" ? ".exe" : "";
     const bin = path.join(w.mnemoHome, "bin");
     fs.mkdirSync(bin, { recursive: true });
-    fs.copyFileSync(binary(), path.join(bin, `mnemo${exe}`));
-    fs.chmodSync(path.join(bin, `mnemo${exe}`), 0o755);
-    if (memsrv()) fs.copyFileSync(memsrv()!, path.join(bin, `memsrv${exe}`));
+    fs.copyFileSync(binary(), path.join(bin, mnemoName));
+    fs.chmodSync(path.join(bin, mnemoName), 0o755);
+    if (memsrv()) fs.copyFileSync(memsrv()!, path.join(bin, memsrvName));
     const linkDir = path.join(w.home, ".local", "bin");
     fs.mkdirSync(linkDir, { recursive: true });
     if (process.platform !== "win32") fs.symlinkSync(path.join(bin, "mnemo"), path.join(linkDir, "mnemo"));
     fs.mkdirSync(path.join(w.mnemoHome, "memory"), { recursive: true });
     fs.writeFileSync(path.join(w.mnemoHome, "memory", "journal.jsonl"), "");
-    return { bin, exe: path.join(bin, `mnemo${exe}`), link: path.join(linkDir, "mnemo"), linkDir };
+    return { bin, exe: path.join(bin, mnemoName), link: path.join(linkDir, "mnemo"), linkDir };
   }
   const run = async (w: World, exe: string, args: string[], env: Record<string, string> = {}) => {
     const p = Bun.spawn([exe, ...args], { cwd: w.project, env: { ...w.env, ...env }, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
@@ -343,31 +382,35 @@ describe("install layout", () => {
     const p = Bun.spawn([i.exe, "doctor"], { cwd: w.project, env, stdout: "pipe", stderr: "pipe" });
     const out = await new Response(p.stdout).text();
     await p.exited;
-    expect(out).toContain(`✓ memory  ${path.join(i.bin, "memsrv")}`);
+    expect(out).toContain(`✓ memory  ${path.join(i.bin, memsrvName)}`);
   }, T);
 
   test.if(!!memsrv())("install --yes copies a download into $MNEMO_HOME/bin, where it finds its sidecar", async () => {
     const w = fresh();
     const dl = path.join(w.home, "Downloads", "mnemo");
     fs.mkdirSync(dl, { recursive: true });
-    fs.copyFileSync(binary(), path.join(dl, "mnemo"));
-    fs.chmodSync(path.join(dl, "mnemo"), 0o755);
-    fs.copyFileSync(memsrv()!, path.join(dl, "memsrv"));
-    const env = { ...w.env, PATH: process.env.PATH! };
+    fs.copyFileSync(binary(), path.join(dl, mnemoName));
+    fs.chmodSync(path.join(dl, mnemoName), 0o755);
+    fs.copyFileSync(memsrv()!, path.join(dl, memsrvName));
+    const env = { ...w.env };
     delete env.MNEMO_MEMSRV;
     const bin = path.join(w.mnemoHome, "bin");
-    const r = await run({ ...w, env }, path.join(dl, "mnemo"), ["install", "--yes"]);
+    const r = await run({ ...w, env }, path.join(dl, mnemoName), ["install", "--yes"]);
     expect(r.code).toBe(0);
-    expect(r.stdout).toContain(`copied mnemo and memsrv to ${bin}`);
+    expect(r.stdout).toContain(`copied ${mnemoName} and ${memsrvName} to ${bin}`);
     // Off Windows nothing edits a shell profile: it says the line instead.
-    expect(r.stdout).toContain(`export PATH="${bin}:$PATH"`);
-    expect(fs.readdirSync(bin).sort()).toEqual(["memsrv", "mnemo"]);
-    const doctor = await run({ ...w, env }, path.join(bin, "mnemo"), ["doctor"]);
-    expect(doctor.stdout).toContain(`✓ memory  ${path.join(bin, "memsrv")}`);
+    if (process.platform === "win32") {
+      expect(r.stdout).toContain(`added ${bin} to your PATH`);
+      expect(r.stdout).toContain("Open a new terminal and type  mnemo");
+    } else expect(r.stdout).toContain(`export PATH="${bin}:$PATH"`);
+    expect(fs.readdirSync(bin).sort()).toEqual([memsrvName, mnemoName]);
+    const doctor = await run({ ...w, env }, path.join(bin, mnemoName), ["doctor"]);
+    expect(doctor.stdout).toContain(`✓ memory  ${path.join(bin, memsrvName)}`);
     // The download, run again while the installed copy is first on the PATH, says so.
-    const again = await run({ ...w, env: { ...env, PATH: `${bin}:${process.env.PATH}` } }, path.join(dl, "mnemo"), ["doctor"]);
-    expect(again.stdout).toContain(`! path    mnemo in a new terminal is ${path.join(bin, "mnemo")}, not this one (${path.join(dl, "mnemo")})`);
-    const installed = await run({ ...w, env }, path.join(bin, "mnemo"), ["install", "--yes"]);
+    const pathKey = Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
+    const again = await run({ ...w, env: { ...env, [pathKey]: `${bin}${path.delimiter}${env[pathKey] ?? ""}` } }, path.join(dl, mnemoName), ["doctor"]);
+    expect(again.stdout).toContain(`! path    mnemo in a new terminal is ${path.join(bin, mnemoName)}, not this one (${path.join(dl, mnemoName)})`);
+    const installed = await run({ ...w, env }, path.join(bin, mnemoName), ["install", "--yes"]);
     expect(installed.stdout).toContain(`Mnemo is installed in ${bin}`);
   }, T);
 
@@ -376,7 +419,10 @@ describe("install layout", () => {
     const i = installed(w);
     const r = await run(w, i.exe, ["uninstall", "--yes"], { MNEMO_LINK_DIR: i.linkDir });
     expect(r.code).toBe(0);
-    expect(fs.existsSync(path.join(i.bin, "mnemo"))).toBe(false);
+    // Windows schedules deletion of the running executable after it exits.
+    for (let n = 0; n < 50 && fs.existsSync(i.exe); n++) await Bun.sleep(100);
+    expect(fs.existsSync(i.exe)).toBe(false);
+    expect(fs.existsSync(path.join(i.bin, memsrvName))).toBe(false);
     if (process.platform !== "win32") expect(fs.existsSync(i.link)).toBe(false);
     expect(fs.existsSync(path.join(w.mnemoHome, "memory", "journal.jsonl"))).toBe(true);
   }, T);
