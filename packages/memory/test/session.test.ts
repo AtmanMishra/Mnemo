@@ -242,3 +242,10 @@ t("a forgotten node is not found by its label any more, in the process that forg
   expect(await memory.state(old)).not.toContain("last used");
   memory.stop();
 });
+
+test("recall ranks by the sidecar's score, which already holds the (capped) votes: they are not counted twice", async () => {
+  const mem = new MemoryService("/nonexistent/memsrv", path.join(os.tmpdir(), "mnemo-unused", "journal.jsonl"));
+  const hit = (node: number, score: number, useful: number) => ({ node, label: `note ${node}`, kind: "Aspect", area: "Semantic", score, state: "", useful, unhelpful: 0 });
+  mem.search = async () => [hit(1, 0.5, 0), hit(2, 0.3, 60)];
+  expect((await mem.recall("how do we deploy", undefined, [])).map((h) => h.node)).toEqual([1, 2]);
+});
