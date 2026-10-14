@@ -52,6 +52,15 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             episode: undefined,
             parentEpisode: host.episode,
           };
+          // The mode is the user's, and they can change it while the child works:
+          // a copy taken at spawn time kept a child in yolo after a switch to plan.
+          Object.defineProperty(child, "mode", {
+            get: () => host.mode,
+            set: (mode: Host["mode"]) => {
+              host.mode = mode;
+            },
+            enumerable: true,
+          });
           const services = await createAgentSessionServices({
             cwd: ctx.cwd,
             agentDir: host.agentDir,

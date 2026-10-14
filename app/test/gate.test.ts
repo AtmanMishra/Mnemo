@@ -91,7 +91,9 @@ test("an empty or odd command is a question, not a crash", () => {
 
 test("a leading environment assignment does not become the program", () => {
   assert.equal(generalise(bash("FOO=1 git status")), "git status*");
-  assert.equal(generalise(bash("CI=1 npm run build")), "npm run*");
+  assert.equal(generalise(bash("CI=1 npm test")), "npm test*");
+  // `run` runs whatever it names: approved exactly, never as `npm run*`.
+  assert.equal(generalise(bash("CI=1 npm run build")), "CI=1 npm run build");
 });
 
 test("an approval never widens over an operand, and a pattern ends on a word", () => {

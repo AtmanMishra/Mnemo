@@ -13,10 +13,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI, type ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { KernelClient, spawnKernel, type KernelChild } from "../kernel/kernel.ts";
 import bridgeSource from "../../python/ipy_bridge.py" with { type: "text" };
 import { childEnv, configuredKeys } from "../runtime/env.ts";
+import { callerSignals } from "./policy.ts";
 import type { Host } from "./host.ts";
 
 /** Write the bundled bridge where Python can run it; rewrite only when it changed. */
@@ -50,7 +51,6 @@ export function kernelExtension(host: Host) {
     const python = host.python();
     if (!python) return;
     let client: KernelClient | undefined;
-    let current: ExtensionToolContext | undefined;
 
     const kernel = (cwd: string) =>
       (client ??= new KernelClient({
@@ -58,12 +58,6 @@ export function kernelExtension(host: Host) {
         bridgePath: installBridge(host.home),
         spawn: (i, a) => spawnKernel(i, a, cwd, childEnv(process.env, configuredKeys(host.agentDir))) as unknown as KernelChild,
         cwd,
-        dispatch: async (name, args) => {
-          if (!current) throw new Error("no tool context");
-          const outcome = await current.executeTool(name, args);
-          if (outcome.isError) throw new Error(textOf(outcome.result) || `${name} failed`);
-          return textOf(outcome.result);
-        },
       }));
 
     pi.registerTool(
@@ -78,16 +72,29 @@ export function kernelExtension(host: Host) {
           code: Type.String({ description: "Python source to run" }),
           timeout: Type.Optional(Type.Number({ description: `Seconds before the cell is stopped (default ${DEFAULT_SECONDS}, at most ${MAX_SECONDS})` })),
         }),
-        async execute(_id, params, signal, _update, ctx) {
-          current = ctx;
+        async execute(id, params, signal, _update, ctx) {
+          // Ends when this cell does, and closes any question one of its calls is waiting on.
+          const done = new AbortController();
+          callerSignals.set(id, done.signal);
           try {
             const seconds = Math.min(MAX_SECONDS, Math.max(1, params.timeout ?? DEFAULT_SECONDS));
-            const r = await kernel(ctx.cwd).run(params.code, { timeoutMs: seconds * 1000, signal });
+            const r = await kernel(ctx.cwd).run(params.code, {
+              timeoutMs: seconds * 1000,
+              signal,
+              // This cell's calls go through this call's context: one shared "current"
+              // context let an overlapping call answer another cell's tools.
+              dispatch: async (name, args, stopped) => {
+                const outcome = await ctx.executeTool(name, args, stopped ? { signal: stopped } : {});
+                if (outcome.isError) throw new Error(textOf(outcome.result) || `${name} failed`);
+                return textOf(outcome.result);
+              },
+            });
             const parts = [r.output?.trimEnd(), r.result && r.result !== "None" ? r.result : undefined].filter(Boolean);
             if (!r.ok) throw new Error([r.output?.trimEnd(), r.error].filter(Boolean).join("\n") || "the cell failed");
             return { content: [{ type: "text", text: parts.join("\n") || "(no output)" }], details: { result: r.result } };
           } finally {
-            current = undefined;
+            done.abort();
+            callerSignals.delete(id);
           }
         },
       }),

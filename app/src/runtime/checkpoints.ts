@@ -10,6 +10,7 @@
  * lives as long as the process.
  */
 import * as fs from "node:fs";
+import * as path from "node:path";
 
 /** null: the file did not exist. */
 type Before = Buffer | null;
@@ -41,20 +42,35 @@ export class Checkpoints {
     return out;
   }
 
-  /** Put the files back; returns the ones that changed. Later turns' records are dropped. */
+  /**
+   * Put the files back; returns the ones that changed. Later turns' records are dropped.
+   * Each file on its own: one that cannot be put back does not stop the rest. A
+   * symlink now in a file's place is removed, never written through; a folder now
+   * in its place is left alone.
+   */
   restore(turns: readonly string[]): string[] {
     const changed: string[] = [];
     for (const [file, before] of this.plan(turns)) {
-      let now: Buffer | null;
       try {
-        now = fs.readFileSync(file);
+        let st: fs.Stats | undefined;
+        try {
+          st = fs.lstatSync(file);
+        } catch {
+          st = undefined;
+        }
+        if (st?.isDirectory()) continue;
+        if (st?.isFile() && before !== null && before.equals(fs.readFileSync(file))) continue;
+        if (!st && before === null) continue;
+        if (st?.isSymbolicLink()) fs.unlinkSync(file);
+        if (before === null) fs.rmSync(file, { force: true });
+        else {
+          fs.mkdirSync(path.dirname(file), { recursive: true });
+          fs.writeFileSync(file, before);
+        }
+        changed.push(file);
       } catch {
-        now = null;
+        // This one stays as it is; the others still go back.
       }
-      if (before === null ? now === null : now !== null && before.equals(now)) continue;
-      if (before === null) fs.rmSync(file, { force: true });
-      else fs.writeFileSync(file, before);
-      changed.push(file);
     }
     for (const t of turns) this.#byTurn.delete(t);
     return changed;

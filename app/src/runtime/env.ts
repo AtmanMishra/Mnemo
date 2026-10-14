@@ -10,7 +10,11 @@ import * as path from "node:path";
 
 type Env = Record<string, string | undefined>;
 
-/** The credentials pi reads for its model providers (pi-ai's env lookups). */
+/**
+ * The credentials pi reads for its model providers (pi-ai's env lookups, and
+ * LLAMA_API_KEY for pi's llama extension). test/env.test.ts reads pi-ai's own
+ * code and fails when a provider's key is missing here.
+ */
 export const PROVIDER_KEYS = new Set([
   "AI_GATEWAY_API_KEY",
   "ANTHROPIC_API_KEY",
@@ -30,6 +34,7 @@ export const PROVIDER_KEYS = new Set([
   "GROQ_API_KEY",
   "HF_TOKEN",
   "KIMI_API_KEY",
+  "LLAMA_API_KEY",
   "META_API_KEY",
   "MINIMAX_API_KEY",
   "MINIMAX_CN_API_KEY",
@@ -41,8 +46,16 @@ export const PROVIDER_KEYS = new Set([
   "OPENROUTER_API_KEY",
   "QWEN_TOKEN_PLAN_API_KEY",
   "QWEN_TOKEN_PLAN_CN_API_KEY",
+  "RADIUS_API_KEY",
   "TOGETHER_API_KEY",
+  "TYPESAFE_API_KEY",
   "XAI_API_KEY",
+  "XIAOMI_API_KEY",
+  "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+  "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+  "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
+  "ZAI_API_KEY",
+  "ZAI_CODING_CN_API_KEY",
 ]);
 
 /** Variables `models.json` interpolates (`$NAME`, `${NAME}`): a custom provider's keys. */
