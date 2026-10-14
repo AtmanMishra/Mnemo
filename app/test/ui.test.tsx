@@ -11,6 +11,8 @@ import { Dialogs } from "../src/runtime/dialogs.ts";
 import { createUiContext } from "../src/runtime/ui-context.ts";
 import { MotionContext } from "../src/ui/components/motion.ts";
 import { WorkingLine } from "../src/ui/components/Working.tsx";
+import { Hub, type AgentState } from "../src/ui/Hub.tsx";
+import type { Agent } from "../src/runtime/fleet.ts";
 import type { CommandInfo } from "../src/runtime/controller.ts";
 
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
@@ -300,4 +302,34 @@ test("an extension's editor starts with its text, and a dialog with a timeout cl
   expect(await ui.input("Name", "", { timeout: 50 })).toBeUndefined();
   expect(Date.now() - started).toBeLessThan(2000);
   expect(dialogs.current()).toBeUndefined();
+});
+
+test("x on an agent that is still working asks for a second x before closing it", async () => {
+  const closed: number[] = [];
+  const state = (kind: "idle" | "working"): AgentState => ({ kind, glyph: "·", tone: "#888888", label: kind, turns: 1, outcomes: [], cost: 0, model: "demo" });
+  const agents = [1, 2].map((id) => ({ id, name: `p${id}`, cwd: `/p${id}` }) as unknown as Agent);
+  const r = render(
+    <Hub agents={agents} states={new Map([[1, state("working")], [2, state("idle")]])} recent={[]} split={[]} width={120} height={30} active
+      onOpen={() => {}} onSplit={() => {}} onClose={(id) => void closed.push(id)} onNew={() => {}} onOpenProject={() => {}} />,
+  );
+  await tick();
+  r.stdin.write("x");
+  await tick();
+  expect(closed).toEqual([]);
+  expect(r.lastFrame()).toContain("x again to close it");
+  r.stdin.write(KEY.down);
+  await tick();
+  r.stdin.write("\x1b[D");
+  await tick();
+  r.stdin.write("x");
+  await tick();
+  expect(closed).toEqual([]);
+  r.stdin.write("x");
+  await tick();
+  expect(closed).toEqual([1]);
+  r.stdin.write("\x1b[C");
+  await tick();
+  r.stdin.write("x");
+  await tick();
+  expect(closed).toEqual([1, 2]);
 });
