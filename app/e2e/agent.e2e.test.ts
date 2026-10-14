@@ -369,3 +369,37 @@ describe("memory commands", () => {
     }
   }, T);
 });
+
+describe("the gate under -p, after the security review", () => {
+  // -p allows what would ask; plan and deny still refuse.
+  test("--plan -p refuses a command", async () => {
+    const w = fresh();
+    play(steps({ tools: [{ name: "bash", args: { command: "touch planned.txt" } }] }, { text: "ok" }));
+    await mnemo(w, ["--plan", "-p", "touch"]);
+    expect(fs.existsSync(path.join(w.project, "planned.txt"))).toBe(false);
+  }, T);
+
+  test("-p in the default mode still honours a deny rule", async () => {
+    const w = fresh();
+    fs.writeFileSync(path.join(w.mnemoHome, "permissions.json"), JSON.stringify({ rules: [{ tool: "bash", pattern: "touch*", action: "deny" }] }));
+    play(steps({ tools: [{ name: "bash", args: { command: "'touch' denied.txt" } }] }, { text: "ok" }));
+    await mnemo(w, ["-p", "touch"]);
+    expect(fs.existsSync(path.join(w.project, "denied.txt"))).toBe(false);
+  }, T);
+
+  test("a grants.json of null does not switch the gate off", async () => {
+    const w = fresh();
+    fs.writeFileSync(path.join(w.mnemoHome, "grants.json"), "null");
+    play(steps({ tools: [{ name: "bash", args: { command: "touch pwned.txt" } }] }, { text: "ok" }));
+    await mnemo(w, ["--plan", "-p", "touch"]);
+    expect(fs.existsSync(path.join(w.project, "pwned.txt"))).toBe(false);
+  }, T);
+
+  test.if(process.platform === "linux")("the read tool does not return the process environment", async () => {
+    const key = "sk-ant-e2e-environ-0123456789";
+    const w = fresh({ env: { ANTHROPIC_API_KEY: key } });
+    play(steps({ tools: [{ name: "read", args: { path: "/proc/self/environ" } }] }, { text: "ok" }));
+    await mnemo(w, ["--yolo", "-p", "read environ"]);
+    expect(JSON.stringify(llm.requests)).not.toContain(key);
+  }, T);
+});

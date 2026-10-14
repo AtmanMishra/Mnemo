@@ -2,10 +2,14 @@
  * The gate every tool call passes before it runs.
  *
  * Order of authority, first answer wins:
- *   1. rules in `$MNEMO_HOME/permissions.json` (`allow` / `ask` / `deny`, first match)
- *   2. the mode (plan refuses changes; yolo allows the rest)
- *   3. the kind of tool: reading is free, edits and commands ask
- *   4. for commands, grants the user gave earlier ("don't ask again for git status*")
+ *   1. `deny` rules in `$MNEMO_HOME/permissions.json`, anywhere in the list
+ *   2. plan mode, which refuses every change, `allow` rules included
+ *   3. the other rules (`allow` / `ask`, first match)
+ *   4. credentials, which read tools refuse unless a rule allowed them
+ *   5. the mode (yolo allows the rest) and the kind of tool: reading is free,
+ *      edits and commands ask
+ *   6. for commands, grants the user gave earlier ("don't ask again for git status*")
+ * If the gate cannot start or fails on a call, the call is refused.
  *
  * The question itself goes to the interface. With no interface (`mnemo -p`) an
  * ask is allowed: headless runs are automation the user started on purpose, and
