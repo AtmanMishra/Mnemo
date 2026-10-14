@@ -505,6 +505,7 @@ export class Controller {
         check,
         run: runner,
         keepDir: path.join(home, "best-of", new Date(now()).toISOString().replace(/[:.]/g, "-")),
+        agentDir: path.join(home, "agent"),
         onProgress: (i, state, info) => {
           const lanes = this.chrome.race!.lanes.map((l, j) => (j === i ? { ...l, state, size: info?.size ?? l.size, endedAt: state === "running" ? undefined : now() } : l));
           set({ lanes });
