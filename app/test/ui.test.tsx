@@ -8,6 +8,7 @@ import { Composer, rankCommands, type ComposerProps } from "../src/ui/components
 import { DialogView, filterChoices } from "../src/ui/components/Dialogs.tsx";
 import { BlockView } from "../src/ui/components/Blocks.tsx";
 import { Dialogs } from "../src/runtime/dialogs.ts";
+import { createUiContext } from "../src/runtime/ui-context.ts";
 import { MotionContext } from "../src/ui/components/motion.ts";
 import { WorkingLine } from "../src/ui/components/Working.tsx";
 import type { CommandInfo } from "../src/runtime/controller.ts";
@@ -277,4 +278,26 @@ test("a command typed in full runs itself, not a longer one it is the start of",
   await c.type("/mode");
   await c.type(KEY.enter);
   expect(c.calls.submit).toEqual([["/mode", "auto"]]);
+});
+
+test("an extension's editor starts with its text, and a dialog with a timeout closes on it", async () => {
+  const dialogs = new Dialogs();
+  const sink = { notify() {}, setStatus() {}, setWorkingMessage() {}, setWorkingVisible() {}, setTitle() {}, getDraft: () => "", setDraft() {}, getToolsExpanded: () => false, setToolsExpanded() {} };
+  const ui = createUiContext(dialogs, sink);
+  const edited = ui.editor("Commit message", "fix: retries");
+  const r = render(<DialogView dialog={dialogs.current()!} />);
+  await tick();
+  expect(r.lastFrame()).toContain("fix: retries");
+  await tick();
+  r.stdin.write("!");
+  await tick();
+  r.stdin.write(KEY.enter);
+  expect(await edited).toBe("fix: retries!");
+  r.unmount();
+  const started = Date.now();
+  expect(await ui.select("Pick", ["a", "b"], { timeout: 50 })).toBeUndefined();
+  expect(await ui.confirm("Sure?", "really", { timeout: 50 })).toBe(false);
+  expect(await ui.input("Name", "", { timeout: 50 })).toBeUndefined();
+  expect(Date.now() - started).toBeLessThan(2000);
+  expect(dialogs.current()).toBeUndefined();
 });

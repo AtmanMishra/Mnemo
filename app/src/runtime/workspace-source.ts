@@ -47,7 +47,7 @@ async function editMemory(controller: Controller, memory: MemoryService, project
     const current = (await memory.profile(scope, projectId)).find((f) => f.key === name);
     if (!current) return;
     if (key === "e") {
-      const value = (await controller.dialogs.text(`New value for "${name}"`, { placeholder: current.value }))?.trim();
+      const value = (await controller.dialogs.text(`New value for "${name}"`, { initial: current.value }))?.trim();
       if (!value || value === current.value) return;
       await memory.learn(scope, projectId, name, value);
       say(`Changed "${name}"`, [value, `was: ${current.value}`]);
@@ -67,7 +67,7 @@ async function editMemory(controller: Controller, memory: MemoryService, project
   } else if (key === "e") {
     const fix = factValue(await memory.state(node), "fix");
     if (fix === undefined) return;
-    const value = (await controller.dialogs.text("New fix", { placeholder: fix }))?.trim();
+    const value = (await controller.dialogs.text("New fix", { initial: fix }))?.trim();
     if (!value || value === fix) return;
     await memory.fact(node, "fix", value);
     say("Changed the fix", [value, `was: ${fix}`]);

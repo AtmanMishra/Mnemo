@@ -23,7 +23,7 @@ test.skipIf(!MEMSRV)("e edits a fact, d forgets it, - twice drops a recalled ite
   const editing = source.act("memory", "p:package manager", "e");
   const ask = await nextDialog(e.controller);
   if (ask.kind !== "text") throw new Error(`expected text, got ${ask.kind}`);
-  expect(ask.placeholder).toBe("pnpm");
+  expect(ask.initial).toBe("pnpm");
   ask.resolve("bun");
   await editing;
   expect((await mem.profile("project", id)).find((f) => f.key === "package manager")?.value).toBe("bun");
