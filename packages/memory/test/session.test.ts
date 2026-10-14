@@ -163,3 +163,34 @@ test("a command that starts by changing into the project is named by what it run
   expect(subjectOf({ command: 'cd "/a b" && make' })).toBe("make");
   expect(subjectOf({ command: "cd src" })).toBe("cd src");
 });
+
+t("two processes starting on one project share one project node and one user node", async () => {
+  const { root, cwd } = setup();
+  const journal = path.join(root, "journal.jsonl");
+  const a = new MemoryService(MEMSRV!, journal);
+  const b = new MemoryService(MEMSRV!, journal);
+  const sa = new MemorySession({ memory: a, cwd, userSkillsDir: root });
+  const sb = new MemorySession({ memory: b, cwd, userSkillsDir: root });
+  await Promise.all([sa.begin("first task here"), sb.begin("second task here")]);
+  const nodes = await a.nodes();
+  expect(nodes.filter((n) => n.label === `project ${sa.identity.id}`)).toHaveLength(1);
+  expect(nodes.filter((n) => n.label === "user preferences")).toHaveLength(1);
+  // What one process learns, a third one reads.
+  await sb.remember("project", "test command", "bun test ./packages");
+  const fresh = new MemoryService(MEMSRV!, journal);
+  expect((await fresh.profile("project", sa.identity.id)).map((f) => f.key)).toEqual(["test command"]);
+  a.stop();
+  b.stop();
+  fresh.stop();
+});
+
+t("with copies of a standing node already written, every process picks the lowest id", async () => {
+  const { root, memory } = setup();
+  const ids: number[] = [];
+  for (let i = 0; i < 5; i++) ids.push((await memory.createNode("entity", "user preferences", "semantic"))!);
+  memory.stop();
+  const fresh = new MemoryService(MEMSRV!, path.join(root, "journal.jsonl"));
+  expect(await fresh.findLabel("user preferences")).toBe(Math.min(...ids));
+  expect(await fresh.userNode()).toBe(Math.min(...ids));
+  fresh.stop();
+});

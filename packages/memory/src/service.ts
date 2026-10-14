@@ -37,7 +37,8 @@ export interface Hit {
 }
 
 /**
- * How far to trust an item from its votes: 1 with none, toward 2 when it keeps
+ * How far to trust an item from its votes (for display; ranking uses the
+ * sidecar's capped usefulness bias): 1 with none, toward 2 when it keeps
  * helping, toward 0 when it is marked wrong. Laplace-smoothed, so one vote
  * moves it a little and a run of them a lot.
  */
@@ -70,10 +71,13 @@ const INTERNAL = new Set(["signature", "occurrences", "path", "failure"]);
 /** The `facts:` section of a node's derived state, as key/value pairs. */
 export function factsOf(state: string, options: { internal?: boolean } = {}): ProfileFact[] {
   const out: ProfileFact[] = [];
+  // Only the first `facts:` section, and only up to its first unindented line:
+  // a later "facts:" (in a log line, a label) is text, not facts.
   let inFacts = false;
+  let seen = false;
   for (const line of state.split("\n")) {
-    if (/^facts:/.test(line)) {
-      inFacts = true;
+    if (!seen && /^facts:/.test(line)) {
+      inFacts = seen = true;
       continue;
     }
     if (!inFacts) continue;
@@ -83,7 +87,7 @@ export function factsOf(state: string, options: { internal?: boolean } = {}): Pr
       if (fact.value === FORGOTTEN) continue;
       if (!options.internal && INTERNAL.has(fact.key)) continue;
       out.push(fact);
-    } else if (!/^\s/.test(line)) inFacts = false;
+    } else if (!/^\s/.test(line)) break;
   }
   return out;
 }
@@ -133,13 +137,27 @@ export class MemoryService {
     const known = this.labels.get(label);
     if (known !== undefined) return known;
     const dump = await this.call<{ nodes: { id: number; label: string }[] }>("dump");
-    const found = dump?.nodes.find((n) => n.label === label);
+    // Several nodes may carry one label (written before `ensure_node`): the
+    // lowest id is the one every process agrees on.
+    const found = dump?.nodes.filter((n) => n.label === label).reduce<{ id: number } | undefined>((a, n) => (a && a.id < n.id ? a : n), undefined);
     if (found) this.labels.set(label, found.id);
     return found?.id;
   }
 
-  /** A standing node by label, created on first use. */
+  /**
+   * A standing node by label, created on first use. Found-or-created in one
+   * request (under the journal lock): two processes that each looked first
+   * and then created made two project nodes.
+   */
   private async standing(label: string, kind: string, area: string): Promise<number | undefined> {
+    const known = this.labels.get(label);
+    if (known !== undefined) return known;
+    const ensured = await this.call<{ node: number }>("ensure_node", { kind, label, area });
+    if (ensured) {
+      this.labels.set(label, ensured.node);
+      return ensured.node;
+    }
+    // An older sidecar without ensure_node.
     const found = await this.findLabel(label);
     if (found !== undefined) return found;
     const created = await this.call<{ node: number }>("create_node", { kind, label, area });
@@ -218,16 +236,18 @@ export class MemoryService {
       .filter((h) => h.area !== "Salience" || factValue(h.state, "fix") !== undefined)
       .filter((h) => h.kind !== "TaskEpisode" || factValue(h.state, "goal") !== undefined)
       .filter((h) => !distrusted(h))
-      .sort((a, b) => b.score * trust(b) - a.score * trust(a))
+      // Votes are already in the score (the sidecar's capped usefulness bias):
+      // weighting by them again here let a much-voted node outrank real matches.
+      .sort((a, b) => b.score - a.score)
       .slice(0, k);
   }
 
   async episode(label: string): Promise<number | undefined> {
-    return (await this.call<{ episode: number }>("episode", { label: redact(label) }))?.episode;
+    return (await this.call<{ episode: number }>("episode", { label: oneLine(label, 200) }))?.episode;
   }
 
   async log(node: number, kind: string, detail: string): Promise<void> {
-    await this.call("commit_log", { node, kind, detail: redact(detail) });
+    await this.call("commit_log", { node, kind: oneLine(kind, 60), detail: oneLine(detail, 2000) });
   }
 
   async fact(node: number, key: string, value: string): Promise<void> {
@@ -257,12 +277,13 @@ export class MemoryService {
   }
 
   async remember(summary: string, label?: string): Promise<number | undefined> {
-    return (await this.call<{ node: number }>("remember", { summary: redact(summary), label: label && redact(label) }))?.node;
+    return (await this.call<{ node: number }>("remember", { summary: redact(summary), label: label && oneLine(label, 200) }))?.node;
   }
 
   async createNode(kind: string, label: string, area?: string): Promise<number | undefined> {
-    const node = (await this.call<{ node: number }>("create_node", { kind, label: redact(label), area }))?.node;
-    if (node !== undefined) this.labels.set(label, node);
+    const written = oneLine(label, 200);
+    const node = (await this.call<{ node: number }>("create_node", { kind, label: written, area }))?.node;
+    if (node !== undefined) this.labels.set(written, node);
     return node;
   }
 

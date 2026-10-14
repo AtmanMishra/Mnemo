@@ -304,6 +304,20 @@ fn set_area_param(
     Ok(format!("{:?}", s.nodes.get(&node).map(|n| n.area).unwrap_or_default()))
 }
 
+/// `kind` on create_node/ensure_node (default aspect).
+fn node_kind(params: &serde_json::Value) -> NodeKind {
+    let kind = params.get("kind").and_then(|k| k.as_str()).unwrap_or("aspect");
+    match kind.to_ascii_lowercase().as_str() {
+        "entity" => NodeKind::Entity, "harness" => NodeKind::Harness,
+        "outcome" => NodeKind::Outcome, _ => NodeKind::Aspect,
+    }
+}
+
+/// The live node with exactly this label; the lowest id when there are several.
+fn find_label(s: &StoreData, label: &str) -> Option<NodeId> {
+    s.nodes.values().filter(|n| !n.deleted && n.label == label).map(|n| n.id).min()
+}
+
 fn handle(
     method: &str,
     params: &serde_json::Value,
@@ -337,7 +351,11 @@ fn handle(
             // A forgotten memory is gone from the listing even though its
             // ops stay in the journal. The journal is the history; dump is
             // the present.
-            let nodes: Vec<serde_json::Value> = s.nodes.values().filter(|n| !n.deleted).map(|n| json!({
+            // In id order: a listing (and a client picking the first match in
+            // it) must not depend on the map's iteration order.
+            let mut live: Vec<&Node> = s.nodes.values().filter(|n| !n.deleted).collect();
+            live.sort_by_key(|n| n.id);
+            let nodes: Vec<serde_json::Value> = live.into_iter().map(|n| json!({
                 "id": n.id, "kind": n.kind, "area": n.area, "label": n.label,
                 "facts": n.active_facts().count(),
                 // #24: superseded values are kept, so a listing that only
@@ -382,17 +400,33 @@ fn handle(
         }
 
         "create_node" => {
-            let kind = params.get("kind").and_then(|k| k.as_str()).unwrap_or("aspect");
-            let kind = match kind.to_ascii_lowercase().as_str() {
-                "entity" => NodeKind::Entity, "harness" => NodeKind::Harness,
-                "outcome" => NodeKind::Outcome, _ => NodeKind::Aspect,
-            };
+            let kind = node_kind(params);
             let label = params.get("label").and_then(|l| l.as_str())
                 .ok_or("missing 'label'")?.to_string();
             let id = s.next_node;
             apply(s, j, Op::CreateNode { id, kind, label, at: *clock })?;
             let area = set_area_param(s, j, &mut apply, id, params, *clock)?;
             Ok(json!({ "node": id, "area": area }))
+        }
+
+        "ensure_node" => {
+            // A standing node (a project, the user profile) by exact label:
+            // found, or created — in one request, so under the journal lock.
+            // A find-then-create from the client is two requests, and two
+            // processes doing it at once each created their own copy. When
+            // copies already exist the lowest live id is THE node, so every
+            // process agrees on it whatever the map's iteration order.
+            let label = params.get("label").and_then(|l| l.as_str())
+                .ok_or("missing 'label'")?.to_string();
+            if let Some(id) = find_label(s, &label) {
+                let area = format!("{:?}", s.nodes[&id].area);
+                return Ok(json!({ "node": id, "area": area, "created": false }));
+            }
+            let kind = node_kind(params);
+            let id = s.next_node;
+            apply(s, j, Op::CreateNode { id, kind, label, at: *clock })?;
+            let area = set_area_param(s, j, &mut apply, id, params, *clock)?;
+            Ok(json!({ "node": id, "area": area, "created": true }))
         }
 
         "episode" => {
@@ -682,7 +716,7 @@ fn handle(
             Ok(json!({ "forgot": node, "label": label }))
         }
 
-        other => Err(format!("unknown method '{other}' (supported: ping stats dump state history create_node episode fact link unlink reweight record_outcome search recall_brief remember set_area forget steer good consolidate mark_useful)")),
+        other => Err(format!("unknown method '{other}' (supported: ping stats dump state history create_node ensure_node episode fact link unlink reweight record_outcome search recall_brief remember set_area forget steer good consolidate mark_useful)")),
     }
 }
 

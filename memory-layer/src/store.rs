@@ -10,6 +10,20 @@ use std::collections::HashMap;
 /// the log on disk and come back verbatim from `history`.
 const FACT_LOG_KINDS: [&str; 2] = ["fact_added", "fact_superseded"];
 
+/// `state_of` is read back line by line (a `facts:` block of `  - key: value`
+/// lines), so text written into it must stay on its line: a newline in a label,
+/// key, value or log detail would otherwise start a line of its own — a forged
+/// fact. Line breaks are shown escaped; the stored text is unchanged.
+fn one_line(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains(['\r', '\n', '\u{2028}', '\u{2029}', '\u{0085}']) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    std::borrow::Cow::Owned(
+        text.replace("\r\n", "\\n")
+            .replace(['\r', '\n', '\u{2028}', '\u{2029}', '\u{0085}'], "\\n"),
+    )
+}
+
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct StoreData {
     pub nodes: HashMap<NodeId, Node>,
@@ -159,10 +173,10 @@ impl StoreData {
                 self.state_memo.remove(node);
             }
             Op::RecordUsefulness { node, useful, .. } => {
-                // ML-2: a vote is counted, never LOGGED — node_text embeds
-                // a node's last-3 log entries, and vote noise would dilute
-                // the very content the vote rewards, drifting a heavily-
-                // voted node away from its topic. The counters stay
+                // ML-2: a vote is counted, never LOGGED — vote noise would
+                // bury the node's recent log (what `state_of` shows) under
+                // bookkeeping. (node_text once embedded the last log
+                // entries, which made this a ranking bug too.) The counters stay
                 // model-visible through `state_of` text, which is display-
                 // only and never embedded.
                 let n = self.get_mut(*node)?;
@@ -196,10 +210,10 @@ impl StoreData {
             return Ok(s.clone());
         }
         let n = self.nodes.get(&id).ok_or_else(|| format!("node {id} missing"))?;
-        let mut s = format!("[{:?}/{:?}] {} #{}\n", n.kind, n.area, n.label, n.id);
+        let mut s = format!("[{:?}/{:?}] {} #{}\n", n.kind, n.area, one_line(&n.label), n.id);
         s.push_str("facts:\n");
         for f in n.active_facts() {
-            s.push_str(&format!("  - {}: {}\n", f.key, f.value));
+            s.push_str(&format!("  - {}: {}\n", one_line(&f.key), one_line(&f.value)));
         }
         // #24: a key has one current value, so retired ones are NOT rendered as
         // live instructions — two versions of a changed constraint with nothing
@@ -226,11 +240,11 @@ impl StoreData {
             .filter(|l| !FACT_LOG_KINDS.contains(&l.kind.as_str()))
             .rev().take(5).collect::<Vec<_>>().iter().rev()
         {
-            s.push_str(&format!("  [{}] {}: {}\n", l.at, l.kind, l.detail));
+            s.push_str(&format!("  [{}] {}: {}\n", l.at, one_line(&l.kind), one_line(&l.detail)));
         }
         s.push_str(&format!("context chunks: {}\n", n.context.len()));
         for c in &n.context {
-            s.push_str(&format!("  <- #{} [dim {}]: {}\n", c.from, c.dim, c.note));
+            s.push_str(&format!("  <- #{} [dim {}]: {}\n", c.from, c.dim, one_line(&c.note)));
         }
         if n.useful > 0 || n.unhelpful > 0 {
             s.push_str(&format!("usefulness votes: {} useful / {} unhelpful\n", n.useful, n.unhelpful));

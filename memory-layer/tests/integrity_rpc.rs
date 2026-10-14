@@ -198,3 +198,38 @@ fn a_recurring_failure_counts_on_one_marker_and_a_tool_error_makes_no_gap() {
     assert!(r["gap_node"].is_u64());
     s.close();
 }
+
+#[test]
+fn ensure_node_finds_or_creates_one_standing_node_across_sidecars() {
+    let (journal, work) = temp("ensure");
+    let mut a = Srv::spawn(&journal, &work);
+    let mut b = Srv::spawn(&journal, &work);
+    let ask = serde_json::json!({"label": "project git:x/y", "kind": "entity", "area": "spatial"});
+    let first = a.call("ensure_node", ask.clone());
+    assert_eq!(first["created"], true);
+    assert_eq!(first["area"], "Spatial");
+    let again = b.call("ensure_node", ask.clone());
+    assert_eq!(again["created"], false);
+    assert_eq!(again["node"], first["node"], "B must find A's node, not make its own");
+    let id = first["node"].as_u64().unwrap();
+
+    // Copies written before ensure_node existed: the lowest live id is the node,
+    // and a dump lists nodes in id order.
+    let dup = a.call("create_node", serde_json::json!({"kind": "entity", "label": "user preferences"}))["node"].as_u64().unwrap();
+    for _ in 0..4 {
+        a.call("create_node", serde_json::json!({"kind": "entity", "label": "user preferences"}));
+    }
+    assert_eq!(b.call("ensure_node", serde_json::json!({"label": "user preferences", "kind": "entity"}))["node"].as_u64(), Some(dup));
+    let ids: Vec<u64> = b.call("dump", serde_json::json!({}))["nodes"].as_array().unwrap().iter().map(|n| n["id"].as_u64().unwrap()).collect();
+    let mut sorted = ids.clone();
+    sorted.sort();
+    assert_eq!(ids, sorted, "dump lists nodes in id order");
+    // A forgotten copy is not the node any more.
+    a.call("forget", serde_json::json!({"node": dup}));
+    let next = b.call("ensure_node", serde_json::json!({"label": "user preferences", "kind": "entity"}));
+    assert_eq!(next["created"], false);
+    assert!(next["node"].as_u64().unwrap() > dup);
+    assert_ne!(next["node"].as_u64(), Some(id));
+    a.close();
+    b.close();
+}

@@ -1,11 +1,23 @@
 //! Vector search over node embeddings + graph-aware rerank.
-//! Node vectors are DERIVED (label + active facts + recent log) -> never journaled.
+//! Node vectors are DERIVED (label + active facts + content log) -> never journaled.
 use crate::model::{Area, EdgeKind, Millis, NodeId, NodeKind};
 use crate::store::StoreData;
 use crate::vec::{cosine, Embedder};
 use std::collections::HashMap;
 
-/// Text a node is embedded from. Derived; recomputed after updates.
+/// Log kinds that say what a node IS (its creation and its fact record), as
+/// opposed to what happened to it (tool calls, outcomes, steering). Only these
+/// reach `node_text`: they change only when the label or facts do, which
+/// re-embed the node anyway.
+const CONTENT_LOG_KINDS: [&str; 4] = ["created", "fact_added", "fact_superseded", "remembered"];
+
+/// Text a node is embedded from: kind, label, current facts and the last few
+/// entries of its content log. Derived; recomputed after updates.
+///
+/// Not its activity log. An episode's log grows with every tool call, so a node
+/// text that carried the last log entries of any kind changed on every write —
+/// and with a remote embedder every change is a new embedding request, made
+/// under the journal lock.
 pub fn node_text(store: &StoreData, id: NodeId) -> Option<String> {
     let n = store.nodes.get(&id)?;
     if n.deleted { return None; }
@@ -13,7 +25,7 @@ pub fn node_text(store: &StoreData, id: NodeId) -> Option<String> {
     for f in n.active_facts() {
         parts.push(format!("{} {}", f.key, f.value));
     }
-    for l in n.log.iter().rev().take(3) {
+    for l in n.log.iter().rev().filter(|l| CONTENT_LOG_KINDS.contains(&l.kind.as_str())).take(3) {
         parts.push(format!("{} {}", l.kind, l.detail));
     }
     Some(parts.join(" "))
@@ -37,7 +49,27 @@ pub struct SearchResult {
     pub via_graph: bool,
 }
 
-/// Shared graph-expansion rerank over raw seed hits.
+/// Live expansion edges by endpoint, both directions: built once per search,
+/// so expanding a seed costs its degree, not a scan of every edge.
+fn adjacency(store: &StoreData, now: Millis) -> HashMap<NodeId, Vec<(NodeId, f32)>> {
+    let mut adj: HashMap<NodeId, Vec<(NodeId, f32)>> = HashMap::new();
+    for e in store.edges.values() {
+        if !e.alive_at(now) { continue; }
+        if !matches!(e.kind, EdgeKind::PartOf | EdgeKind::SuppliesContext | EdgeKind::ActivatedWith | EdgeKind::DerivedFrom) { continue; }
+        adj.entry(e.src).or_default().push((e.dst, e.weight));
+        if e.dst != e.src {
+            adj.entry(e.dst).or_default().push((e.src, e.weight));
+        }
+    }
+    adj
+}
+
+/// Shared graph-expansion rerank over raw seed hits (best first).
+///
+/// Only the top seeds are expanded. A neighbour scores at most half of the
+/// seed that reached it, and the top `k` seeds are all in the result with
+/// their own scores, so a seed ranked below them can never place a neighbour
+/// in the top `k`: expanding the rest was cost with no effect on the answer.
 fn expand(
     store: &StoreData,
     seeds: Vec<(NodeId, f32)>,
@@ -45,20 +77,20 @@ fn expand(
     now: Millis,
     opts: &SearchOpts,
 ) -> Vec<SearchResult> {
+    let adj = adjacency(store, now);
+    let expand_top = k.max(1).saturating_mul(2);
     let mut out: HashMap<NodeId, SearchResult> = HashMap::new();
-    for (id, s) in seeds {
+    for (rank, (id, s)) in seeds.into_iter().enumerate() {
         if store.nodes.get(&id).map(|n| n.deleted).unwrap_or(true) {
             continue;
         }
         out.insert(id, SearchResult { node: id, score: s, via_graph: false });
-        for e in store.edges.values() {
-            if !e.alive_at(now) { continue; }
-            if !matches!(e.kind, EdgeKind::PartOf | EdgeKind::SuppliesContext | EdgeKind::ActivatedWith | EdgeKind::DerivedFrom) { continue; }
-            let nb = if e.src == id { Some(e.dst) } else if e.dst == id { Some(e.src) } else { None };
+        if rank >= expand_top { continue; }
+        for &(nb_id, weight) in adj.get(&id).map(Vec::as_slice).unwrap_or(&[]) {
             // a filtered-out node must not sneak back in as a neighbour —
             // "restrict to this area/kind" has to mean the whole result set
-            if let Some(nb_id) = nb.filter(|n| passes_filter(store, *n, opts)) {
-                let boosted = s * 0.5 * e.weight.max(0.1);
+            if passes_filter(store, nb_id, opts) {
+                let boosted = s * 0.5 * weight.max(0.1);
                 let entry = out.entry(nb_id).or_insert(SearchResult { node: nb_id, score: 0.0, via_graph: true });
                 if boosted > entry.score {
                     entry.score = boosted;
@@ -235,6 +267,21 @@ pub fn search_with_path(
 /// NOT a learning-to-rank system.
 pub const USEFULNESS_BIAS: f32 = 0.02;
 
+/// Net votes beyond this count no more: sixty thumbs on one node are a habit,
+/// not sixty times the evidence, and must not lift it over a real match.
+pub const USEFULNESS_VOTE_CAP: i32 = 5;
+
+/// The usefulness bias for a node whose match score is `base`. Votes reorder
+/// matches; they never make a node that does not match the query (`base` 0)
+/// into a hit.
+pub fn usefulness_bias(store: &StoreData, id: NodeId, base: f32) -> f32 {
+    if base <= 0.0 { return 0.0; }
+    store.nodes.get(&id)
+        .map(|n| (n.useful as i64 - n.unhelpful as i64)
+            .clamp(-(USEFULNESS_VOTE_CAP as i64), USEFULNESS_VOTE_CAP as i64) as f32 * USEFULNESS_BIAS)
+        .unwrap_or(0.0)
+}
+
 impl SearchOpts {
     pub fn kind(k: NodeKind) -> Self {
         Self { kind: Some(k), ..Default::default() }
@@ -343,10 +390,7 @@ pub fn search(
         .filter(|(id, _)| passes_filter(store, **id, opts))
         .map(|(id, v)| {
             let base = cosine(&q, v) * opts.area_weight(store, *id);
-            let bias = store.nodes.get(id)
-                .map(|n| (n.useful as i32 - n.unhelpful as i32) as f32 * USEFULNESS_BIAS)
-                .unwrap_or(0.0);
-            (*id, base + bias)
+            (*id, base + usefulness_bias(store, *id, base))
         })
         .filter(|(_, s)| *s > 1e-6)
         .collect();
@@ -371,17 +415,16 @@ pub fn search_ann(
     opts: &SearchOpts,
 ) -> Vec<SearchResult> {
     let q = emb.embed(&expand_query_aliases(query));
-    let seeds: Vec<(NodeId, f32)> = index.search(&q, k.min(1000) * 4).into_iter()
+    let mut seeds: Vec<(NodeId, f32)> = index.search(&q, k.min(1000) * 4).into_iter()
         .map(|(id, s)| (id as NodeId, s))
         .filter(|(id, _)| passes_filter(store, *id, opts))
         .map(|(id, s)| {
             let base = s * opts.area_weight(store, id);
-            let bias = store.nodes.get(&id)
-                .map(|n| (n.useful as i32 - n.unhelpful as i32) as f32 * USEFULNESS_BIAS)
-                .unwrap_or(0.0);
-            (id, base + bias)
+            (id, base + usefulness_bias(store, id, base))
         })
         .collect();
+    // best first, as `expand` expects (votes can reorder the index's ranking)
+    seeds.sort_by(|a, b| b.1.total_cmp(&a.1));
     expand(store, seeds, k, now, opts)
 }
 
