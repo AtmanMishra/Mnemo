@@ -42,7 +42,8 @@ const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
 usage
   mnemo                    start in this folder
   mnemo -c, --continue     continue the most recent session here
-  mnemo -p "<prompt>"      answer once and print the result (no interface)
+  mnemo -p "<prompt>"      answer once and print the result (no interface); asks nothing: what would ask
+                           is allowed, while deny rules and --plan still refuse
   mnemo doctor [--fix]     what is installed, configured and reachable; --fix repairs what it can
   mnemo update             install the latest release · --check · --auto on|off (a daily check, off by default)
   mnemo uninstall          remove Mnemo; what it learned stays · --deep also deletes memory, sessions,
@@ -96,7 +97,17 @@ interface Args {
   cwd?: string;
 }
 
+/** A mistake in the command line: exits 2, like the subcommands' usage errors. */
+class UsageError extends Error {}
+
 function parse(argv: string[]): Args {
+  /** The value after option `v`: there must be one, and it must not be the next option. */
+  const value = (i: number, v: string): string => {
+    const next = argv[i];
+    if (next === undefined || next.trim() === "" || /^--?[A-Za-z]/.test(next))
+      throw new UsageError(`${v} needs a value${next === undefined || next.trim() === "" ? "" : `, not the option ${next}`} — mnemo --help lists them`);
+    return next;
+  };
   const a: Args = { help: false, version: false, demo: false, dump: false, motion: true, boot: true, inline: false, intro: false, memory: true, reflect: true, verify: true, escalate: process.env.MNEMO_ESCALATE_MODEL || undefined, mode: "default", continueRecent: false };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i]!;
@@ -113,17 +124,17 @@ function parse(argv: string[]): Args {
     else if (v === "--no-memory") a.memory = false;
     else if (v === "--no-reflect") a.reflect = false;
     else if (v === "--no-verify") a.verify = false;
-    else if (v === "--escalate") a.escalate = argv[++i];
-    else if (v === "--best-of") a.bestOf = Number(argv[++i]);
-    else if (v === "--check") a.check = argv[++i];
+    else if (v === "--escalate") a.escalate = value(++i, v);
+    else if (v === "--best-of") a.bestOf = Number(value(++i, v));
+    else if (v === "--check") a.check = value(++i, v);
     else if (v === "--plan") a.mode = "plan";
     else if (v === "--accept-edits") a.mode = "accept-edits";
     else if (v === "--yolo") a.mode = "yolo";
     else if (v === "--trust-project") a.trustProject = true;
     else if (v === "-c" || v === "--continue") a.continueRecent = true;
-    else if (v === "-p" || v === "--print") a.print = argv[++i] ?? "";
-    else if (v === "--cwd") a.cwd = argv[++i];
-    else throw new Error(`unknown argument ${v} — mnemo --help lists them`);
+    else if (v === "-p" || v === "--print") a.print = value(++i, v);
+    else if (v === "--cwd") a.cwd = value(++i, v);
+    else throw new UsageError(`unknown argument ${v} — mnemo --help lists them`);
   }
   return a;
 }
@@ -597,6 +608,6 @@ main().then(
   (code) => process.exit(code),
   (error) => {
     console.error(`mnemo: ${error instanceof Error ? error.message : String(error)}`);
-    process.exit(1);
+    process.exit(error instanceof UsageError ? 2 : 1);
   },
 );

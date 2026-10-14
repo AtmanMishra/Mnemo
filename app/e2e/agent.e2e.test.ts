@@ -417,3 +417,26 @@ describe("system prompt", () => {
     expect(prompt).toContain("github.com/earendil-works/pi");
   }, T);
 });
+
+describe("arguments", () => {
+  test("-p followed by an option, or by nothing, is a usage error, not a prompt", async () => {
+    const w = fresh();
+    play(() => ({ text: "should not be asked" }));
+    for (const args of [["-p", "--yolo"], ["-p"], ["-p", ""], ["--cwd"], ["--best-of"]]) {
+      const r = await mnemo(w, args);
+      expect({ args, code: r.code }).toEqual({ args, code: 2 });
+      expect(r.stderr).toContain("mnemo --help");
+    }
+    expect(llm.agentRequests()).toHaveLength(0);
+  }, T);
+
+  test("an unknown argument exits 2, like the other usage errors", async () => {
+    const r = await mnemo(fresh(), ["--no-such-flag"]);
+    expect(r.code).toBe(2);
+  }, T);
+
+  test("--help says what a headless run allows", async () => {
+    const r = await mnemo(fresh(), ["--help"]);
+    expect(r.stdout).toMatch(/-p "<prompt>"[^\n]*asks nothing/);
+  }, T);
+});
