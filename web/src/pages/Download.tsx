@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Install } from "../Install";
 import { LATEST } from "../content/changelog";
-import { LATEST_DOWNLOAD, REPO, VERSION } from "../site";
+import { LATEST_DOWNLOAD, REPO, SITE, VERSION } from "../site";
 import { Cmd, Note, PageHead } from "./parts";
 
 interface Target {
@@ -54,7 +54,7 @@ export function Download() {
     };
   }, []);
 
-  const installer = mine?.os === "windows" ? { file: "install.ps1", label: "Windows installer (install.ps1)" } : { file: "install.sh", label: "Installer script (install.sh)" };
+  const win = mine?.os === "windows";
 
   return (
     <div className="wrap page">
@@ -70,12 +70,23 @@ export function Download() {
           {mine ? (
             <>
               <p className="dl-sys"><strong>{mine.name}</strong> · {mine.arch}</p>
-              <p className="cta">
-                <a className="btn primary big" href={url(mine.file)} download>Download for {mine.name}</a>
-                <a className="btn big" href={`/${installer.file}`} download>{installer.label}</a>
-              </p>
+              {win ? (
+                <>
+                  <p>In PowerShell:</p>
+                  <Cmd prompt="PS> " text={`irm ${SITE}/install.ps1 | iex`} />
+                  <p>
+                    Or <a href={url(mine.file)} download>download {mine.file}</a>, unzip it, and double-click <code>mnemo.exe</code>: it installs itself.
+                  </p>
+                </>
+              ) : (
+                <p className="cta">
+                  <a className="btn primary big" href={url(mine.file)} download>Download for {mine.name}</a>
+                  <a className="btn big" href="/install.sh" download>Installer script (install.sh)</a>
+                </p>
+              )}
               <p className="fine-sm">
                 {mine.file} · <a href={url("SHA256SUMS")}>SHA256SUMS</a>
+                {win ? <> · <a href="/install.ps1">install.ps1</a> (read before you run)</> : null}
                 {mine.os === "mac" ? <> · Intel Mac? <a href={url("mnemo-darwin-x64.tar.gz")}>Download the Intel build</a>.</> : null}
                 {mine.os === "linux" ? <> · Not this architecture? See <a href="#all">all downloads</a>.</> : null}
               </p>
@@ -90,11 +101,19 @@ export function Download() {
             </>
           )}
         </div>
-        <ol className="steps" aria-label="After you download">
-          <li><strong>Unpack it.</strong> <span>The archive holds <code>mnemo</code> and <code>memsrv</code>.</span></li>
-          <li><strong>Put both on your PATH,</strong> <span>in one folder (for example <code>~/.mnemo/bin</code>).</span></li>
-          <li><strong>Run <code>mnemo doctor</code>,</strong> <span>then <code>mnemo</code> in a project folder.</span></li>
-        </ol>
+        {win ? (
+          <ol className="steps" aria-label="After you download">
+            <li><strong>Run the command, or unzip and double-click <code>mnemo.exe</code>.</strong> <span>Either way <code>mnemo.exe</code> and <code>memsrv.exe</code> go to <code>%USERPROFILE%\.mnemo\bin</code>, on your PATH.</span></li>
+            <li><strong>Open a new terminal,</strong> <span>so it sees the new PATH. The unzipped folder can go.</span></li>
+            <li><strong>Run <code>mnemo doctor</code>,</strong> <span>then <code>mnemo</code> in a project folder.</span></li>
+          </ol>
+        ) : (
+          <ol className="steps" aria-label="After you download">
+            <li><strong>Unpack it.</strong> <span>The archive holds <code>mnemo</code> and <code>memsrv</code>.</span></li>
+            <li><strong>Put both on your PATH,</strong> <span>in one folder (for example <code>~/.mnemo/bin</code>).</span></li>
+            <li><strong>Run <code>mnemo doctor</code>,</strong> <span>then <code>mnemo</code> in a project folder.</span></li>
+          </ol>
+        )}
       </section>
 
       <Install />
