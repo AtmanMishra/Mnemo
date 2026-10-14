@@ -202,12 +202,17 @@ entries (`created`, `fact_added`, `fact_superseded`, `remembered`) — not the
 activity log, so a tool call does not change a node's text and send it back to
 a remote embedder. Graph expansion uses one adjacency index per search and
 expands only the top 2k seeds (exact for the top k).
+The counters also travel in `dump` and `search` results, which is how the
+application weighs trust (§2.9). Votes deliberately do **not** enter `node_text`:
+a heavily voted node would otherwise drift away from its own topic.
 
 ### 2.7 `memsrv` — the only integration surface
 
 Line-JSON-RPC over stdio: `{"id":N,"method":"M","params":{…}}` →
-`{"id":N,"ok":true,"result":…}`. It replays the journal on startup, opens an
-embedder, and serves one request per line until `exit`. Each request runs
+`{"id":N,"ok":true,"result":…}`. It takes the journal path as its argument,
+replays the journal on startup, opens an embedder, and serves one request per line
+until `exit`. A request frame is capped at 1 MiB; an oversize or non-UTF-8 frame is
+answered with an error and drained, and never kills the sidecar. Each request runs
 under the journal lock (without it the request is read-only); a write is
 checked, appended, then applied, so nothing is served that the journal does not
 hold. A corrupt journal line is copied once to `journal.corrupt` (0600). The TS
@@ -217,14 +222,16 @@ node takes no more writes. Methods: `ping`, `dump` (in id order; optional
 `ensure_node` (find-or-create by exact label under the lock, lowest live id
 wins — how the project and user nodes are made), `episode`, `fact`, `link`,
 `commit_log`,
-`steer`, `set_area`, `good`, `consolidate`, `mark_useful`, `stats`, `remember`,
+`steer`, `set_area`, `good`, `forget`, `consolidate`, `mark_useful`, `stats`, `remember`,
 `recall_brief`, plus the audit-era additions (`unlink`, `reweight`,
 `record_outcome`). `fact` supersedes a same-key value unless `append: true`
 says the key is a set, and answers with the fact id it wrote plus the id it
 superseded; `history` returns every fact a node ever had with its status and
-`superseded_by`, which is where retired values are read. `dump` carries a
-`retired` count beside `facts`. Search results carry label, kind, area and state
-text — the
+`superseded_by`, which is where retired values are read. `dump` lists live nodes with `facts`, a
+`retired` count, `useful`/`unhelpful` votes and `feeders`; a forgotten node is gone
+from it though its ops stay in the journal. `search` takes `areas` (a hard filter)
+and `scope` (a project node), and results carry label, kind, area, state text and
+votes — the
 project learned once that ids plus scores are useless to a model. Clients:
 `packages/memory/src/client.ts` (`MemoryClient`: requests serialized on one pipe,
 chunks buffered into lines, a dead sidecar answers `{ok:false}` instead of

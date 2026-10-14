@@ -138,7 +138,8 @@ in a place you can afford to lose: a container, a throwaway checkout.
   cell together with the processes it started (the kernel runs in its own process
   group), and a tool call or approval the cell was waiting on is cancelled with it.
   On Linux its memory is capped at 8 GB (`MNEMO_KERNEL_MEMORY_MB`, `0` for no cap;
-  a value that is not a whole number keeps 8 GB). It can read and write what you can.
+  a value that is not a whole number keeps 8 GB); macOS and Windows have no cap. It can
+  read and write what you can.
 - Memory writes and session ingestion are redacted for common credential
   shapes (`sk-…`, `ghp_…`, `AKIA…`, private keys, and similar) before they are
   stored. Redaction is pattern-based and best effort: do not rely on it. Eval
