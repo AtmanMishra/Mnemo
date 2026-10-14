@@ -31,6 +31,8 @@ export interface ComposerProps {
   onFocusNext?: () => void;
   /** ctrl+k on an empty prompt: the palette. */
   onPalette?: () => void;
+  /** Whether ctrl+f finds in the conversation here (the workspace; inline, the terminal's scrollback has it). */
+  canFind?: boolean;
   /** esc twice on an empty prompt: go back to an earlier message. */
   onRewind?: () => void;
   /** Columns it has (a split pane is narrower than the terminal); default: the terminal's. */
@@ -341,7 +343,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
         </Box>
       ) : showShortcuts ? (
         <Box flexDirection="column" paddingX={2}>
-          {SHORTCUTS.map(([k, v]) => (
+          {SHORTCUTS.filter(([k]) => (k !== "ctrl+f" || props.canFind) && (k !== "ctrl+k" || props.onPalette)).map(([k, v]) => (
             <Text key={k}>
               <Text color={color.accent}>{k.padEnd(12)}</Text>
               <Text color={color.muted}>{v}</Text>

@@ -125,7 +125,8 @@ export const HELP_TEXT = [
   "Keys",
   "  enter send (queues while Mnemo works) · alt+enter newline · esc interrupt",
   "  ↑/↓ history · tab accept suggestion · @ mention a file · shift+tab mode · ctrl+t thinking level",
-  "  ctrl+o expand output (everything printed, too) · ctrl+f find in the conversation · ctrl+l clear screen",
+  "  ctrl+o expand output (everything printed, too) · ctrl+l clear screen · ctrl+k on an empty prompt: go to a command or file",
+  "  ctrl+f find in the conversation (full screen; with --inline your terminal's own search does it)",
   "  ctrl+c twice / ctrl+d quit",
 ].join("\n");
 

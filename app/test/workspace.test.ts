@@ -9,6 +9,8 @@ import React from "react";
 import { render } from "ink-testing-library";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { Workspace } from "../src/ui/workspace/Workspace.tsx";
+import { App } from "../src/ui/App.tsx";
+import * as os from "node:os";
 import { fileTree, type Item, type Pane, type WorkspaceSource } from "../src/ui/workspace/model.ts";
 import { mnemoEnv, nextDialog } from "./helpers.ts";
 import * as fs from "node:fs";
@@ -399,4 +401,26 @@ test("the logs pane shows the local clock, and a memory edit that did not take s
   await editing;
   const said = e.controller.transcript.snapshot().committed.flatMap((b) => (b.kind === "notice" ? [b.text] : b.kind === "memory" ? [b.title] : []));
   expect(said.at(-1)).toBe('Could not change "pm": the memory sidecar did not take it.');
+});
+
+test("inline, ctrl+k opens the palette and the shortcuts promise only what works there", async () => {
+  const e = await mnemoEnv();
+  envs.push(e);
+  const r = render(React.createElement(App, { controller: e.controller, version: "t", home: os.homedir(), motion: false, clearTerminal: () => {} }));
+  await wait(80);
+  r.stdin.write("?");
+  await wait();
+  expect(r.lastFrame()).toContain("ctrl+k");
+  expect(r.lastFrame()).not.toContain("ctrl+f");
+  r.stdin.write("?");
+  await wait();
+  r.stdin.write("\x0b");
+  const d = await nextDialog(e.controller);
+  if (d.kind !== "select") throw new Error("expected the palette");
+  expect(d.choices.some((c) => c.label === "/help")).toBe(true);
+  const file = d.choices.find((c) => c.value.startsWith("f:"))!;
+  d.resolve(file.value);
+  await wait();
+  expect(e.controller.draftText).toBe(`@${file.value.slice(2)} `);
+  r.unmount();
 });

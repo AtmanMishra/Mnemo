@@ -135,7 +135,7 @@ export interface WorkspaceProps {
 }
 
 /** Commands that run as picked; the rest (they take words) go into the prompt. */
-const RUN_AS_PICKED = new Set(["help", "model", "thinking", "login", "logout", "new", "resume", "compact", "cost", "stats", "clear", "memory", "mode", "yolo", "accept-edits", "theme", "update", "mouse", "plan", "skills", "reload", "rewind", "quit"]);
+export const RUN_AS_PICKED = new Set(["help", "model", "thinking", "login", "logout", "new", "resume", "compact", "cost", "stats", "clear", "memory", "mode", "yolo", "accept-edits", "theme", "update", "mouse", "plan", "skills", "reload", "rewind", "quit"]);
 
 export function Workspace({ controller, source, motion, initial, width, height, active = true, compact = false, brand = true, agents }: WorkspaceProps): React.ReactElement {
   const snap = useSyncExternalStore(controller.transcript.subscribe, controller.transcript.snapshot);
@@ -508,6 +508,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
           onRewind={() => void controller.rewind()}
           onFocusNext={() => setFocus(nextFocus("composer"))}
           onPalette={() => void openPalette()}
+          canFind
         />
         </Box>
       </Box>
