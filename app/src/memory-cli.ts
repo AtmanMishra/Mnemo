@@ -96,14 +96,23 @@ function option(argv: string[], name: string): string | undefined {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
-/** The command that runs this binary again: the compiled one, or bun on the source. */
-function self(): string {
+/** The argv that runs this binary again: the compiled one, or bun on the source. */
+function self(): string[] {
   const exe = process.execPath;
-  return /bun(\.exe)?$/.test(path.basename(exe)) ? `${exe} ${path.resolve(import.meta.dir, "..", "bin", "mnemo.ts")}` : exe;
+  return /bun(\.exe)?$/.test(path.basename(exe)) ? [exe, path.resolve(import.meta.dir, "..", "bin", "mnemo.ts")] : [exe];
 }
 
-export function setupText(agent: string): string | undefined {
-  const cmd = self();
+/**
+ * One argument as a shell reads it: a path with a space (a Windows user name,
+ * "Application Support") must stay one argument.
+ */
+export function shellQuote(arg: string, platform: NodeJS.Platform = process.platform): string {
+  if (/^[\w@%+=:,./\\-]+$/.test(arg)) return arg;
+  return platform === "win32" ? `"${arg.replace(/"/g, '\\"')}"` : `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+export function setupText(agent: string, argv: string[] = self(), platform: NodeJS.Platform = process.platform): string | undefined {
+  const cmd = argv.map((a) => shellQuote(a, platform)).join(" ");
   if (agent === "claude-code") {
     const hook = (async = false) => [{ hooks: [{ type: "command", command: `${cmd} memory hook`, timeout: async ? 300 : 15, ...(async ? { async: true } : {}) }] }];
     const settings = { hooks: { SessionStart: hook(), UserPromptSubmit: hook(), Stop: hook(true) } };
@@ -121,7 +130,7 @@ export function setupText(agent: string): string | undefined {
     ].join("\n");
   }
   if (agent === "codex") {
-    const [command, ...args] = cmd.split(" ");
+    const [command, ...args] = argv;
     return [
       "# Add to ~/.codex/config.toml:",
       "[mcp_servers.mnemo]",
@@ -201,6 +210,8 @@ export async function runMemoryCommand(argv: string[], home: string, agentDir: s
           memory,
           userSkillsDir: skillsDir(home),
           cwd: path.resolve(option(rest, "--cwd") ?? process.cwd()),
+          // Started for one project: its calls may not name another.
+          root: option(rest, "--cwd") === undefined ? undefined : path.resolve(option(rest, "--cwd")!),
           source: { agent: option(rest, "--agent") ?? "mcp" },
           sessions: new SessionIndex(sessionIndexPath(home), sessionSources(home)),
         },

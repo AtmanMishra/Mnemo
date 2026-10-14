@@ -38,3 +38,30 @@ t("a client initializes, lists the tools, remembers a fact and recalls it", asyn
   expect(by(6).error.code).toBe(-32601);
   memory.stop();
 }, 30_000);
+
+t("a call's cwd must be an existing folder, inside the server's --cwd when it has one", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-mcp-cwd-"));
+  const project = path.join(root, "project");
+  fs.mkdirSync(path.join(project, "sub"), { recursive: true });
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-mcp-other-"));
+  const memory = new MemoryService(MEMSRV!, path.join(root, "journal.jsonl"));
+  const input = new PassThrough();
+  const output = new PassThrough();
+  let buffered = "";
+  output.on("data", (d) => (buffered += d));
+  const done = serveMcp({ memory, userSkillsDir: path.join(root, "skills"), cwd: project, root: project }, input, output);
+  const call = (id: number, cwd: string) =>
+    input.write(`${JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "memory_search", arguments: { query: "anything at all", cwd } } })}\n`);
+  call(1, path.join(project, "sub"));
+  call(2, elsewhere);
+  call(3, path.join(root, "no-such-dir"));
+  call(4, path.join(project, "sub", "..", "..", path.basename(elsewhere)));
+  input.end();
+  await done;
+  const by = (id: number) => buffered.trim().split("\n").map((l) => JSON.parse(l)).find((r) => r.id === id);
+  expect(by(1).result.isError).toBeUndefined();
+  expect(by(2).result.isError).toBe(true);
+  expect(by(3).result.isError).toBe(true);
+  expect(by(4).result.isError).toBe(true);
+  memory.stop();
+}, 30_000);
