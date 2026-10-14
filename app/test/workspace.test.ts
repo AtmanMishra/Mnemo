@@ -387,7 +387,8 @@ test("the logs pane shows the local clock, and a memory edit that did not take s
     fs.mkdirSync(path.join(e.home, "logs"), { recursive: true });
     fs.writeFileSync(path.join(e.home, "logs", `${new Date().toISOString().slice(0, 10)}.jsonl`), `${JSON.stringify({ ts: ts.toISOString(), type: "tool", tool: "bash", subject: "ls", ok: true })}\n`);
     const logs = workspaceSource(e.controller, e.host, e.home).logs();
-    expect(logs[0]?.label).toBe("06:32:03 bash");
+    // Bun fixes the zone at the first Date in the process: the label follows whatever zone that is.
+    expect(logs[0]?.label).toBe(`${ts.toTimeString().slice(0, 8)} bash`);
   } finally {
     if (tz === undefined) delete process.env.TZ;
     else process.env.TZ = tz;
