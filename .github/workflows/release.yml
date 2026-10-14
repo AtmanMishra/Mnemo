@@ -126,6 +126,18 @@ jobs:
           demo=$(stage/mnemo${{ matrix.ext }} --demo --dump)
           grep -q "retries" <<<"$demo" || { echo "::error::the scripted turn did not run"; exit 1; }
 
+      # The suite CI runs on every push (app/e2e: the tool loop, permissions, memory,
+      # images, the bundle, uninstall…), against the binary that ships, with node_modules
+      # out of the way: a break that only the compiled binary has cannot be released.
+      - name: the archive passes the end-to-end suite
+        shell: bash
+        working-directory: app
+        run: |
+          # What keeps the bundle whole (dynamic imports, embedded files), checked on this platform's build.
+          bun test --timeout 120000 ./test/bundle-guard.test.ts ./test/bun-setup.test.ts
+          MNEMO_E2E_BIN="$PWD/../stage/mnemo${{ matrix.ext }}" MNEMO_MEMSRV="$PWD/../stage/memsrv${{ matrix.ext }}" \
+            sh scripts/without-node-modules.sh bun test --timeout 120000 ./e2e
+
       # The one-liner's own script, run against this very archive: install,
       # upgrade in place, uninstall. SHA256SUMS is made here only for the test.
       - name: the installer installs it

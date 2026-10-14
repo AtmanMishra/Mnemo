@@ -60,3 +60,29 @@ describe.if(!!bash && process.platform !== "win32")("release.yml", () => {
     expect(calls.at(-1)).toBe("release edit v0.2.0 --draft=false");
   });
 });
+
+describe.if(!!Bun.which("dash") && process.platform !== "win32")("without-node-modules.sh", () => {
+  const script = path.join(root, "app", "scripts", "without-node-modules.sh");
+  const tree = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-nm-"));
+    for (const d of ["node_modules/pkg", "app/node_modules/dep"]) fs.mkdirSync(path.join(dir, d), { recursive: true });
+    return dir;
+  };
+
+  test("the command runs with no node_modules, and they come back with its exit code kept", () => {
+    const dir = tree();
+    const r = Bun.spawnSync(["dash", script, "sh", "-c", '[ ! -e node_modules ] && [ ! -e app/node_modules ] && exit 3'], { cwd: dir, env: { ...process.env, MNEMO_REPO_ROOT: dir } });
+    expect(r.exitCode).toBe(3);
+    expect(fs.existsSync(path.join(dir, "node_modules", "pkg"))).toBe(true);
+    expect(fs.existsSync(path.join(dir, "app", "node_modules", "dep"))).toBe(true);
+  });
+
+  test("CI and the release run the end-to-end suite through it", () => {
+    const ci = step("ci.yml", "app", "binary end to end (no node_modules)");
+    expect(ci).toContain("without-node-modules.sh");
+    expect(ci).toContain("./e2e");
+    const release = step("release.yml", "build", "the archive passes the end-to-end suite");
+    expect(release).toContain("without-node-modules.sh");
+    expect(release).toMatch(/MNEMO_E2E_BIN=.*stage\/mnemo/);
+  });
+});
