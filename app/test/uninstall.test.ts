@@ -75,3 +75,10 @@ test.skipIf(process.platform === "win32")("the CLI: without a terminal it asks f
   expect(fs.existsSync(home)).toBe(false);
   expect(run("--bogus").exitCode).toBe(2);
 });
+
+test.skipIf(process.platform === "win32")("plain: copies a Windows update moved aside go too, whatever their name", () => {
+  const { home, links } = installed();
+  for (const f of ["mnemo.exe.old", "mnemo.exe.k3j2h1g0f9e.old", "memsrv.exe.a1b2c3d4e5f.old"]) fs.writeFileSync(path.join(home, "bin", f), "old");
+  const plan = planUninstall({ kind: "installer", home, deep: false, linkDir: links });
+  expect(plan.files.map((f) => path.basename(f))).toEqual(expect.arrayContaining(["mnemo.exe.old", "mnemo.exe.k3j2h1g0f9e.old", "memsrv.exe.a1b2c3d4e5f.old"]));
+});

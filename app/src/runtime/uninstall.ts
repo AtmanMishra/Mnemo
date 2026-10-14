@@ -79,7 +79,14 @@ export function planUninstall(o: { kind: InstallKind; home: string; deep: boolea
   else if (o.kind === "scoop") plan.manager = "scoop uninstall mnemo";
   else if (o.kind === "installer") {
     const bin = path.join(o.home, "bin");
-    plan.files = [EXE("mnemo"), EXE("memsrv"), `${EXE("mnemo")}.old`, `${EXE("memsrv")}.old`].map((f) => path.join(bin, f)).filter((f) => fs.existsSync(f));
+    // Besides the two binaries: copies a Windows update moved aside (`mnemo.exe.<random>.old`).
+    let aside: string[] = [];
+    try {
+      aside = fs.readdirSync(bin).filter((f) => f.endsWith(".old") || f.endsWith(".exe.new"));
+    } catch {
+      /* no bin */
+    }
+    plan.files = [EXE("mnemo"), EXE("memsrv"), ...aside].map((f) => path.join(bin, f)).filter((f) => fs.existsSync(f));
     if (win) plan.pathEntry = bin;
     else {
       const link = path.join(o.linkDir ?? path.join(os.homedir(), ".local", "bin"), "mnemo");

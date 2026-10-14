@@ -91,7 +91,7 @@ function Install-Mnemo {
         if ($answer -ne "delete") { Write-Host "  nothing changed"; return }
       }
     }
-    foreach ($f in "mnemo.exe", "memsrv.exe", "mnemo.exe.old", "memsrv.exe.old") { Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $BinDir $f) }
+    foreach ($f in "mnemo.exe", "memsrv.exe", "*.old", "*.new") { Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $BinDir $f) }
     if (Test-Path (Join-Path $BinDir "mnemo.exe")) { throw "mnemo.exe is in use: close every Mnemo window and run this again" }
     $kept = ((Get-UserPath) -split ";" | Where-Object { $_ -and $_ -ne $BinDir }) -join ";"
     Set-UserPath $kept
@@ -144,16 +144,31 @@ function Install-Mnemo {
       }
     } finally { $zip.Dispose() }
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-    foreach ($f in "mnemo.exe", "memsrv.exe") {
-      $dest = Join-Path $BinDir $f
-      # A running .exe cannot be overwritten, but it can be renamed: move it aside
-      # (mnemo deletes the .old copy on its next start), then put the new one in place.
-      if (Test-Path $dest) {
-        Remove-Item -Force -ErrorAction SilentlyContinue "$dest.old"
-        try { Move-Item -Force -ErrorAction Stop $dest "$dest.old" } catch { throw "could not replace $f; close every Mnemo window and run the installer again" }
+    $names = "mnemo.exe", "memsrv.exe"
+    # Copies left aside by earlier updates; one still running (an MCP server child, say) stays.
+    Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $BinDir "*.old")
+    # Both new files go in beside the old ones first, so nothing installed has changed if this fails.
+    foreach ($f in $names) { Copy-Item -Force (Join-Path $tmp $f) (Join-Path $BinDir "$f.new") }
+    # A running .exe cannot be overwritten, but it can be renamed: each one in place is moved
+    # aside under a name of its own (mnemo deletes *.old on its next start; a name is never
+    # reused, since an earlier .old may still be running). If either cannot be moved, the
+    # other is put back: never a new mnemo.exe beside an old memsrv.exe.
+    $aside = @()
+    try {
+      foreach ($f in $names) {
+        $dest = Join-Path $BinDir $f
+        if (Test-Path $dest) {
+          $old = "$dest." + [IO.Path]::GetRandomFileName().Replace(".", "") + ".old"
+          Move-Item -ErrorAction Stop $dest $old
+          $aside += [pscustomobject]@{ Old = $old; Dest = $dest }
+        }
       }
-      Move-Item -Force (Join-Path $tmp $f) $dest
+    } catch {
+      foreach ($a in $aside) { Move-Item -Force -ErrorAction SilentlyContinue $a.Old $a.Dest }
+      foreach ($f in $names) { Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $BinDir "$f.new") }
+      throw "could not replace $f; close every Mnemo window and run the installer again"
     }
+    foreach ($f in $names) { Move-Item -Force (Join-Path $BinDir "$f.new") (Join-Path $BinDir $f) }
     Ok "installed into $BinDir"
     $userPath = Get-UserPath
     if (($userPath -split ";") -notcontains $BinDir) {

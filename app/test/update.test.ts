@@ -4,7 +4,10 @@
  * read from GitHub's redirect, and /update says what it will do.
  */
 import { test, expect, afterEach } from "bun:test";
-import { compareVersions, installKind, latestVersion, manualStep, shouldCheck } from "../src/runtime/update.ts";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { clearReplaced, compareVersions, installKind, latestVersion, manualStep, shouldCheck } from "../src/runtime/update.ts";
 import type { Updater } from "../src/runtime/controller.ts";
 import { mnemoEnv } from "./helpers.ts";
 
@@ -85,4 +88,14 @@ test("/update auto on|off turns the daily check on and off", async () => {
   await a.e.controller.submit("/update auto off");
   expect(a.calls).toEqual(["auto true", "auto false"]);
   expect(a.notices().at(-1)).toContain("no request of its own");
+});
+
+test("clearReplaced deletes every binary the Windows installer moved aside, whatever its name", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-old-"));
+  const bin = path.join(home, "bin");
+  fs.mkdirSync(bin);
+  for (const f of ["mnemo.exe", "mnemo.exe.old", "mnemo.exe.k3j2h1g0f9e.old", "memsrv.exe.a1b2c3d4e5f.old", "notes.txt"]) fs.writeFileSync(path.join(bin, f), "x");
+  clearReplaced(home);
+  expect(fs.readdirSync(bin).sort()).toEqual(["mnemo.exe", "notes.txt"]);
+  clearReplaced(path.join(home, "nowhere")); // no bin: nothing to do, no throw
 });

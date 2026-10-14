@@ -127,10 +127,20 @@ export function shouldCheck(o: { auto?: boolean; checkedAt?: number; now: number
   return on && (o.checkedAt === undefined || o.now - o.checkedAt >= DAY_MS);
 }
 
-/** On Windows the installer renames a running binary aside (`mnemo.exe.old`); clear those once it is no longer running. */
+/**
+ * On Windows the installer renames a running binary aside (`mnemo.exe.<random>.old`, a
+ * new name each time since an earlier one may still be running); clear those that no
+ * longer are.
+ */
 export function clearReplaced(home: string): void {
   const bin = path.join(home, "bin");
-  for (const f of ["mnemo.exe.old", "memsrv.exe.old"]) {
+  let names: string[];
+  try {
+    names = fs.readdirSync(bin).filter((f) => f.endsWith(".old"));
+  } catch {
+    return;
+  }
+  for (const f of names) {
     try {
       fs.rmSync(path.join(bin, f), { force: true });
     } catch {

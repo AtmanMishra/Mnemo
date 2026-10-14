@@ -80,3 +80,62 @@ test("test-install.sh: every check in the container can fail the run", () => {
   expect(unguarded).toEqual([]);
   if (dash) expect(Bun.spawnSync([dash, "-n", "-c", inner]).exitCode).toBe(0);
 });
+
+describe.if(!!pwsh)("get.ps1 replacing an installed Mnemo", () => {
+  /**
+   * Runs the whole installer against a local release holding a new mnemo.exe and memsrv.exe,
+   * over an install of old ones. `mocks` is PowerShell defining Move-Item / Remove-Item stand-ins
+   * that fail the way Windows does on a running .exe. (Off Windows the installer stops at the
+   * user PATH, which lives in the registry; the files are in place by then.)
+   */
+  function install(mocks: string, leftovers: string[] = []) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-ps-"));
+    const rel = path.join(root, "release");
+    const bin = path.join(root, ".mnemo", "bin");
+    fs.mkdirSync(rel, { recursive: true });
+    fs.mkdirSync(bin, { recursive: true });
+    for (const f of ["mnemo.exe", "memsrv.exe"]) {
+      fs.writeFileSync(path.join(root, f), `new ${f}`);
+      fs.writeFileSync(path.join(bin, f), `old ${f}`);
+    }
+    for (const f of leftovers) fs.writeFileSync(path.join(bin, f), "still running");
+    const ps = `$ErrorActionPreference = "Stop"
+Compress-Archive -Path '${path.join(root, "mnemo.exe")}','${path.join(root, "memsrv.exe")}' -DestinationPath '${path.join(rel, "mnemo-windows-x64.zip")}'
+$sum = (Get-FileHash -Algorithm SHA256 '${path.join(rel, "mnemo-windows-x64.zip")}').Hash.ToLower()
+"$sum  mnemo-windows-x64.zip" | Set-Content '${path.join(rel, "SHA256SUMS")}'
+${mocks}
+try { & '${path.join(scripts, "get.ps1")}' } catch { Write-Output "THREW: $_" }`;
+    const r = Bun.spawnSync([pwsh!, "-NoProfile", "-NonInteractive", "-Command", ps], {
+      env: { ...process.env, MNEMO_HOME: path.join(root, ".mnemo"), MNEMO_RELEASE_BASE: rel, NO_COLOR: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const files = Object.fromEntries(fs.readdirSync(bin).sort().map((f) => [f, fs.readFileSync(path.join(bin, f), "utf8")]));
+    return { out: r.stdout.toString() + r.stderr.toString(), files };
+  }
+  /** Windows: a file that is running cannot be deleted, nor replaced by a rename onto it. */
+  const lockedOld = `
+function Remove-Item { [CmdletBinding()] param([Parameter(Position = 0)]$Path, [switch]$Force, [switch]$Recurse)
+  if ("$Path" -like "*.old") { return }
+  Microsoft.PowerShell.Management\\Remove-Item @PSBoundParameters }
+function Move-Item { [CmdletBinding()] param([Parameter(Position = 0)]$Path, [Parameter(Position = 1)]$Destination, [switch]$Force)
+  if ("$Destination" -like "*.old" -and (Test-Path "$Destination")) { throw "the file is in use" }
+  Microsoft.PowerShell.Management\\Move-Item @PSBoundParameters }`;
+
+  test("a mnemo.exe.old still running from the last update does not stop the next one", () => {
+    const { out, files } = install(lockedOld, ["mnemo.exe.old"]);
+    expect(out).not.toContain("could not replace");
+    expect(files["mnemo.exe"]).toBe("new mnemo.exe");
+    expect(files["memsrv.exe"]).toBe("new memsrv.exe");
+  });
+
+  test("when memsrv.exe cannot be moved aside, the old mnemo.exe stays too", () => {
+    const memsrvBusy = `
+function Move-Item { [CmdletBinding()] param([Parameter(Position = 0)]$Path, [Parameter(Position = 1)]$Destination, [switch]$Force)
+  if ("$Path" -like "*memsrv.exe" -and "$Destination" -like "*.old") { throw "the file is in use" }
+  Microsoft.PowerShell.Management\\Move-Item @PSBoundParameters }`;
+    const { out, files } = install(memsrvBusy);
+    expect(out).toContain("could not replace");
+    expect(files).toEqual({ "memsrv.exe": "old memsrv.exe", "mnemo.exe": "old mnemo.exe" });
+  });
+});
