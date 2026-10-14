@@ -2,8 +2,8 @@
  * Files are kept before the agent changes them (runtime/checkpoints.ts), so
  * esc esc or /rewind can take the project back with the conversation.
  */
-import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { realPath, toolTarget } from "../policy/paths.ts";
 import type { Host } from "./host.ts";
 
 const WRITES = new Set(["edit", "write"]);
@@ -27,7 +27,10 @@ export function checkpointsExtension(host: Host) {
       if (typeof file !== "string" || !file) return undefined;
       // A sub-agent's turn is its parent's: that is the message a rewind goes back to.
       if (host.depth === 0) store.turn = currentTurn(ctx.sessionManager.getBranch());
-      store.keep(path.resolve(ctx.cwd, file));
+      // The file the tool will really write: `@src/a.ts`, `~/x` and `file://` resolved as
+      // pi resolves them, and through symlinks, so a rewind puts back that file.
+      const target = toolTarget(ctx.cwd, file);
+      if (target !== undefined) store.keep(realPath(target) ?? target);
       return undefined;
     });
   };
