@@ -76,6 +76,7 @@ expect(lastToolResult()).toContain("…");             // what the binary sent b
 | Memory across sessions, `memory_search` | ✓ `memory-loop.test`, `packages/memory` | ✓ | |
 | `mnemo memory status / tidy / setup / --help` | ✓ `tidy.test`, `memory-cli.test` | ✓ runs against a real journal | |
 | Images in `read` | | ✓ (v0.1.3) | |
+| `mnemo install`, a download installing itself, doctor's PATH check | ✓ `self-install.test` (Windows paths with stubs; the PATH through pwsh when present) | ✓ `install --yes` from a download, doctor from both copies | ✓ the question: no is remembered, yes installs |
 | Uninstall, `--deep`, the refusal to delete foreign files | ✓ `uninstall.test` | ✓ installer layout, saved grants, refusal exits 1 | |
 | Update, `--check`, auto check | ✓ `update.test` | ✗ needs a mock GitHub | |
 | Installers `get.sh` / `get.ps1` | ✓ `installers.test` (dash; pwsh when present), release workflow | ◐ `scripts/test-install.sh` (Docker) | |
