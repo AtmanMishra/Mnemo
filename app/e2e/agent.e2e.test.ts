@@ -321,6 +321,28 @@ describe("install layout", () => {
     expect(out).toContain(`✓ memory  ${path.join(i.bin, "memsrv")}`);
   }, T);
 
+  test.if(!!memsrv())("install --yes copies a download into $MNEMO_HOME/bin, where it finds its sidecar", async () => {
+    const w = fresh();
+    const dl = path.join(w.home, "Downloads", "mnemo");
+    fs.mkdirSync(dl, { recursive: true });
+    fs.copyFileSync(binary(), path.join(dl, "mnemo"));
+    fs.chmodSync(path.join(dl, "mnemo"), 0o755);
+    fs.copyFileSync(memsrv()!, path.join(dl, "memsrv"));
+    const env = { ...w.env, PATH: process.env.PATH! };
+    delete env.MNEMO_MEMSRV;
+    const bin = path.join(w.mnemoHome, "bin");
+    const r = await run({ ...w, env }, path.join(dl, "mnemo"), ["install", "--yes"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain(`copied mnemo and memsrv to ${bin}`);
+    // Off Windows nothing edits a shell profile: it says the line instead.
+    expect(r.stdout).toContain(`export PATH="${bin}:$PATH"`);
+    expect(fs.readdirSync(bin).sort()).toEqual(["memsrv", "mnemo"]);
+    const doctor = await run({ ...w, env }, path.join(bin, "mnemo"), ["doctor"]);
+    expect(doctor.stdout).toContain(`✓ memory  ${path.join(bin, "memsrv")}`);
+    const installed = await run({ ...w, env }, path.join(bin, "mnemo"), ["install", "--yes"]);
+    expect(installed.stdout).toContain(`Mnemo is installed in ${bin}`);
+  }, T);
+
   test("uninstall --yes removes the program and keeps what it learned", async () => {
     const w = fresh();
     const i = installed(w);

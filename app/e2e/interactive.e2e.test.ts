@@ -1,8 +1,10 @@
 // The interactive interface in a real terminal: what only a person at a keyboard
 // would otherwise find. Linux and macOS (Windows has no pty to drive).
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { startMockLLM, type MockLLM } from "./mock-llm.ts";
-import { binary, world, type World } from "./harness.ts";
+import { binary, memsrv, world, type World } from "./harness.ts";
 import { hasPty, KEY, terminal, type Terminal } from "./pty.ts";
 
 const T = 90_000;
@@ -220,4 +222,59 @@ describe.if(hasPty)("interactive", () => {
       await t.kill();
     }
   }, T);
+
+  // Windows only, outside tests: MNEMO_SELF_INSTALL_TEST lets the question come up here.
+  describe.if(!!memsrv())("a downloaded copy", () => {
+    /** mnemo and memsrv unzipped into a downloads folder, as a release archive leaves them. */
+    function downloaded(w: World) {
+      const dl = path.join(w.home, "Downloads", "mnemo");
+      fs.mkdirSync(dl, { recursive: true });
+      fs.copyFileSync(binary(), path.join(dl, "mnemo"));
+      fs.chmodSync(path.join(dl, "mnemo"), 0o755);
+      fs.copyFileSync(memsrv()!, path.join(dl, "memsrv"));
+      return { dl, exe: path.join(dl, "mnemo") };
+    }
+    const env = { MNEMO_SELF_INSTALL_TEST: "1" };
+
+    test("asks to install itself; no starts Mnemo, and is not asked again", async () => {
+      const w = fresh();
+      const d = downloaded(w);
+      const bin = path.join(w.mnemoHome, "bin");
+      let t = await terminal(w, START, { exe: d.exe, env });
+      try {
+        await t.waitFor(new RegExp(`Install Mnemo to ${bin} and add it to your PATH\\? \\[Y/n\\]`));
+        await t.type("n");
+        await t.type(KEY.enter);
+        await ready(t);
+      } finally {
+        await t.kill();
+      }
+      expect(fs.existsSync(bin)).toBe(false);
+      t = await terminal(w, START, { exe: d.exe, env });
+      try {
+        await ready(t);
+        expect(t.text()).not.toContain("Install Mnemo to");
+      } finally {
+        await t.kill();
+      }
+    }, T);
+
+    test("yes installs it, says what to do next, and exits", async () => {
+      const w = fresh();
+      const d = downloaded(w);
+      const bin = path.join(w.mnemoHome, "bin");
+      const t = await terminal(w, START, { exe: d.exe, env });
+      try {
+        await t.waitFor(/add it to your PATH\? \[Y\/n\]/);
+        await t.type(KEY.enter);
+        await t.waitFor(/Mnemo is installed/);
+        expect(await t.exitWithin(10_000)).toBe(0);
+      } finally {
+        await t.kill();
+      }
+      expect(fs.readdirSync(bin).sort()).toEqual(["memsrv", "mnemo"]);
+      expect(t.text()).toContain(`copied mnemo and memsrv to ${bin}`);
+    }, T);
+  });
 });
+
