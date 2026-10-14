@@ -185,3 +185,16 @@ commit and carry a build-provenance attestation:
 
 The checksum catches a corrupted download, not a compromised release (it is
 published beside the archive); the attestation is the provenance check.
+
+`mnemo update` (and `/update`) downloads the installer from the release and runs
+it, with the same checksum check and the same limit: the checksum is not
+provenance, so verify the attestation yourself if that matters.
+
+## Uninstalling
+
+`mnemo uninstall` removes the program (`mnemo` and `memsrv` in `$MNEMO_HOME/bin`,
+the link on your `PATH`) and keeps what Mnemo learned. `--deep` also deletes
+`$MNEMO_HOME` (memory, sessions, the credentials from `/login`, skills, logs,
+settings) after you type `delete` (`--yes` skips the question). The install scripts do the same
+(`sh -s -- --uninstall` / `--deep`, or `MNEMO_UNINSTALL=1` / `deep` on Windows).
+Keys that live in your environment or in other tools are not touched.

@@ -1,7 +1,7 @@
 # DESIGN.md — the Mnemo interface
 
 How `mnemo` looks and behaves in a terminal, and where each piece lives.
-Status: v0.1, being built in `app/src/ui/` (Ink + React on Bun).
+Status: v0.1.2, being built in `app/src/ui/` (Ink + React on Bun).
 The Go interface's design is archived at `docs/archive/DESIGN-go-tui.md`.
 
 ## 1. Principles
@@ -34,7 +34,8 @@ One file owns colour: `app/src/ui/theme.ts`. Eleven themes, switched live with
 **Gruvbox**, **Tokyo Night**, **Catppuccin Mocha**, **Synthwave**, **Amber CRT** (one
 phosphor: roles told apart by value), **Game Boy** (four greens, the same way), **Paper** and
 **Solarized Light** (light). Each keeps Night's roles; `test/themes.test.ts` holds every one to
-7:1 contrast for text and 3:1 for accents. A theme changes
+7:1 contrast for text and 3:1 for accents. Each is an entry in `THEMES` (a label, whether it paints its own background, and a
+colour for every palette key); `setTheme` changes
 the palette in place; pixel art is drawn in Night and translated, and painted
 themes also set the terminal's default colours (OSC 10/11, restored on exit).
 Truecolor hex; chalk downsamples, `NO_COLOR` turns it off. Pixels: `app/src/ui/pixel.ts`
@@ -125,7 +126,7 @@ The inline layout (`--inline`, dumps, pipes) is the earlier one:
 
 ```
 ╭─────────────────────────────────────────────────────────────╮
-│ ✻ mnemo  v0.1.0                                             │   welcome card
+│ ✻ mnemo  v0.1.2                                             │   welcome card
 │   memory that works like a brain                            │   (once, then
 │   ~/code/project · claude-sonnet-4-5 · memory on            │    scrollback)
 │   /help for commands · @ to mention a file · esc interrupts │
@@ -248,7 +249,7 @@ ends the program.
 Built in: `/help`, `/model`, `/login`, `/logout`, `/new`, `/resume`, `/compact`,
 `/thinking`, `/cost`, `/stats`, `/clear`, `/memory [words]`, `/remember key: value`, `/mode`,
 `/plan`, `/skills`, `/reload`, `/quit`, `/theme`, `/bestof N "<check>" <task>`, `/rewind`,
-`/update`, `/mouse`. `/resume` lists sessions by title (a session is named after its first
+`/update`, `/mouse`, `/forget <key>`, `/yolo`, `/accept-edits`. `/resume` lists sessions by title (a session is named after its first
 message), with what each cost and how it ended, and the filter searches everything said in
 them. File paths in tool titles and links in answers are clickable (OSC 8; `MNEMO_LINKS=0`
 turns it off). Everything pi knows —

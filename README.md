@@ -43,8 +43,10 @@ irm https://mnemo.atmanmishra.dev/install.ps1 | iex
 No Bun, Node or Rust is needed: the installer downloads one archive holding
 `mnemo` and its memory sidecar `memsrv`, checks its SHA-256, and puts both in
 `~/.mnemo/bin`. On a terminal it draws itself as it goes; piped or with
-`NO_COLOR` it prints plain lines. Read the script first if you like:
-[`app/scripts/get.sh`](app/scripts/get.sh).
+`NO_COLOR` it prints plain lines. `sh -s -- --version v0.1.2` (or
+`MNEMO_VERSION=v0.1.2`, also on Windows) installs a specific release. Read the
+script first if you like: [`app/scripts/get.sh`](app/scripts/get.sh). More on
+[the download page](https://mnemo.atmanmishra.dev/download).
 
 Then:
 
@@ -97,10 +99,10 @@ you attached memory to Claude Code or Codex (`mnemo memory setup`), remove the
 
 <details><summary>From source</summary>
 
-Needs [Bun](https://bun.sh) 1.4+ and a Rust toolchain.
+Needs [Bun](https://bun.sh) 1.3+ and a Rust toolchain.
 
 ```bash
-git clone https://github.com/AtmanMishra/Mnemo && cd mnemo
+git clone https://github.com/AtmanMishra/Mnemo && cd Mnemo
 bun install
 (cd memory-layer && cargo build --release --bin memsrv)
 cd app && bun bin/mnemo.ts --demo
@@ -115,7 +117,8 @@ cd app && bun bin/mnemo.ts --demo
   skills, stored locally. `/memory` shows them, `/forget` retires one, and the
   memory map (`m` in the memory pane) draws them. In the memory pane, `e`
   edits a fact, `d` forgets it, and `+`/`-` tell recall what helped and what was
-  wrong. `mnemo memory tidy` finds duplicates, facts about files that are gone
+  wrong: recall ranks by those votes, and what was marked wrong twice is no
+  longer recalled. `mnemo memory tidy` finds duplicates, facts about files that are gone
   and what was marked wrong (`--apply` retires them). Search can use your own
   embedding server: `MNEMO_EMBED_URL=http://localhost:11434/v1/embeddings
   MNEMO_EMBED_MODEL=nomic-embed-text` (Ollama).
@@ -126,8 +129,11 @@ cd app && bun bin/mnemo.ts --demo
   four), `ctrl+p` switch project, `ctrl+n` another agent on this project.
 - **Keyboard first.** `ctrl+k` on an empty prompt goes to any command, agent,
   session or file; `ctrl+f` finds in the conversation; `/stats` shows the
-  session and the week; a long turn that ends while you are in another window
-  sends a desktop notification.
+  session and the week; `ctrl+o` expands output that is already printed; file
+  paths and links are clickable; a long turn that ends while you are in another
+  window sends a desktop notification. Every screen fits the terminal, at any
+  size. All commands and keys: [docs](https://mnemo.atmanmishra.dev/docs),
+  [shortcuts](https://mnemo.atmanmishra.dev/shortcuts).
 - **Checks its work.** A run that changed code and ran nothing is sent back to
   run the project's checks. `--escalate provider/id` finishes a run on a stronger
   model after two failed checks; `mnemo -p "<task>" --best-of 3 --check "npm
@@ -138,7 +144,9 @@ cd app && bun bin/mnemo.ts --demo
   both, and your message returns to the prompt. Changes made by shell commands
   are not tracked.
 - **Stays out of your keys.** Commands the agent runs (bash, the Python kernel)
-  do not get your model-provider API keys; see [SECURITY.md](SECURITY.md).
+  do not get your model-provider API keys (`MNEMO_PASS_ENV=NAME` hands one
+  back), and the Python kernel has a timeout and a memory cap; see
+  [SECURITY.md](SECURITY.md).
 - **A pixel interface** with Mne the elephant, eleven themes (`/theme`) and a
   sidebar for files, memory, sessions, skills and logs. The spec is
   [DESIGN.md](DESIGN.md).
@@ -168,8 +176,9 @@ edits, `/yolo` (or `--yolo`) about everything, and headless `-p` never asks, so
 use the last two in a container or a throwaway checkout. The gate filters
 what runs; it is not a sandbox. Your prompts and the files the model reads go to
 the provider you chose; nothing else leaves your machine, and there is no
-telemetry, and no update check unless you turn one on. Read [SECURITY.md](SECURITY.md), which also says how to report a
-vulnerability.
+telemetry, and no update check unless you turn one on. Read
+[SECURITY.md](SECURITY.md), which also says how to report a vulnerability
+([also on the website](https://mnemo.atmanmishra.dev/security)).
 
 ## Repository
 
@@ -178,7 +187,8 @@ vulnerability.
 | `app/` | the program: Ink interface, agent loop on the [pi](https://github.com/earendil-works/pi) SDK, extensions, evals |
 | `packages/memory/` | `@mnemo/memory`: the memory loop any agent can drive |
 | `memory-layer/` | `memsrv`, the Rust memory sidecar |
-| `site/` | the project page and installers (GitHub Pages) |
+| `web/` | the project site, <https://mnemo.atmanmishra.dev> (Vite + React, prerendered) |
+| `site/` | the earlier project page (GitHub Pages) and the images this README uses |
 | `docs/` | [ROADMAP](docs/ROADMAP.md), [RELEASING](docs/RELEASING.md), [the previous stack](docs/LEGACY.md) |
 | `research/` | the evals and the design papers |
 | branch [`legacy`](https://github.com/AtmanMishra/Mnemo/tree/legacy) | the previous stack (`tui-go/`, `agent/`, `harness-engine/`), kept for reference and **unmaintained** |
@@ -190,7 +200,9 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Maintainers cutting a release:
 
 Pre-alpha. It works, it has tests, and it has rough edges; file what you find in
 [the issue tracker](https://github.com/AtmanMishra/Mnemo/issues). What is left,
-in order, is in [docs/ROADMAP.md](docs/ROADMAP.md).
+in order, is in [docs/ROADMAP.md](docs/ROADMAP.md) and on
+[the roadmap page](https://mnemo.atmanmishra.dev/roadmap); what changed in each
+release is in [the changelog](https://mnemo.atmanmishra.dev/changelog).
 
 ## License
 

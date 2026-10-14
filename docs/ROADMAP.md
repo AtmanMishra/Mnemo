@@ -1,9 +1,11 @@
 # Roadmap — from half-built to something a stranger can install
 
-*Written 2026-10-08 against branch `rebuild/bun-app`. This is the task list.
+*Written 2026-10-08, brought up to date 2026-10-13 against release v0.1.2 (`main`). This is the task list.
 `docs/REBUILD.md` says where the code is going, `docs/PLAN-monorepo.md` says how
 it is laid out, `docs/HANDOFF.md` says where the last session stopped. This file
-says what is left before Mnemo can be handed to a user, in the order to do it.*
+says what is left, in the order to do it. The public view of the same plan, without task numbers, is
+<https://mnemo.atmanmishra.dev/roadmap>; what shipped in each release is in the
+[changelog](https://mnemo.atmanmishra.dev/changelog) (`web/src/content/`).*
 
 ## The direction (settled)
 
@@ -13,13 +15,12 @@ One Bun application is the program. Three runtimes, three jobs:
 |---|---|---|
 | **Bun / TypeScript** | the interface, the agent loop and its tools, sessions, auth, policy, hooks, schedules, MCP, the harness engine | `app/` (today) → `packages/*` (later) |
 | **Rust** | memory: the journal, recall, steering, consolidation, and the background jobs that improve the graph | `memory-layer/` (`memsrv`) |
-| **Python** | execution: one long-lived ipy interpreter the agent drives to touch the system | `agent/kernel/ipy_bridge.py` (to move) |
+| **Python** | execution: one long-lived ipy interpreter the agent drives to touch the system | `app/python/ipy_bridge.py` |
 
-**Legacy, kept only as a reference until parity is proven:** `tui-go/` (Go
-interface), `agent/` (Node: tools, extensions, hooks, schedules, MCP, tracing),
-`harness-engine/` (Node). They keep working on this branch, nothing is deleted on
-the strength of a plan, and each is archived on its own branch once the Bun side
-replaces it (see Stage 7).
+**Legacy:** `tui-go/` (Go interface), `agent/` (Node: tools, extensions, hooks, schedules, MCP,
+tracing) and `harness-engine/` (Node) are no longer on `main`. They live on the `legacy` branch,
+unmaintained, and serve as a specification only (see `SECURITY.md`). Their documentation is
+`docs/LEGACY.md`.
 
 **The product** is an agentic CLI in the family of Claude Code, Codex CLI and
 Hermes whose difference is the memory: it reads each session, updates the graph,
@@ -27,15 +28,16 @@ steers it on failure, stores different kinds of facts, and writes and patches it
 own skills. The interface is the table stakes; the memory is the reason to exist.
 Both have to ship.
 
-## Where things actually stand (updated 2026-10-08, prototype)
+## Where things actually stand (updated 2026-10-13, v0.1.2)
 
 | Area | State |
 |---|---|
-| `app/` | **A working prototype.** Ink interface on pi 1.1's in-process SDK, with Mnemo's behaviour as six pi extensions (policy, memory, kernel, sub-agents, skills, trace). 103 tests pass, none skipped, `tsc` clean — including a cross-session test where what one session learns is in the next session's prompt. |
-| Memory loop | profiles (project, user) injected every turn; search recall linked to the episode as feeders; tool/turn failures steer; clean runs reinforce; a reflection call after each run writes durable facts (a changed fact supersedes); consolidation at shutdown. |
-| Install | `app/scripts/install.sh` builds `mnemo` + `memsrv` into `~/.mnemo/bin` and runs `mnemo doctor` (verified). No release pipeline for the Bun binary yet. |
-| Not verified | a turn against a real provider (everything here ran on pi's faux model); Windows and macOS (CI job added, not run). |
-| Legacy | `agent/`, `harness-engine/`, `tui-go/` still in the tree, no longer used by `app/`. |
+| Releases | v0.1.0 (2026-10-09), v0.1.1 (2026-10-12), v0.1.2 (2026-10-13). A tag builds, smoke-tests and attests five archives (linux x64/arm64, macOS arm64/x64, Windows x64) and publishes them with `SHA256SUMS`; `docs/RELEASING.md`. |
+| `app/` | The program: Ink interface on pi 1.1's in-process SDK, with Mnemo's behaviour as pi extensions (policy, memory, kernel, shell, checkpoints, sub-agents, skills, trace, escalate, update). 235 tests pass on a scripted model, `tsc` clean, on Linux, macOS and Windows CI. |
+| Memory loop | profiles injected every turn; trust-weighted recall linked to the episode; failures steer, clean runs reinforce; a reflection call after each run writes durable facts; `mnemo memory tidy`; consolidation at shutdown; shared with Claude Code (hooks) and Codex, Cursor, opencode (MCP). |
+| Install | `get.sh` / `get.ps1` (animated on a terminal, checksummed), `mnemo update`, `mnemo uninstall [--deep]`, `mnemo doctor [--fix]`; Docker clean-install test in `app/scripts/test-install.sh`. |
+| Site | `web/` (Vite + React on Vercel): home, download, docs, shortcuts, changelog, roadmap, security, privacy, terms; `docs/WEB.md`. |
+| Not verified | Long real-provider sessions beyond the dogfood and benchmark runs (`research/`); a person following the README on a clean Windows and macOS machine; the background curator against a real model (it is on `feature/background-curator`, not in a release). |
 
 ## Decisions (answered 2026-10-08)
 
@@ -148,7 +150,7 @@ J0 exists. Build in its own phases, report-only first.
   (Spatial), decisions (Executive), pain (Salience), each routed to its area.
   Built as a reflection call after each run writing key/value facts onto a
   project profile and a user profile.
-- ▢ 3.2 **P0 `mnemo memory status`**: empty episodes, open gaps, contradicting
+- ▣ 3.2 **P0 `mnemo memory status`**: empty episodes, open gaps, contradicting
   same-key facts, dead edges, counts by area. No model, no writes.
 - ▢ 3.3 **No-model jobs** J2 merge, J5 salience review, J6 edge maintenance, J9
   compaction report, J10 training rows. Safe on a cron with no key.
@@ -162,9 +164,9 @@ J0 exists. Build in its own phases, report-only first.
 - ▣ 3.7 **Steering from real outcomes**: wire `steer`/`reinforce` to the turn's
   actual result (tool failure, user correction, test red→green), not only to
   explicit calls.
-- ▢ 3.8 **Usefulness feedback** from the interface (thumbs on a recalled item)
+- ▣ 3.8 **Usefulness feedback** from the interface (thumbs on a recalled item)
   into `mark_useful`.
-- ▢ 3.9 **Memory panel writes**: edit a fact, supersede, link, forget with
+- ▣ 3.9 **Memory panel writes** (v0.1.2: edit, forget, vote; ▢ link, `history` of a key): edit a fact, supersede, link, forget with
   confirmation; show `history` of a key.
 - ▢ 3.10 **Retrieval quality**: decide the default embedder (hash is offline and
   weak; the remote one needs a key), switch `memsrv` to the ANN path when node
@@ -204,10 +206,13 @@ frontier model's sessions teach the memory the cheap model uses.
 - ▣ 3b.7 **Benchmarks, local**: `app/eval/run.ts` (seven two-session scenarios,
   memory vs none) and `app/eval/series.ts` (six tasks in one repo with unwritten
   rules: the learning curve; `--teacher` for teacher→student).
-- ▢ 3b.8 **Trust-weighted recall** (audit F8): rank by provenance (a fix a
-  frontier model found and a test confirmed outranks a cheap model's guess).
-- ▢ 3b.9 **Local embedder** (audit F15): recall precision; the lexical hash
-  ranks an episode above the matching pitfall today.
+- ▣ 3b.8 **Trust-weighted recall** (audit F8), v0.1.2: rank by the votes you give
+  (`trust = 2(up+1)/(up+down+2)`; marked wrong twice and it is no longer recalled).
+  ▢ Rank by provenance too (a fix a frontier model found and a test confirmed
+  outranks a cheap model's guess).
+- ▣ 3b.9 **Local embedder** (audit F15), v0.1.2: `MNEMO_EMBED_URL` + `MNEMO_EMBED_MODEL`
+  point search at an Ollama or any OpenAI-compatible server. ▢ The default is still
+  the offline hashing embedder, which ranks an episode above the matching pitfall.
 - ▣ 3b.10 **Escalation** (`--escalate provider/id`, `MNEMO_ESCALATE_MODEL`;
   `src/extensions/escalate.ts`): after the project's checks fail twice in a run,
   the rest of the run goes to the stronger model and the next run starts cheap
@@ -231,9 +236,9 @@ frontier model's sessions teach the memory the cheap model uses.
 
 ### Stage 4 — Execution
 
-- ▢ 4.1 Per-call timeout on the in-kernel channel (audit #6) and a cell timeout
+- ▣ 4.1 Per-call timeout on the in-kernel channel (audit #6) and a cell timeout
   surfaced in the UI.
-- ▢ 4.2 Resource bounds (audit #11) — at minimum memory and wall clock.
+- ▣ 4.2 Resource bounds (audit #11) — at minimum memory and wall clock.
 - ▢ 4.3 Record the process tree each call starts; show it in the audit trail.
 - ▢ 4.4 Route `bash_exec` through the kernel or document why not.
 - ▢ 4.5 Sandbox decision (D4) written into the README either way.
@@ -255,44 +260,51 @@ frontier model's sessions teach the memory the cheap model uses.
 - ▣ 5.3a Build: `app/scripts/build.ts` → `dist/mnemo` (≈96 MB; verified to run
   the demo with an empty environment). Stubs Ink's optional devtools import,
   which otherwise breaks `--compile`.
-- ▢ 5.4 `mnemo doctor` is the support command: runtime, provider, model, sidecar,
+- ▣ 5.4 `mnemo doctor` is the support command: runtime, provider, model, sidecar,
   kernel, home, versions.
-- ▢ 5.5 Versioning and `--version`; a release checklist; update path.
+- ▣ 5.5 Versioning and `--version`; a release checklist; update path.
 - ▢ 5.6 First-run on a clean VM per OS — a person follows the README with nothing
   preinstalled and it works.
 
 ### Stage 6 — Quality gates for a public alpha
 
-- ▢ 6.1 CI matrix: app (3 OS), memory-layer, harness, secrets scan, eval floor.
+- ▣ 6.1 CI matrix: app (3 OS) with the memory package, memory-layer, retrieval floor, secrets scan (`ci.yml`). ▢ The site (`web/`) has no CI job: `npm run build` runs on Vercel.
 - ▣ 6.2 `SECURITY.md` ("what the gate is and is not", credentials, memory as
   trusted input). ▢ Open audit leftovers: 12.15 (partly done), 12.16 design
   confirmations.
-- ▢ 6.2a **Scrub provider keys from child processes**: commands the agent runs
+- ▣ 6.2a **Scrub provider keys from child processes**: commands the agent runs
   inherit the environment, keys included (an eval's `env` call recorded one).
   Pass bash and the kernel an environment without `*_API_KEY`/`*_TOKEN`/`AWS_*`
   unless the user opts in per command.
 - ▣ 6.3 Telemetry policy: none, and measured (`SECURITY.md`): only a real prompt
   opens a connection, to the configured provider.
-- ▢ 6.4 Docs for users (not agents): install, first run, commands, config, memory
+- ▣ 6.4 Docs for users (not agents): install, first run, commands, config, memory
   model in plain words, skills, hooks, troubleshooting.
 - ▢ 6.5 Known-issues list in the tracker; triage before the tag.
 
 ### Stage 7 — Retire the old code
 
 - ▢ 7.1 Parity sign-off (1.12 and 2.x verified).
-- ▢ 7.2 Archive `tui-go/` on `archive/tui-go`, `agent/` on `archive/agent-node`,
-  `harness-engine/` likewise; remove from CI; one commit that deletes them from
-  the tree. Same procedure as `archive/tui-rust`.
+- ▣ 7.2 The Go interface, the Node agent and the harness engine moved to the
+  `legacy` branch and are gone from `main` and CI (2026-10-09).
 - ▢ 7.3 Monorepo restructure (`PLAN-monorepo.md`, D5) — only now.
-- ▢ 7.4 `AGENTS.md` rewritten for the final layout.
+- ▣ 7.4 `AGENTS.md` rewritten for the final layout.
 
-## The definition of "available to users" (v0.1 alpha)
+## The definition of "available to users" (v0.1 alpha): met
 
-All of: Stage 0, Stage 1, Stage 2 (2.1–2.8), Stage 3 (3.1–3.5 and 3.7), Stage 4
-(4.1, 4.5), Stage 5 (5.1–5.4, 5.6), Stage 6 (6.1, 6.4).
+v0.1.0 shipped it: Stages 0 to 2, the memory loop (3.1 to 3.5 and 3.7), the release
+pipeline and installers (Stage 5), and the quality gates (Stage 6). What is still open
+in those stages is listed above as ▢ and is not blocking.
 
-v0.2: hooks, schedules, MCP, the harness engine, `init`/`pr` (2.9), the skill
-patch loop (3.6), the memory daemon (3.11), the monorepo move (7.3).
+Next, in rough order (the public version is the website's roadmap):
+
+1. **The memory claim, measured** (3.12, 3b.12): a task set where the second run is the measurement.
+2. **The background curator** (3.11, 3.6): built on `feature/background-curator`, held out of
+   releases until it has run against real models for weeks and its revert path has been used.
+3. **Evidence-gated skills**: `retire_skill` and citations (2.7).
+4. **v0.2**: hooks, schedules, MCP and the harness engine in the app (2.9), `mnemo traces`
+   (2.5, 2.8), the sandbox decision (4.3 to 4.5), a visual pass in real terminals (1.10),
+   and a clean-machine first run per OS (5.6).
 
 ## Risks
 
@@ -304,5 +316,5 @@ patch loop (3.6), the memory daemon (3.11), the monorepo move (7.3).
   parallel with Stage 2, not after.
 - **The headline number is thin.** Three tasks on a free model is a demo, not a
   benchmark (3.12).
-- **Bun churn.** The sandbox is on 1.4.2, the docs and tests assume 1.3.x; CI
-  should pin one version and the floor should be tested, not asserted.
+- **Bun churn.** `app/package.json` requires Bun 1.3 or newer and CI pins one
+  version; the floor should be tested, not asserted.

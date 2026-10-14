@@ -3,6 +3,14 @@
 > **Updated 2026-10-08:** two decisions changed this plan. pi runs **in-process**
 > through its SDK (no RPC client, no `agent/` child), and the interface is **Ink +
 > React**, not a hand-rolled terminal kit. Current task list: `docs/ROADMAP.md`.
+>
+> **Status as of v0.1.2:** the rebuild shipped, and this is the original plan, not the
+> layout. The program is `app/` (Ink + React, pi in-process; the `src/transcript`,
+> `src/frame`, `src/setup`, `src/status`, `src/tools` and `src/auth` modules below were
+> never created), memory is `memory-layer/` plus `packages/memory`, the kernel is
+> `app/src/kernel` with `app/python/ipy_bridge.py`, and `tui-go/`, `agent/` and
+> `harness-engine/` are on the `legacy` branch, not on `main`. Phase 5 became the
+> release pipeline and installers (`docs/RELEASING.md`, `mnemo update`, `mnemo uninstall`).
 
 Branch: `rebuild/bun-app`. This document is the target and the order of work.
 The old surfaces (`agent/` on Node, `tui-go/`, `harness-engine/`) stay on `main`

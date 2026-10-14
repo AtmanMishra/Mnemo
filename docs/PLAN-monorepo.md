@@ -2,6 +2,13 @@
 
 > **Updated 2026-10-08:** the monorepo move now happens *after* the port (D5),
 > and `@mnemo/tui` is built on Ink, not "on nothing" (D7). See `docs/ROADMAP.md`.
+>
+> **Status as of v0.1.2:** not carried out. The workspace is `app/` plus
+> `packages/memory` (`@mnemo/memory`, the one package that was split out); there is
+> no `@mnemo/tui`, `agent`, `harness`, `kernel`, `policy`, `catalog` or `cli` package
+> and no `crates/` directory (`memory-layer/` is still the Rust crate). Treat this
+> as a design note; the real layout is in `AGENTS.md`. The site in `web/` is outside
+> the Bun workspace.
 
 Written after reading oh-my-pi's package table, which is the thing being asked
 for here: not its features, but its *shape*. In oh-my-pi every capability is a
