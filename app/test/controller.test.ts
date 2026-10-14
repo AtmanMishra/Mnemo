@@ -300,3 +300,22 @@ test("esc stops a /compact, and a message sent meanwhile comes back to the promp
   expect(controller.transcript.isWorking).toBe(false);
   expect(notices(controller)).toContain("Compaction cancelled");
 });
+
+test("a built-in command that throws reports it instead of rejecting", async () => {
+  const { controller } = await setup();
+  (controller.session as unknown as { getSessionStats: () => never }).getSessionStats = () => {
+    throw new Error("stats unavailable");
+  };
+  await controller.submit("/stats");
+  await controller.submit("/cost");
+  expect(notices(controller).slice(-2)).toEqual(["/stats failed: stats unavailable", "/cost failed: stats unavailable"]);
+});
+
+test("resuming a session file that cannot be read says so instead of rejecting", async () => {
+  const { controller } = await setup();
+  const before = controller.session.sessionFile;
+  // A directory where the session file should be: reading it fails.
+  await controller.resumePath(fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-not-a-session-")));
+  expect(notices(controller).at(-1)).toStartWith("Could not resume that session");
+  expect(controller.session.sessionFile).toBe(before);
+});

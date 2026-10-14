@@ -394,7 +394,13 @@ export class Controller {
     if (this.chrome.race?.done) this.update({ race: undefined });
     if (trimmed.startsWith("/")) {
       const [name = "", ...rest] = trimmed.slice(1).split(/\s+/);
-      if (await this.builtin(name, rest.join(" "))) return;
+      // A command that fails says so; it never rejects into the interface (an unhandled rejection ends the program).
+      try {
+        if (await this.builtin(name, rest.join(" "))) return;
+      } catch (error) {
+        this.transcript.notice(`/${name} failed: ${errorText(error)}`, "error");
+        return;
+      }
     }
     const session = this.runtime.session;
     if (!this.hasModel) {
@@ -1038,6 +1044,14 @@ export class Controller {
    * to the prompt to edit and send again.
    */
   async rewind(): Promise<void> {
+    try {
+      await this.rewindTo();
+    } catch (error) {
+      this.transcript.notice(`Rewind failed: ${errorText(error)}`, "error");
+    }
+  }
+
+  private async rewindTo(): Promise<void> {
     if (this.transcript.isWorking) {
       this.transcript.notice("Rewind once the turn ends (esc stops it).", "warn");
       return;
@@ -1078,15 +1092,25 @@ export class Controller {
       ]);
       if (!how) return;
     }
-    const restored = how === "conversation" ? [] : (store?.restore(turns) ?? []);
+    // The conversation moves first: if that is cancelled or fails, the files are left as they are.
     if (how !== "files") {
-      const result = await this.runtime.session.navigateTree(pick);
-      if (result.cancelled) return;
+      let result: Awaited<ReturnType<AgentSession["navigateTree"]>>;
+      try {
+        result = await this.runtime.session.navigateTree(pick);
+      } catch (error) {
+        this.transcript.notice(`Rewind failed: ${errorText(error)}. Nothing was changed: the conversation and the files are as they were.`, "error");
+        return;
+      }
+      if (result.cancelled) {
+        this.transcript.notice("Rewind cancelled. The conversation and the files are as they were.");
+        return;
+      }
       this.options.onClearScreen?.();
       this.transcript.clear();
       this.transcript.load(this.runtime.session.messages);
       if (result.editorText) this.setDraft(result.editorText);
     }
+    const restored = how === "conversation" ? [] : (store?.restore(turns) ?? []);
     const what = [how !== "files" && "the conversation", restored.length > 0 && plural(restored.length)].filter(Boolean).join(" and ");
     this.transcript.notice(`Rewound ${what || "nothing (the files already match)"}.${how !== "files" ? " Your message is back in the prompt." : ""}`);
   }
@@ -1117,7 +1141,13 @@ export class Controller {
   /** Continue the session stored at `file` (the workspace's Sessions pane, /resume). */
   async resumePath(file: string): Promise<void> {
     if (this.runtime.session.sessionFile === file) return;
-    const result = await this.runtime.switchSession(file);
+    let result: Awaited<ReturnType<AgentSessionRuntime["switchSession"]>>;
+    try {
+      result = await this.runtime.switchSession(file);
+    } catch (error) {
+      this.transcript.notice(`Could not resume that session: ${errorText(error)}`, "error");
+      return;
+    }
     if (result.cancelled) return;
     this.options.onClearScreen?.();
     this.transcript.clear();

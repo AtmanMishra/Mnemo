@@ -177,8 +177,12 @@ export function Workspace({ controller, source, motion, initial, width, height, 
 
   const load = async (p: Pane) => {
     if (p === "files") return;
-    const next = p === "memory" ? await source.memory() : p === "sessions" ? await source.sessions() : p === "skills" ? source.skills() : source.logs();
-    setLoaded((l) => ({ ...l, [p]: next }));
+    try {
+      const next = p === "memory" ? await source.memory() : p === "sessions" ? await source.sessions() : p === "skills" ? source.skills() : source.logs();
+      setLoaded((l) => ({ ...l, [p]: next }));
+    } catch (error) {
+      controller.transcript.notice(`Could not load ${p}: ${error instanceof Error ? error.message : String(error)}`, "warn");
+    }
   };
   useEffect(() => void load(pane), [pane]);
   // After each run: memory, sessions and logs have moved on.
@@ -341,7 +345,10 @@ export function Workspace({ controller, source, motion, initial, width, height, 
       if (key.return || key.rightArrow) return setFocus("main");
       if (input && !key.ctrl && !key.meta)
         // What a key changed (a memory edited or forgotten) shows when the pane reloads.
-        void Promise.resolve(source.act(pane, current.id, input)).then(() => load(pane));
+        void Promise.resolve()
+          .then(() => source.act(pane, current.id, input))
+          .catch((error) => controller.transcript.notice(error instanceof Error ? error.message : String(error), "error"))
+          .then(() => load(pane));
     },
     { isActive: active && !dialog },
   );

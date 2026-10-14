@@ -315,3 +315,31 @@ test("ctrl+k with words in the prompt still kills to the end of the line", async
   expect(r.lastFrame()).not.toContain("keep this");
   r.unmount();
 });
+
+test("a pane that fails to load or act says so instead of rejecting", async () => {
+  const e = await mnemoEnv();
+  envs.push(e);
+  const source: WorkspaceSource = {
+    ...fakeSource([]),
+    memory: async () => {
+      throw new Error("memsrv went away");
+    },
+    act: async () => {
+      throw new Error("could not resume");
+    },
+  };
+  const r = render(React.createElement(Workspace, { controller: e.controller, source, motion: false }));
+  await wait(80);
+  r.stdin.write(KEY.tab);
+  await wait();
+  r.stdin.write("2");
+  await wait(80);
+  r.stdin.write("3");
+  await wait(80);
+  r.stdin.write("r");
+  await wait(80);
+  const said = e.controller.transcript.snapshot().committed.flatMap((b) => (b.kind === "notice" ? [b.text] : []));
+  expect(said).toContain("Could not load memory: memsrv went away");
+  expect(said).toContain("could not resume");
+  r.unmount();
+});
