@@ -86,3 +86,20 @@ t("a password under a key that names it is not kept, by the service or the sessi
   await expect(s.remember("project", "staging password", "Tr0ub4dor&3xx")).rejects.toThrow(/credentials/);
   memory.stop();
 }, 30_000);
+
+t("what memsrv says on stderr is kept in $MNEMO_HOME/logs/memsrv.log, privately", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-memsrv-log-"));
+  const saved = process.env.MNEMO_HOME;
+  process.env.MNEMO_HOME = path.join(root, "home");
+  try {
+    const memory = new MemoryService(MEMSRV!, path.join(root, "memory", "journal.jsonl"));
+    expect(await memory.ping()).toBe(true);
+    memory.stop();
+  } finally {
+    if (saved === undefined) delete process.env.MNEMO_HOME;
+    else process.env.MNEMO_HOME = saved;
+  }
+  const log = path.join(root, "home", "logs", "memsrv.log");
+  expect(fs.readFileSync(log, "utf8")).toContain("[memsrv] ready");
+  if (process.platform !== "win32") expect(fs.statSync(log).mode & 0o077).toBe(0);
+}, 30_000);

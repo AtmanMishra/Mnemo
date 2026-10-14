@@ -176,11 +176,11 @@ fn main() {
         let reply = {
             let guard = lock.write();
             if let Err(e) = &guard {
-                eprintln!("[memsrv] journal lock failed ({e}); serving without other writers' updates");
+                eprintln!("[memsrv] journal lock failed ({e}); this request is read-only");
             }
             sync(&jpath, &mut offset, &mut s, &mut clock, &mut search_cache);
             clock += 1;
-            let reply = handle(&method, &params, &mut s, &mut journal, embedder.as_ref(), &mut clock, &mut search_cache);
+            let reply = handle(&method, &params, &mut s, &mut journal, embedder.as_ref(), &mut clock, &mut search_cache, guard.is_ok());
             // our appends moved the end of the journal; nobody else's could
             // have, because we hold the lock
             if let Ok(meta) = std::fs::metadata(&jpath) { offset = meta.len(); }
@@ -229,7 +229,8 @@ fn sync(
         *clock = (*clock).max(op_at(op) + 1);
     }
     if report.skipped > 0 {
-        eprintln!("[memsrv] quarantined {} corrupt journal line(s) to {jpath}.corrupt — check it, never silent amnesia", report.skipped);
+        eprintln!("[memsrv] skipped {} corrupt journal line(s), copied to {} — check it, never silent amnesia",
+            report.skipped, persist::quarantine_path(jpath).display());
     }
     if skipped > 0 {
         eprintln!("[memsrv] skipped {skipped} unappliable op(s) (id collisions / missing refs)");
@@ -326,10 +327,19 @@ fn handle(
     emb: &dyn Embedder,
     clock: &mut Millis,
     cache: &mut SearchCache<(Vec<serde_json::Value>, Vec<NodeId>)>,
+    writable: bool,
 ) -> Result<serde_json::Value, String> {
     let mut apply = |s: &mut StoreData, j: &mut Journal, op: Op| -> Result<(), String> {
-        s.apply(&op)?;
+        // Without the lock another process may be appending: a write now could
+        // reuse its ids or interleave with its lines. Reads are still served.
+        if !writable {
+            return Err("memory is read-only for this request: the journal lock could not be taken".into());
+        }
+        // On disk first, then in memory: a failed append must not leave a
+        // write that this process serves and the journal never had.
+        s.check(&op)?;
         j.append_held(&op).map_err(|e| format!("journal write failed: {e}"))?;
+        s.apply(&op)?;
         // F2: any write can change ranking (a new node can outrank every
         // cached hit without touching one), so the cache is cleared, not pruned.
         cache.clear();

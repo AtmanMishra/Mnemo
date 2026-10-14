@@ -22,6 +22,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { MemoryClient, type MemoryChild } from "./client.ts";
+import { mnemoHome } from "./paths.ts";
 import { redact, secretUnderKey } from "./redact.ts";
 
 export interface Hit {
@@ -109,8 +110,39 @@ function factParams(key: string, value: string): { key: string; value: string } 
   return { key: oneLine(key, 120), value: secretUnderKey(key, value) ? "[redacted]" : oneLine(value, 4000) };
 }
 
+/** memsrv's own log is kept to this size; the one before it is kept as `.1`. */
+const MEMSRV_LOG_MAX = 1 << 20;
+
+/**
+ * Where memsrv's stderr goes: `$MNEMO_HOME/logs/memsrv.log`, appended, private,
+ * rotated once it passes 1 MiB. What it says there (a corrupt journal line, a
+ * failed embedding request) is the only trace of it; undefined when the file
+ * cannot be opened, and then stderr is dropped as before.
+ */
+export function memsrvLog(home = mnemoHome()): number | undefined {
+  try {
+    const dir = path.join(home, "logs");
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const file = path.join(dir, "memsrv.log");
+    try {
+      if (fs.statSync(file).size > MEMSRV_LOG_MAX) fs.renameSync(file, `${file}.1`);
+    } catch {
+      /* no log yet */
+    }
+    return fs.openSync(file, "a", 0o600);
+  } catch {
+    return undefined;
+  }
+}
+
 export function spawnMemsrv(binary: string, args: string[]): MemoryChild {
-  return spawn(binary, args, { stdio: ["pipe", "pipe", "ignore"] }) as unknown as MemoryChild;
+  const log = memsrvLog();
+  try {
+    return spawn(binary, args, { stdio: ["pipe", "pipe", log ?? "ignore"] }) as unknown as MemoryChild;
+  } finally {
+    // The child has its own copy of the descriptor.
+    if (log !== undefined) fs.closeSync(log);
+  }
 }
 
 export type EdgeKind = "supplies_context" | "part_of" | "derived_from" | "activated_with";

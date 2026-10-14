@@ -151,8 +151,8 @@ impl Journal {
             let mut raw: Vec<u8> = Vec::new();
             let read = reader.read_until(b'\n', &mut raw)?;
             if read == 0 || raw.last() != Some(&b'\n') { break; } // EOF or a partial line
+            parse_line(path, &raw, consumed, &mut report);
             consumed += read as u64;
-            parse_line(path, &raw, &mut report);
         }
         Ok((report, consumed))
     }
@@ -182,24 +182,26 @@ impl Journal {
         let lock = fd_lock::RwLock::new(lock_file);
         let _guard = lock.read()?; // held across the entire read
         let mut reader = BufReader::new(File::open(path)?);
+        let mut at = 0u64;
         loop {
             let mut raw: Vec<u8> = Vec::new();
             let read = reader.read_until(b'\n', &mut raw)?;
             if read == 0 { break; } // clean EOF
             // a final line without '\n' (torn by a crash mid-append) is still
             // a candidate line — parse it; quarantine if it does not parse
-            parse_line(path, &raw, &mut report);
+            parse_line(path, &raw, at, &mut report);
+            at += read as u64;
         }
         Ok(report)
     }
 }
 
 /// One journal line into the report: an op, or a quarantined line.
-fn parse_line(path: &Path, raw: &[u8], report: &mut LoadReport) {
+fn parse_line(path: &Path, raw: &[u8], offset: u64, report: &mut LoadReport) {
     let line = match std::str::from_utf8(raw) {
         Ok(s) => s.trim().to_string(),
         Err(_) => {
-            quarantine(path, "invalid utf-8", raw);
+            quarantine(path, "invalid utf-8", raw, offset);
             report.skipped += 1;
             return;
         }
@@ -208,17 +210,31 @@ fn parse_line(path: &Path, raw: &[u8], report: &mut LoadReport) {
     match serde_json::from_str::<Op>(&line) {
         Ok(op) => report.ops.push(op),
         Err(e) => {
-            quarantine(path, &e.to_string(), raw);
+            quarantine(path, &e.to_string(), raw, offset);
             report.skipped += 1;
         }
     }
 }
 
-/// Best-effort append of one damaged line to `<journal>.corrupt`.
-/// Never fatal: a quarantine failure must not turn into amnesia.
-fn quarantine(path: &Path, reason: &str, raw: &[u8]) {
-    let mut qpath = path.to_path_buf();
-    qpath.set_extension("corrupt");
+/// Where damaged journal lines are copied: `journal.jsonl` → `journal.corrupt`.
+pub fn quarantine_path(journal: impl AsRef<Path>) -> std::path::PathBuf {
+    journal.as_ref().with_extension("corrupt")
+}
+
+/// Best-effort append of one damaged line to `<journal>.corrupt`, once: the
+/// record carries the line's byte offset and hash, and a line already there
+/// (every start re-reads the journal) is not copied again. Private, like the
+/// journal it comes from. Never fatal: a quarantine failure must not turn
+/// into amnesia.
+fn quarantine(path: &Path, reason: &str, raw: &[u8], offset: u64) {
+    use sha2::Digest;
+    let qpath = quarantine_path(path);
+    let hash: String = sha2::Sha256::digest(raw).iter().take(8).map(|b| format!("{b:02x}")).collect();
+    let line_id = format!("{offset}:{hash}");
+    if let Ok(existing) = std::fs::read_to_string(&qpath) {
+        let needle = format!("\"line\":\"{line_id}\"");
+        if existing.contains(&needle) { return; }
+    }
     let mut shown = String::from_utf8_lossy(raw).trim().to_string();
     if shown.len() > QUARANTINE_RAW_CAP {
         // cut at a char boundary — never split UTF-8 mid-sequence
@@ -226,9 +242,9 @@ fn quarantine(path: &Path, reason: &str, raw: &[u8]) {
             .map(|(i, _)| i).last().unwrap_or(0);
         shown = format!("{}... [truncated {} bytes total]", &shown[..cut], raw.len());
     }
-    let rec = serde_json::json!({ "reason": reason, "raw": shown });
-    if let Some(dir) = qpath.parent() { let _ = std::fs::create_dir_all(dir); }
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&qpath) {
+    let rec = serde_json::json!({ "line": line_id, "reason": reason, "raw": shown });
+    if let Some(dir) = qpath.parent() { let _ = create_private_dir(dir); }
+    if let Ok(mut f) = private_options().create(true).append(true).open(&qpath) {
         let _ = writeln!(f, "{rec}");
     }
 }

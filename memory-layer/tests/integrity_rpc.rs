@@ -233,3 +233,65 @@ fn ensure_node_finds_or_creates_one_standing_node_across_sidecars() {
     a.close();
     b.close();
 }
+
+/// A sidecar whose stderr is kept, for what it says about the journal.
+fn spawn_logged(jpath: &Path, work: &Path, log: &Path) -> Srv {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_memsrv"))
+        .arg(jpath)
+        .current_dir(work)
+        .env_remove("OPENROUTER_API_KEY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(std::fs::File::create(log).unwrap())
+        .spawn()
+        .expect("spawn memsrv");
+    let stdin = child.stdin.take().unwrap();
+    let out = BufReader::new(child.stdout.take().unwrap());
+    Srv { child, stdin, out, next: 1 }
+}
+
+#[test]
+fn a_corrupt_line_is_quarantined_once_privately_and_named_right() {
+    let (journal, work) = temp("quarantine");
+    std::fs::write(&journal, concat!(
+        r#"{"CreateNode":{"id":1,"kind":"Aspect","label":"kept","at":1700000000001}}"#, "\n",
+        "{not json at all\n",
+    )).unwrap();
+    for round in 0..3 {
+        let log = work.join(format!("stderr-{round}.log"));
+        let mut s = spawn_logged(&journal, &work, &log);
+        assert_eq!(s.call("dump", serde_json::json!({}))["nodes"].as_array().unwrap().len(), 1);
+        s.close();
+        let said = std::fs::read_to_string(&log).unwrap();
+        assert!(said.contains("journal.corrupt"), "names the file it wrote: {said}");
+        assert!(!said.contains("journal.jsonl.corrupt"), "{said}");
+    }
+    let q = work.join("journal.corrupt");
+    assert_eq!(std::fs::read_to_string(&q).unwrap().lines().count(), 1, "one record however many starts");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&q).unwrap().permissions().mode() & 0o077, 0);
+    }
+}
+
+#[test]
+fn a_write_that_cannot_reach_the_journal_is_not_served_from_memory() {
+    let (journal, work) = temp("append-first");
+    let mut s = Srv::spawn(&journal, &work);
+    s.call("ping", serde_json::json!({}));
+    // The journal becomes unwritable underneath the sidecar.
+    std::fs::remove_file(&journal).unwrap();
+    std::fs::create_dir(&journal).unwrap();
+    let id = s.next;
+    s.next += 1;
+    writeln!(s.stdin, "{}", serde_json::json!({"id": id, "method": "create_node", "params": {"label": "phantom"}})).unwrap();
+    s.stdin.flush().unwrap();
+    let mut line = String::new();
+    s.out.read_line(&mut line).unwrap();
+    let v: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+    assert_eq!(v["ok"], false, "{v}");
+    let nodes = s.call("dump", serde_json::json!({}))["nodes"].as_array().unwrap().len();
+    assert_eq!(nodes, 0, "the failed write must not exist in memory either");
+    s.close();
+}

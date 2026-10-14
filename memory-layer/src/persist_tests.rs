@@ -111,9 +111,10 @@ mod tolerant_load_tests {
         let second = Journal::read_all_reported(&jpath).unwrap();
         assert_eq!(first.ops.len(), second.ops.len());
         assert_eq!(first.skipped, second.skipped);
-        // two quarantine appends = two records (an audit trail, not a bug)
+        // the same damaged line (same offset, same bytes) is recorded once,
+        // however many times the journal is read
         let q = std::fs::read_to_string(dir.join("journal.corrupt")).unwrap();
-        assert_eq!(q.lines().count(), 2);
+        assert_eq!(q.lines().count(), 1);
     }
 
     #[test]

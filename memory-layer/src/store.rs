@@ -189,6 +189,45 @@ impl StoreData {
         Ok(())
     }
 
+    /// Whether `apply(op)` would succeed, without changing anything. A writer
+    /// checks, then journals, then applies: an op is on disk before it is in
+    /// memory (a failed append leaves no phantom write behind), and an op that
+    /// cannot apply never reaches the journal.
+    pub fn check(&self, op: &Op) -> Result<(), String> {
+        let live = |id: &NodeId| -> Result<&Node, String> {
+            match self.nodes.get(id) {
+                Some(n) if n.deleted => Err(format!("node {id} was forgotten")),
+                Some(n) => Ok(n),
+                None => Err(format!("node {id} missing")),
+            }
+        };
+        let edge = |id: &EdgeId| -> Result<(), String> {
+            if self.edges.contains_key(id) { Ok(()) } else { Err(format!("edge {id} missing")) }
+        };
+        match op {
+            Op::CreateNode { id, .. } => {
+                if self.nodes.contains_key(id) { return Err(format!("node {id} exists")); }
+            }
+            Op::AddFact { node, .. } | Op::SetArea { node, .. } | Op::CommitLog { node, .. }
+            | Op::RecordUsefulness { node, .. } => { live(node)?; }
+            Op::PushContext { to, .. } => { live(to)?; }
+            Op::SupersedeFact { node, old_fact, .. } => {
+                if !live(node)?.facts.iter().any(|f| f.id == *old_fact) {
+                    return Err(format!("fact {old_fact} not on node {node}"));
+                }
+            }
+            Op::DeleteNode { node, .. } => {
+                if !self.nodes.contains_key(node) { return Err(format!("node {node} missing")); }
+            }
+            Op::Link { id, src, dst, .. } => {
+                live(src)?; live(dst)?;
+                if self.edges.contains_key(id) { return Err(format!("edge {id} exists")); }
+            }
+            Op::Unlink { edge: e, .. } | Op::Reweight { edge: e, .. } | Op::RecordOutcome { edge: e, .. } => edge(e)?,
+        }
+        Ok(())
+    }
+
     /// A live node to write to. A forgotten (soft-deleted) node takes no more
     /// writes: it is history, and a fact or link added to it would be a write
     /// nobody can see — or, once something reads it again, a resurrection.
