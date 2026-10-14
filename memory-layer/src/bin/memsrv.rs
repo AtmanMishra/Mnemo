@@ -363,7 +363,13 @@ fn handle(
             // the present.
             // In id order: a listing (and a client picking the first match in
             // it) must not depend on the map's iteration order.
-            let mut live: Vec<&Node> = s.nodes.values().filter(|n| !n.deleted).collect();
+            // `scope` (a project node), as for search: what belongs to another
+            // project is left out; what belongs to none stays.
+            let hidden = match params.get("scope").and_then(|v| v.as_u64()) {
+                Some(p) => out_of_scope(s, p, *clock),
+                None => Default::default(),
+            };
+            let mut live: Vec<&Node> = s.nodes.values().filter(|n| !n.deleted && !hidden.contains(&n.id)).collect();
             live.sort_by_key(|n| n.id);
             let nodes: Vec<serde_json::Value> = live.into_iter().map(|n| json!({
                 "id": n.id, "kind": n.kind, "area": n.area, "label": n.label,

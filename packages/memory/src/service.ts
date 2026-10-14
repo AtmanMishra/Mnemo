@@ -332,9 +332,12 @@ export class MemoryService {
     return (r?.lessons ?? []).map((l) => (typeof l === "string" ? l : JSON.stringify(l)));
   }
 
-  /** Every node: id, label, kind, area and its votes (for a browser of memory). */
-  async nodes(): Promise<{ id: number; label: string; kind: string; area: string; useful?: number; unhelpful?: number }[]> {
-    return (await this.call<{ nodes: { id: number; label: string; kind: string; area: string; useful?: number; unhelpful?: number }[] }>("dump"))?.nodes ?? [];
+  /**
+   * Every node: id, label, kind, area and its votes (for a browser of memory).
+   * With `scope` (a project node), not those that belong to another project.
+   */
+  async nodes(scope?: number): Promise<{ id: number; label: string; kind: string; area: string; useful?: number; unhelpful?: number }[]> {
+    return (await this.call<{ nodes: { id: number; label: string; kind: string; area: string; useful?: number; unhelpful?: number }[] }>("dump", scope === undefined ? {} : { scope }))?.nodes ?? [];
   }
 
   async stats(): Promise<{ nodes: number; episodes: number; byArea: Record<string, number> } | undefined> {

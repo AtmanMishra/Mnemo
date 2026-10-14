@@ -19,6 +19,35 @@ test("same meaning and file paths", () => {
   expect(pathsIn("entry is `src/old/main.ts`, see docs/a.md or https://x.io/a.js; /etc/hosts.txt")).toEqual(["src/old/main.ts", "docs/a.md"]);
 });
 
+test("opposite orders are not the same meaning, and versions are not file paths", () => {
+  expect(sameMeaning("use pnpm, never npm", "use npm, never pnpm")).toBe(false);
+  expect(sameMeaning("deploy staging before production, never after", "deploy production before staging, never after")).toBe(false);
+  expect(pathsIn("CI matrix runs Python 3.11/3.12")).toEqual([]);
+  expect(pathsIn("supports node 18.x/20.x")).toEqual([]);
+  expect(pathsIn("config lives in config/app.conf and lib/x.rs")).toEqual(["config/app.conf", "lib/x.rs"]);
+});
+
+test.skipIf(!MEMSRV)("tidy in one project never retires another project's pitfalls", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-tidy-scope-"));
+  const a = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-tidy-a-"));
+  const b = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-tidy-b-"));
+  const mem = new MemoryService(MEMSRV!, journalPath(home));
+  const projectB = (await mem.project(projectIdentity(b).id, b))!;
+  for (let i = 0; i < 2; i++) {
+    const pit = (await mem.createNode("aspect", `pain: vitest not found ${i}`, "salience"))!;
+    await mem.fact(pit, "failure", "bash(pnpm vitest) failed: sh: vitest: not found");
+    await mem.fact(pit, "fix", "pnpm install first");
+    await mem.link(pit, projectB, "part_of");
+  }
+  mem.stop();
+  const out = sink();
+  expect(await runMemoryCommand(["tidy", "--cwd", a], home, path.join(home, "agent"), out.stream, out.stream)).toBe(0);
+  expect(out.text()).toContain("is tidy");
+  const inB = sink();
+  await runMemoryCommand(["tidy", "--cwd", b], home, path.join(home, "agent"), inB.stream, inB.stream);
+  expect(inB.text()).toContain("duplicate   pitfall");
+});
+
 function sink() {
   let text = "";
   return { stream: { write: (s: string) => ((text += s), true) } as never, text: () => text };
