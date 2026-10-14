@@ -26,8 +26,14 @@ export type Block =
       details?: unknown;
       durationMs?: number;
     }
-  | { kind: "notice"; id: string; tone: Tone; text: string }
+  | { kind: "notice"; id: string; tone: Tone; text: string; extra?: NoticeExtra }
   | { kind: "memory"; id: string; title: string; items: string[] };
+
+/** What a notice can carry beyond its text: a code to type somewhere, links to open. */
+export interface NoticeExtra {
+  code?: string;
+  links?: readonly { url: string; label?: string }[];
+}
 
 export interface Working {
   since: number;
@@ -123,13 +129,13 @@ export class Transcript {
   }
 
   /** Append a block that did not come from the agent (welcome, notices). */
-  push(block: { kind: "welcome" } | { kind: "notice"; tone: Tone; text: string } | { kind: "user"; text: string }): void {
+  push(block: { kind: "welcome" } | { kind: "notice"; tone: Tone; text: string; extra?: NoticeExtra } | { kind: "user"; text: string }): void {
     this.live.push({ ...block, id: this.nextId("b") } as Block);
     this.changed();
   }
 
-  notice(text: string, tone: Tone = "info"): void {
-    this.push({ kind: "notice", tone, text });
+  notice(text: string, tone: Tone = "info", extra?: NoticeExtra): void {
+    this.push({ kind: "notice", tone, text, ...(extra ? { extra } : {}) });
   }
 
   /**
@@ -159,6 +165,25 @@ export class Transcript {
     this.epoch++;
     this.changed();
   }
+
+  /**
+   * Something outside a run is in progress (a compaction, a login): the working
+   * line shows, and esc reaches the controller to stop it. Returns the release;
+   * a run that starts meanwhile owns the line from then on.
+   */
+  hold(): () => void {
+    if (this.working) return () => {};
+    const mine: Working = { since: this.now(), tokens: 0 };
+    this.working = mine;
+    this.changed();
+    return () => {
+      if (this.working !== mine) return;
+      this.working = null;
+      this.changed();
+    };
+  }
+
+  private releaseCompaction: (() => void) | undefined;
 
   get isWorking(): boolean {
     return this.working !== null;
@@ -275,16 +300,28 @@ export class Transcript {
       }
 
       case "compaction_start":
+        // A manual /compact runs outside a turn: it gets the working line (and esc) too.
+        if (!this.working) {
+          const mine: Working = { since: this.now(), tokens: 0 };
+          this.working = mine;
+          this.releaseCompaction = () => {
+            if (this.working === mine) this.working = null;
+          };
+        }
         this.live.push({ kind: "notice", id: this.nextId("n"), tone: "info", text: "Compacting the conversation…" });
         break;
 
       case "compaction_end":
+        this.releaseCompaction?.();
+        this.releaseCompaction = undefined;
         this.live.push({
           kind: "notice",
           id: this.nextId("n"),
           tone: event.errorMessage ? "error" : "info",
           text: event.errorMessage
-            ? `Compaction failed: ${event.errorMessage}`
+            ? /^compaction failed/i.test(event.errorMessage)
+              ? event.errorMessage
+              : `Compaction failed: ${event.errorMessage}`
             : event.aborted
               ? "Compaction cancelled"
               : "Conversation compacted",

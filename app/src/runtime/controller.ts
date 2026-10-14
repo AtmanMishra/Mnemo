@@ -18,6 +18,7 @@ import { CYCLE, type Host, type MemoryNote, type Mode } from "../extensions/host
 import { projectIdentity, VERIFY } from "@mnemo/memory";
 import { testCounts, type TestCounts } from "../ui/activity.ts";
 import { mouse } from "../ui/mouse.ts";
+import { openBrowser, osc52 } from "../ui/link.ts";
 import { compareVersions, manualStep, type InstallKind } from "./update.ts";
 import { setTheme, themeName, THEMES, type ThemeName } from "../ui/theme.ts";
 import { bestOf, describeBestOf, type CandidateRunner, type LaneState } from "./best-of.ts";
@@ -166,6 +167,11 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** pi's login errors carry a stack and request details after the reason: the reason is what to show. */
+export function loginError(error: unknown): string {
+  return errorText(error).split(/;\s*(?:stack|details)=|\n\s+at\s/)[0]!.trim();
+}
+
 export class Controller {
   readonly transcript: Transcript;
   readonly dialogs = new Dialogs();
@@ -178,6 +184,9 @@ export class Controller {
   private branch: string | undefined;
   private memoryNodes: number | null = null;
   private needsReload = false;
+  /** A login in progress, which esc cancels. */
+  private loginAbort: AbortController | undefined;
+  private compactionEnds = 0;
 
   constructor(
     readonly runtime: AgentSessionRuntime,
@@ -192,6 +201,10 @@ export class Controller {
       updater?: Updater;
       /** How a best-of candidate runs (tests inject one; the default is this program, headless). */
       bestOfRunner?: CandidateRunner;
+      /** Open a sign-in page in the browser; returns whether it tried (default: the system's browser). */
+      openUrl?: (url: string) => boolean;
+      /** Put text on the clipboard (default: OSC 52 to the terminal). */
+      clipboard?: (text: string) => void;
     },
   ) {
     this.transcript = new Transcript({ now: options.now });
@@ -326,6 +339,7 @@ export class Controller {
         event.type === "compaction_end"
       )
         this.refreshFooter();
+      if (event.type === "compaction_end") this.compactionEnds++;
       if (event.type === "agent_settled") void this.afterRun();
     });
     this.refreshFooter();
@@ -391,12 +405,24 @@ export class Controller {
       if (session.isStreaming) await session.prompt(trimmed, { streamingBehavior: mode === "steer" ? "steer" : "followUp" });
       else await session.prompt(trimmed);
     } catch (error) {
+      // Not sent (a compaction is running, say): the message goes back to the prompt rather than being lost.
+      if (!this.draft.includes(trimmed)) this.setDraft([trimmed, this.draft].filter((t) => t.trim()).join("\n\n"));
       this.transcript.notice(errorText(error), "error");
     }
   }
 
+  /**
+   * esc: stop what is running. A login waiting on the browser or a device code
+   * is cancelled; otherwise the run (or a compaction) stops, and anything
+   * queued behind it comes back to the prompt instead of being sent later.
+   */
   interrupt(): void {
-    void this.runtime.session.abort().catch(() => {});
+    if (this.loginAbort) return void this.loginAbort.abort();
+    const session = this.runtime.session;
+    const { steering, followUp } = session.clearQueue();
+    const queued = [...steering, ...followUp];
+    if (queued.length) this.setDraft([...queued, this.draft].filter((t) => t.trim()).join("\n\n"));
+    void session.abort().catch(() => {});
   }
 
   async quit(code = 0): Promise<void> {
@@ -568,13 +594,16 @@ export class Controller {
       case "resume":
         await this.resume();
         return true;
-      case "compact":
+      case "compact": {
+        // pi reports a failed or cancelled compaction itself (compaction_end); only anything else is said here.
+        const ends = this.compactionEnds;
         try {
           await this.runtime.session.compact(arg || undefined);
         } catch (error) {
-          this.transcript.notice(errorText(error), "error");
+          if (this.compactionEnds === ends) this.transcript.notice(errorText(error), "error");
         }
         return true;
+      }
       case "memory":
         await this.showMemory(arg);
         return true;
@@ -892,7 +921,10 @@ export class Controller {
       if (!picked) return;
       type = picked as typeof type;
     }
+    // Until it ends, esc cancels it (the browser callback and device-code polling have no dialog to back out of).
     const abort = new AbortController();
+    this.loginAbort = abort;
+    const release = this.transcript.hold();
     try {
       await modelRuntime.login(provider.id, type, {
         signal: abort.signal,
@@ -900,12 +932,16 @@ export class Controller {
         notify: (e: AuthEvent) => this.authEvent(e),
       });
       this.transcript.notice(`Logged in to ${provider.name}.`);
-      if (!this.hasModel) await this.chooseModel("");
     } catch (error) {
       if (error instanceof Cancelled || abort.signal.aborted) this.transcript.notice("Login cancelled");
-      else this.transcript.notice(`Login failed: ${errorText(error)}`, "error");
+      else this.transcript.notice(`Login failed: ${loginError(error)}`, "error");
+      return;
+    } finally {
+      if (this.loginAbort === abort) this.loginAbort = undefined;
+      release();
+      this.refreshFooter();
     }
-    this.refreshFooter();
+    if (!this.hasModel) await this.chooseModel("");
   }
 
   private async authPrompt(p: AuthPrompt): Promise<string> {
@@ -923,9 +959,48 @@ export class Controller {
     return answer;
   }
 
+  /**
+   * What a login asks the user to do outside Mnemo. A sign-in URL is opened in
+   * the browser, put on the clipboard and shown as a link on a line of its own
+   * (the subscription URLs run to hundreds of characters: wrapped as text they
+   * could be neither clicked nor selected).
+   */
   private authEvent(e: AuthEvent): void {
-    if (e.type === "auth_url") this.transcript.notice(`Open this URL to sign in:\n${e.url}${e.instructions ? `\n${e.instructions}` : ""}`);
-    else if (e.type === "device_code") this.transcript.notice(`Go to ${e.verificationUri} and enter the code ${e.userCode}`);
+    const open = (url: string) => {
+      try {
+        return (this.options.openUrl ?? openBrowser)(url);
+      } catch {
+        return false;
+      }
+    };
+    const copy = (text: string) => {
+      try {
+        (this.options.clipboard ?? ((t: string) => void (process.stdout.isTTY && process.stdout.write(osc52(t)))))(text);
+      } catch {
+        // A clipboard is a convenience.
+      }
+    };
+    if (e.type === "auth_url") {
+      const opened = open(e.url);
+      copy(e.url);
+      this.transcript.notice(
+        [
+          opened ? "Opening your browser to sign in. If it does not open, open this link" : "Open this link to sign in",
+          "(it is on your clipboard too, where the terminal allows it) · esc cancels",
+          ...(e.instructions ? [e.instructions] : []),
+        ].join("\n"),
+        "info",
+        { links: [{ url: e.url }] },
+      );
+    } else if (e.type === "device_code") {
+      const opened = open(e.verificationUri);
+      copy(e.userCode);
+      this.transcript.notice(
+        `${opened ? "Your browser is opening this page" : "Open this page"} and enter the code (on your clipboard too) · esc cancels`,
+        "info",
+        { code: e.userCode, links: [{ url: e.verificationUri }] },
+      );
+    } else if (e.type === "info") this.transcript.notice(e.message, "info", e.links?.length ? { links: e.links } : undefined);
     else this.transcript.notice(e.message);
   }
 

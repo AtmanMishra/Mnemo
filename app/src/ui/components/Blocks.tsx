@@ -2,7 +2,7 @@
  * One transcript block on screen. The vocabulary is in DESIGN.md §4.
  */
 import React, { useEffect, useState } from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import type { Block } from "../store.ts";
 import { color, glyph, palette } from "../theme.ts";
 import { formatDuration, toolBody, toolSummary, toolTitle } from "../format.ts";
@@ -12,7 +12,7 @@ import { Markdown } from "./Markdown.tsx";
 import { Pulse } from "./Pulse.tsx";
 import { Dither } from "./Dither.tsx";
 import { Welcome, type WelcomeInfo } from "./Welcome.tsx";
-import { fileLink } from "../link.ts";
+import { fileLink, hyperlink, linkLabel, linksOn } from "../link.ts";
 
 export interface BlockProps {
   block: Block;
@@ -48,6 +48,24 @@ function Gutter({ mark, tint, children }: { mark: string; tint: string; children
       </Box>
       <Box flexDirection="column" flexGrow={1} flexShrink={1}>
         {children}
+      </Box>
+    </Box>
+  );
+}
+
+/**
+ * A link on a line of its own. Clickable in a terminal that knows OSC 8, its
+ * text cut to the window; otherwise the whole URL on one unwrapped line, which
+ * the terminal soft-wraps and so still selects as one.
+ */
+function LinkLine({ url, label }: { url: string; label?: string }): React.ReactElement {
+  const { columns } = useWindowSize();
+  if (linksOn()) return <Text color={color.accent}>{hyperlink(url, linkLabel(label ?? url, Math.max(20, columns - 8)))}</Text>;
+  return (
+    <Box flexDirection="column">
+      {label ? <Text color={color.muted}>{label}</Text> : null}
+      <Box width={url.length} flexShrink={0}>
+        <Text color={color.accent}>{url}</Text>
       </Box>
     </Box>
   );
@@ -255,6 +273,12 @@ export function BlockView({ block, cwd, expanded, welcome }: BlockProps): React.
       return (
         <Gutter mark={glyph.notice} tint={tint}>
           <Text color={tint}>{block.text}</Text>
+          {block.extra?.code ? (
+            <Box marginY={1} paddingLeft={2}>
+              <Text bold inverse color={color.accent}>{` ${block.extra.code} `}</Text>
+            </Box>
+          ) : null}
+          {block.extra?.links?.map((l, i) => <LinkLine key={i} url={l.url} label={l.label} />)}
         </Gutter>
       );
     }
