@@ -62,7 +62,7 @@ describe.if(hasPty)("interactive", () => {
       t.mark();
       await t.type(KEY.down); // Copy code login: prints the URL instead of opening a browser
       await t.type(KEY.enter);
-      await t.waitFor(/Open this URL to sign in|Login failed/);
+      await t.waitFor(/Open this link to sign in|Opening your browser|Login failed/);
       expect(t.text()).toMatch(/https:\/\/\S*(claude|anthropic)/);
       expect(t.text()).not.toContain("Login failed");
     } finally {
@@ -161,6 +161,61 @@ describe.if(hasPty)("interactive", () => {
       await Bun.sleep(300);
       await t.type(KEY.ctrlC);
       expect(await t.exitWithin(10_000)).toBe(0);
+    } finally {
+      await t.kill();
+    }
+  }, T);
+
+  test("esc with a message queued stops the run and puts the message back, without crashing the screen", async () => {
+    const slow = startMockLLM((_req, { agentTurn }) => (agentTurn === 0 ? { tools: [{ name: "bash", args: { command: "sleep 6" } }] } : { text: "done waiting" }));
+    const t = await terminal(fresh({ llm: slow.url }), [...START, "--yolo"]);
+    try {
+      await ready(t);
+      await t.type("wait a bit");
+      await t.type(KEY.enter);
+      await t.waitFor(/esc to interrupt/);
+      t.mark();
+      await t.type("and then this");
+      await t.type(KEY.enter);
+      await t.waitFor(/queued/);
+      t.mark();
+      await t.type(KEY.esc);
+      await t.waitFor(/aborted|Interrupted/);
+      await Bun.sleep(800);
+      const screen = t.text();
+      expect(screen).not.toMatch(/TypeError|ERROR|since/);
+      expect(screen).toContain("and then this");
+      expect(await t.exitWithin(200)).toBeUndefined();
+    } finally {
+      await t.kill();
+      slow.stop();
+    }
+  }, T);
+
+  test("a subscription login shows its sign-in link, and esc cancels the wait", async () => {
+    const t = await terminal(fresh(), START, { env: { BROWSER: "none" } });
+    try {
+      await ready(t);
+      await t.type("/login anthropic");
+      await t.type(KEY.enter);
+      await t.waitFor(/how do you want to log in/);
+      await Bun.sleep(600);
+      t.mark();
+      await t.type(KEY.enter); // Subscription
+      await t.waitFor(/login method|Open this link to sign in|Login failed/);
+      if (/login method/.test(t.text())) {
+        await Bun.sleep(600);
+        t.mark();
+        await t.type(KEY.enter);
+      }
+      await t.waitFor(/Open this link to sign in/);
+      expect(t.text()).toMatch(/https:\/\/\S*(claude|anthropic)/);
+      await Bun.sleep(400);
+      t.mark();
+      await t.type(KEY.esc);
+      await Bun.sleep(300);
+      await t.type(KEY.esc);
+      await t.waitFor(/Login cancelled/);
     } finally {
       await t.kill();
     }

@@ -4,11 +4,16 @@
 import { test, expect } from "bun:test";
 import React from "react";
 import { render } from "ink-testing-library";
-import { Composer, type ComposerProps } from "../src/ui/components/Composer.tsx";
+import { Composer, rankCommands, type ComposerProps } from "../src/ui/components/Composer.tsx";
 import { DialogView, filterChoices } from "../src/ui/components/Dialogs.tsx";
 import { BlockView } from "../src/ui/components/Blocks.tsx";
 import { Dialogs } from "../src/runtime/dialogs.ts";
+import { Transcript } from "../src/ui/store.ts";
+import { createUiContext } from "../src/runtime/ui-context.ts";
 import { MotionContext } from "../src/ui/components/motion.ts";
+import { WorkingLine } from "../src/ui/components/Working.tsx";
+import { Hub, type AgentState } from "../src/ui/Hub.tsx";
+import type { Agent } from "../src/runtime/fleet.ts";
 import type { CommandInfo } from "../src/runtime/controller.ts";
 
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
@@ -256,4 +261,85 @@ test("a filter ranks label matches ahead of description matches", () => {
     { value: "f", label: "▤ docs/state.md", description: "mention it" },
   ];
   expect(filterChoices(choices, "sta").map((c) => c.value)).toEqual(["stats", "f", "new"]);
+});
+
+test("a queued message with the run already stopped draws without a working line", () => {
+  // Queue a follow-up, then esc: the run ends before the queue empties.
+  const r = render(
+    <MotionContext.Provider value={false}>
+      <WorkingLine working={null} queue={["more please"]} />
+    </MotionContext.Provider>,
+  );
+  expect(r.lastFrame()).toContain("queued: more please");
+  expect(r.lastFrame()).not.toContain("esc to interrupt");
+});
+
+test("a command typed in full runs itself, not a longer one it is the start of", async () => {
+  const cmds: CommandInfo[] = ["model", "mode", "remember", "rewind"].map((name) => ({ name, description: "", source: "builtin" as const }));
+  expect(rankCommands(cmds, "mode")[0]?.name).toBe("mode");
+  const c = composer({ commands: () => cmds });
+  await c.type("/mode");
+  await c.type(KEY.enter);
+  expect(c.calls.submit).toEqual([["/mode", "auto"]]);
+});
+
+test("an extension's editor starts with its text, and a dialog with a timeout closes on it", async () => {
+  const dialogs = new Dialogs();
+  const sink = { notify() {}, setStatus() {}, setWorkingMessage() {}, setWorkingVisible() {}, setTitle() {}, getDraft: () => "", setDraft() {}, getToolsExpanded: () => false, setToolsExpanded() {} };
+  const ui = createUiContext(dialogs, sink);
+  const edited = ui.editor("Commit message", "fix: retries");
+  const r = render(<DialogView dialog={dialogs.current()!} />);
+  await tick();
+  expect(r.lastFrame()).toContain("fix: retries");
+  await tick();
+  r.stdin.write("!");
+  await tick();
+  r.stdin.write(KEY.enter);
+  expect(await edited).toBe("fix: retries!");
+  r.unmount();
+  const started = Date.now();
+  expect(await ui.select("Pick", ["a", "b"], { timeout: 50 })).toBeUndefined();
+  expect(await ui.confirm("Sure?", "really", { timeout: 50 })).toBe(false);
+  expect(await ui.input("Name", "", { timeout: 50 })).toBeUndefined();
+  expect(Date.now() - started).toBeLessThan(2000);
+  expect(dialogs.current()).toBeUndefined();
+});
+
+test("x on an agent that is still working asks for a second x before closing it", async () => {
+  const closed: number[] = [];
+  const state = (kind: "idle" | "working"): AgentState => ({ kind, glyph: "·", tone: "#888888", label: kind, turns: 1, outcomes: [], cost: 0, model: "demo" });
+  const agents = [1, 2].map((id) => ({ id, name: `p${id}`, cwd: `/p${id}` }) as unknown as Agent);
+  const r = render(
+    <Hub agents={agents} states={new Map([[1, state("working")], [2, state("idle")]])} recent={[]} split={[]} width={120} height={30} active
+      onOpen={() => {}} onSplit={() => {}} onClose={(id) => void closed.push(id)} onNew={() => {}} onOpenProject={() => {}} />,
+  );
+  await tick();
+  r.stdin.write("x");
+  await tick();
+  expect(closed).toEqual([]);
+  expect(r.lastFrame()).toContain("x again to close it");
+  r.stdin.write(KEY.down);
+  await tick();
+  r.stdin.write("\x1b[D");
+  await tick();
+  r.stdin.write("x");
+  await tick();
+  expect(closed).toEqual([]);
+  r.stdin.write("x");
+  await tick();
+  expect(closed).toEqual([1]);
+  r.stdin.write("\x1b[C");
+  await tick();
+  r.stdin.write("x");
+  await tick();
+  expect(closed).toEqual([1, 2]);
+});
+
+test("a streamed tool call with no arguments still draws", () => {
+  const t = new Transcript();
+  t.apply({ type: "message_start", message: { role: "assistant" } } as never);
+  t.apply({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: { type: "toolCall", id: "c1", name: "ls" } } } as never);
+  const tool = t.snapshot().live[0];
+  expect(tool?.kind === "tool" && tool.args).toEqual({});
+  expect(() => render(<BlockView block={tool!} cwd="/x" expanded={false} />)).not.toThrow();
 });

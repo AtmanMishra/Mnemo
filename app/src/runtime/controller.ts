@@ -18,6 +18,7 @@ import { CYCLE, type Host, type MemoryNote, type Mode } from "../extensions/host
 import { projectIdentity, VERIFY } from "@mnemo/memory";
 import { testCounts, type TestCounts } from "../ui/activity.ts";
 import { mouse } from "../ui/mouse.ts";
+import { openBrowser, osc52 } from "../ui/link.ts";
 import { compareVersions, manualStep, type InstallKind } from "./update.ts";
 import { setTheme, themeName, THEMES, type ThemeName } from "../ui/theme.ts";
 import { bestOf, describeBestOf, type CandidateRunner, type LaneState } from "./best-of.ts";
@@ -83,6 +84,8 @@ export interface Chrome {
   expanded: boolean;
   /** Set when something outside the input (an extension, a command) replaces the draft. */
   draftRequest?: { text: string; seq: number };
+  /** Bumped each time another session is bound (/new, /resume): views drop where they were. */
+  sessionSeq: number;
 }
 
 const BUILTINS: Omit<CommandInfo, "source">[] = [
@@ -122,21 +125,33 @@ export const HELP_TEXT = [
   "Keys",
   "  enter send (queues while Mnemo works) · alt+enter newline · esc interrupt",
   "  ↑/↓ history · tab accept suggestion · @ mention a file · shift+tab mode · ctrl+t thinking level",
-  "  ctrl+o expand output (everything printed, too) · ctrl+f find in the conversation · ctrl+l clear screen",
+  "  ctrl+o expand output (everything printed, too) · ctrl+l clear screen · ctrl+k on an empty prompt: go to a command or file",
+  "  ctrl+f find in the conversation (full screen; with --inline your terminal's own search does it)",
   "  ctrl+c twice / ctrl+d quit",
 ].join("\n");
 
-function gitBranch(cwd: string): string | undefined {
-  let dir = cwd;
-  for (;;) {
-    try {
-      const head = fs.readFileSync(path.join(dir, ".git", "HEAD"), "utf8").trim();
-      return head.startsWith("ref: refs/heads/") ? head.slice(16) : head.slice(0, 7);
-    } catch {
-      const up = path.dirname(dir);
-      if (up === dir) return undefined;
-      dir = up;
+/** The checked-out branch (or short commit) of the repository `cwd` is in; a worktree's `.git` is a file naming its git dir. */
+export function gitBranch(cwd: string): string | undefined {
+  for (let dir = path.resolve(cwd); ; ) {
+    const dotgit = path.join(dir, ".git");
+    const st = fs.statSync(dotgit, { throwIfNoEntry: false });
+    if (st) {
+      try {
+        let gitdir = dotgit;
+        if (st.isFile()) {
+          const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotgit, "utf8"));
+          if (!m) return undefined;
+          gitdir = path.resolve(dir, m[1]!.trim());
+        }
+        const head = fs.readFileSync(path.join(gitdir, "HEAD"), "utf8").trim();
+        return head.startsWith("ref: refs/heads/") ? head.slice(16) : head.slice(0, 7);
+      } catch {
+        return undefined;
+      }
     }
+    const up = path.dirname(dir);
+    if (up === dir) return undefined;
+    dir = up;
   }
 }
 
@@ -166,6 +181,11 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** pi's login errors carry a stack and request details after the reason: the reason is what to show. */
+export function loginError(error: unknown): string {
+  return errorText(error).split(/;\s*(?:stack|details)=|\n\s+at\s/)[0]!.trim();
+}
+
 export class Controller {
   readonly transcript: Transcript;
   readonly dialogs = new Dialogs();
@@ -178,6 +198,9 @@ export class Controller {
   private branch: string | undefined;
   private memoryNodes: number | null = null;
   private needsReload = false;
+  /** A login in progress, which esc cancels. */
+  private loginAbort: AbortController | undefined;
+  private compactionEnds = 0;
 
   constructor(
     readonly runtime: AgentSessionRuntime,
@@ -192,6 +215,10 @@ export class Controller {
       updater?: Updater;
       /** How a best-of candidate runs (tests inject one; the default is this program, headless). */
       bestOfRunner?: CandidateRunner;
+      /** Open a sign-in page in the browser; returns whether it tried (default: the system's browser). */
+      openUrl?: (url: string) => boolean;
+      /** Put text on the clipboard (default: OSC 52 to the terminal). */
+      clipboard?: (text: string) => void;
     },
   ) {
     this.transcript = new Transcript({ now: options.now });
@@ -207,7 +234,7 @@ export class Controller {
       };
       void this.refreshMemory();
     }
-    this.chrome = { footer: this.readFooter(), statuses: [], workingVisible: true, expanded: false };
+    this.chrome = { footer: this.readFooter(), statuses: [], workingVisible: true, expanded: false, sessionSeq: 0 };
   }
 
   get session(): AgentSession {
@@ -237,6 +264,7 @@ export class Controller {
   snapshot = (): Chrome => this.chrome;
 
   private update(patch: Partial<Chrome>): void {
+    if (!this.chrome) return;
     this.chrome = { ...this.chrome, ...patch };
     for (const l of this.listeners) l();
   }
@@ -277,6 +305,17 @@ export class Controller {
   private async attach(): Promise<void> {
     this.unsubscribe?.();
     const session = this.runtime.session;
+    // What the last session's extensions and runs left on screen is not this one's.
+    this.statuses.clear();
+    this.branch = gitBranch(this.runtime.cwd);
+    this.update({
+      statuses: [],
+      workingMessage: undefined,
+      workingVisible: true,
+      activity: undefined,
+      race: this.chrome?.race?.done ? undefined : this.chrome?.race,
+      sessionSeq: (this.chrome?.sessionSeq ?? 0) + 1,
+    });
     await session.bindExtensions({
       uiContext: createUiContext(this.dialogs, {
         notify: (m, tone) => this.transcript.notice(m, tone),
@@ -326,6 +365,7 @@ export class Controller {
         event.type === "compaction_end"
       )
         this.refreshFooter();
+      if (event.type === "compaction_end") this.compactionEnds++;
       if (event.type === "agent_settled") void this.afterRun();
     });
     this.refreshFooter();
@@ -380,7 +420,20 @@ export class Controller {
     if (this.chrome.race?.done) this.update({ race: undefined });
     if (trimmed.startsWith("/")) {
       const [name = "", ...rest] = trimmed.slice(1).split(/\s+/);
-      if (await this.builtin(name, rest.join(" "))) return;
+      // A command that fails says so; it never rejects into the interface (an unhandled rejection ends the program).
+      try {
+        if (await this.builtin(name, rest.join(" "))) return;
+      } catch (error) {
+        this.transcript.notice(`/${name} failed: ${errorText(error)}`, "error");
+        return;
+      }
+      // A slip of the keys (`/modle`) is not a message for the model. Templates, skills
+      // and extension commands are pi's to run; a path (`/usr/bin/x is missing`) is words.
+      if (/^[\w:-]+$/.test(name) && !this.commands().some((c) => c.name === name)) {
+        this.transcript.notice(`Unknown command /${name} (/help lists them)`, "warn");
+        this.setDraft(trimmed);
+        return;
+      }
     }
     const session = this.runtime.session;
     if (!this.hasModel) {
@@ -391,12 +444,25 @@ export class Controller {
       if (session.isStreaming) await session.prompt(trimmed, { streamingBehavior: mode === "steer" ? "steer" : "followUp" });
       else await session.prompt(trimmed);
     } catch (error) {
+      // Not sent (a compaction is running, say): the message goes back to the prompt rather than being lost.
+      const aborted = error instanceof Error && (error.name === "AbortError" || /abort/i.test(error.message));
+      if (!aborted && !this.draft.includes(trimmed)) this.setDraft([trimmed, this.draft].filter((t) => t.trim()).join("\n\n"));
       this.transcript.notice(errorText(error), "error");
     }
   }
 
+  /**
+   * esc: stop what is running. A login waiting on the browser or a device code
+   * is cancelled; otherwise the run (or a compaction) stops, and anything
+   * queued behind it comes back to the prompt instead of being sent later.
+   */
   interrupt(): void {
-    void this.runtime.session.abort().catch(() => {});
+    if (this.loginAbort) return void this.loginAbort.abort();
+    const session = this.runtime.session;
+    const { steering, followUp } = session.clearQueue();
+    const queued = [...steering, ...followUp];
+    if (queued.length) this.setDraft([...queued, this.draft].filter((t) => t.trim()).join("\n\n"));
+    void session.abort().catch(() => {});
   }
 
   async quit(code = 0): Promise<void> {
@@ -502,6 +568,8 @@ export class Controller {
         this.transcript.notice(`could not reload skills: ${errorText(error)}`, "warn");
       }
     }
+    // The run may have switched branches (git checkout): the footer catches up.
+    this.branch = gitBranch(this.runtime.cwd);
     void this.refreshMemory();
     // A session is named after its first message once it has one, so /resume and pi list it by that.
     const session = this.runtime.session;
@@ -568,13 +636,16 @@ export class Controller {
       case "resume":
         await this.resume();
         return true;
-      case "compact":
+      case "compact": {
+        // pi reports a failed or cancelled compaction itself (compaction_end); only anything else is said here.
+        const ends = this.compactionEnds;
         try {
           await this.runtime.session.compact(arg || undefined);
         } catch (error) {
-          this.transcript.notice(errorText(error), "error");
+          if (this.compactionEnds === ends) this.transcript.notice(errorText(error), "error");
         }
         return true;
+      }
       case "memory":
         await this.showMemory(arg);
         return true;
@@ -587,7 +658,11 @@ export class Controller {
         }
         const key = arg.split(/[:=]/)[0]!.trim().toLowerCase().slice(0, 40);
         const value = arg.includes(":") || arg.includes("=") ? arg.slice(arg.search(/[:=]/) + 1).trim() : arg;
-        await mem.learn("project", this.projectId, arg.includes(":") || arg.includes("=") ? key : `note ${Date.now().toString(36)}`, value);
+        const kept = await mem.learn("project", this.projectId, arg.includes(":") || arg.includes("=") ? key : `note ${Date.now().toString(36)}`, value);
+        if (!kept) {
+          this.transcript.notice("Could not remember that: the memory sidecar did not take it. `mnemo doctor` checks it.", "error");
+          return true;
+        }
         this.transcript.memory("Remembered", [value]);
         void this.refreshMemory();
         return true;
@@ -698,8 +773,15 @@ export class Controller {
       }
       case "theme": {
         const names = Object.keys(THEMES) as ThemeName[];
+        // By key or by the name shown (`/theme Dracula`, `/theme tokyo night`), in any case.
+        const wanted = arg.trim().toLowerCase();
+        const named = wanted ? names.find((n) => n.toLowerCase() === wanted || THEMES[n].label.toLowerCase() === wanted) : undefined;
+        if (wanted && !named) {
+          this.transcript.notice(`No theme called ${arg}. /theme lists them.`, "warn");
+          return true;
+        }
         const pick =
-          (names.find((n) => n === arg) as ThemeName | undefined) ??
+          named ??
           ((await this.dialogs.select(
             "Theme",
             names.map((n) => ({ value: n, label: THEMES[n].label, description: n === themeName() ? "current" : undefined })),
@@ -892,7 +974,10 @@ export class Controller {
       if (!picked) return;
       type = picked as typeof type;
     }
+    // Until it ends, esc cancels it (the browser callback and device-code polling have no dialog to back out of).
     const abort = new AbortController();
+    this.loginAbort = abort;
+    const release = this.transcript.hold();
     try {
       await modelRuntime.login(provider.id, type, {
         signal: abort.signal,
@@ -900,12 +985,16 @@ export class Controller {
         notify: (e: AuthEvent) => this.authEvent(e),
       });
       this.transcript.notice(`Logged in to ${provider.name}.`);
-      if (!this.hasModel) await this.chooseModel("");
     } catch (error) {
       if (error instanceof Cancelled || abort.signal.aborted) this.transcript.notice("Login cancelled");
-      else this.transcript.notice(`Login failed: ${errorText(error)}`, "error");
+      else this.transcript.notice(`Login failed: ${loginError(error)}`, "error");
+      return;
+    } finally {
+      if (this.loginAbort === abort) this.loginAbort = undefined;
+      release();
+      this.refreshFooter();
     }
-    this.refreshFooter();
+    if (!this.hasModel) await this.chooseModel("");
   }
 
   private async authPrompt(p: AuthPrompt): Promise<string> {
@@ -923,9 +1012,48 @@ export class Controller {
     return answer;
   }
 
+  /**
+   * What a login asks the user to do outside Mnemo. A sign-in URL is opened in
+   * the browser, put on the clipboard and shown as a link on a line of its own
+   * (the subscription URLs run to hundreds of characters: wrapped as text they
+   * could be neither clicked nor selected).
+   */
   private authEvent(e: AuthEvent): void {
-    if (e.type === "auth_url") this.transcript.notice(`Open this URL to sign in:\n${e.url}${e.instructions ? `\n${e.instructions}` : ""}`);
-    else if (e.type === "device_code") this.transcript.notice(`Go to ${e.verificationUri} and enter the code ${e.userCode}`);
+    const open = (url: string) => {
+      try {
+        return (this.options.openUrl ?? openBrowser)(url);
+      } catch {
+        return false;
+      }
+    };
+    const copy = (text: string) => {
+      try {
+        (this.options.clipboard ?? ((t: string) => void (process.stdout.isTTY && process.stdout.write(osc52(t)))))(text);
+      } catch {
+        // A clipboard is a convenience.
+      }
+    };
+    if (e.type === "auth_url") {
+      const opened = open(e.url);
+      copy(e.url);
+      this.transcript.notice(
+        [
+          opened ? "Opening your browser to sign in. If it does not open, open this link" : "Open this link to sign in",
+          "(it is on your clipboard too, where the terminal allows it) · esc cancels",
+          ...(e.instructions ? [e.instructions] : []),
+        ].join("\n"),
+        "info",
+        { links: [{ url: e.url }] },
+      );
+    } else if (e.type === "device_code") {
+      const opened = open(e.verificationUri);
+      copy(e.userCode);
+      this.transcript.notice(
+        `${opened ? "Your browser is opening this page" : "Open this page"} and enter the code (on your clipboard too) · esc cancels`,
+        "info",
+        { code: e.userCode, links: [{ url: e.verificationUri }] },
+      );
+    } else if (e.type === "info") this.transcript.notice(e.message, "info", e.links?.length ? { links: e.links } : undefined);
     else this.transcript.notice(e.message);
   }
 
@@ -943,8 +1071,13 @@ export class Controller {
         creds.map((c) => ({ value: c.providerId, label: modelRuntime.getProvider(c.providerId)?.name ?? c.providerId, description: c.type })),
       ));
     if (!id) return;
-    await modelRuntime.logout(id);
-    this.transcript.notice(`Logged out of ${id}.`);
+    const cred = creds.find((c) => c.providerId === id || modelRuntime.getProvider(c.providerId)?.name.toLowerCase() === id.toLowerCase());
+    if (!cred) {
+      this.transcript.notice(`No stored credentials for ${id}. Stored: ${creds.map((c) => c.providerId).join(", ")}.`, "warn");
+      return;
+    }
+    await modelRuntime.logout(cred.providerId);
+    this.transcript.notice(`Logged out of ${modelRuntime.getProvider(cred.providerId)?.name ?? cred.providerId}.`);
     this.refreshFooter();
   }
 
@@ -952,7 +1085,7 @@ export class Controller {
     const result = await this.runtime.newSession();
     if (result.cancelled) return;
     this.options.onClearScreen?.();
-    this.transcript.clear();
+    this.transcript.reset();
     this.transcript.notice("New session");
   }
 
@@ -963,6 +1096,14 @@ export class Controller {
    * to the prompt to edit and send again.
    */
   async rewind(): Promise<void> {
+    try {
+      await this.rewindTo();
+    } catch (error) {
+      this.transcript.notice(`Rewind failed: ${errorText(error)}`, "error");
+    }
+  }
+
+  private async rewindTo(): Promise<void> {
     if (this.transcript.isWorking) {
       this.transcript.notice("Rewind once the turn ends (esc stops it).", "warn");
       return;
@@ -1003,15 +1144,25 @@ export class Controller {
       ]);
       if (!how) return;
     }
-    const restored = how === "conversation" ? [] : (store?.restore(turns) ?? []);
+    // The conversation moves first: if that is cancelled or fails, the files are left as they are.
     if (how !== "files") {
-      const result = await this.runtime.session.navigateTree(pick);
-      if (result.cancelled) return;
+      let result: Awaited<ReturnType<AgentSession["navigateTree"]>>;
+      try {
+        result = await this.runtime.session.navigateTree(pick);
+      } catch (error) {
+        this.transcript.notice(`Rewind failed: ${errorText(error)}. Nothing was changed: the conversation and the files are as they were.`, "error");
+        return;
+      }
+      if (result.cancelled) {
+        this.transcript.notice("Rewind cancelled. The conversation and the files are as they were.");
+        return;
+      }
       this.options.onClearScreen?.();
-      this.transcript.clear();
+      this.transcript.reset();
       this.transcript.load(this.runtime.session.messages);
       if (result.editorText) this.setDraft(result.editorText);
     }
+    const restored = how === "conversation" ? [] : (store?.restore(turns) ?? []);
     const what = [how !== "files" && "the conversation", restored.length > 0 && plural(restored.length)].filter(Boolean).join(" and ");
     this.transcript.notice(`Rewound ${what || "nothing (the files already match)"}.${how !== "files" ? " Your message is back in the prompt." : ""}`);
   }
@@ -1042,10 +1193,16 @@ export class Controller {
   /** Continue the session stored at `file` (the workspace's Sessions pane, /resume). */
   async resumePath(file: string): Promise<void> {
     if (this.runtime.session.sessionFile === file) return;
-    const result = await this.runtime.switchSession(file);
+    let result: Awaited<ReturnType<AgentSessionRuntime["switchSession"]>>;
+    try {
+      result = await this.runtime.switchSession(file);
+    } catch (error) {
+      this.transcript.notice(`Could not resume that session: ${errorText(error)}`, "error");
+      return;
+    }
     if (result.cancelled) return;
     this.options.onClearScreen?.();
-    this.transcript.clear();
+    this.transcript.reset();
     this.transcript.load(this.runtime.session.messages);
     this.transcript.notice("Resumed session");
   }

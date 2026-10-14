@@ -78,6 +78,21 @@ test("conversation only leaves the files as they are", async () => {
   expect(e.controller.runtime.session.messages.filter((m) => m.role === "user")).toHaveLength(1);
 });
 
+test("when the conversation cannot move, the files are left alone and it says so", async () => {
+  const { e, a, b } = await twoTurns();
+  (e.controller.runtime.session as unknown as { navigateTree: () => Promise<never> }).navigateTree = async () => {
+    throw new Error("tree is busy");
+  };
+  const done = e.controller.rewind();
+  await pick(e, (l) => l.startsWith("second"));
+  await pick(e, (l) => l.startsWith("The conversation and"));
+  await done;
+  expect(fs.readFileSync(a, "utf8")).toBe("two\n");
+  expect(fs.existsSync(b)).toBe(true);
+  const notices = e.controller.transcript.snapshot().committed.filter((x) => x.kind === "notice").map((x) => ("text" in x ? x.text : ""));
+  expect(notices.at(-1)).toContain("Nothing was changed");
+});
+
 // ── what a security review found ──
 
 import * as os from "node:os";

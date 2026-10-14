@@ -13,7 +13,8 @@ import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { Fleet, projectCandidates } from "../src/runtime/fleet.ts";
 import { workspaceSource } from "../src/runtime/workspace-source.ts";
 import { Shell, splitGrid } from "../src/ui/Shell.tsx";
-import { matchProject } from "../src/ui/ProjectPicker.tsx";
+import { matchProject, typedPath } from "../src/ui/ProjectPicker.tsx";
+import { listFiles, samePath } from "../src/ui/files.ts";
 import { turns, testCounts } from "../src/ui/activity.ts";
 import { mnemoEnv } from "./helpers.ts";
 
@@ -153,4 +154,25 @@ test("pure parts: the split grid, project matching and candidates, turns and tes
   expect(testCounts("test result: ok. 9 passed; 0 failed; 0 ignored")).toEqual({ passed: 9, failed: 0, skipped: 0 });
   expect(testCounts("ok  \tpkg/a\t0.1s\nFAIL\tpkg/b\t0.2s")).toEqual({ passed: 1, failed: 1, skipped: 0 });
   expect(testCounts("hello world")).toBeUndefined();
+});
+
+test("the project picker takes Windows and relative paths, and folders compare as the platform does", () => {
+  expect(typedPath("C:\\Users\\me\\shop", path.win32)).toBe("C:\\Users\\me\\shop");
+  expect(typedPath("\\\\server\\share\\shop", path.win32)).toBe("\\\\server\\share\\shop");
+  expect(typedPath("../shop")).toBe(path.resolve("../shop"));
+  expect(typedPath("./shop")).toBe(path.resolve("shop"));
+  expect(typedPath("shop")).toBeUndefined();
+  expect(samePath("C:\\Users\\Me\\shop\\", "c:\\users\\me\\shop", "win32")).toBe(true);
+  expect(samePath("/work/shop/", "/work/shop/../shop", "linux")).toBe(true);
+  expect(samePath("/work/Shop", "/work/shop", "linux")).toBe(false);
+});
+
+test("without git, the file list uses / so the tree nests", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-files-"));
+  fs.mkdirSync(path.join(dir, "src", "lib"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "src", "lib", "util.ts"), "");
+  const sep = path.sep;
+  const files = listFiles(dir);
+  expect(files).toEqual(["src/lib/util.ts"]);
+  expect(sep === "/" || !files[0]!.includes(sep)).toBe(true);
 });

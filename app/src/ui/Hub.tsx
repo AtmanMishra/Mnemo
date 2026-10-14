@@ -127,6 +127,8 @@ export function Hub(p: HubProps): React.ReactElement {
   const cardW = Math.floor((p.width - 4) / cols);
   const count = p.agents.length + projects.length;
   const [sel, setSel] = useState(0);
+  /** x on an agent that is working or waiting: it closes on a second x. */
+  const [closing, setClosing] = useState<number | undefined>(undefined);
   const at = Math.min(sel, Math.max(0, count - 1));
   const onAgent = at < p.agents.length ? p.agents[at] : undefined;
   const onProject = at >= p.agents.length ? projects[at - p.agents.length] : undefined;
@@ -134,6 +136,7 @@ export function Hub(p: HubProps): React.ReactElement {
   useInput(
     (input, key) => {
       const inCards = at < p.agents.length;
+      if (closing !== undefined && input !== "x") setClosing(undefined);
       if (key.leftArrow) return setSel(Math.max(0, at - 1));
       if (key.rightArrow) return setSel(Math.min(count - 1, at + 1));
       if (key.upArrow) return setSel(inCards ? Math.max(0, at - cols) : at === p.agents.length ? Math.max(0, p.agents.length - 1) : at - 1);
@@ -145,7 +148,12 @@ export function Hub(p: HubProps): React.ReactElement {
       }
       if (!onAgent) return;
       if (input === "s") return p.onSplit(onAgent.id);
-      if (input === "x") return p.onClose(onAgent.id);
+      if (input === "x") {
+        const busy = (p.states.get(onAgent.id)?.kind ?? "idle") !== "idle";
+        if (busy && closing !== onAgent.id) return setClosing(onAgent.id);
+        setClosing(undefined);
+        return p.onClose(onAgent.id);
+      }
     },
     { isActive: p.active },
   );
@@ -168,7 +176,9 @@ export function Hub(p: HubProps): React.ReactElement {
   const rowsOfCards = Math.min(fitRows, allRows);
   const roomForProjects = Math.max(0, p.height - headH - rowsOfCards * CARD_H - 4);
   const keys =
-    p.width >= 100
+    closing !== undefined && closing === onAgent?.id
+      ? `${p.states.get(closing)?.kind === "waiting" ? "it is waiting on you" : "it is still working"} · x again to close it · any other key keeps it`
+      : p.width >= 100
       ? "←→↑↓ choose · enter open · s split in/out · x close · n new agent · ^p projects · ^g back"
       : p.width >= 60
         ? "↑↓ choose · enter open · s split · x close · n new · ^g back"

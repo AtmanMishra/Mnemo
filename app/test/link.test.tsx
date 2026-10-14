@@ -8,7 +8,7 @@ import React from "react";
 import { render } from "ink-testing-library";
 import { BlockView } from "../src/ui/components/Blocks.tsx";
 import { MotionContext } from "../src/ui/components/motion.ts";
-import { hyperlink, setLinks } from "../src/ui/link.ts";
+import { hyperlink, openBrowser, setLinks } from "../src/ui/link.ts";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -35,4 +35,25 @@ test("on: files and answers link, unsafe schemes do not", () => {
   const answer = view({ kind: "assistant", id: "a", text: "See [the docs](https://example.com/docs).", done: true });
   expect(answer).toContain("\x1b]8;;https://example.com/docs\x07");
   expect(answer).toContain("the docs");
+});
+
+test("a sign-in link is one link (on) or one unwrapped line (off), and a device code stands out", () => {
+  const url = `https://claude.ai/oauth/authorize?${"code=true&".repeat(55)}state=abc`;
+  const block = { kind: "notice" as const, id: "n", tone: "info" as const, text: "Open this link to sign in", extra: { code: "WDJB-MJHT", links: [{ url }] } };
+  const off = view(block);
+  expect(off.split("\n").some((l) => l.trim() === url)).toBe(true);
+  expect(off).toMatch(/^\s+WDJB-MJHT$/m);
+  setLinks(true);
+  const on = view(block);
+  expect(on).toContain(`\x1b]8;;${url}\x07`);
+  expect(on.split("\n").every((l) => l.replace(/\x1b\]8;;[^\x07]*\x07/g, "").length <= 100)).toBe(true);
+});
+
+test("the browser is not opened where it cannot or should not be", () => {
+  expect(openBrowser("https://x.io", { BROWSER: "none", DISPLAY: ":0" }, "linux")).toBe(false);
+  expect(openBrowser("https://x.io", { BROWSER: "true" }, "darwin")).toBe(false);
+  expect(openBrowser("https://x.io", {}, "linux")).toBe(false);
+  expect(openBrowser("javascript:alert(1)", {}, "darwin")).toBe(false);
+  // A BROWSER that cannot be started fails quietly, without waiting.
+  expect(openBrowser("https://x.io", { BROWSER: "/nonexistent/browser" }, "linux")).toBe(true);
 });
