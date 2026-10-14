@@ -90,7 +90,8 @@ curl -fsSL https://mnemo.atmanmishra.dev/install.sh | sh -s -- --uninstall   # o
 $env:MNEMO_UNINSTALL="1"; irm https://mnemo.atmanmishra.dev/install.ps1 | iex      # or "deep"
 ```
 
-`--deep` only deletes a folder that holds nothing but what Mnemo put there. If
+`--deep` only deletes a folder that holds nothing but what Mnemo put there;
+otherwise it says so, keeps the folder and exits non-zero. If
 you attached memory to Claude Code or Codex (`mnemo memory setup`), remove the
 `mnemo` entries from their settings too.
 

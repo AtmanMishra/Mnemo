@@ -56,6 +56,8 @@ export function plain(s: string): string {
 export interface Terminal {
   /** Everything printed so far, as plain text. */
   text(): string;
+  /** Everything printed so far, escape sequences included. */
+  raw(): string;
   /** Types like a person: one key at a time (a burst would read as a paste). An escape sequence is one key. */
   type(keys: string): Promise<void>;
   /** Resolves when the screen (since `since`) matches; fails with the screen when it does not. */
@@ -86,6 +88,7 @@ export async function terminal(w: World, args: string[], opts: { cols?: number; 
   })();
   const t: Terminal = {
     text: () => plain(raw),
+    raw: () => raw,
     type: async (keys) => {
       const parts = keys.startsWith("\x1b") ? [keys] : [...keys];
       for (const k of parts) {

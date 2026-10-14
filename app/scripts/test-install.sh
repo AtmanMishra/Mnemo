@@ -32,18 +32,18 @@ docker run --rm -v "$REL:/release:ro" "$IMAGE" sh -c '
   export PATH="$HOME/.local/bin:$PATH"
   echo "--- version";  mnemo --version
   echo "--- demo";     mnemo --demo --dump > /tmp/demo.txt 2>&1 || true
-  grep -q "retries" /tmp/demo.txt && echo "✓ a scripted turn ran" || { cat /tmp/demo.txt; exit 1; }
+  grep -q "retries" /tmp/demo.txt || { cat /tmp/demo.txt; echo "FAIL: a scripted turn ran"; exit 1; }; echo "✓ a scripted turn ran"
   grep -E "Learned|Session done|failed" /tmp/demo.txt || true
-  echo "--- again (upgrade in place)"; sh /release/install.sh > /dev/null && echo "✓ reinstall"
+  echo "--- again (upgrade in place)"; sh /release/install.sh > /dev/null || { echo "FAIL: reinstall"; exit 1; }; echo "✓ reinstall"
   echo "--- memory written by the demo is kept by an uninstall"
   mkdir -p "$HOME/.mnemo/memory" && echo keep > "$HOME/.mnemo/memory/journal.jsonl"
   sh /release/install.sh --uninstall > /dev/null
-  [ ! -e "$HOME/.mnemo/bin/mnemo" ] && [ ! -e "$HOME/.mnemo/bin/memsrv" ] && [ ! -e "$HOME/.local/bin/mnemo" ] && echo "✓ binaries and link removed"
-  [ "$(cat "$HOME/.mnemo/memory/journal.jsonl")" = keep ] && echo "✓ memory untouched"
+  [ ! -e "$HOME/.mnemo/bin/mnemo" ] && [ ! -e "$HOME/.mnemo/bin/memsrv" ] && [ ! -e "$HOME/.local/bin/mnemo" ] || { echo "FAIL: binaries and link removed"; exit 1; }; echo "✓ binaries and link removed"
+  [ "$(cat "$HOME/.mnemo/memory/journal.jsonl")" = keep ] || { echo "FAIL: memory untouched"; exit 1; }; echo "✓ memory untouched"
   echo "--- an unrelated mnemo on the PATH is left alone"
   mkdir -p "$HOME/.local/bin" && echo mine > "$HOME/.local/bin/mnemo"
   sh /release/install.sh > /tmp/out 2>&1
-  [ "$(cat "$HOME/.local/bin/mnemo")" = mine ] && grep -q "not ours" /tmp/out && echo "✓ foreign file kept, and said so"
+  [ "$(cat "$HOME/.local/bin/mnemo")" = mine ] && grep -q "not ours" /tmp/out || { echo "FAIL: foreign file kept, and said so"; exit 1; }; echo "✓ foreign file kept, and said so"
   rm -f "$HOME/.local/bin/mnemo"; sh /release/install.sh --uninstall > /dev/null
   echo "--- overrides that would point the download somewhere else are refused"
   for bad in "MNEMO_REPO=../evil/x" "MNEMO_REPO=a/b/c" "MNEMO_VERSION=../../evil/x/releases/download/v1" "MNEMO_RELEASE_BASE=http://example.com/r"; do
@@ -51,21 +51,21 @@ docker run --rm -v "$REL:/release:ro" "$IMAGE" sh -c '
     [ -s /tmp/err ] || { echo "no reason given for $bad"; exit 1; }
   done
   echo "✓ four bad overrides refused"
-  MNEMO_UNINSTALL=0 sh /release/install.sh > /dev/null && [ -e "$HOME/.mnemo/bin/mnemo" ] && echo "✓ MNEMO_UNINSTALL=0 installs"
+  MNEMO_UNINSTALL=0 sh /release/install.sh > /dev/null && [ -e "$HOME/.mnemo/bin/mnemo" ] || { echo "FAIL: MNEMO_UNINSTALL=0 installs"; exit 1; }; echo "✓ MNEMO_UNINSTALL=0 installs"
   sh /release/install.sh --uninstall > /dev/null
   echo "--- no curl or wget: say so before doing anything"
   if MNEMO_RELEASE_BASE= sh /release/install.sh --version v9.9.9 >/tmp/out 2>/tmp/err; then echo "unexpected success"; exit 1; fi
-  grep -q "needs curl or wget" /tmp/err && ! grep -q downloading /tmp/out && echo "✓ clear error, nothing started"
+  grep -q "needs curl or wget" /tmp/err && ! grep -q downloading /tmp/out || { echo "FAIL: clear error, nothing started"; exit 1; }; echo "✓ clear error, nothing started"
   echo "--- a release that does not exist (curl answers 404) fails cleanly"
   printf "#!/bin/sh\nexit 22\n" > /usr/local/bin/curl && chmod +x /usr/local/bin/curl
   if MNEMO_RELEASE_BASE= sh /release/install.sh --version v9.9.9 >/dev/null 2>/tmp/err; then echo "unexpected success"; exit 1; fi
-  grep -q "could not download" /tmp/err && echo "✓ clear error"
-  [ ! -e "$HOME/.mnemo/bin/mnemo" ] && echo "✓ nothing installed"
+  grep -q "could not download" /tmp/err || { echo "FAIL: clear error"; exit 1; }; echo "✓ clear error"
+  [ ! -e "$HOME/.mnemo/bin/mnemo" ] || { echo "FAIL: nothing installed"; exit 1; }; echo "✓ nothing installed"
   rm -f /usr/local/bin/curl
   echo "--- deep uninstall: the script, then the program itself"
   sh /release/install.sh > /dev/null && mkdir -p "$HOME/.mnemo/memory" && echo j > "$HOME/.mnemo/memory/journal.jsonl"
   if sh /release/install.sh --deep < /dev/null > /dev/null 2>&1; then echo "deleted without asking"; exit 1; fi
-  [ -e "$HOME/.mnemo/memory/journal.jsonl" ] && echo "✓ --deep without a terminal asks for --yes"
-  sh /release/install.sh --deep --yes > /dev/null && [ ! -e "$HOME/.mnemo" ] && [ ! -e "$HOME/.local/bin/mnemo" ] && echo "✓ --deep --yes removed everything"
-  sh /release/install.sh > /dev/null && "$HOME/.mnemo/bin/mnemo" uninstall --deep --yes > /dev/null && [ ! -e "$HOME/.mnemo" ] && [ ! -e "$HOME/.local/bin/mnemo" ] && echo "✓ mnemo uninstall --deep --yes removed everything"
+  [ -e "$HOME/.mnemo/memory/journal.jsonl" ] || { echo "FAIL: --deep without a terminal asks for --yes"; exit 1; }; echo "✓ --deep without a terminal asks for --yes"
+  sh /release/install.sh --deep --yes > /dev/null && [ ! -e "$HOME/.mnemo" ] && [ ! -e "$HOME/.local/bin/mnemo" ] || { echo "FAIL: --deep --yes removed everything"; exit 1; }; echo "✓ --deep --yes removed everything"
+  sh /release/install.sh > /dev/null && "$HOME/.mnemo/bin/mnemo" uninstall --deep --yes > /dev/null && [ ! -e "$HOME/.mnemo" ] && [ ! -e "$HOME/.local/bin/mnemo" ] || { echo "FAIL: mnemo uninstall --deep --yes removed everything"; exit 1; }; echo "✓ mnemo uninstall --deep --yes removed everything"
 '

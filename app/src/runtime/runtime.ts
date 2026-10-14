@@ -6,11 +6,13 @@
  * and draws the interface. `AgentSessionRuntime` (not a bare `AgentSession`) so
  * `/new` and `/resume` can replace the active session.
  */
+import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
+  getReadmePath,
   hasTrustRequiringProjectResources,
   ModelRuntime,
   ProjectTrustStore,
@@ -60,6 +62,29 @@ export async function createModelRuntime(agentDir: string): Promise<ModelRuntime
   });
 }
 
+/**
+ * pi's system prompt sends the model to its README, docs/ and examples/ beside its
+ * package. A compiled binary has none of them (pi takes the folder of the executable),
+ * so the model was told to read files that do not exist. There, the section says where
+ * the documentation really is; run from source, pi's own section stands.
+ */
+export function piDocsSection(readme = getReadmePath()): string | undefined {
+  if (fs.existsSync(readme)) return undefined;
+  return "Mnemo runs on pi, a coding agent harness. pi's documentation (extensions, skills, themes, prompt templates, models.json and custom providers, MCP, the SDK) is not installed with Mnemo; it is online at https://github.com/earendil-works/pi/tree/main/packages/coding-agent (docs/ and examples/). Read it only when the user asks about pi itself.";
+}
+
+const piDocs: InlineExtension = {
+  name: "pi-docs",
+  hidden: true,
+  factory: (pi) => {
+    const docs = piDocsSection();
+    if (!docs) return;
+    pi.on("before_agent_start", (event) => {
+      event.systemPromptOptions.sections.docs = docs;
+    });
+  },
+};
+
 export async function startRuntime(options: RuntimeOptions): Promise<AgentSessionRuntime> {
   const modelRuntime = options.modelRuntime ?? (await createModelRuntime(options.agentDir));
   const factory: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
@@ -68,7 +93,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<AgentSessio
       agentDir: options.agentDir,
       modelRuntime,
       settingsManager: SettingsManager.create(cwd, options.agentDir, { projectTrusted: projectTrusted(cwd, options.agentDir, options.trustProject) }),
-      resourceLoaderOptions: { extensionFactories: options.extensions ?? [] },
+      // First, so extensions that build on the rendered prompt (memory recall) see the section it sets.
+      resourceLoaderOptions: { extensionFactories: [piDocs, ...(options.extensions ?? [])] },
     });
     const created = await createAgentSessionFromServices({
       services,

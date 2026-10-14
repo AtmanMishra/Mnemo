@@ -7,6 +7,7 @@ import * as path from "node:path";
 import pkg from "../package.json" with { type: "json" };
 import { startMockLLM, systemPrompt, textOf, toolResults, type MockLLM, type Script } from "./mock-llm.ts";
 import { binary, memsrv, mnemo, world, type World } from "./harness.ts";
+import { hasPty, KEY, terminal, type Terminal } from "./pty.ts";
 
 const T = 120_000;
 let script: Script = () => ({ text: "done" });
@@ -355,6 +356,21 @@ describe("install layout", () => {
     const r = await run(w, i.exe, ["uninstall", "--deep", "--yes"], { MNEMO_LINK_DIR: i.linkDir });
     expect(r.stderr).toContain("not deleted");
     expect(fs.readFileSync(path.join(w.mnemoHome, "my-thesis.docx"), "utf8")).toBe("precious");
+    // What was asked for did not happen: that is not a success.
+    expect(r.code).toBe(1);
+    expect(r.stdout).not.toContain("Mnemo is uninstalled");
+  }, T);
+
+  test("uninstall --deep deletes a home holding saved approvals and permission rules", async () => {
+    const w = fresh();
+    const i = installed(w);
+    fs.writeFileSync(path.join(w.mnemoHome, "grants.json"), JSON.stringify({ "/x": [{ tool: "bash", pattern: "ls*" }] }));
+    fs.writeFileSync(path.join(w.mnemoHome, "permissions.json"), JSON.stringify({ deny: ["bash(rm *)"] }));
+    fs.mkdirSync(path.join(w.mnemoHome, "skill-history"));
+    const r = await run(w, i.exe, ["uninstall", "--deep", "--yes"], { MNEMO_LINK_DIR: i.linkDir });
+    expect(r.code).toBe(0);
+    for (let n = 0; n < 50 && fs.existsSync(w.mnemoHome); n++) await Bun.sleep(100);
+    expect(fs.existsSync(w.mnemoHome)).toBe(false);
   }, T);
 });
 
@@ -366,6 +382,108 @@ describe("memory commands", () => {
     for (const args of [["memory", "status"], ["memory", "tidy"], ["memory", "setup", "claude-code"], ["memory", "setup", "codex"], ["memory", "--help"]]) {
       const r = await mnemo(w, args);
       expect({ args, code: r.code, err: r.stderr }).toEqual({ args, code: 0, err: expect.not.stringContaining("Cannot find module") });
+    }
+  }, T);
+});
+
+describe("a failed model call", () => {
+  test("-p exits 1 and says why when the provider refuses the request", async () => {
+    const w = fresh();
+    play(() => ({ status: 401, error: "invalid api key (mock)" }));
+    const r = await mnemo(w, ["-p", "hi", "--no-reflect"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("invalid api key (mock)");
+    expect(r.stdout.trim()).toBe("");
+  }, T);
+
+  test("--best-of counts a candidate whose model call failed as failed", async () => {
+    const w = fresh();
+    play(() => ({ status: 401, error: "invalid api key (mock)" }));
+    const r = await mnemo(w, ["-p", "hi", "--best-of", "2", "--check", "true"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("exit 1");
+  }, T);
+});
+
+describe("system prompt", () => {
+  test("points at no pi documentation the binary does not have", async () => {
+    const w = fresh();
+    play(() => ({ text: "ok" }));
+    const r = await mnemo(w, ["-p", "hi", "--no-reflect"]);
+    expect(r.code).toBe(0);
+    const prompt = systemPrompt(llm.agentRequests()[0]!);
+    // pi names README.md, docs/ and examples/ beside its package; a compiled binary has none of them.
+    for (const [, p] of prompt.matchAll(/(?:Main documentation|Additional docs|Examples): (\S+)/g)) expect({ p, exists: fs.existsSync(p!) }).toEqual({ p, exists: true });
+    expect(prompt).not.toContain(path.join(path.dirname(binary()), "docs"));
+    expect(prompt).toContain("github.com/earendil-works/pi");
+  }, T);
+});
+
+describe("arguments", () => {
+  test("-p followed by an option, or by nothing, is a usage error, not a prompt", async () => {
+    const w = fresh();
+    play(() => ({ text: "should not be asked" }));
+    for (const args of [["-p", "--yolo"], ["-p"], ["-p", ""], ["--cwd"], ["--best-of"]]) {
+      const r = await mnemo(w, args);
+      expect({ args, code: r.code }).toEqual({ args, code: 2 });
+      expect(r.stderr).toContain("mnemo --help");
+    }
+    expect(llm.agentRequests()).toHaveLength(0);
+  }, T);
+
+  test("an unknown argument exits 2, like the other usage errors", async () => {
+    const r = await mnemo(fresh(), ["--no-such-flag"]);
+    expect(r.code).toBe(2);
+  }, T);
+
+  test("--help says what a headless run allows", async () => {
+    const r = await mnemo(fresh(), ["--help"]);
+    expect(r.stdout).toMatch(/-p "<prompt>"[^\n]*asks nothing/);
+  }, T);
+});
+
+describe.if(hasPty)("the terminal", () => {
+  const START = ["--no-boot", "--no-motion"];
+  async function ready(t: Terminal) {
+    await t.waitFor(/for commands/);
+    await Bun.sleep(1200);
+    t.mark();
+  }
+
+  test("/clear in the workspace leaves the terminal's own scrollback alone", async () => {
+    const t = await terminal(fresh(), START);
+    try {
+      await ready(t);
+      await t.type("/clear");
+      await t.type(KEY.enter);
+      await Bun.sleep(1500);
+      // \x1b[3J erases the scrollback the user had before starting Mnemo; the workspace is on the alternate screen.
+      expect(t.raw().includes("\x1b[3J")).toBe(false);
+    } finally {
+      await t.kill();
+    }
+  }, T);
+
+  test("an unhandled rejection mid-session is logged and shown, and the session goes on", async () => {
+    const w = fresh({
+      files: {
+        "README.md": "# demo\n",
+        ".pi/extensions/flaky.ts": `export default function () { setTimeout(() => { Promise.reject(new Error("boom from an extension")); }, 2500); }\n`,
+      },
+    });
+    play(() => ({ text: "still here" }));
+    const t = await terminal(w, [...START, "--trust-project"]);
+    try {
+      await ready(t);
+      await t.waitFor(/boom from an extension/, 15_000);
+      expect(await t.exitWithin(500)).toBeUndefined();
+      await t.type("ping");
+      await t.type(KEY.enter);
+      await t.waitFor(/still here/);
+      const log = fs.readFileSync(path.join(w.mnemoHome, "logs", "errors.log"), "utf8");
+      expect(log).toContain("boom from an extension");
+    } finally {
+      await t.kill();
     }
   }, T);
 });

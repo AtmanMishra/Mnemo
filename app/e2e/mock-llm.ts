@@ -12,7 +12,8 @@ export interface ToolCall {
   name: string;
   args: Record<string, unknown>;
 }
-export type Reply = { text: string } | { tools: ToolCall[]; text?: string };
+/** `{ status }` answers the request with that HTTP error instead (a bad key, an outage). */
+export type Reply = { text: string } | { tools: ToolCall[]; text?: string } | { status: number; error?: string };
 
 export interface ChatRequest {
   model: string;
@@ -88,6 +89,7 @@ export function startMockLLM(script: Script): MockLLM {
       } catch (e) {
         return new Response(String(e), { status: 500 });
       }
+      if ("status" in reply) return Response.json({ error: { message: reply.error ?? `mock error ${reply.status}`, type: "mock_error" } }, { status: reply.status });
       if (body.stream === false) {
         const message = "tools" in reply
           ? { role: "assistant", content: reply.text ?? null, tool_calls: reply.tools.map((t, i) => ({ id: `call_${i}`, type: "function", function: { name: t.name, arguments: JSON.stringify(t.args) } })) }
