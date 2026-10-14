@@ -81,7 +81,8 @@ test("test-install.sh: every check in the container can fail the run", () => {
   if (dash) expect(Bun.spawnSync([dash, "-n", "-c", inner]).exitCode).toBe(0);
 });
 
-describe.if(!!pwsh)("get.ps1 replacing an installed Mnemo", () => {
+// Not on Windows: there the installer goes on to edit the real user PATH in the registry.
+describe.if(!!pwsh && process.platform !== "win32")("get.ps1 replacing an installed Mnemo", () => {
   /**
    * Runs the whole installer against a local release holding a new mnemo.exe and memsrv.exe,
    * over an install of old ones. `mocks` is PowerShell defining Move-Item / Remove-Item stand-ins
