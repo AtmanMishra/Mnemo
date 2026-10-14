@@ -69,6 +69,7 @@ fn ann_index(vectors: &HashMap<NodeId, Vec<f32>>) -> AnnIndex<'static> {
 }
 
 #[test]
+#[ignore = "temporary measurement probe (see the header), minutes long; run with --ignored --nocapture"]
 fn probe_quality_across_seeds() {
     let emb = HashingEmbedder;
     let mut total = 0usize;
@@ -105,6 +106,7 @@ fn probe_quality_across_seeds() {
 }
 
 #[test]
+#[ignore = "temporary measurement probe (see the header), minutes long; run with --ignored --nocapture"]
 fn probe_quality_sweep() {
     let emb = HashingEmbedder;
     for (n, seeds, per_seed) in [(200usize, 40u64, 20usize), (800, 20, 20), (2000, 8, 15)] {
@@ -138,6 +140,7 @@ fn probe_quality_sweep() {
 }
 
 #[test]
+#[ignore = "temporary measurement probe (see the header), minutes long; run with --ignored --nocapture"]
 fn probe_quality_variance() {
     // same corpus, 5 fresh HNSW builds: how much does the aggregate move?
     let emb = HashingEmbedder;
@@ -164,6 +167,7 @@ fn probe_quality_variance() {
 }
 
 #[test]
+#[ignore = "temporary measurement probe (see the header), minutes long; run with --ignored --nocapture"]
 fn probe_cost_crossover() {
     let emb = HashingEmbedder;
     for n in [500usize, 1000, 2000, 4000] {

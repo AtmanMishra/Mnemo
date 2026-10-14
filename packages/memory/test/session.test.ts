@@ -163,3 +163,89 @@ test("a command that starts by changing into the project is named by what it run
   expect(subjectOf({ command: 'cd "/a b" && make' })).toBe("make");
   expect(subjectOf({ command: "cd src" })).toBe("cd src");
 });
+
+t("two processes starting on one project share one project node and one user node", async () => {
+  const { root, cwd } = setup();
+  const journal = path.join(root, "journal.jsonl");
+  const a = new MemoryService(MEMSRV!, journal);
+  const b = new MemoryService(MEMSRV!, journal);
+  const sa = new MemorySession({ memory: a, cwd, userSkillsDir: root });
+  const sb = new MemorySession({ memory: b, cwd, userSkillsDir: root });
+  await Promise.all([sa.begin("first task here"), sb.begin("second task here")]);
+  const nodes = await a.nodes();
+  expect(nodes.filter((n) => n.label === `project ${sa.identity.id}`)).toHaveLength(1);
+  expect(nodes.filter((n) => n.label === "user preferences")).toHaveLength(1);
+  // What one process learns, a third one reads.
+  await sb.remember("project", "test command", "bun test ./packages");
+  const fresh = new MemoryService(MEMSRV!, journal);
+  expect((await fresh.profile("project", sa.identity.id)).map((f) => f.key)).toEqual(["test command"]);
+  a.stop();
+  b.stop();
+  fresh.stop();
+});
+
+t("with copies of a standing node already written, every process picks the lowest id", async () => {
+  const { root, memory } = setup();
+  const ids: number[] = [];
+  for (let i = 0; i < 5; i++) ids.push((await memory.createNode("entity", "user preferences", "semantic"))!);
+  memory.stop();
+  const fresh = new MemoryService(MEMSRV!, path.join(root, "journal.jsonl"));
+  expect(await fresh.findLabel("user preferences")).toBe(Math.min(...ids));
+  expect(await fresh.userNode()).toBe(Math.min(...ids));
+  fresh.stop();
+});
+
+test("a sidecar that was down for the first run does not cost the session its episode, and the episode joins the project later", async () => {
+  const calls: [string, unknown[]][] = [];
+  let up = false;
+  const fake = {
+    project: async () => (calls.push(["project", []]), up ? 1 : undefined),
+    userNode: async () => (up ? 2 : undefined),
+    episode: async () => (up ? 10 : undefined),
+    link: async (...args: unknown[]) => void calls.push(["link", args]),
+    fact: async () => undefined,
+  } as unknown as MemoryService;
+  const s = new MemorySession({ memory: fake, cwd: os.tmpdir(), userSkillsDir: os.tmpdir() });
+  expect(await s.begin("first try while memory is down")).toBeUndefined();
+  up = true;
+  expect(await s.begin("second try")).toBe(10);
+  expect(calls.filter(([m]) => m === "link")).toEqual([["link", [10, 1, "part_of"]]]);
+});
+
+test("an episode made while the project was unreachable is linked to it once the project appears", async () => {
+  const links: unknown[][] = [];
+  let projectUp = false;
+  const fake = {
+    project: async () => (projectUp ? 1 : undefined),
+    userNode: async () => 2,
+    episode: async () => 10,
+    link: async (...args: unknown[]) => void links.push(args),
+    fact: async () => undefined,
+  } as unknown as MemoryService;
+  const s = new MemorySession({ memory: fake, cwd: os.tmpdir(), userSkillsDir: os.tmpdir() });
+  expect(await s.begin("first")).toBe(10);
+  expect(links).toEqual([]);
+  projectUp = true;
+  await s.begin("second");
+  await s.begin("third");
+  expect(links).toEqual([[10, 1, "part_of"]]);
+});
+
+t("a forgotten node is not found by its label any more, in the process that forgot it", async () => {
+  const { memory } = setup();
+  const old = (await memory.createNode("harness", "skill deploy", "procedural"))!;
+  expect(await memory.findLabel("skill deploy")).toBe(old);
+  expect(await memory.forgetNode(old)).toBe(true);
+  expect(await memory.findLabel("skill deploy")).toBeUndefined();
+  // and the sidecar refuses writes to it
+  await memory.fact(old, "last used", "today");
+  expect(await memory.state(old)).not.toContain("last used");
+  memory.stop();
+});
+
+test("recall ranks by the sidecar's score, which already holds the (capped) votes: they are not counted twice", async () => {
+  const mem = new MemoryService("/nonexistent/memsrv", path.join(os.tmpdir(), "mnemo-unused", "journal.jsonl"));
+  const hit = (node: number, score: number, useful: number) => ({ node, label: `note ${node}`, kind: "Aspect", area: "Semantic", score, state: "", useful, unhelpful: 0 });
+  mem.search = async () => [hit(1, 0.5, 0), hit(2, 0.3, 60)];
+  expect((await mem.recall("how do we deploy", undefined, [])).map((h) => h.node)).toEqual([1, 2]);
+});

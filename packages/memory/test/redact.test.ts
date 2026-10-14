@@ -39,3 +39,25 @@ test("a private key that is cut off is redacted, and a pile of BEGIN markers doe
   redact("-----BEGIN PRIVATE KEY-----".repeat(8000));
   expect(Date.now() - t0).toBeLessThan(1000);
 });
+
+test("more shapes: vendor tokens, Basic auth, webhooks, *_PASS / PRIVATE_KEY assignments, a password in a sentence", () => {
+  const leaks = [
+    "the staging password is Tr0ub4dor&3xx",
+    "hf_abcdefghijklmnopqrstuvwxyz0123456789",
+    "Authorization: Basic dXNlcjpwYXNzd29yZDEyMw==",
+    "https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXXXXXXXXXX",
+    "ya29.a0AfH6SMBxxxxxxxxxxxxxxxxxxxxxxxx",
+    "PRIVATE_KEY=abcdef123456",
+    "export DB_PASS=hunter2hunter2",
+  ];
+  for (const l of leaks) expect([l, redact(l).includes("[redacted]")]).toEqual([l, true]);
+  for (const ok of ["bypass: abcdefgh", "compass=northwest", "the password is required for login"]) expect(redact(ok)).toBe(ok);
+});
+
+test("a value is a secret when its key says so, though it is only a word alone", async () => {
+  const { secretUnderKey } = await import("../src/redact.ts");
+  expect(secretUnderKey("db password", "hunter2hunter2")).toBe(true);
+  expect(secretUnderKey("db password", "use the 1password CLI: op read op://db/pw")).toBe(false);
+  expect(secretUnderKey("test command", "bun test")).toBe(false);
+  expect(secretUnderKey("token budget", "4000 tokens")).toBe(false);
+});

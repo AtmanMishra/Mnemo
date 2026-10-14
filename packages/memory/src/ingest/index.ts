@@ -60,10 +60,70 @@ function readLedger(home: string): Ledger {
   }
 }
 
-function writeLedger(home: string, ledger: Ledger): void {
-  fs.mkdirSync(path.dirname(ledgerPath(home)), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(ledgerPath(home), JSON.stringify(ledger, null, 2), { mode: 0o600 });
+/**
+ * Record how many runs of one session are learned. Two ingests (a Stop hook and
+ * a manual run) may finish at once: the ledger is re-read under its own lock,
+ * only this session's entry changes, and it is replaced whole (tmp + rename) so
+ * a reader never sees half a file.
+ */
+async function recordIngested(home: string, key: string, runs: number): Promise<void> {
+  const file = ledgerPath(home);
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const release = await acquireLock(`${file}.lock`, { staleMs: 30_000, waitMs: 10_000 });
+  try {
+    const ledger = readLedger(home);
+    ledger[key] = Math.max(ledger[key] ?? 0, runs);
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(ledger, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } finally {
+    release?.();
+  }
 }
+
+/**
+ * An exclusive lock file (created with O_EXCL; it holds the owner's pid). A lock
+ * older than `staleMs`, or whose owner on this machine is gone, is taken over.
+ * Undefined when it is still held after `waitMs`.
+ */
+export async function acquireLock(file: string, o: { staleMs: number; waitMs?: number }): Promise<(() => void) | undefined> {
+  const deadline = Date.now() + (o.waitMs ?? 0);
+  for (;;) {
+    try {
+      const fd = fs.openSync(file, "wx", 0o600);
+      fs.writeSync(fd, `${process.pid} ${os.hostname()}`);
+      fs.closeSync(fd);
+      return () => fs.rmSync(file, { force: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    if (lockIsStale(file, o.staleMs)) {
+      fs.rmSync(file, { force: true });
+      continue;
+    }
+    if (Date.now() >= deadline) return undefined;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+function lockIsStale(file: string, staleMs: number): boolean {
+  try {
+    if (Date.now() - fs.statSync(file).mtimeMs > staleMs) return true;
+    const [pid, host] = fs.readFileSync(file, "utf8").split(" ");
+    if (host !== os.hostname() || !Number(pid)) return false;
+    try {
+      process.kill(Number(pid), 0);
+      return false;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "ESRCH";
+    }
+  } catch {
+    return false; // gone already, or unreadable: try again
+  }
+}
+
+/** A session's ingest lock: replaying it with reflection can take minutes. */
+const SESSION_LOCK_STALE_MS = 30 * 60_000;
 
 export function claudeCodeSessions(projectsDir = path.join(os.homedir(), ".claude", "projects")): string[] {
   if (!fs.existsSync(projectsDir)) return [];
@@ -82,43 +142,64 @@ export function claudeCodeSessions(projectsDir = path.join(os.homedir(), ".claud
 export async function ingestClaudeCode(o: IngestOptions): Promise<IngestReport> {
   const now = o.now ?? Date.now();
   const settle = o.settleMs ?? 10 * 60_000;
-  const ledger = readLedger(o.home);
   const report: IngestReport = { sessions: 0, runs: 0, unchanged: 0, active: 0 };
   for (const file of o.files ?? claudeCodeSessions(o.projectsDir)) {
     const s = parseClaudeCode(fs.readFileSync(file, "utf8"));
     if (!s || !s.runs.length) continue;
-    if (o.under && !path.resolve(s.cwd).startsWith(path.resolve(o.under))) continue;
+    if (o.under && !isInside(path.resolve(s.cwd), path.resolve(o.under))) continue;
     const key = `claude-code:${s.id}`;
-    const done = ledger[key] ?? 0;
-    // The last run may still be going: wait for it to finish or go quiet.
-    // settle 0 means do not wait: a file written this very millisecond (or with
-    // an mtime a fraction ahead of the clock) is still taken.
-    const quiet = settle <= 0 || now - fs.statSync(file).mtimeMs > settle;
-    const complete = quiet || s.runs.at(-1)!.finished ? s.runs.length : s.runs.length - 1;
-    const fresh = s.runs.slice(done, complete);
-    if (!fresh.length) {
-      if (complete < s.runs.length) report.active++;
-      else report.unchanged++;
+    // One ingest per session at a time: another process (a Stop hook, a manual
+    // ingest) replaying the same runs would record every episode twice.
+    fs.mkdirSync(path.join(o.home, "memory", "ingest-locks"), { recursive: true, mode: 0o700 });
+    const release = await acquireLock(path.join(o.home, "memory", "ingest-locks", `${key.replace(/[^\w.-]/g, "_")}.lock`), { staleMs: SESSION_LOCK_STALE_MS });
+    if (!release) {
+      report.active++;
       continue;
     }
-    if (fresh.reduce((n, r) => n + r.tools.length, 0) >= (o.minTools ?? 1)) {
-      o.progress?.(s, fresh.length);
-      const session = new MemorySession({
-        memory: o.memory,
-        cwd: s.cwd,
-        userSkillsDir: o.userSkillsDir,
-        source: { agent: "claude-code", model: s.model },
-        reflect: o.reflect,
-        approveSkill: o.approveSkill,
-        notify: o.notify && ((note) => o.notify!(s.id, note)),
-      });
-      await replay(session, fresh);
-      await session.close();
-      report.sessions++;
-      report.runs += fresh.length;
+    try {
+      await ingestOne(o, file, s, key, now, settle, report);
+    } finally {
+      release();
     }
-    ledger[key] = complete;
-    writeLedger(o.home, ledger);
   }
   return report;
+}
+
+/** `child` is `parent` or a folder inside it (`/a/proj` is not inside `/a/pro`). */
+function isInside(child: string, parent: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+async function ingestOne(o: IngestOptions, file: string, s: ReplaySession, key: string, now: number, settle: number, report: IngestReport): Promise<void> {
+  // Read under the session's lock: what another ingest finished is not learned again.
+  const done = readLedger(o.home)[key] ?? 0;
+  // The last run may still be going: wait for it to finish or go quiet.
+  // settle 0 means do not wait: a file written this very millisecond (or with
+  // an mtime a fraction ahead of the clock) is still taken.
+  const quiet = settle <= 0 || now - fs.statSync(file).mtimeMs > settle;
+  const complete = quiet || s.runs.at(-1)!.finished ? s.runs.length : s.runs.length - 1;
+  const fresh = s.runs.slice(done, complete);
+  if (!fresh.length) {
+    if (complete < s.runs.length) report.active++;
+    else report.unchanged++;
+    return;
+  }
+  if (fresh.reduce((n, r) => n + r.tools.length, 0) >= (o.minTools ?? 1)) {
+    o.progress?.(s, fresh.length);
+    const session = new MemorySession({
+      memory: o.memory,
+      cwd: s.cwd,
+      userSkillsDir: o.userSkillsDir,
+      source: { agent: "claude-code", model: s.model },
+      reflect: o.reflect,
+      approveSkill: o.approveSkill,
+      notify: o.notify && ((note) => o.notify!(s.id, note)),
+    });
+    await replay(session, fresh);
+    await session.close();
+    report.sessions++;
+    report.runs += fresh.length;
+  }
+  await recordIngested(o.home, key, complete);
 }

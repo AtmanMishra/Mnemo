@@ -13,6 +13,7 @@
  * dependencies. Each tool takes an optional `cwd`, because not every client
  * starts its servers in the project directory.
  */
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
@@ -25,6 +26,11 @@ export interface McpOptions {
   userSkillsDir: string;
   /** Used when a call does not name one. */
   cwd: string;
+  /**
+   * When given (the server was started with --cwd), a call's own `cwd` must be
+   * this folder or inside it: a client cannot point memory at another project.
+   */
+  root?: string;
   source?: Source;
   version?: string;
   /** Past-session search; the tool is offered only when this is given. */
@@ -76,14 +82,42 @@ export const SESSION_SEARCH_TOOL = {
   },
 };
 
+const MAX_SESSIONS = 32;
+
+/** An existing directory, symlinks resolved; throws (as a tool error) otherwise. */
+function realDir(dir: string): string {
+  let real: string;
+  try {
+    real = fs.realpathSync(path.resolve(dir));
+  } catch {
+    throw new Error(`cwd ${dir} does not exist`);
+  }
+  if (!fs.statSync(real).isDirectory()) throw new Error(`cwd ${dir} is not a directory`);
+  return real;
+}
+
+function inside(child: string, parent: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
 type Request = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
 
 export function serveMcp(o: McpOptions, input: Readable, output: Writable): Promise<void> {
   const sessions = new Map<string, MemorySession>();
+  const root = o.root === undefined ? undefined : realDir(o.root);
   const sessionFor = (cwd?: unknown) => {
-    const dir = path.resolve(typeof cwd === "string" && cwd ? cwd : o.cwd);
+    let dir = path.resolve(o.cwd);
+    if (typeof cwd === "string" && cwd) {
+      dir = realDir(cwd);
+      if (root !== undefined && !inside(dir, root)) throw new Error(`cwd must be ${root} or a folder inside it`);
+    }
     let s = sessions.get(dir);
-    if (!s) sessions.set(dir, (s = new MemorySession({ memory: o.memory, cwd: dir, userSkillsDir: o.userSkillsDir, source: o.source })));
+    if (s) sessions.delete(dir); // most recently used goes last
+    else s = new MemorySession({ memory: o.memory, cwd: dir, userSkillsDir: o.userSkillsDir, source: o.source });
+    sessions.set(dir, s);
+    // A long-lived server asked about many folders keeps the recent ones.
+    while (sessions.size > MAX_SESSIONS) sessions.delete(sessions.keys().next().value!);
     return s;
   };
   const send = (msg: object) => output.write(`${JSON.stringify({ jsonrpc: "2.0", ...msg })}\n`);

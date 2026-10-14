@@ -10,6 +10,20 @@ use std::collections::HashMap;
 /// the log on disk and come back verbatim from `history`.
 const FACT_LOG_KINDS: [&str; 2] = ["fact_added", "fact_superseded"];
 
+/// `state_of` is read back line by line (a `facts:` block of `  - key: value`
+/// lines), so text written into it must stay on its line: a newline in a label,
+/// key, value or log detail would otherwise start a line of its own — a forged
+/// fact. Line breaks are shown escaped; the stored text is unchanged.
+fn one_line(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains(['\r', '\n', '\u{2028}', '\u{2029}', '\u{0085}']) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    std::borrow::Cow::Owned(
+        text.replace("\r\n", "\\n")
+            .replace(['\r', '\n', '\u{2028}', '\u{2029}', '\u{0085}'], "\\n"),
+    )
+}
+
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct StoreData {
     pub nodes: HashMap<NodeId, Node>,
@@ -109,7 +123,9 @@ impl StoreData {
                 self.state_memo.remove(node);
             }
             Op::DeleteNode { node, hard, at } => {
-                let n = self.get_mut(*node)?;
+                // forgetting a forgotten node again is allowed (a soft forget
+                // then a hard one); every other write to it is not
+                let n = self.nodes.get_mut(node).ok_or_else(|| format!("node {node} missing"))?;
                 n.deleted = true;
                 n.log.push(LogEntry { at: *at, kind: "deleted".into(), detail: format!("hard={hard}") });
                 if *hard {
@@ -159,10 +175,10 @@ impl StoreData {
                 self.state_memo.remove(node);
             }
             Op::RecordUsefulness { node, useful, .. } => {
-                // ML-2: a vote is counted, never LOGGED — node_text embeds
-                // a node's last-3 log entries, and vote noise would dilute
-                // the very content the vote rewards, drifting a heavily-
-                // voted node away from its topic. The counters stay
+                // ML-2: a vote is counted, never LOGGED — vote noise would
+                // bury the node's recent log (what `state_of` shows) under
+                // bookkeeping. (node_text once embedded the last log
+                // entries, which made this a ranking bug too.) The counters stay
                 // model-visible through `state_of` text, which is display-
                 // only and never embedded.
                 let n = self.get_mut(*node)?;
@@ -173,11 +189,61 @@ impl StoreData {
         Ok(())
     }
 
+    /// Whether `apply(op)` would succeed, without changing anything. A writer
+    /// checks, then journals, then applies: an op is on disk before it is in
+    /// memory (a failed append leaves no phantom write behind), and an op that
+    /// cannot apply never reaches the journal.
+    pub fn check(&self, op: &Op) -> Result<(), String> {
+        let live = |id: &NodeId| -> Result<&Node, String> {
+            match self.nodes.get(id) {
+                Some(n) if n.deleted => Err(format!("node {id} was forgotten")),
+                Some(n) => Ok(n),
+                None => Err(format!("node {id} missing")),
+            }
+        };
+        let edge = |id: &EdgeId| -> Result<(), String> {
+            if self.edges.contains_key(id) { Ok(()) } else { Err(format!("edge {id} missing")) }
+        };
+        match op {
+            Op::CreateNode { id, .. } => {
+                if self.nodes.contains_key(id) { return Err(format!("node {id} exists")); }
+            }
+            Op::AddFact { node, .. } | Op::SetArea { node, .. } | Op::CommitLog { node, .. }
+            | Op::RecordUsefulness { node, .. } => { live(node)?; }
+            Op::PushContext { to, .. } => { live(to)?; }
+            Op::SupersedeFact { node, old_fact, .. } => {
+                if !live(node)?.facts.iter().any(|f| f.id == *old_fact) {
+                    return Err(format!("fact {old_fact} not on node {node}"));
+                }
+            }
+            Op::DeleteNode { node, .. } => {
+                if !self.nodes.contains_key(node) { return Err(format!("node {node} missing")); }
+            }
+            Op::Link { id, src, dst, .. } => {
+                live(src)?; live(dst)?;
+                if self.edges.contains_key(id) { return Err(format!("edge {id} exists")); }
+            }
+            Op::Unlink { edge: e, .. } | Op::Reweight { edge: e, .. } | Op::RecordOutcome { edge: e, .. } => edge(e)?,
+        }
+        Ok(())
+    }
+
+    /// A live node to write to. A forgotten (soft-deleted) node takes no more
+    /// writes: it is history, and a fact or link added to it would be a write
+    /// nobody can see — or, once something reads it again, a resurrection.
     fn get_mut(&mut self, id: NodeId) -> Result<&mut Node, String> {
-        self.nodes.get_mut(&id).ok_or_else(|| format!("node {id} missing"))
+        match self.nodes.get_mut(&id) {
+            Some(n) if n.deleted => Err(format!("node {id} was forgotten")),
+            Some(n) => Ok(n),
+            None => Err(format!("node {id} missing")),
+        }
     }
     fn must_exist(&self, id: NodeId) -> Result<(), String> {
-        if self.nodes.contains_key(&id) { Ok(()) } else { Err(format!("node {id} missing")) }
+        match self.nodes.get(&id) {
+            Some(n) if n.deleted => Err(format!("node {id} was forgotten")),
+            Some(_) => Ok(()),
+            None => Err(format!("node {id} missing")),
+        }
     }
     fn edge_mut(&mut self, id: EdgeId) -> Result<&mut Edge, String> {
         self.edges.get_mut(&id).ok_or_else(|| format!("edge {id} missing"))
@@ -196,10 +262,10 @@ impl StoreData {
             return Ok(s.clone());
         }
         let n = self.nodes.get(&id).ok_or_else(|| format!("node {id} missing"))?;
-        let mut s = format!("[{:?}/{:?}] {} #{}\n", n.kind, n.area, n.label, n.id);
+        let mut s = format!("[{:?}/{:?}] {} #{}\n", n.kind, n.area, one_line(&n.label), n.id);
         s.push_str("facts:\n");
         for f in n.active_facts() {
-            s.push_str(&format!("  - {}: {}\n", f.key, f.value));
+            s.push_str(&format!("  - {}: {}\n", one_line(&f.key), one_line(&f.value)));
         }
         // #24: a key has one current value, so retired ones are NOT rendered as
         // live instructions — two versions of a changed constraint with nothing
@@ -226,11 +292,11 @@ impl StoreData {
             .filter(|l| !FACT_LOG_KINDS.contains(&l.kind.as_str()))
             .rev().take(5).collect::<Vec<_>>().iter().rev()
         {
-            s.push_str(&format!("  [{}] {}: {}\n", l.at, l.kind, l.detail));
+            s.push_str(&format!("  [{}] {}: {}\n", l.at, one_line(&l.kind), one_line(&l.detail)));
         }
         s.push_str(&format!("context chunks: {}\n", n.context.len()));
         for c in &n.context {
-            s.push_str(&format!("  <- #{} [dim {}]: {}\n", c.from, c.dim, c.note));
+            s.push_str(&format!("  <- #{} [dim {}]: {}\n", c.from, c.dim, one_line(&c.note)));
         }
         if n.useful > 0 || n.unhelpful > 0 {
             s.push_str(&format!("usefulness votes: {} useful / {} unhelpful\n", n.useful, n.unhelpful));

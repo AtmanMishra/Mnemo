@@ -104,4 +104,32 @@ mod embed_bound_tests {
         assert!(!allowed_endpoint("http://localhost.evil.com/v1"));
         assert!(!allowed_endpoint("http://192.168.1.5:11434/v1/embeddings"));
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_embed_cache_is_replaced_whole_and_private() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let dir = std::env::temp_dir().join(format!("memlayer-embed-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let e = OpenRouterEmbedder::new_with_endpoint(
+            "k".into(), "m".into(), &dir, "https://api.example.com/v1/embeddings".into(), Duration::from_secs(1),
+        );
+        let cache = dir.join("embed-cache.json");
+        let mut map = std::collections::HashMap::new();
+        map.insert("a".to_string(), vec![1.0f32]);
+        e.persist(&map);
+        let first = std::fs::metadata(&cache).unwrap();
+        assert_eq!(first.permissions().mode() & 0o077, 0, "the cache holds memories' vectors: private");
+        map.insert("b".to_string(), vec![2.0f32]);
+        e.persist(&map);
+        // A new file renamed over the old one (a new inode), never the old one
+        // truncated and rewritten in place where a reader can catch it half-done.
+        assert_ne!(std::fs::metadata(&cache).unwrap().ino(), first.ino());
+        let back: std::collections::HashMap<String, Vec<f32>> = serde_json::from_slice(&std::fs::read(&cache).unwrap()).unwrap();
+        assert_eq!(back.len(), 2);
+        let leftovers: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|d| d.ok())
+            .filter(|d| d.file_name().to_string_lossy().ends_with(".tmp")).collect();
+        assert!(leftovers.is_empty());
+    }
 }

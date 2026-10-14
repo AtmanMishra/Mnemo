@@ -41,7 +41,8 @@ export function normalizeRemote(url: string): string {
   let u = url.trim();
   const scp = /^[\w.-]+@([^:/]+):(.+)$/.exec(u);
   if (scp) u = `${scp[1]}/${scp[2]}`;
-  else u = u.replace(/^[a-z+]+:\/\//i, "").replace(/^[^@/]+@/, "");
+  // ssh://git@host:22/o/r is git@host:o/r (the scp form is always port 22); another port is another server
+  else u = u.replace(/^[a-z+]+:\/\//i, "").replace(/^[^@/]+@/, "").replace(/^([^/:]+):22\//, "$1/");
   return u.replace(/\.git$/i, "").replace(/\/+$/, "").toLowerCase();
 }
 
