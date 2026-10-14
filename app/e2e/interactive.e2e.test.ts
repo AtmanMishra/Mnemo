@@ -93,8 +93,11 @@ describe.if(hasPty)("interactive", () => {
       await t.waitFor(/how do you want to log in/);
       await Bun.sleep(600);
       await t.type(KEY.down);
+      await Bun.sleep(300);
+      // The menu itself says "API key": wait for the prompt that takes the key, or it is typed into nothing.
+      t.mark();
       await t.type(KEY.enter);
-      await t.waitFor(/key/i);
+      await t.waitFor(/input is hidden/);
       t.mark();
       await t.type("sk-ant-e2e-test-key");
       await t.waitFor(new RegExp("•".repeat("sk-ant-e2e-test-key".length)));
@@ -219,7 +222,12 @@ describe.if(hasPty)("interactive", () => {
         await t.type(KEY.enter);
       }
       await t.waitFor(/Open this link to sign in/);
-      expect(t.text()).toMatch(/https:\/\/\S*(claude|anthropic)/);
+      // The visible label can reach the stream in pieces (Ink redraws what changed), so read
+      // the link itself: the hyperlink's target and the copy put on the clipboard are whole.
+      const raw = t.raw();
+      const targets = [...raw.matchAll(/\x1b\]8;;(https:\/\/[^\x07\x1b]+)/g)].map((m) => m[1]!);
+      const copied = [...raw.matchAll(/\x1b\]52;c;([A-Za-z0-9+/=]+)/g)].map((m) => Buffer.from(m[1]!, "base64").toString());
+      expect([...targets, ...copied].filter((u) => /^https:\/\/\S*(claude|anthropic)/.test(u))).not.toHaveLength(0);
       await Bun.sleep(400);
       t.mark();
       await t.type(KEY.esc);
