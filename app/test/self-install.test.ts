@@ -7,7 +7,7 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { mayOffer, placeBinaries, PS_USER_PATH, selfInstall, selfInstallOffer, userPathVia, withPathEntry, type Files, type UserPath } from "../src/runtime/self-install.ts";
+import { mayOffer, placeBinaries, placementProblems, PS_USER_PATH, selfInstall, selfInstallOffer, userPathVia, withPathEntry, type Files, type UserPath } from "../src/runtime/self-install.ts";
 
 const pwsh = process.env.MNEMO_TEST_PWSH || Bun.which("pwsh");
 
@@ -179,6 +179,28 @@ describe("asking", () => {
     expect(mayOffer([], true, { MNEMO_NO_SELF_INSTALL: "1" })).toBe(false);
     for (const a of [["-p", "hi"], ["--print", "hi"], ["--version"], ["-v"], ["--help"], ["-h"], ["--dump"], ["doctor"], ["uninstall"], ["update"], ["memory", "status"], ["install"]])
       expect([a, mayOffer(a, true, {})]).toEqual([a, false]);
+  });
+});
+
+describe("doctor", () => {
+  test("says when Windows runs Mnemo from outside its folder, and when PATH finds another mnemo", () => {
+    const d = download();
+    const home = d.home;
+    const lines = placementProblems({ execPath: d.execPath, home, platform: "win32", kind: "elsewhere", which: () => "C:\\old\\mnemo.exe" });
+    expect(lines[0]).toContain(`running from ${d.from}, not ${d.bin} — mnemo install`);
+    expect(lines[1]).toContain("mnemo in a new terminal is C:\\old\\mnemo.exe, not this one");
+    expect(lines[1]).toContain("mnemo install");
+    // Everywhere: the PATH's mnemo is another file.
+    const other = path.join(d.root, "other-mnemo");
+    fs.writeFileSync(other, "");
+    expect(placementProblems({ execPath: d.execPath, home, platform: "linux", kind: "installer", which: () => other })).toEqual([
+      `! path    mnemo in a new terminal is ${other}, not this one (${d.execPath}) — remove that one, or put ${d.from} first on your PATH`,
+    ]);
+    // A link to this very binary is this one.
+    const link = path.join(d.root, "link");
+    fs.symlinkSync(d.execPath, link);
+    expect(placementProblems({ execPath: d.execPath, home, platform: "linux", kind: "installer", which: () => link })).toEqual([]);
+    expect(placementProblems({ execPath: d.execPath, home, platform: "linux", kind: "elsewhere", which: () => null })).toEqual([]);
   });
 });
 

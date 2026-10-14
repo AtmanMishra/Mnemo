@@ -36,7 +36,7 @@ import { bestOf, describeBestOf } from "../src/runtime/best-of.ts";
 import { selfCommand } from "../src/runtime/self.ts";
 import { findProblems } from "../src/runtime/doctor.ts";
 import { describePlan, looksLikeMnemoHome, planUninstall, runUninstall } from "../src/runtime/uninstall.ts";
-import { mayOffer, ownConsole, selfInstall, selfInstallOffer } from "../src/runtime/self-install.ts";
+import { mayOffer, ownConsole, placementProblems, selfInstall, selfInstallOffer } from "../src/runtime/self-install.ts";
 
 const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
 
@@ -207,6 +207,7 @@ async function doctor(home: string, dir: string, fix: boolean): Promise<number> 
   lines.push(`  skills  ${skills} in ${skillsDir(home)}`);
   const problems = findProblems(home);
   for (const p of problems) lines.push(`✗ ${p.problem}`);
+  lines.push(...placement(home));
   console.log(lines.join("\n"));
   if (!fix) {
     if (problems.length || (!memsrv && installKind(process.execPath, home) === "installer")) console.log("\nmnemo doctor --fix repairs what it can");
@@ -232,6 +233,11 @@ async function doctor(home: string, dir: string, fix: boolean): Promise<number> 
   if (!usable) console.log("cannot  no model: run mnemo, then /login");
   if (!problems.length && memsrv && usable) console.log("nothing to fix");
   return usable && memsrvNow ? 0 : 1;
+}
+
+/** Whether a new terminal's `mnemo` is this one (it is not when a download was never installed). */
+function placement(home: string): string[] {
+  return placementProblems({ execPath: process.execPath, home, platform: process.platform, kind: installKind(process.execPath, home), which: (n) => Bun.which(n) });
 }
 
 /** Small per-user state: whether the introduction has been seen. */

@@ -222,6 +222,33 @@ export function selfInstall(o: {
 }
 
 /**
+ * For `mnemo doctor`: whether the `mnemo` a new terminal runs is this one, and on
+ * Windows whether this one is installed. Lines to print, empty when all is well.
+ */
+export function placementProblems(o: { execPath: string; home: string; platform: NodeJS.Platform; kind: InstallKind; which: (name: string) => string | null | undefined }): string[] {
+  if (o.kind === "source") return [];
+  const out: string[] = [];
+  const bin = path.join(o.home, "bin");
+  if (o.platform === "win32" && o.kind === "elsewhere") out.push(`! install running from ${path.dirname(o.execPath)}, not ${bin} — mnemo install puts it there and on your PATH`);
+  const onPath = o.which("mnemo");
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync.native(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const same = (a: string, b: string) => (o.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+  if (onPath && !same(real(onPath), real(o.execPath)))
+    out.push(
+      o.kind === "elsewhere"
+        ? `! path    mnemo in a new terminal is ${onPath}, not this one (${o.execPath}) — run this one's  mnemo install  to make it the one`
+        : `! path    mnemo in a new terminal is ${onPath}, not this one (${o.execPath}) — remove that one, or put ${path.dirname(o.execPath)} first on your PATH`,
+    );
+  return out;
+}
+
+/**
  * Whether this console window is ours alone, as when mnemo.exe was double-clicked: it
  * closes the moment Mnemo exits, so the last lines need an Enter first. Assumed so when
  * Windows cannot be asked.

@@ -339,6 +339,9 @@ describe("install layout", () => {
     expect(fs.readdirSync(bin).sort()).toEqual(["memsrv", "mnemo"]);
     const doctor = await run({ ...w, env }, path.join(bin, "mnemo"), ["doctor"]);
     expect(doctor.stdout).toContain(`✓ memory  ${path.join(bin, "memsrv")}`);
+    // The download, run again while the installed copy is first on the PATH, says so.
+    const again = await run({ ...w, env: { ...env, PATH: `${bin}:${process.env.PATH}` } }, path.join(dl, "mnemo"), ["doctor"]);
+    expect(again.stdout).toContain(`! path    mnemo in a new terminal is ${path.join(bin, "mnemo")}, not this one (${path.join(dl, "mnemo")})`);
     const installed = await run({ ...w, env }, path.join(bin, "mnemo"), ["install", "--yes"]);
     expect(installed.stdout).toContain(`Mnemo is installed in ${bin}`);
   }, T);
