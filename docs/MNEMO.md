@@ -99,6 +99,9 @@ by hand; `?` on an empty prompt shows the panel):
 | `1`–`5` (sidebar) | files · memory · sessions · skills · logs |
 | `ctrl+g` `ctrl+p` `ctrl+n` `ctrl+s` | the agent hub · switch project · another agent here · split view (up to four) |
 | `alt+1`…`alt+9`, `alt+,` `alt+.` | go to agent N · previous / next agent |
+| `alt+l` (split) | next split layout: columns, rows, grid, main + side (at most four panes) |
+| `ctrl+y` | the playground: every agent, sub-agent and message between them, to watch (read-only) |
+| `l` `u` `f` `p` (agents page) | link two agents as siblings · unlink · split with this agent's family · playground |
 | `/` · `@` | the slash menu · mention a file |
 | `ctrl+c` | clear the draft, interrupt the turn, or quit (twice) |
 

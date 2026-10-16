@@ -59,7 +59,9 @@ test("a send is refused outside the family, to the ended, and from the ended; in
   expect(r.send(a1, b, "found it")).toEqual({ ok: true }); // a sub-agent reaches its parent's sibling
   expect(inbox.get(b)![0]).toMatchObject({ from: a1, fromLabel: "researcher", fromRole: "sub-agent (depth 1)", text: "found it" });
   expect(r.send(a1, c, "hi")).toMatchObject({ ok: false });
-  expect(r.send(a, 9999, "hi")).toMatchObject({ ok: false });
+  // A node that does not exist and one that is out of reach answer alike: ids in other trees cannot be probed.
+  const norm = (x: ReturnType<typeof r.send>) => JSON.stringify(x).replace(/#\d+/, "#n");
+  expect(norm(r.send(a, 9999, "hi"))).toBe(norm(r.send(a, c, "hi")));
   expect(r.send(a1, a1, "hi")).toMatchObject({ ok: false });
   r.finish(a1, "done", "ok");
   expect(r.send(a1, a, "late")).toMatchObject({ ok: false, reason: "you are no longer running" });

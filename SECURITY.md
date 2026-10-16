@@ -166,6 +166,41 @@ memory), and the MCP server takes the project from each call, so a model that is
 prompt-injected can ask for another project's memory. Only attach memory to agents
 and repositories you trust with all of it.
 
+## Agents that talk to agents
+
+Agents can start sub-agents (to depth 3), you can link top-level agents as siblings,
+and agents in one family can message each other (`list_agents`, `message_agent`).
+What that does and does not allow:
+
+- **Reach is enforced in code, not by a prompt.** An agent can message its parent and
+  children, its siblings, and the siblings of its ancestors, and nobody else. It cannot
+  reach an unlinked agent, another conversation's tree, or probe for ids (the refusal
+  is the same for "no such agent" and "not yours"). Only **you** link agents, from the
+  agents page; there is no tool for it, and a model cannot link itself to anything.
+- **A message is another model's text, never an instruction.** It is delivered framed
+  as such, not in the system prompt, and it changes nothing about the receiver's mode,
+  approvals or deny rules: in `default` and `accept-edits` the receiver still asks you
+  before a command, whoever suggested it. In `yolo` nothing asks, so a message can
+  talk a `yolo` agent into running something; do not link agents you want to keep
+  unattended and unrestricted to ones that read untrusted text.
+- **A message never starts work.** It reaches a running agent after its current step and
+  an idle one at its next prompt, so an agent cannot spend your money or act on another
+  one's behalf while you are away. Messages are bounded (2,000 characters, 30 a minute
+  per sender, 20 unread per idle agent) and so is the tree (depth 3, 4 live children,
+  16 live sub-agents per conversation); a sub-agent never has more access than its
+  parent.
+- **What agents write is cleaned and redacted** (control and bidirectional-override
+  characters removed, credential shapes redacted) before it is stored, shown on the
+  agents page or the playground, or delivered, so an agent cannot repaint your
+  terminal or put a key on a screen.
+- **The playground is read-only by construction.** It receives a view of the roster
+  with no way to change it and has no prompt; the only thing it can do is open an agent
+  in the agents page.
+- **Accepted risk.** Linked agents can read each other's current task, latest steps and
+  last prompt (not transcripts or file contents), and a read-only research agent that
+  reads hostile text can pass it on as a message. The framing, the gate and the limits
+  above are the mitigations; this is still a prompt-injection path between agents.
+
 ## The legacy stack
 
 `agent/`, `harness-engine/` and `tui-go/` (the previous implementation) are not on

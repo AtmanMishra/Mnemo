@@ -1,8 +1,8 @@
 # Agent hierarchy, siblings and the playground (0.1.5)
 
-*Design, written 2026-10-16 before the code. Status: being built on
-`claude/agent-hierarchy-0.1.5-c5vprl`. The shipped behaviour is in
-`docs/MNEMO-INTERNALS.md` §3.4 once it lands.*
+*Design, written 2026-10-16 before the code; built in 0.1.5. The shipped behaviour
+is in `docs/MNEMO-INTERNALS.md` §3.4 and the security review in `SECURITY.md`; the
+tests are `roster`, `hierarchy`, `layout`, `tree` and `agents-ui` in `app/test/`.*
 
 ## What exists today
 

@@ -47,6 +47,25 @@ export const AREA_LABEL: Record<Area, string> = {
 
 export const RELEASES: Release[] = [
   {
+    version: "0.1.5",
+    date: "2026-10-17",
+    headline: "Agents work in teams: sub-agents that start sub-agents, sibling agents that see and message each other, split layouts, and a playground to watch them.",
+    changes: [
+      { kind: "added", area: "agents", text: "Sub-agents can start sub-agents", detail: "Down to three levels, four at a time per agent and sixteen per conversation. A read-only agent can only start read-only ones. Give one a name with spawn_subagent's name field." },
+      { kind: "added", area: "agents", text: "Sibling agents", detail: "Press l on one agent in the agents page, then l on another, and the two can see what the other is doing and message each other. A sub-agent can reach its parent's siblings. u unlinks. Only you can link agents; no tool can." },
+      { kind: "added", area: "agents", text: "list_agents and message_agent", detail: "A message is delivered as another model's text, not yours: it grants nothing, does not skip the receiver's approvals, and never starts a turn on its own." },
+      { kind: "changed", area: "agents", text: "The agents page draws the tree", detail: "Each card says who it is linked with and how many sub-agents it has; below, the selected agent's family as a tree with each sub-agent's task and steps." },
+      { kind: "added", area: "interface", text: "Split layouts, never more than four panes", detail: "alt+l cycles columns, rows, grid and main + side. f in the agents page splits an agent with its linked agents and its busiest sub-agents, and the bar says '4 of 9' when more are related. A sub-agent is a read-only pane." },
+      { kind: "added", area: "interface", text: "The playground (ctrl+y)", detail: "Every agent, sub-agent and message between them, live, to supervise. It cannot steer: no prompt, no stop, no message. Enter takes you to the agent." },
+      { kind: "security", area: "safety", text: "Who may message whom is enforced in code; what agents write is cleaned and redacted", detail: "Control and bidirectional characters are removed and credential shapes redacted before anything an agent writes is shown or delivered. Limits on size, rate, depth and fan-out. See SECURITY.md." },
+    ],
+    known: [
+      "Sub-agents are watched, not typed to: you talk to top-level agents only.",
+      "A message never wakes an idle agent, so a sibling reads it at its next prompt.",
+      "Links last for the session; they are not restored when Mnemo restarts.",
+    ],
+  },
+  {
     version: "0.1.3",
     date: "2026-10-16",
     headline: "Subscription login works in the downloaded binary; memory no longer reads off; Windows installs itself; about sixty fixes from a full review.",

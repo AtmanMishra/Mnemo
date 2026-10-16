@@ -274,6 +274,7 @@ export class Roster implements RosterView {
     n.status = status;
     n.endedAt = this.now();
     n.pending = 0;
+    this.sent.delete(id);
     if (answer !== undefined) n.answer = clean(answer, 1500);
     this.handles.delete(id);
     this.event({ at: this.now(), kind: status, node: id });
@@ -352,9 +353,8 @@ export class Roster implements RosterView {
     const sender = this.nodes.get(from);
     const target = this.nodes.get(to);
     if (!sender || isEnded(sender.status)) return { ok: false, reason: "you are no longer running" };
-    if (!target) return { ok: false, reason: `there is no agent #${to}` };
-    // The same answer for "does not exist" and "not yours to reach" would leak nothing; a distinct one helps the model correct itself.
-    if (!this.canReach(from, to)) return { ok: false, reason: `agent #${to} is not in your family; list_agents shows who you can message` };
+    // One answer for "does not exist" and "not yours to reach", so ids in other trees cannot be probed.
+    if (!target || !this.canReach(from, to)) return { ok: false, reason: `agent #${to} is not in your family; list_agents shows who you can message` };
     if (isEnded(target.status)) return { ok: false, reason: `agent #${to} has finished` };
     const body = clean(text, LIMITS.messageChars + 1);
     if (!body.trim()) return { ok: false, reason: "the message is empty" };
