@@ -18,15 +18,11 @@ import {
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import type { Host } from "./host.ts";
+import { RosterError } from "../runtime/roster.ts";
+import { stepLine } from "./peers.ts";
 import { projectTrusted } from "../runtime/runtime.ts";
 
-const READ_ONLY = ["read", "grep", "find", "ls", "memory_search"];
-
-/** One line per child step, for the parent's live view. */
-function stepLine(name: string, args: Record<string, unknown>): string {
-  const subject = String(args.command ?? args.path ?? args.pattern ?? args.query ?? "").split("\n")[0]!.slice(0, 80);
-  return `→ ${name}${subject ? `(${subject})` : ""}`;
-}
+const READ_ONLY = ["read", "grep", "find", "ls", "memory_search", "spawn_subagent", "list_agents", "message_agent"];
 
 export function agentsExtension(host: Host, extensionsFor: (child: Host) => import("@earendil-works/pi-coding-agent").InlineExtension[]) {
   return (pi: ExtensionAPI): void => {
@@ -37,16 +33,28 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
         label: "Sub-agent",
         description:
           "Delegate a self-contained task to a sub-agent that works on its own and reports back. Write a complete brief: " +
-          "the goal, the relevant files, constraints, and what to return. Use 'read-only' for research; 'full' lets it edit and run commands (the user still approves).",
+          "the goal, the relevant files, constraints, and what to return. Use 'read-only' for research; 'full' lets it edit and run commands (the user still approves). " +
+          "A sub-agent can start sub-agents of its own, to a limited depth, and can message the agents around it (list_agents). Start independent tasks in one step to run them side by side.",
         parameters: Type.Object({
           task: Type.String({ description: "The complete brief" }),
+          name: Type.Optional(Type.String({ description: "A short name for it, e.g. 'auth researcher'" })),
           access: Type.Optional(Type.Union([Type.Literal("read-only"), Type.Literal("full")])),
         }),
         async execute(_id, params, signal, onUpdate, ctx) {
           if (!ctx.model) throw new Error("no model is selected");
+          const access = params.access === "full" ? "full" : "read-only";
+          let node;
+          try {
+            node = host.roster.addSub(host.node, { label: params.name ?? "", task: params.task, access });
+          } catch (e) {
+            if (e instanceof RosterError) throw new Error(e.message);
+            throw e;
+          }
           const child: Host = {
             ...host,
             depth: host.depth + 1,
+            node: node.id,
+            access,
             background: host.background,
             signals: host.signals,
             episode: undefined,
@@ -61,40 +69,48 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             },
             enumerable: true,
           });
-          const services = await createAgentSessionServices({
-            cwd: ctx.cwd,
-            agentDir: host.agentDir,
-            modelRuntime: host.modelRuntime,
-            settingsManager: SettingsManager.create(ctx.cwd, host.agentDir, { projectTrusted: projectTrusted(ctx.cwd, host.agentDir) }),
-            resourceLoaderOptions: { extensionFactories: extensionsFor(child) },
-          });
-          const { session } = await createAgentSessionFromServices({
-            services,
-            sessionManager: SessionManager.inMemory(ctx.cwd),
-            model: ctx.model,
-            tools: params.access === "full" ? undefined : READ_ONLY,
-          });
-          await session.bindExtensions({});
-          const steps: string[] = [];
-          const unsubscribe = session.subscribe((event) => {
-            if (event.type === "tool_execution_start") {
-              steps.push(stepLine(event.toolName, (event.args ?? {}) as Record<string, unknown>));
-              onUpdate?.({ content: [{ type: "text", text: steps.slice(-8).join("\n") }], details: { steps: steps.length } });
-            }
-          });
-          const onAbort = () => void session.abort();
-          signal?.addEventListener("abort", onAbort);
+          let session: Awaited<ReturnType<typeof createAgentSessionFromServices>>["session"] | undefined;
+          let unsubscribe = () => {};
+          const onAbort = () => void session?.abort();
+          let outcome: "done" | "failed" = "failed";
+          let answer: string | undefined;
           try {
+            const services = await createAgentSessionServices({
+              cwd: ctx.cwd,
+              agentDir: host.agentDir,
+              modelRuntime: host.modelRuntime,
+              settingsManager: SettingsManager.create(ctx.cwd, host.agentDir, { projectTrusted: projectTrusted(ctx.cwd, host.agentDir) }),
+              resourceLoaderOptions: { extensionFactories: extensionsFor(child) },
+            });
+            ({ session } = await createAgentSessionFromServices({
+              services,
+              sessionManager: SessionManager.inMemory(ctx.cwd),
+              model: ctx.model,
+              tools: access === "full" ? undefined : READ_ONLY,
+            }));
+            await session.bindExtensions({});
+            const steps: string[] = [];
+            unsubscribe = session.subscribe((event) => {
+              if (event.type === "tool_execution_start") {
+                steps.push(stepLine(event.toolName, (event.args ?? {}) as Record<string, unknown>));
+                onUpdate?.({ content: [{ type: "text", text: steps.slice(-8).join("\n") }], details: { steps: steps.length } });
+              }
+            });
+            signal?.addEventListener("abort", onAbort);
+            if (signal?.aborted) onAbort();
             await session.prompt(params.task);
-            const answer = session.getLastAssistantText()?.trim() || "(the sub-agent finished without an answer)";
+            answer = session.getLastAssistantText()?.trim() || "(the sub-agent finished without an answer)";
+            outcome = "done";
             return {
               content: [{ type: "text", text: answer }],
-              details: { steps: steps.length, cost: session.getSessionStats().cost },
+              details: { steps: steps.length, cost: session.getSessionStats().cost, node: node.id },
             };
           } finally {
             signal?.removeEventListener("abort", onAbort);
             unsubscribe();
-            session.dispose();
+            // A tree that was stopped keeps "stopped"; finish ignores a node that already ended.
+            host.roster.finish(node.id, signal?.aborted ? "stopped" : outcome, answer);
+            session?.dispose();
           }
         },
       }),

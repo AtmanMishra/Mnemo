@@ -23,7 +23,7 @@ import { nativeSystem, realTarget, within, type PathSystem } from "../policy/pat
 import type { ApprovalRequest } from "../runtime/dialogs.ts";
 import type { Host } from "./host.ts";
 
-const READ = new Set(["read", "grep", "find", "ls", "memory_search", "memory_remember", "memory_steer", "spawn_subagent"]);
+const READ = new Set(["read", "grep", "find", "ls", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent"]);
 const EDIT = new Set(["edit", "write", "create_skill", "update_skill"]);
 const EXEC = new Set(["bash", "powershell", "ipy_run"]);
 

@@ -107,6 +107,7 @@ export class Fleet {
   adopt(cwd: string, spawned: Spawned): Agent {
     const agent = { id: this.nextId++, name: this.nameFor(cwd), cwd, ...spawned };
     this.agents.push(agent);
+    agent.host.roster.describeRoot(agent.host.node, { label: agent.name, agentId: agent.id });
     this.remember(cwd);
     this.changed();
     return agent;
@@ -120,6 +121,7 @@ export class Fleet {
     const spawned = await this.spawn(dir, () => this.closed(id));
     const agent = { id, name: this.nameFor(dir), cwd: dir, ...spawned };
     this.agents.push(agent);
+    agent.host.roster.describeRoot(agent.host.node, { label: agent.name, agentId: id });
     this.remember(dir);
     this.changed();
     return agent;
@@ -128,6 +130,19 @@ export class Fleet {
   /** Ask an agent to quit; it leaves the fleet once its session is closed. */
   async close(id: number): Promise<void> {
     await this.agents.find((a) => a.id === id)?.controller.quit();
+  }
+
+  /** Make two agents siblings (each can then see and message the other); only the user does this. */
+  link(a: number, b: number): boolean {
+    const x = this.agents.find((n) => n.id === a);
+    const y = this.agents.find((n) => n.id === b);
+    return !!x && !!y && x.host.roster.link(x.host.node, y.host.node);
+  }
+
+  /** Take an agent out of its sibling group. */
+  unlink(id: number): boolean {
+    const x = this.agents.find((n) => n.id === id);
+    return !!x && x.host.roster.unlink(x.host.node);
   }
 
   /** Everything done so far: closed agents and open ones. */
@@ -151,6 +166,8 @@ export class Fleet {
     const x = agentSummary(leaving);
     this.done = { ...this.done, agents: this.done.agents + 1, turns: this.done.turns + x.turns, files: this.done.files + x.files, learned: this.done.learned + x.learned, cost: this.done.cost + x.cost };
     this.agents = this.agents.filter((a) => a.id !== id);
+    // Its sub-agents stop, its sibling links go, its inbox is dropped.
+    leaving.host.roster.removeRoot(leaving.host.node);
     this.changed();
     if (this.agents.length === 0) this.o.onEmpty(code);
   }
