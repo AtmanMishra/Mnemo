@@ -58,7 +58,7 @@ export const COMPOUND = /[;&|><`$(){}\n]|\|\|/;
 /** Programs whose first word after the name picks what they do: `git status`, `npm test`. */
 const SUBCOMMAND_PROGRAMS = new Set(["git", "npm", "pnpm", "yarn", "bun", "cargo", "go", "docker", "make"]);
 /** Subcommands whose arguments can carry a command of their own: never a class. */
-const EXEC_SUBCOMMANDS = new Set(["config", "alias", "exec", "run-script", "run", "x", "dlx"]);
+const EXEC_SUBCOMMANDS = new Set(["config", "alias", "exec", "run-script", "run", "x", "dlx", "filter-branch"]);
 /** Programs an approval must never widen: they act on whatever operand follows. */
 const OPERAND_PROGRAMS = new Set(["rm", "mv", "cp", "dd", "chmod", "chown", "ln", "ssh", "scp", "rsync", "curl", "wget", "sudo", "su", "sh", "bash", "zsh", "dash", "env", "xargs", "find", "eval", "exec", "nohup", "kill", "tar", "sed", "awk", "python", "python3", "node", "perl", "ruby"]);
 
@@ -81,14 +81,26 @@ export function widens(command: string): boolean {
   return words.slice(i + 1).some((w) => (w.startsWith("--") ? WIDENING_OPTIONS.has(w.split("=")[0]!) : /^-[A-Za-z]/.test(w) && short.test(w.slice(1).replace(/[^A-Za-z].*$/, ""))));
 }
 
-/** `go run x`, `npm run y`: a subcommand whose operand is the program. Only an exact grant covers it. */
+/** Package managers' subcommands that fetch a named package, and installing runs its scripts. */
+const FETCH_SUBCOMMANDS = new Set(["install", "i", "add", "get", "update", "upgrade", "up"]);
+const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn", "bun", "cargo", "go"]);
+
+/**
+ * `go run x`, `npm run y`, `git bisect run t`, `git submodule foreach c`,
+ * `npm install pkg`: a subcommand whose operand is a program or a package whose
+ * scripts run. Only an exact grant covers it.
+ */
 function runsOperand(command: string): boolean {
   const words = command.trim().split(/\s+/);
   let i = 0;
   while (i < words.length && words[i]!.includes("=")) i++;
   const program = (words[i] ?? "").replace(/^.*\//, "");
-  const sub = words.slice(i + 1).find((w) => !w.startsWith("-"));
-  return SUBCOMMAND_PROGRAMS.has(program) && sub !== undefined && EXEC_SUBCOMMANDS.has(sub);
+  const operands = words.slice(i + 1).filter((w) => !w.startsWith("-"));
+  const sub = operands[0];
+  if (!SUBCOMMAND_PROGRAMS.has(program) || sub === undefined) return false;
+  if (EXEC_SUBCOMMANDS.has(sub)) return true;
+  if (program === "git") return (sub === "bisect" && operands[1] === "run") || (sub === "submodule" && operands[1] === "foreach");
+  return PACKAGE_MANAGERS.has(program) && FETCH_SUBCOMMANDS.has(sub) && operands.length > 1;
 }
 
 /** Another process's environment (where the model keys are): never covered by a grant. */
@@ -124,7 +136,7 @@ export function generalise(call: ToolCall): string | undefined {
     // `make -f other.mk`: the option is the point, so the approval is for exactly this.
     if (widens(trimmed)) return trimmed;
     // `git status*`; but not `git config*`, whose arguments can name a program to run.
-    if (sub && EXEC_SUBCOMMANDS.has(sub)) return trimmed;
+    if (runsOperand(trimmed)) return trimmed;
     return sub ? `${program} ${sub}*` : `${program}*`;
   }
   // Anything else generalises only when there is nothing to generalise over:

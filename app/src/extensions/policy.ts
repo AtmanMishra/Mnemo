@@ -24,6 +24,8 @@ import type { ApprovalRequest } from "../runtime/dialogs.ts";
 import type { Host } from "./host.ts";
 
 const READ = new Set(["read", "grep", "find", "ls", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent"]);
+/** Read-class tools that still write to memory: plan mode is "change nothing", memory included. */
+const WRITES_MEMORY = new Set(["memory_remember", "memory_steer"]);
 const EDIT = new Set(["edit", "write", "create_skill", "update_skill"]);
 const EXEC = new Set(["bash", "powershell", "ipy_run"]);
 
@@ -393,7 +395,7 @@ export function judge(
     return { allow: false, reason: `Refused by a rule in permissions.json (${denied.tool}${denied.pattern ? ` ${denied.pattern}` : ""})${denied.note ? `: ${denied.note}` : "."}` };
   // Before any allow: plan mode is the user saying "change nothing", and a standing
   // allow rule was written for the other modes.
-  if (kind !== "read" && host.mode === "plan")
+  if ((kind !== "read" || WRITES_MEMORY.has(tool)) && host.mode === "plan")
     return { allow: false, reason: "Plan mode is read-only: describe the change instead of making it. The user can leave plan mode with shift+tab." };
   // First match among allow and ask. An allow for a path is tested only where the
   // path lands, so `src/*` is not an allow for `src/../../etc/x`.

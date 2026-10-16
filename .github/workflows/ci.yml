@@ -111,6 +111,20 @@ jobs:
           exe=""; if [ "$RUNNER_OS" = Windows ]; then exe=".exe"; fi
           MNEMO_E2E_BIN="$PWD/dist/mnemo$exe" sh scripts/without-node-modules.sh bun test --timeout 120000 ./e2e
 
+  web:
+    # The site is deployed by Vercel, which builds it after merge: this catches a broken
+    # build (types, prerender, the site's own checks) on the pull request instead.
+    # The runner's Node is enough; the build uses no Node feature newer than 20.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: npm ci
+        working-directory: web
+        run: npm ci --ignore-scripts
+      - name: build and check
+        working-directory: web
+        run: npm run build
+
   secrets:
     runs-on: ubuntu-latest
     steps:
