@@ -5,6 +5,8 @@
  *
  *   enter       go to that project's agent, or start one there
  *   ctrl+enter  (or tab) always start a new agent there, in parallel
+ *
+ * Opened with `fresh` (the hub's n), enter starts a new agent too: the user asked for one.
  */
 import React, { useMemo, useState } from "react";
 import * as fs from "node:fs";
@@ -43,6 +45,8 @@ export function matchProject(cwd: string, query: string): boolean {
 export interface ProjectPickerProps {
   fleet: FleetSnapshot;
   current: string | undefined;
+  /** Enter always starts a new agent, as tab does. */
+  fresh?: boolean;
   width: number;
   onPick: (cwd: string, fresh: boolean) => void;
   onCancel: () => void;
@@ -64,7 +68,7 @@ export function ProjectPicker(p: ProjectPickerProps): React.ReactElement {
     if (key.escape) return p.onCancel();
     if (key.return || key.tab) {
       const pick = items[at];
-      if (pick) p.onPick(pick, key.tab || key.ctrl);
+      if (pick) p.onPick(pick, key.tab || key.ctrl || p.fresh === true);
       return;
     }
     if (key.upArrow) return setIndex(Math.max(0, at - 1));
@@ -93,9 +97,9 @@ export function ProjectPicker(p: ProjectPickerProps): React.ReactElement {
       <Text>
         <Text color={palette.magenta}>▞▚ </Text>
         <Text bold color={palette.text}>
-          projects
+          {p.fresh ? "new agent in…" : "projects"}
         </Text>
-        <Text color={palette.faint}>{"   enter go · tab new agent · esc close"}</Text>
+        <Text color={palette.faint}>{p.fresh ? "   enter new agent · esc close" : "   enter go · tab new agent · esc close"}</Text>
       </Text>
       <Text>
         <Text color={palette.cyan}>{"› "}</Text>
