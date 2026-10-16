@@ -206,3 +206,24 @@ test("f on an agent with nothing around it says so and splits nothing", async ()
   await waitFor(() => expect(r.lastFrame()).toContain("no linked or sub-agents"));
   r.unmount();
 });
+
+test("control keys that share a letter with a hub key (ctrl+p, ctrl+f, ctrl+l, ctrl+u) do not fire the hub's", async () => {
+  const { fleet, roster } = await fleetOf(["alpha", "beta"]);
+  const r = render(React.createElement(Shell, { fleet, motion: false, initial: { screen: "hub" } }));
+  size(r, 140, 40);
+  await waitFor(() => expect(r.lastFrame()).toContain("new · ready"));
+  const before = roster.snapshot().version;
+  r.stdin.write("\x10"); // ctrl+p opens the project picker, not the playground
+  await waitFor(() => expect(r.lastFrame()).toContain("projects"));
+  expect(r.lastFrame()).not.toContain("PLAYGROUND");
+  r.stdin.write("\x1b");
+  await tick();
+  for (const k of ["\x06", "\x0c", "\x15"]) {
+    r.stdin.write(k); // ctrl+f, ctrl+l, ctrl+u
+    await tick();
+  }
+  expect(r.lastFrame()).not.toContain("PLAYGROUND");
+  expect(r.lastFrame()).not.toContain("choose the agent to link with");
+  expect(roster.snapshot().version).toBe(before);
+  r.unmount();
+});

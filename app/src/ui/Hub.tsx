@@ -155,6 +155,8 @@ export function Hub(p: HubProps): React.ReactElement {
   useInput(
     (input, key) => {
       const inCards = at < p.agents.length;
+      // ctrl+n / ctrl+s / ctrl+x are the shell's; only the bare letters are the hub's.
+      const bare = !key.ctrl && !key.meta;
       if (closing !== undefined && input !== "x") setClosing(undefined);
       if (key.escape) return setLinking(undefined);
       if (key.leftArrow) return setSel(Math.max(0, at - 1));
@@ -166,15 +168,15 @@ export function Hub(p: HubProps): React.ReactElement {
         if (onAgent) return p.onOpen(onAgent.id);
         if (onProject) return p.onOpenProject(onProject);
       }
-      if (input === "p") return p.onPlayground?.();
+      if (bare && input === "p") return p.onPlayground?.();
       if (!onAgent) return;
-      if (input === "l" && p.onLink) {
+      if (bare && input === "l" && p.onLink) {
         if (linking === undefined) return setLinking(onAgent.id);
         if (linking !== onAgent.id) p.onLink(linking, onAgent.id);
         return setLinking(undefined);
       }
-      if (input === "u") return p.onUnlink?.(onAgent.id);
-      if (input === "f") return p.onFamily?.(onAgent.id);
+      if (bare && input === "u") return p.onUnlink?.(onAgent.id);
+      if (bare && input === "f") return p.onFamily?.(onAgent.id);
       if (input === "s") return p.onSplit(onAgent.id);
       if (input === "x") {
         const busy = (p.states.get(onAgent.id)?.kind ?? "idle") !== "idle";
