@@ -354,3 +354,19 @@ test("a streamed tool call with no arguments still draws", () => {
   expect(tool?.kind === "tool" && tool.args).toEqual({});
   expect(() => render(<BlockView block={tool!} cwd="/x" expanded={false} />)).not.toThrow();
 });
+
+test("esc during a running tool says Interrupted, as it does during streaming", () => {
+  const t = new Transcript();
+  let n = 0;
+  const done = (text: string) => {
+    const id = `c${++n}`;
+    t.apply({ type: "tool_execution_start", toolCallId: id, toolName: "bash", args: { command: "sleep 9" } } as never);
+    t.apply({ type: "tool_execution_end", toolCallId: id, toolName: "bash", isError: true, durationMs: 5, result: { content: [{ type: "text", text }] } } as never);
+    const s = t.snapshot();
+    const tool = [...s.committed, ...s.live].find((b) => b.kind === "tool" && b.id === id);
+    return tool?.kind === "tool" ? tool.output : undefined;
+  };
+  expect(done("The operation was aborted.")).toBe("Interrupted");
+  // Another failure keeps its own words.
+  expect(done("exit 1: no such file")).toBe("exit 1: no such file");
+});

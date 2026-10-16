@@ -86,6 +86,15 @@ test("plan mode refuses a change even when an allow rule covers it", () => {
   expect(allowed(judge({ mode: "plan" }, [{ tool: "read", action: "allow" }], noGrants, "/p", "read", { path: ssh }))).toBe(true);
 });
 
+test("plan mode refuses the memory tools that write, and still runs the ones that read", () => {
+  const call = (tool: string, input: Record<string, unknown>) => judge({ mode: "plan" }, [], noGrants, "/p", tool, input);
+  expect(refused(call("memory_remember", { key: "k", value: "v" }))).toBe(true);
+  expect(refused(call("memory_steer", { id: "x" }))).toBe(true);
+  expect(allowed(call("memory_search", { query: "k" }))).toBe(true);
+  // Outside plan mode they are unchanged.
+  expect(allowed(judge({ mode: "default" }, [], noGrants, "/p", "memory_remember", { key: "k", value: "v" }))).toBe(true);
+});
+
 // ── 3. dangling symlinks ──
 
 test("accept-edits does not write through a dangling symlink into .git or out of the project", () => {
