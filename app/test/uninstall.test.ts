@@ -17,11 +17,12 @@ function installed() {
   fs.mkdirSync(path.join(home, "memory"), { recursive: true });
   fs.mkdirSync(path.join(home, "agent", "sessions"), { recursive: true });
   fs.mkdirSync(links);
-  for (const f of ["mnemo", "memsrv"]) fs.writeFileSync(path.join(home, "bin", f), "bin");
+  const exe = process.platform === "win32" ? ".exe" : "";
+  for (const f of ["mnemo", "memsrv"]) fs.writeFileSync(path.join(home, "bin", f + exe), "bin");
   fs.writeFileSync(path.join(home, "memory", "journal.jsonl"), "x".repeat(2048));
   fs.writeFileSync(path.join(home, "agent", "auth.json"), "{}");
   fs.writeFileSync(path.join(home, "state.json"), "{}");
-  fs.symlinkSync(path.join(home, "bin", "mnemo"), path.join(links, "mnemo"));
+  fs.symlinkSync(path.join(home, "bin", "mnemo" + exe), path.join(links, "mnemo"));
   return { root, home, links };
 }
 
