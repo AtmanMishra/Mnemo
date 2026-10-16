@@ -306,7 +306,8 @@ export class Transcript {
           this.replace({
             ...tool,
             status: event.isError ? "error" : "done",
-            output: textOf(result?.content),
+            // esc during a tool: the abort's own wording, said as the streaming case says it.
+            output: event.isError && /^the operation was aborted\.?$/i.test(textOf(result?.content).trim()) ? "Interrupted" : textOf(result?.content),
             details: result?.details,
             durationMs: event.durationMs,
           });

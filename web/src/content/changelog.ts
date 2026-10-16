@@ -47,6 +47,24 @@ export const AREA_LABEL: Record<Area, string> = {
 
 export const RELEASES: Release[] = [
   {
+    version: "0.1.4",
+    date: "2026-10-17",
+    headline: "Closes the permission holes v0.1.3 shipped with, and fixes the agents page shortcuts.",
+    changes: [
+      { kind: "security", area: "safety", text: "An approval no longer covers the form of a command that runs something else", detail: "A grant for git bisect, git submodule, npm install, bun add, cargo install or go get is for the plain subcommand. git bisect run, git submodule foreach, git filter-branch and installing a named package are asked about each time." },
+      { kind: "security", area: "safety", text: "Plan mode no longer writes to memory", detail: "memory_remember and memory_steer are refused in plan mode. Reading memory still works." },
+      { kind: "fixed", area: "interface", text: "Agents page: n starts a new agent, s and ctrl+s split the chosen agents", detail: "n then Enter used to jump to the first agent. Ctrl keys also fired the page's single-letter keys; they no longer do." },
+      { kind: "fixed", area: "interface", text: "esc during a running tool says Interrupted", detail: "It said \"The operation was aborted.\"" },
+      { kind: "changed", area: "site", text: "The website is built and checked on every pull request" },
+    ],
+    known: [
+      "The Windows binary is not code-signed, so SmartScreen may warn on a browser download.",
+      "Keys typed in the first second after the prompt appears can occasionally be dropped.",
+      "The binary reports its version to MCP servers as 0.0.0.",
+      "Memory: distrusted is a difference, not a ratio; skill nodes are global by label; a write that times out on the client can still be applied later.",
+    ],
+  },
+  {
     version: "0.1.3",
     date: "2026-10-16",
     headline: "Subscription login works in the downloaded binary; memory no longer reads off; Windows installs itself; about sixty fixes from a full review.",

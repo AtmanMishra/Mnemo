@@ -310,22 +310,32 @@ on a version.
 
 ### 0.1.4 — close the known issues (quick wins)
 
+*Status 2026-10-16: built on `claude/project-thread-vya8xl` with the release notes and changelog entry (✔ = in this branch). The agents-page shortcut fixes (draft PR #26) ship in it too. Not done, and why, is under the table.*
+
 Everything here is listed under "Known issues" in `docs/releases/v0.1.3.md`,
 `docs/REVIEW-2026-10.md` ("Known and left", "Not fixed") or this file as open.
 
 | Item | Size | Where it comes from |
 |---|---|---|
-| Gate: `git bisect run`, `git submodule foreach` and `npm install*` grants covered by the option checks; each with a regression test | S | v0.1.3 known issues; review "Known and left" |
-| Gate: `memory_remember` and `spawn_subagent` refused in plan mode | S | review, Security (last bullet) |
-| esc during a running tool says "Interrupted", like esc during streaming | S | review, Interface ("noticed and left") |
+| ✔ Gate: `git bisect run`, `git submodule foreach` and `npm install*` grants covered by the option checks; each with a regression test | S | v0.1.3 known issues; review "Known and left" |
+| ✔ Gate: `memory_remember` and `spawn_subagent` refused in plan mode | S | review, Security (last bullet) |
+| ✔ esc during a running tool says "Interrupted", like esc during streaming | S | review, Interface ("noticed and left") |
 | Merge the two Dependabot PRs (#21 actions, #24 crates) once CI is green, and pin `upload/download-artifact` to SHAs | S | open PRs; 5.1 |
-| A `web/` job in `ci.yml` (`npm run build && npm run check`) | S | 6.1 |
+| ✔ A `web/` job in `ci.yml` (`npm run build && npm run check`) | S | 6.1 |
 | Binary reports pi's version as 0.0.0 to MCP servers | S–M | review runtime 8b; pi has no setter, so this may need an upstream change or a patch. *Inferred:* low value until MCP lands in 0.2, so it can slide. |
 | Keys typed in the first second after the prompt draws can be dropped | M | review interface 15; not reproducible, so the first step is a reproduction (raw mode before first draw). *Inferred:* worth a time-boxed attempt only. |
 | Import keys from the legacy `~/.mnemo/auth.json` | S | 2.1 |
 | `distrusted` as a ratio, not a difference; skill nodes scoped per project, not global by label | M | review memory "Left". *Inferred:* both change recall ranking, so run the memory evals before and after. |
 | A write that times out on the client can still be applied later (idempotency key on memsrv writes) | M | review memory "Left" |
 | Move embedding out from under the journal lock | M–L | review memory "Left"; the review called it not a contained change |
+
+**Left out of 0.1.4 on purpose:** the Dependabot PRs (#21, #24) are yours to merge once CI is
+green; the pi version report, the dropped first-second keys and the `auth.json` import are not
+fixed (the first two need an upstream change or a reproduction; the import writes credentials, so it
+wants its own review); the memory items (`distrusted` ratio, per-project skill nodes, write
+idempotency, embedding outside the lock) change recall or the sidecar protocol and need the
+evals, so they move to 0.1.5. The gate also now treats `git filter-branch`, `cargo install` and
+`go get` like the other command-running forms.
 
 Bigger risk to flag: **Windows has never been verified by a person** (review, "Not verified
 here"). Code signing for `mnemo.exe` (SmartScreen warning) is a known v0.1.3 issue too;

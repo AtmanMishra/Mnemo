@@ -108,3 +108,17 @@ test("an approval never widens over an operand, and a pattern ends on a word", (
   assert.equal(decide(bash("git statusx"), grants).decision, "ask");
   assert.equal(decide(bash("git status  --short"), grants).decision, "allow");
 });
+
+test("a grant for a git or package-manager subcommand does not cover the form that runs something else", () => {
+  // Each of these ran an arbitrary command or install script under a grant given for the plain subcommand.
+  const grants = { project: ["git bisect*", "git submodule*", "git filter-branch*", "npm install*", "bun add*", "cargo install*", "go get*"], global: [], deny: [] };
+  for (const command of ["git bisect run ./exploit.sh", "git -C . bisect run sh -c x", "git submodule foreach make evil", "npm install left-pad", "npm i left-pad", "bun add left-pad", "FOO=1 npm install --save evil-pkg", "git filter-branch --tree-filter evil HEAD", "cargo install evil", "go get example.com/evil"]) {
+    assert.equal(decide(bash(command), grants).decision, "ask", command);
+    assert.equal(generalise(bash(command)), command.trim(), `${command} is approved exactly or not at all`);
+  }
+  // The harmless forms keep their grants.
+  for (const command of ["git bisect start", "git bisect good", "git submodule status", "npm install", "npm install --frozen-lockfile"]) {
+    const granted = { ...grants };
+    assert.equal(decide(bash(command), granted).decision, "allow", command);
+  }
+});
