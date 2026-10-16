@@ -1,6 +1,6 @@
 # Roadmap — from half-built to something a stranger can install
 
-*Written 2026-10-08, brought up to date 2026-10-13 against release v0.1.2 (`main`). This is the task list.
+*Written 2026-10-08, brought up to date 2026-10-16 against release v0.1.3 (`main`). This is the task list.
 `docs/REBUILD.md` says where the code is going, `docs/PLAN-monorepo.md` says how
 it is laid out, `docs/HANDOFF.md` says where the last session stopped. This file
 says what is left, in the order to do it. The public view of the same plan, without task numbers, is
@@ -28,12 +28,12 @@ steers it on failure, stores different kinds of facts, and writes and patches it
 own skills. The interface is the table stakes; the memory is the reason to exist.
 Both have to ship.
 
-## Where things actually stand (updated 2026-10-13, v0.1.2)
+## Where things actually stand (updated 2026-10-16, v0.1.3)
 
 | Area | State |
 |---|---|
-| Releases | v0.1.0 (2026-10-09), v0.1.1 (2026-10-12), v0.1.2 (2026-10-13). A tag builds, smoke-tests and attests five archives (linux x64/arm64, macOS arm64/x64, Windows x64) and publishes them with `SHA256SUMS`; `docs/RELEASING.md`. |
-| `app/` | The program: Ink interface on pi 1.1's in-process SDK, with Mnemo's behaviour as pi extensions (policy, memory, kernel, shell, checkpoints, sub-agents, skills, trace, escalate, update). 235 tests pass on a scripted model, `tsc` clean, on Linux, macOS and Windows CI. |
+| Releases | v0.1.0 (2026-10-09), v0.1.1 (2026-10-12), v0.1.2 (2026-10-13), v0.1.3 (2026-10-16: compiled-binary fixes for `/login`, Bedrock and image reads; Windows install; about sixty review fixes, `docs/REVIEW-2026-10.md`). A tag builds, smoke-tests and attests five archives (linux x64/arm64, macOS arm64/x64, Windows x64) and publishes them with `SHA256SUMS`; `docs/RELEASING.md`. |
+| `app/` | The program: Ink interface on pi 1.1's in-process SDK, with Mnemo's behaviour as pi extensions (policy, memory, kernel, shell, checkpoints, sub-agents, skills, trace, escalate, update). 309 unit/integration tests (plus 62 in `packages/memory` and 55 binary/terminal e2e) pass on a scripted model, `tsc` clean, on Linux, macOS and Windows CI. |
 | Memory loop | profiles injected every turn; trust-weighted recall linked to the episode; failures steer, clean runs reinforce; a reflection call after each run writes durable facts; `mnemo memory tidy`; consolidation at shutdown; shared with Claude Code (hooks) and Codex, Cursor, opencode (MCP). |
 | Install | `get.sh` / `get.ps1` (animated on a terminal, checksummed), `mnemo update`, `mnemo uninstall [--deep]`, `mnemo doctor [--fix]`; Docker clean-install test in `app/scripts/test-install.sh`. |
 | Site | `web/` (Vite + React on Vercel): home, download, docs, shortcuts, changelog, roadmap, security, privacy, terms; `docs/WEB.md`. |
@@ -296,15 +296,88 @@ v0.1.0 shipped it: Stages 0 to 2, the memory loop (3.1 to 3.5 and 3.7), the rele
 pipeline and installers (Stage 5), and the quality gates (Stage 6). What is still open
 in those stages is listed above as ▢ and is not blocking.
 
-Next, in rough order (the public version is the website's roadmap):
+## Release plan, 0.1.4 onward
 
-1. **The memory claim, measured** (3.12, 3b.12): a task set where the second run is the measurement.
-2. **The background curator** (3.11, 3.6): built on `feature/background-curator`, held out of
-   releases until it has run against real models for weeks and its revert path has been used.
-3. **Evidence-gated skills**: `retire_skill` and citations (2.7).
-4. **v0.2**: hooks, schedules, MCP and the harness engine in the app (2.9), `mnemo traces`
-   (2.5, 2.8), the sandbox decision (4.3 to 4.5), a visual pass in real terminals (1.10),
-   and a clean-machine first run per OS (5.6).
+*Added 2026-10-16. Drafted from the repo, not agreed: the version numbers, the grouping
+and the sizes are proposals for Atman to move around. Nothing has a date, matching the
+public roadmap. **Size:** S = a day or less, M = a few days, L = a week or more or needs
+outside resources (a model, a machine, weeks of real use).*
+
+The shape: 0.1.4 closes what 0.1.3 shipped with a known hole; 0.1.5 makes the headline
+claim measurable and gives skills evidence; 0.2.0 is the first feature jump back to
+legacy parity (hooks, schedules, MCP); the curator ships when its own bar is met, not
+on a version.
+
+### 0.1.4 — close the known issues (quick wins)
+
+Everything here is listed under "Known issues" in `docs/releases/v0.1.3.md`,
+`docs/REVIEW-2026-10.md` ("Known and left", "Not fixed") or this file as open.
+
+| Item | Size | Where it comes from |
+|---|---|---|
+| Gate: `git bisect run`, `git submodule foreach` and `npm install*` grants covered by the option checks; each with a regression test | S | v0.1.3 known issues; review "Known and left" |
+| Gate: `memory_remember` and `spawn_subagent` refused in plan mode | S | review, Security (last bullet) |
+| esc during a running tool says "Interrupted", like esc during streaming | S | review, Interface ("noticed and left") |
+| Merge the two Dependabot PRs (#21 actions, #24 crates) once CI is green, and pin `upload/download-artifact` to SHAs | S | open PRs; 5.1 |
+| A `web/` job in `ci.yml` (`npm run build && npm run check`) | S | 6.1 |
+| Binary reports pi's version as 0.0.0 to MCP servers | S–M | review runtime 8b; pi has no setter, so this may need an upstream change or a patch. *Inferred:* low value until MCP lands in 0.2, so it can slide. |
+| Keys typed in the first second after the prompt draws can be dropped | M | review interface 15; not reproducible, so the first step is a reproduction (raw mode before first draw). *Inferred:* worth a time-boxed attempt only. |
+| Import keys from the legacy `~/.mnemo/auth.json` | S | 2.1 |
+| `distrusted` as a ratio, not a difference; skill nodes scoped per project, not global by label | M | review memory "Left". *Inferred:* both change recall ranking, so run the memory evals before and after. |
+| A write that times out on the client can still be applied later (idempotency key on memsrv writes) | M | review memory "Left" |
+| Move embedding out from under the journal lock | M–L | review memory "Left"; the review called it not a contained change |
+
+Bigger risk to flag: **Windows has never been verified by a person** (review, "Not verified
+here"). Code signing for `mnemo.exe` (SmartScreen warning) is a known v0.1.3 issue too;
+it needs a certificate, so it is an L that depends on spend, not code.
+
+### 0.1.5 — make the claim measurable, give skills evidence
+
+| Item | Size | Where it comes from |
+|---|---|---|
+| **Memory claim re-measured**: a task set where the second run is the measurement, method published | L | 3.12; first of the website's "Next" items |
+| Terminal-Bench / SWE-bench subset as the absolute anchor, accuracy per dollar as the headline | L | 3b.12; needs Docker and the datasets |
+| Escalations per task as an eval metric (should fall) | S | 3b.10 |
+| Rank recall by provenance (a fix a frontier model found and a test confirmed outranks a cheap guess) | M | 3b.8 |
+| Default embedder decision (offline hash ranks an episode above the matching pitfall) | M | 3b.9, 3.10; the answer is a measured change, so it rides on the benchmark above |
+| Evidence-gated skills: `patch_skill` cites session ids, `retire_skill` | M | 2.7, 3.6; website "Skills that cite their evidence" |
+| Codex and opencode transcripts for `mnemo memory ingest` | M | 3b.13 |
+| `--best-of` takes its check from memory when `--check` is absent (needs the verify command stored as a command, not prose) | M | 3b.11 |
+| `mnemo traces`, and a `pi-telemetry` adapter | M | 2.5, 2.8 |
+| A pass in real terminals (iTerm2/Ghostty, Windows Terminal, 16-colour) with screenshots | M | 1.10; needs hands on the machines |
+| A person follows the README on a clean VM per OS | M | 5.6; also closes the "Windows never verified" gap |
+
+### 0.2.0 — legacy parity
+
+The features the legacy stack had that `app/` does not (`agent/src/hooks`, `schedule`,
+`mcp.ts`, `init.ts`, `pr.ts`, and `harness-engine/`). Read them as a specification, never
+copy their security posture (`AGENTS.md`). Decision D6 already deferred these here.
+
+| Item | Size | Notes |
+|---|---|---|
+| Hooks around tool calls | M | legacy `hooks-inline.ts`; runs user commands, so it goes through the gate and gets bypass tests from day one |
+| MCP servers as tools (`pi-mcp`) | M–L | the same point applies; also decides whether the 0.0.0 version report is fixed |
+| Schedules | M | legacy `schedules-inline.ts`; *inferred:* unattended runs raise the approval question, so decide the permission story first |
+| `mnemo init` and `mnemo pr` | S–M each | legacy `init.ts`, `pr.ts` |
+| Harness engine | L | legacy `harness-engine/`; *inferred:* the least-asked-for of the set, and the site does not mention it. Cut it, or ship it last. |
+| Sandbox decision (4.3 to 4.5): a real sandbox for kernel and commands, or a documented reason not | L | decision first, code second; update the README either way |
+| Process tree recorded per call; `bash_exec` through the kernel or documented why not | M | 4.3, 4.4 |
+| Parity sign-off, then the monorepo restructure | M | 7.1, 7.3 (D5: only now) |
+
+### Not on a version: the background curator
+
+Built on `feature/background-curator`, which is not on the remote I could read, so I could
+not review it. Held out until it has run against real models for weeks and its revert path
+has been used (3.3 to 3.6, 3.11). *Inferred:* it should ship the release after that bar is
+met, and the first release carrying it should be report-only or `--dry-run`. The no-model
+jobs (3.3) could ship earlier on their own, since they are safe on a cron with no key.
+
+### What I assumed
+
+- "Roadmap" meant refreshing this file, which already existed at v0.1.2, rather than a new one. The public roadmap in `web/src/content/roadmap.ts` is not changed here; it should follow once the plan is settled.
+- The 0.1.x / 0.2.0 split is mine. The repo only says hooks, schedules, MCP and the harness engine are "v0.2".
+- There are no open issues, only the two Dependabot PRs, so the list comes from the docs, not the tracker.
+- Sizes are rough and were not checked against the code.
 
 ## Risks
 
