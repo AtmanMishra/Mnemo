@@ -12,7 +12,8 @@ import { cleanup, render } from "ink-testing-library";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { Fleet, projectCandidates } from "../src/runtime/fleet.ts";
 import { workspaceSource } from "../src/runtime/workspace-source.ts";
-import { Shell, splitGrid } from "../src/ui/Shell.tsx";
+import { Shell } from "../src/ui/Shell.tsx";
+import { defaultLayout, layoutsFor } from "../src/ui/layout.ts";
 import { matchProject, typedPath } from "../src/ui/ProjectPicker.tsx";
 import { listFiles, samePath } from "../src/ui/files.ts";
 import { turns, testCounts } from "../src/ui/activity.ts";
@@ -143,10 +144,11 @@ test("ctrl+n starts a second agent on the same project; closing every agent ends
   r.unmount();
 });
 
-test("pure parts: the split grid, project matching and candidates, turns and test counts", () => {
-  expect(splitGrid(2, 120)).toEqual({ cols: 2, rows: 1 });
-  expect(splitGrid(3, 120)).toEqual({ cols: 2, rows: 2 });
-  expect(splitGrid(3, 200)).toEqual({ cols: 3, rows: 1 });
+test("pure parts: the split layouts, project matching and candidates, turns and test counts", () => {
+  expect(defaultLayout(2, 120)).toBe("cols");
+  expect(defaultLayout(3, 120)).toBe("grid");
+  expect(defaultLayout(3, 200)).toBe("cols");
+  expect(layoutsFor(4)).toContain("main-left");
   expect(matchProject("/code/self-evolving-agent", "sea")).toBe(true);
   expect(matchProject("/code/clsx", "zz")).toBe(false);
   const a = project("one");

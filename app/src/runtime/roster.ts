@@ -78,6 +78,8 @@ export interface RosterSnapshot {
   /** Root id → link group, for roots that are linked. */
   groups: ReadonlyMap<number, number>;
   events: readonly RosterEvent[];
+  /** Every node's name, including nodes that have left, for the event feed. */
+  labels: ReadonlyMap<number, string>;
 }
 
 /** The interface's whole view of the roster: it can look and subscribe, nothing more. */
@@ -121,6 +123,7 @@ export class Roster implements RosterView {
   private nodes = new Map<number, RosterNode>();
   private handles = new Map<number, NodeHandle>();
   private group = new Map<number, number>();
+  private labels = new Map<number, string>();
   private events: RosterEvent[] = [];
   private sent = new Map<number, number[]>();
   private nextNode = 1;
@@ -221,7 +224,7 @@ export class Roster implements RosterView {
   describeRoot(id: number, o: { label?: string; agentId?: number }): void {
     const n = this.nodes.get(id);
     if (!n || n.kind !== "root") return;
-    if (o.label !== undefined) n.label = clean(o.label, 60);
+    if (o.label !== undefined) this.labels.set(id, (n.label = clean(o.label, 60)));
     if (o.agentId !== undefined) n.agentId = o.agentId;
     this.changed();
   }
@@ -373,6 +376,7 @@ export class Roster implements RosterView {
   private make(o: Pick<RosterNode, "kind" | "label" | "task" | "depth" | "access" | "status"> & Partial<RosterNode>): RosterNode {
     const node: RosterNode = { steps: [], stepCount: 0, startedAt: this.now(), pending: 0, ...o, id: this.nextNode++ };
     this.nodes.set(node.id, node);
+    this.labels.set(node.id, node.label);
     return node;
   }
 
@@ -387,6 +391,7 @@ export class Roster implements RosterView {
       nodes: [...this.nodes.values()].map((n) => ({ ...n, steps: [...n.steps] })),
       groups: new Map(this.group),
       events: this.events,
+      labels: new Map(this.labels),
     };
   }
 

@@ -3,12 +3,15 @@
  *
  *   agent   one agent's workspace, full screen (the default)
  *   split   up to four agents side by side, one of them focused
- *   hub     every agent at a glance: what each is doing, what waits on you
+ *   hub     every agent at a glance: what each is doing, what waits on you,
+ *           its sub-agents and the agents linked to it as siblings
+ *   playground  every agent and what passes between them, read-only
  *
  * Keys, from anywhere:
  *   ctrl+g  hub              ctrl+p  switch project (or open one)
  *   ctrl+n  another agent on this project, in parallel
- *   ctrl+s  split / single   alt+1…9 go to an agent   alt+, alt+.  previous, next
+ *   ctrl+s  split / single   alt+l  next split layout   ctrl+y  playground
+ *   alt+1…9 go to an agent   alt+, alt+.  previous, next
  *
  * Every agent's workspace stays mounted (hidden when off screen), so a draft,
  * a scroll position or an open dialog survives moving between screens.
@@ -22,10 +25,15 @@ import { Workspace } from "./workspace/Workspace.tsx";
 import { ProjectPicker } from "./ProjectPicker.tsx";
 import { samePath } from "./files.ts";
 import { Hub, agentState, type AgentState } from "./Hub.tsx";
+import { Playground } from "./Playground.tsx";
+import { NodePane } from "./NodePane.tsx";
+import { Roster } from "../runtime/roster.ts";
+import { familyPanes, linkedRoots, subsOf } from "./tree.ts";
+import { defaultLayout, fitsPanes, LAYOUT_LABEL, layoutsFor, nextLayout, SPLIT_MAX, splitRects, type SplitLayout } from "./layout.ts";
 import { Toasts, useToasts } from "./Toasts.tsx";
 import { ExitCard } from "./ExitCard.tsx";
 
-export type Screen = "agent" | "split" | "hub";
+export type Screen = "agent" | "split" | "hub" | "playground";
 
 export interface ShellProps {
   fleet: Fleet;
@@ -34,7 +42,11 @@ export interface ShellProps {
   initial?: { screen?: Screen; picker?: boolean };
 }
 
-const SPLIT_MAX = 4;
+/** What a shell with no agent reads from (never shown: it has no agents). */
+const NO_ROSTER = new Roster();
+
+/** A split pane is an agent (`a<id>`, the full workspace) or a sub-agent (`n<id>`, a read-only view). */
+const agentKey = (id: number) => `a${id}`;
 
 /** Re-render when any agent's transcript, chrome or dialogs change. */
 function useAgentStates(agents: readonly Agent[]): { states: Map<number, AgentState>; version: number } {
@@ -55,31 +67,28 @@ function useAgentStates(agents: readonly Agent[]): { states: Map<number, AgentSt
   return { states: new Map(agents.map((a) => [a.id, agentState(a)])), version };
 }
 
-/** Columns × rows for n panes. */
-export function splitGrid(n: number, columns: number): { cols: number; rows: number } {
-  if (n <= 1) return { cols: 1, rows: 1 };
-  if (n === 2) return { cols: 2, rows: 1 };
-  if (n === 3) return columns >= 180 ? { cols: 3, rows: 1 } : { cols: 2, rows: 2 };
-  return { cols: 2, rows: 2 };
-}
-
 function FleetBar({
   agents,
   states,
   activeId,
   screen,
   columns,
+  split,
 }: {
   agents: readonly Agent[];
   states: Map<number, AgentState>;
   activeId: number | undefined;
   screen: Screen;
   columns: number;
+  /** In a split: its layout, how many panes, and how many agents are related to the active one. */
+  split?: { layout: SplitLayout; shown: number; related: number };
 }): React.ReactElement {
-  const hints = "^g hub  ^p projects  ^n new  ^s split ";
+  const hints = split
+    ? `◫ ${LAYOUT_LABEL[split.layout]}${split.related > split.shown ? ` · ${split.shown} of ${split.related}` : ""}  alt+l layout  ^g hub  ^y play `
+    : "^g hub  ^p projects  ^n new  ^s split  ^y play ";
   const showHints = columns >= 100;
   // One row, always: names shorten to share the room; with no room for names, numbers only.
-  const room = columns - 9 - (screen === "hub" ? 6 : 0) - (showHints ? hints.length : 0);
+  const room = columns - 9 - (screen === "hub" || screen === "playground" ? 6 : 0) - (showHints ? hints.length : 0);
   const perTab = Math.floor(room / Math.max(1, agents.length)) - 7;
   const nameMax = perTab >= 3 ? perTab : 0;
   const label = (name: string) => (nameMax === 0 ? "" : name.length > nameMax ? `${name.slice(0, Math.max(1, nameMax - 1))}…` : name);
@@ -93,10 +102,10 @@ function FleetBar({
             {ch}
           </Text>
         ))}
-        <Text color={screen === "hub" ? palette.text : palette.faint}>{screen === "hub" ? "▣ hub " : ""}</Text>
+        <Text color={screen === "hub" || screen === "playground" ? palette.text : palette.faint}>{screen === "hub" ? "▣ hub " : screen === "playground" ? "◈ play " : ""}</Text>
         {agents.map((a, i) => {
           const s = states.get(a.id);
-          const on = a.id === activeId && screen !== "hub";
+          const on = a.id === activeId && screen !== "hub" && screen !== "playground";
           return (
             <Text key={a.id}>
               <Text color={palette.faint}>{" "}</Text>
@@ -124,11 +133,15 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
     if (motion && process.stdout.isTTY) process.stdout.write(terminalColors());
   }, [theme]);
   const agents = snap.agents;
+  // The tree of agents and sub-agents; every agent of a process shares one roster.
+  const roster = agents[0]?.host.roster ?? NO_ROSTER;
+  const tree = useSyncExternalStore(roster.subscribe, roster.snapshot);
   const { states, version } = useAgentStates(agents);
   const { columns, rows } = useWindowSize();
   const [screen, setScreen] = useState<Screen>(initial?.screen ?? "agent");
   const [activeId, setActiveId] = useState<number | undefined>(agents[0]?.id);
-  const [splitIds, setSplitIds] = useState<number[]>([]);
+  const [splitKeys, setSplitKeys] = useState<string[]>([]);
+  const [layoutChoice, setLayoutChoice] = useState<SplitLayout | undefined>();
   const [picker, setPicker] = useState(initial?.picker ?? false);
   const [error, setError] = useState<string | undefined>();
 
@@ -138,43 +151,64 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
     if (active && active.id !== activeId) setActiveId(active.id);
   }, [active?.id]);
 
-  // The split shows the chosen agents, else the first four, always including the active one.
+  // The split shows the chosen panes (agents, or sub-agents to watch), else the first four
+  // agents, never more than four and always including the active agent.
   const split = useMemo(() => {
-    const chosen = splitIds.filter((id) => agents.some((a) => a.id === id));
-    const ids = chosen.length >= 2 ? chosen : agents.slice(0, SPLIT_MAX).map((a) => a.id);
-    return active && !ids.includes(active.id) ? [...ids.slice(0, SPLIT_MAX - 1), active.id] : ids.slice(0, SPLIT_MAX);
-  }, [splitIds, agents, active?.id]);
+    const exists = (k: string) => (k[0] === "a" ? agents.some((a) => agentKey(a.id) === k) : tree.nodes.some((n) => `n${n.id}` === k));
+    const chosen = splitKeys.filter(exists);
+    const keys = chosen.length >= 2 ? chosen : agents.slice(0, SPLIT_MAX).map((a) => agentKey(a.id));
+    const mine = active ? agentKey(active.id) : undefined;
+    return mine && !keys.includes(mine) ? [...keys.slice(0, SPLIT_MAX - 1), mine] : keys.slice(0, SPLIT_MAX);
+  }, [splitKeys, agents, tree, active?.id]);
+  const splitAgents = split.filter((k) => k[0] === "a").map((k) => Number(k.slice(1)));
 
-  const go = (id: number, to: Screen = screen === "hub" ? "agent" : screen) => {
+  // How many agents and sub-agents are related to the active one: more than the panes can show is said in the bar.
+  const activeNode = tree.nodes.find((n) => n.kind === "root" && n.agentId === active?.id);
+  const related = activeNode ? 1 + linkedRoots(tree, activeNode.id).length + subsOf(tree, activeNode.id).length : 1;
+
+  const landing: Screen = screen === "hub" || screen === "playground" ? "agent" : screen;
+  const go = (id: number, to: Screen = landing) => {
     setActiveId(id);
     setScreen(to);
   };
   const cycle = (delta: number) => {
     if (agents.length === 0) return;
-    const pool = screen === "split" ? agents.filter((a) => split.includes(a.id)) : agents;
+    const pool = screen === "split" ? agents.filter((a) => splitAgents.includes(a.id)) : agents;
     const at = Math.max(0, pool.findIndex((a) => a.id === active?.id));
     go(pool[(at + delta + pool.length) % pool.length]!.id);
   };
   const open = async (cwd: string, fresh: boolean) => {
     setPicker(false);
     const existing = agents.find((a) => samePath(a.cwd, cwd));
-    if (existing && !fresh) return go(existing.id, screen === "hub" ? "agent" : screen);
+    if (existing && !fresh) return go(existing.id, landing);
     try {
       const a = await fleet.open(cwd);
       setError(undefined);
-      if (screen === "split") setSplitIds((ids) => [...ids.filter((id) => id !== a.id), a.id].slice(-SPLIT_MAX));
-      go(a.id, screen === "hub" ? "agent" : screen);
+      if (screen === "split") setSplitKeys((ks) => [...ks.filter((k) => k !== agentKey(a.id)), agentKey(a.id)].slice(-SPLIT_MAX));
+      go(a.id, landing);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
+  };
+  /** Split the agent with the agents around it: its linked siblings, then its busiest sub-agents. */
+  const splitWithFamily = (id: number) => {
+    const root = tree.nodes.find((n) => n.kind === "root" && n.agentId === id);
+    const keys = root ? familyPanes(tree, root.id, SPLIT_MAX).keys : [agentKey(id)];
+    if (keys.length < 2) return setError("this agent has no linked or sub-agents to split with yet");
+    setError(undefined);
+    setSplitKeys(keys);
+    setLayoutChoice(undefined);
+    go(id, "split");
   };
 
   useInput(
     (input, key) => {
       if (key.ctrl && input === "g") return setScreen((s) => (s === "hub" ? "agent" : "hub"));
+      if (key.ctrl && input === "y") return setScreen((s) => (s === "playground" ? "agent" : "playground"));
       if (key.ctrl && input === "p") return setPicker(true);
       if (key.ctrl && input === "n" && active) return void open(active.cwd, true);
       if (key.ctrl && input === "s") return setScreen((s) => (s === "split" ? "agent" : "split"));
+      if (key.meta && input === "l" && screen === "split") return setLayoutChoice((l) => nextLayout(split.length, l ?? defaultLayout(split.length, columns)));
       if (key.meta && /^[1-9]$/.test(input)) {
         const a = agents[Number(input) - 1];
         if (a) go(a.id);
@@ -187,7 +221,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   );
 
   // What happens in an agent you are not looking at arrives as a toast.
-  const toasts = useToasts(agents, (id) => screen !== "hub" && (id === active?.id || (screen === "split" && split.includes(id))), version);
+  const toasts = useToasts(agents, (id) => (screen === "agent" && id === active?.id) || (screen === "split" && (id === active?.id || splitAgents.includes(id))), version);
   const body = rows - 1 - (error ? 1 : 0);
   // Every agent closed: the exit card, until the program ends.
   if (agents.length === 0)
@@ -197,18 +231,25 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
       </MotionContext.Provider>
     );
   // A split needs room: below about 40×10 a pane, one agent is shown instead, and the bar says why.
-  const want = splitGrid(split.length, columns);
-  const tooSmall = screen === "split" && (Math.floor(columns / want.cols) < 40 || Math.floor((body - 1) / want.rows) < 10);
+  const layout: SplitLayout = layoutsFor(split.length).includes(layoutChoice as SplitLayout) ? layoutChoice! : defaultLayout(split.length, columns);
+  const tooSmall = screen === "split" && !fitsPanes(splitRects(split.length, layout, columns, body - 1));
   const view: Screen = tooSmall ? "agent" : screen;
-  const grid = want;
   const main = body - (tooSmall ? 1 : 0);
-  const paneW = Math.floor(columns / grid.cols);
-  const paneH = Math.floor(main / grid.rows);
+  const rects = splitRects(split.length, layout, columns, main);
+  const solo = { x: 0, y: 0, w: columns, h: main };
+  const covered = screen === "hub" || screen === "playground";
 
   return (
     <MotionContext.Provider value={motion}>
       <Box flexDirection="column" width={columns} height={rows} backgroundColor={themePaints() ? palette.ground : undefined}>
-        <FleetBar agents={agents} states={states} activeId={active?.id} screen={screen} columns={columns} />
+        <FleetBar
+          agents={agents}
+          states={states}
+          activeId={active?.id}
+          screen={screen}
+          columns={columns}
+          split={screen === "split" && !tooSmall ? { layout, shown: split.length, related } : undefined}
+        />
         {error ? <Text color={palette.magenta}>{` ✗ ${error}`}</Text> : null}
         {tooSmall ? <Text color={palette.amber} wrap="truncate-end">{columns >= 64 ? " the window is too small to split: showing one agent (^s back)" : " too small to split · ^s back"}</Text> : null}
         {screen === "hub" ? (
@@ -219,32 +260,56 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
             width={columns}
             height={body}
             active={!picker}
-            split={split}
+            split={splitAgents}
+            roster={tree}
             onOpen={(id) => go(id, "agent")}
             onSplit={(id) =>
-              setSplitIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...(ids.length ? ids : split), id].slice(-SPLIT_MAX)))
+              setSplitKeys((ks) => {
+                const k = agentKey(id);
+                return ks.includes(k) ? ks.filter((x) => x !== k) : [...(ks.length ? ks : split), k].slice(-SPLIT_MAX);
+              })
             }
             onClose={(id) => void fleet.close(id)}
             onNew={() => setPicker(true)}
             onOpenProject={(cwd) => void open(cwd, false)}
+            onLink={(a, b) => {
+              if (!fleet.link(a, b)) setError("those two cannot be linked");
+              else setError(undefined);
+            }}
+            onUnlink={(id) => void fleet.unlink(id)}
+            onFamily={splitWithFamily}
+            onPlayground={() => setScreen("playground")}
           />
         ) : null}
-        <Box flexDirection="row" flexWrap="wrap" width={columns} height={screen === "hub" ? 0 : main} display={screen === "hub" ? "none" : "flex"}>
+        {screen === "playground" ? (
+          <Playground
+            roster={roster}
+            width={columns}
+            height={body}
+            active={!picker}
+            onOpen={(rootNode) => {
+              const a = agents.find((o) => o.host.node === rootNode);
+              if (a) go(a.id, "agent");
+            }}
+          />
+        ) : null}
+        <Box width={columns} height={covered ? 0 : main} display={covered ? "none" : "flex"}>
           {agents.map((a) => {
-            const inSplit = view === "split" && split.includes(a.id);
+            const at = split.indexOf(agentKey(a.id));
+            const inSplit = view === "split" && at >= 0;
             const shown = view === "agent" ? a.id === active?.id : inSplit;
             const focused = a.id === active?.id && !picker;
             const framed = view === "split";
-            // Three in a 2×2 grid: the last one takes the whole bottom row.
-            const last = framed && split.length === 3 && grid.cols === 2 && split.indexOf(a.id) === 2;
-            const w = framed ? (last ? paneW * 2 : paneW) : columns;
-            const h = framed ? paneH : main;
+            const r = framed && at >= 0 ? rects[at]! : solo;
             return (
               <Box
                 key={a.id}
+                position="absolute"
+                left={r.x}
+                top={r.y}
                 display={shown ? "flex" : "none"}
-                width={w}
-                height={h}
+                width={r.w}
+                height={r.h}
                 borderStyle={framed ? "round" : undefined} borderBackgroundColor={ground()}
                 borderColor={focused ? palette.magenta : palette.faint}
               >
@@ -252,8 +317,8 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
                   controller={a.controller}
                   source={a.source}
                   motion={motion && shown}
-                  width={framed ? w - 2 : w}
-                  height={framed ? h - 2 : h}
+                  width={framed ? r.w - 2 : r.w}
+                  height={framed ? r.h - 2 : r.h}
                   active={shown && focused}
                   compact={framed}
                   brand={false}
@@ -262,6 +327,19 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
               </Box>
             );
           })}
+          {view === "split"
+            ? split.map((k, i) => {
+                if (k[0] !== "n") return null;
+                const node = tree.nodes.find((n) => `n${n.id}` === k);
+                if (!node) return null;
+                const r = rects[i]!;
+                return (
+                  <Box key={k} position="absolute" left={r.x} top={r.y} width={r.w} height={r.h} borderStyle="round" borderBackgroundColor={ground()} borderColor={palette.faint}>
+                    <NodePane node={node} nodes={tree.nodes} width={r.w - 2} height={r.h - 2} focused={false} />
+                  </Box>
+                );
+              })
+            : null}
         </Box>
         <Toasts toasts={toasts} columns={columns} />
         {picker ? (
