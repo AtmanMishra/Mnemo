@@ -47,6 +47,31 @@ export const AREA_LABEL: Record<Area, string> = {
 
 export const RELEASES: Release[] = [
   {
+    version: "0.1.3",
+    date: "2026-10-16",
+    headline: "Subscription login works in the downloaded binary; memory no longer reads off; Windows installs itself; about sixty fixes from a full review.",
+    changes: [
+      { kind: "fixed", area: "install", text: "Subscription /login works in the downloaded binary", detail: "On v0.1.0 to v0.1.2 it failed with Cannot find module './anthropic.js'. Bedrock models and image reads failed the same way. Release builds now fail if a flow would not load." },
+      { kind: "fixed", area: "memory", text: "Memory no longer reads off after a while", detail: "The footer shows off only when the memory sidecar is not installed. Installed but slow to answer is busy, and the last count stays." },
+      { kind: "changed", area: "memory", text: "Remote embeddings are opt-in", detail: "Set MNEMO_EMBED_URL and MNEMO_EMBED_MODEL. An OPENROUTER_API_KEY alone no longer sends memory anywhere, and the sidecar starts without your provider keys." },
+      { kind: "added", area: "install", text: "A downloaded mnemo.exe installs itself on Windows", detail: "It asks once, copies itself and memsrv.exe to %USERPROFILE%\\.mnemo\\bin and adds that folder to your user PATH. mnemo install [--yes] does the same without a question." },
+      { kind: "added", area: "install", text: "mnemo doctor checks memory", detail: "It starts the sidecar, times its answer, and names the embedder and the log file. It warns when the mnemo on your PATH is a different file from the one running." },
+      { kind: "fixed", area: "install", text: "mnemo uninstall on Windows removes everything at once", detail: "A running mnemo.exe is moved out of the install folder, so the folder and, with --deep, the data folder go immediately. What it cannot remove is named and the exit code is 1." },
+      { kind: "fixed", area: "interface", text: "Esc with a message queued no longer crashes the screen", detail: "The message goes back to the prompt. A login waiting on the browser can be cancelled with esc." },
+      { kind: "fixed", area: "tools", text: "mnemo -p exits 1 when the model call fails", detail: "It prints the reason. It used to exit 0." },
+      { kind: "security", area: "safety", text: "A malformed grants.json no longer switches the gate off", detail: "It fails closed. Plan mode is no longer beaten by an allow rule." },
+      { kind: "security", area: "safety", text: "Deny rules resist wrappers", detail: "Quotes, sudo -u, env -u, bash -e -c, eval, timeout, xargs and find -exec no longer get around them." },
+      { kind: "security", area: "safety", text: "The agent's tools cannot read the process environment, .env, models.json or grants.json" },
+      { kind: "security", area: "memory", text: "Memory redaction catches more credential shapes", detail: "hf_ and ya29. tokens, Basic and Digest auth, webhook URLs, *_PASS= and \"password is\"." },
+      { kind: "added", area: "site", text: "A changelog, download, roadmap, security, privacy, terms and shortcuts pages on the project site", detail: "The Windows instructions lead with irm https://mnemo.atmanmishra.dev/install.ps1 | iex." },
+    ],
+    known: [
+      "The Windows binary is not code-signed, so SmartScreen may warn on a browser download. The irm | iex and Scoop paths avoid it.",
+      "Keys typed in the first second after the prompt appears can occasionally be dropped.",
+      "git bisect run, git submodule foreach and npm install* grants are not yet covered by the gate's option checks (see SECURITY.md).",
+    ],
+  },
+  {
     version: "0.1.2",
     date: "2026-10-13",
     headline: "Install, update and uninstall from the command line; provider keys kept out of the commands the agent runs; rewind; smarter memory; eleven themes.",
