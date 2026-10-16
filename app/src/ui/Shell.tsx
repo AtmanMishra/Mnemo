@@ -143,6 +143,8 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   const [splitKeys, setSplitKeys] = useState<string[]>([]);
   const [layoutChoice, setLayoutChoice] = useState<SplitLayout | undefined>();
   const [picker, setPicker] = useState(initial?.picker ?? false);
+  /** The picker was opened to start an agent (the hub's n), not to go to a project. */
+  const [pickerFresh, setPickerFresh] = useState(false);
   const [error, setError] = useState<string | undefined>();
 
   // The active agent left: focus a neighbour.
@@ -156,7 +158,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   const split = useMemo(() => {
     const exists = (k: string) => (k[0] === "a" ? agents.some((a) => agentKey(a.id) === k) : tree.nodes.some((n) => `n${n.id}` === k));
     const chosen = splitKeys.filter(exists);
-    const keys = chosen.length >= 2 ? chosen : agents.slice(0, SPLIT_MAX).map((a) => agentKey(a.id));
+    const keys = chosen.length >= 1 ? chosen : agents.slice(0, SPLIT_MAX).map((a) => agentKey(a.id));
     const mine = active ? agentKey(active.id) : undefined;
     return mine && !keys.includes(mine) ? [...keys.slice(0, SPLIT_MAX - 1), mine] : keys.slice(0, SPLIT_MAX);
   }, [splitKeys, agents, tree, active?.id]);
@@ -179,6 +181,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   };
   const open = async (cwd: string, fresh: boolean) => {
     setPicker(false);
+    setPickerFresh(false);
     const existing = agents.find((a) => samePath(a.cwd, cwd));
     if (existing && !fresh) return go(existing.id, landing);
     try {
@@ -205,7 +208,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
     (input, key) => {
       if (key.ctrl && input === "g") return setScreen((s) => (s === "hub" ? "agent" : "hub"));
       if (key.ctrl && input === "y") return setScreen((s) => (s === "playground" ? "agent" : "playground"));
-      if (key.ctrl && input === "p") return setPicker(true);
+      if (key.ctrl && input === "p") return (setPickerFresh(false), setPicker(true));
       if (key.ctrl && input === "n" && active) return void open(active.cwd, true);
       if (key.ctrl && input === "s") return setScreen((s) => (s === "split" ? "agent" : "split"));
       if (key.meta && input === "l" && screen === "split") return setLayoutChoice((l) => nextLayout(split.length, l ?? defaultLayout(split.length, columns)));
@@ -266,11 +269,13 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
             onSplit={(id) =>
               setSplitKeys((ks) => {
                 const k = agentKey(id);
-                return ks.includes(k) ? ks.filter((x) => x !== k) : [...(ks.length ? ks : split), k].slice(-SPLIT_MAX);
+                // Toggle against what the split shows now, which is the first four until you choose.
+                const now = ks.length ? ks : split;
+                return now.includes(k) ? now.filter((x) => x !== k) : [...now, k].slice(-SPLIT_MAX);
               })
             }
             onClose={(id) => void fleet.close(id)}
-            onNew={() => setPicker(true)}
+            onNew={() => (setPickerFresh(true), setPicker(true))}
             onOpenProject={(cwd) => void open(cwd, false)}
             onLink={(a, b) => {
               if (!fleet.link(a, b)) setError("those two cannot be linked");
@@ -346,9 +351,10 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
           <ProjectPicker
             fleet={snap}
             current={active?.cwd}
+            fresh={pickerFresh}
             width={columns}
             onPick={(cwd, fresh) => void open(cwd, fresh)}
-            onCancel={() => setPicker(false)}
+            onCancel={() => (setPicker(false), setPickerFresh(false))}
           />
         ) : null}
       </Box>
