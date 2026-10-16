@@ -164,10 +164,12 @@ for ($mnemoAttempt = 0; $mnemoAttempt -lt 100; $mnemoAttempt++) {
   $mnemoPending = $false
   foreach ($mnemoFile in $mnemoFiles) {
     try {
+      # File.Delete throws for a missing file whose folder is gone too (the data
+      # folder removed it on an earlier pass), so only touch what exists.
       if ([IO.File]::Exists($mnemoFile)) {
         Clear-MnemoReadOnly $mnemoFile $false
+        [IO.File]::Delete($mnemoFile)
       }
-      [IO.File]::Delete($mnemoFile)
     } catch { $mnemoPending = $true; $mnemoLast = "$($mnemoFile): $($_.Exception.Message)" }
   }
   if ($mnemoData -and [IO.Directory]::Exists($mnemoData)) {
