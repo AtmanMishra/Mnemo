@@ -32,7 +32,6 @@ export function initMotion() {
       lenis = new Lenis({ lerp: 0.1, smoothWheel: true });
       lenis.on("scroll", ScrollTrigger.update);
       gsap.ticker.add((time) => lenis!.raf(time * 1000));
-      gsap.ticker.lagSmoothing(0);
       document.addEventListener("click", (e) => {
         const a = (e.target as Element | null)?.closest<HTMLAnchorElement>('a[href^="#"]');
         const id = a?.getAttribute("href")?.slice(1);
@@ -196,7 +195,7 @@ function scenes(root: HTMLElement, gsap: GSAP, ScrollTrigger: ST, stage: Stage) 
     }
     // Past the story the elephant settles back into the hero's spot, small and quiet.
     const after = root.querySelector("[data-after-story]");
-    if (after) gsap.fromTo(s, { fade: 1, rays: 1 }, { fade: 0.35, rays: 0.5, ease: "none", immediateRender: false, scrollTrigger: { trigger: after, start: "top 80%", end: "top 20%", scrub: true } });
+    if (after) gsap.fromTo(s, { fade: 1 }, { fade: 0.35, ease: "none", immediateRender: false, scrollTrigger: { trigger: after, start: "top 80%", end: "top 20%", scrub: true } });
   }
 
   // How it works: scrolling through the six areas lights each one in the graph.

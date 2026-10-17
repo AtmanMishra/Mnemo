@@ -35,11 +35,14 @@ Vercel at <https://mnemo.atmanmishra.dev>, with DNS on Cloudflare. It replaced t
 - The look is mid-century print (cream and teal night, a red ribbon header, seals, ticket buttons) with
   self-hosted fonts from Fontsource. Pages are listed in `web/src/App.tsx`.
 - The stage (`src/fx/stage.ts`, three.js, lazy loaded) is one WebGL canvas behind every page: Mne as voxels
-  that come apart into a memory graph of six areas, drawn through a post pass (sunburst, pixelation, ASCII,
-  grain). `src/fx/host.ts` points it at each page's `[data-stage-anchor]`; scroll scenes in `src/motion.ts`
-  drive it. Without WebGL2 the page keeps its CSS sunburst and still images.
-- The loader (`src/fx/boot.ts`) shows real progress (fonts, three.js, shader compile, graph, images) and
-  hands its pixel elephant to the stage. It runs only when `public/boot.js` marks the first paint.
+  that come apart into a memory graph of six areas, with a post pass for pixelation and ASCII. The canvas
+  is transparent: the sunburst is one fixed CSS layer (`.sky`) shared by the loader, the stage and every page,
+  so the background never moves. `src/fx/host.ts` points the stage at each page's `[data-stage-anchor]`; a new
+  anchor is reached by an eased move timed by the stage's own clock, so a stalled frame never makes it jump.
+  Scroll scenes in `src/motion.ts` drive it. Without WebGL2 the page keeps the sunburst and still images.
+- The loader (`src/fx/boot.ts`) shows real progress (fonts, three.js, shader compile, graph, images) as Mne's
+  pixels arriving, then hands the pixel elephant to the stage, which flies it into the hero. It runs only
+  when `public/boot.js` marks the first paint, never for crawlers or page-speed tools.
 - `src/Router.tsx` swaps pages in the client behind a pixel wipe (`src/fx/transition.ts`); every page is
   still a prerendered file, so links work without JavaScript.
 - Motion is loaded after hydration (GSAP + ScrollTrigger + Lenis, one smooth-scroll engine, fine pointers

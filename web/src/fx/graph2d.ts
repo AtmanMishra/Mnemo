@@ -203,6 +203,9 @@ export function createGraph(canvas: HTMLCanvasElement, opts: { reduced: boolean 
     }
   };
 
+  // Declared before the first frame: reduced motion draws at once, and drawing reads them.
+  let drag: GNode | null = null;
+  let hover: GNode | null = null;
   let raf = 0;
   const loop = () => {
     raf = requestAnimationFrame(loop);
@@ -222,8 +225,6 @@ export function createGraph(canvas: HTMLCanvasElement, opts: { reduced: boolean 
   };
 
   // Pointer: drag a node, hover to read it.
-  let drag: GNode | null = null;
-  let hover: GNode | null = null;
   const at = (ev: PointerEvent) => {
     const r = canvas.getBoundingClientRect();
     const x = ev.clientX - r.left, y = ev.clientY - r.top;
