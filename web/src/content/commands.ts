@@ -95,8 +95,10 @@ export const GROUPS: Group[] = [
       ["`ctrl+s`", "split view (never more than four panes); again for single view"],
       ["`alt+l`", "in a split: the next layout (columns, rows, grid, main + side)"],
       ["`ctrl+y`", "playground: every agent, sub-agent and message between them, to watch only"],
+      ["`c` `tab` (playground)", "the selected agent's conversation with another as a thread · its next partner"],
       ["`alt+1` … `alt+9`", "go to agent 1–9"],
-      ["`alt+,` `alt+.`", "previous / next agent"],
+      ["`alt+,` `alt+.`", "previous / next agent; in a split, every pane, so you can type to a running sub-agent"],
+      ["`esc` (sub-agent pane)", "give the keys back to the agent"],
     ],
   },
   {

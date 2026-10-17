@@ -39,7 +39,7 @@ Rust sidecar; code execution is a Python kernel.
 
 | Piece | Language | What it owns |
 |---|---|---|
-| `app/` | Bun / TypeScript | The program. The Ink interface, the agent loop (pi's SDK, **in this process**), Mnemo's behaviour as nine pi extensions (policy gate, checkpoints, shell, memory, kernel, sub-agents, skills, escalation, trace), sessions, updates. |
+| `app/` | Bun / TypeScript | The program. The Ink interface, the agent loop (pi's SDK, **in this process**), Mnemo's behaviour as pi extensions (policy gate, checkpoints, shell, memory, kernel, sub-agents, peers, skills, escalation, trace), sessions, updates. |
 | `packages/memory/` | TypeScript | `@mnemo/memory`: the memory loop any agent can drive — profiles, recall, learning from a run, failure steering, skills, past-session search, `tidy`; and its attachments for Claude Code (hooks) and MCP clients. |
 | `memory-layer/` | Rust | The brain. An append-only journal, a graph store, retrieval, steering, consolidation — and `memsrv`, the JSON-RPC sidecar. |
 | `app/python/ipy_bridge.py` | Python | The kernel behind the `ipy_run` tool: one long-lived interpreter the agent drives. |
@@ -98,9 +98,9 @@ by hand; `?` on an empty prompt shows the panel):
 | `ctrl+b` · `tab` | show or hide the sidebar · move focus prompt → sidebar → transcript |
 | `1`–`5` (sidebar) | files · memory · sessions · skills · logs |
 | `ctrl+g` `ctrl+p` `ctrl+n` `ctrl+s` | the agent hub · switch project · another agent here · split view (up to four) |
-| `alt+1`…`alt+9`, `alt+,` `alt+.` | go to agent N · previous / next agent |
+| `alt+1`…`alt+9`, `alt+,` `alt+.` | go to agent N · previous / next agent (in a split: every pane, so you can type to a running sub-agent; `esc` leaves its pane) |
 | `alt+l` (split) | next split layout: columns, rows, grid, main + side (at most four panes) |
-| `ctrl+y` | the playground: every agent, sub-agent and message between them, to watch (read-only) |
+| `ctrl+y` | the playground: every agent, sub-agent and message between them, to watch (read-only); `c` one pair's conversation as a thread, `tab` the next partner |
 | `l` `u` `f` `p` (agents page) | link two agents as siblings · unlink · split with this agent's family · playground |
 | `/` · `@` | the slash menu · mention a file |
 | `ctrl+c` | clear the draft, interrupt the turn, or quit (twice) |

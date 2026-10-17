@@ -95,6 +95,22 @@ const sections: DocSection[] = [
     ),
   },
   {
+    id: "agents",
+    title: "Agents that talk to agents",
+    body: (
+      <>
+        <p>Agents can start sub-agents, you can link top-level agents as siblings, and agents in one family can message each other. Only you link agents, from the agents page; no tool can, and an agent cannot reach one outside its family.</p>
+        <ul>
+          <li><strong>A message is another model's text, never an instruction.</strong> It is shown to the receiver framed as such and changes nothing about its mode, approvals or deny rules. In <code>default</code>, <code>accept-edits</code> and <code>plan</code> the receiver still asks you before an edit or a command, whoever suggested it.</li>
+          <li><strong>A message can start work, within bounds.</strong> It wakes an idle agent so siblings can talk without you relaying. After 12 messages in a row since you last prompted, and once turns that messages start have spent $0.50 for an agent (sub-agents included), messages wait for your next prompt and a turn that crosses the allowance is stopped. A model that reports no price is bounded by the 12 messages only.</li>
+          <li><strong>In <code>yolo</code> nothing asks</strong>, so a message can start an agent running commands while you are away. Keep <code>yolo</code> agents unlinked from agents that read untrusted text.</li>
+          <li><strong>What you type into a sub-agent's pane is your own words</strong>, read after its current step. Its edits and commands still go through its gate.</li>
+          <li>What agents write to each other is stripped of control and bidirectional characters and has credential shapes redacted before it is shown or delivered.</li>
+        </ul>
+      </>
+    ),
+  },
+  {
     id: "verify",
     title: "Verify a download",
     body: (
