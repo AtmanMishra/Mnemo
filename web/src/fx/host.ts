@@ -35,6 +35,8 @@ export async function mountStage(canvas: HTMLCanvasElement) {
     const mod = await import("./stage");
     complete("three.js");
     stage = await mod.createStage(canvas);
+    // Under the loader the stage stays empty until the loader hands it the elephant.
+    if (isBooting()) stage.state.fade = 0;
     complete("memory graph");
     await stage.warm();
     complete("shaders");
@@ -47,28 +49,32 @@ export async function mountStage(canvas: HTMLCanvasElement) {
   document.documentElement.classList.add("has-stage");
   onHandoff((rect) => {
     // The same picture as the loader's: flat colours, one block per sprite pixel.
-    Object.assign(s.state, { flat: 1, pixel: rect.height / 18, morph: 0, spin: 0, tilt: 0, ascii: 0, fade: 1, rays: 1, zoom: 1 });
+    Object.assign(s.state, { flat: 1, pixel: rect.height / 18, morph: 0, spin: 0, tilt: 0, ascii: 0, fade: 1, zoom: 1 });
     s.snapTo(rect);
+    handedAt = rect;
   });
   resolveReady(s);
 }
 
 const anchorEl = () => document.querySelector("[data-stage-anchor]");
+// Where the loader left the elephant, for the flight to its spot.
+let handedAt: DOMRect | null = null;
 // The page's own look is one tween at a time; the page's scroll scenes tween the same
 // state and must not be killed with it.
 let look: { kill(): void } | null = null;
 
 /**
  * Point the stage at this page. Home is the elephant; every other page is the memory
- * graph, floating in the page head. After the loader the elephant first comes to life
- * where the loader left it (unpixelates, turns round), then goes to its place.
+ * graph, floating in the page head. After the loader the elephant flies from where the
+ * loader left it to its place, coming to life on the way (the pixels resolve into
+ * voxels as it sways round).
  */
 export async function stagePage(path: string) {
   const s = await stageReady;
   if (!s) return;
   const { default: gsap } = await import("gsap");
   const home = path === "/";
-  const to = { morph: home ? 0 : 1, fade: home ? 1 : 0.9, rays: home ? 1 : 0.75, ascii: 0, areaAmt: 0, zoom: home ? 1 : 0.62, tilt: 0, drift: 1 };
+  const to = { morph: home ? 0 : 1, fade: home ? 1 : 0.9, ascii: 0, areaAmt: 0, zoom: home ? 1 : 0.62, tilt: 0, drift: 1 };
   look?.kill();
   if (reduced()) {
     Object.assign(s.state, to, { pixel: 1, flat: 0, spin: home ? -0.5 : 0.4 });
@@ -77,13 +83,17 @@ export async function stagePage(path: string) {
   }
   if (isBooting()) {
     await finished;
+    const FLY = 1.6;
+    s.setAnchor(anchorEl(), { from: handedAt ?? undefined, ms: FLY * 1000, arc: Math.min(90, window.innerHeight * 0.08) });
     const tl = gsap.timeline();
     look = tl;
-    tl.to(s.state, { pixel: 1, duration: 0.7, ease: "steps(6)" });
-    tl.to(s.state, { flat: 0, duration: 0.5, ease: "power2.out" }, "<0.35");
-    tl.to(s.state, { spin: Math.PI * 2 - 0.5, duration: 1.8, ease: "power3.inOut" }, "<");
-    tl.add(() => s.setAnchor(anchorEl()), "<0.6");
-    tl.to(s.state, { ...to, duration: 1.6, ease: "power3.inOut" }, "<");
+    tl.to(s.state, { pixel: 1, duration: 0.8, ease: "steps(5)" }, 0);
+    tl.to(s.state, { flat: 0, duration: 0.6, ease: "power2.out" }, 0.3);
+    // A sway as it flies, never edge-on: the flat sprite would show as a sliver.
+    tl.to(s.state, { spin: 0.7, tilt: -0.12, duration: FLY * 0.45, ease: "power2.out" }, 0);
+    tl.to(s.state, { spin: -0.5, tilt: 0, duration: FLY * 0.55, ease: "power2.inOut" }, FLY * 0.45);
+    const { tilt: _tilt, ...rest } = to;
+    tl.to(s.state, { ...rest, duration: FLY, ease: "power3.inOut" }, 0);
     return;
   }
   s.setAnchor(anchorEl());

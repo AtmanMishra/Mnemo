@@ -2,7 +2,7 @@
    shadows, a sunburst behind the elephant. Day is the light theme, Night the dark one.
    The legacy names (--magenta, --cyan, --amber) are kept so every demo reads the palette. */
 :root {
-  --ground: #f2e7cc; --panel: #fbf4e2; --sunken: #e9dbb9; --rule: #d4c095; --ray: #e8d6ad;
+  --ground: #f2e7cc; --panel: #fbf4e2; --sunken: #e9dbb9; --rule: #d4c095; --ray: #e8d6ad; --ray-mid: color-mix(in srgb, var(--ray), var(--ground));
   --text: #2a1f1a; --ink: #2a1f1a; --dim: #5a4839; --faint: #7a6651;
   --magenta: #c8392b; --cyan: #1d6a63; --amber: #94610a; --mustard: #e3a92b; --salmon: #ec8a7c;
   --violet: #7b4b6e; --green: #4e7a2e; --red: #b3261e;
@@ -45,12 +45,10 @@
 /* Hairline figures draw with the page's tokens. */
 :root { --hairline-plate: var(--panel); --hairline-hi: var(--text); --hairline-edge: var(--dim); --hairline-mid: var(--faint); --hairline-lo: var(--rule); }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 96px;
-  /* The sunburst without WebGL (and before it starts): the stage paints over it. */
-  background: var(--ground) repeating-conic-gradient(from 0deg at 50% 30%, var(--ray) 0deg 6deg, var(--ground) 6deg 12deg) fixed; }
+html { scroll-behavior: smooth; scroll-padding-top: 96px; background: var(--ground); }
 html.lenis, html.lenis body { height: auto; }
 .lenis.lenis-smooth { scroll-behavior: auto !important; }
-body { margin: 0; background: transparent; color: var(--text); font: 17px/1.65 var(--serif); text-wrap: pretty; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+body { margin: 0; background: transparent; color: var(--text); font: 17px/1.65 var(--serif); text-wrap: pretty; -webkit-font-smoothing: antialiased; overflow-x: hidden; overflow-x: clip; }
 a, button { touch-action: manipulation; -webkit-tap-highlight-color: var(--accent-tap); }
 a { color: var(--cyan); text-underline-offset: 3px; text-decoration-thickness: 2px; transition: color 150ms ease; }
 @media (hover: hover) and (pointer: fine) { a:hover { color: var(--magenta); } }

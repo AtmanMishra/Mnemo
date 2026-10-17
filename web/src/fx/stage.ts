@@ -4,11 +4,13 @@
 // the head). Every voxel is also a node of a memory graph: it has a home (its place in
 // the elephant) and a place in one of the memory's six areas, and `morph` moves it
 // between the two. Edges between nodes appear as the graph forms, with recall pulses
-// running along them. A second pass draws the mid-century sunburst behind it, and can
-// pixelate the scene (the loader hands over a pixel elephant) or set it in ASCII.
+// running along them. A second pass can pixelate the scene (the loader hands over a
+// pixel elephant) or set it in ASCII. The canvas is transparent: the sunburst behind
+// it is the page's own (`.sky` in landing.css), so it never moves or changes hands.
 //
 // Pages drive it through `state` (GSAP tweens it) and `anchor`: an element whose box
-// the elephant sits in, followed every frame, so the 3D scene scrolls with the page.
+// the elephant sits in, followed exactly every frame, so the 3D scene scrolls with the
+// page. A new anchor is reached by an eased move from wherever the elephant is.
 import * as THREE from "three";
 import { PIXELS } from "./mne";
 import { mulberry32 } from "../art/rng";
@@ -28,8 +30,6 @@ export interface StageState {
   tilt: number;
   /** Canvas opacity. */
   fade: number;
-  /** Sunburst strength. */
-  rays: number;
   /** An area to pick out (0..5) and how strongly the others dim. */
   area: number;
   areaAmt: number;
@@ -41,16 +41,22 @@ export interface StageState {
 
 export interface Stage {
   state: StageState;
-  /** The element the elephant sits in; null keeps the last box. */
-  setAnchor(el: Element | null, opts?: { instant?: boolean }): void;
+  /**
+   * The element the elephant sits in; null keeps the last box. A different element is
+   * reached by an eased move of `ms` (from `from`, or from where the elephant is now),
+   * lifted by `arc` CSS px at its middle; `instant` jumps.
+   */
+  setAnchor(el: Element | null, opts?: { instant?: boolean; ms?: number; from?: Rect; arc?: number }): void;
   /** Places the elephant over a box at once (the loader's handover). */
-  snapTo(rect: { left: number; top: number; width: number; height: number }): void;
+  snapTo(rect: Rect): void;
   /** Render whatever changed now (reduced motion renders only on demand). */
   invalidate(): void;
   /** Compiles every shader and draws one frame. */
   warm(): Promise<void>;
   destroy(): void;
 }
+
+type Rect = { left: number; top: number; width: number; height: number };
 
 const GLYPHS = " .:-=+*#%@";
 
@@ -194,40 +200,19 @@ const POST_FRAG = /* glsl */ `
 uniform sampler2D tScene;
 uniform sampler2D tGlyph;
 uniform vec2 uRes;
-uniform vec2 uCenter;
 uniform vec2 uOrigin;
-uniform float uTime;
 uniform float uPixel;
 uniform float uAscii;
 uniform float uCell;
-uniform float uRays;
 uniform float uDark;
-uniform vec3 uBg;
-uniform vec3 uRay;
 uniform vec3 uInk;
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 void main() {
   vec2 fc = gl_FragCoord.xy;
-  // The sunburst: rays from behind the elephant, the way a 1950s ad puts them behind a logo.
-  vec2 d = fc - uCenter;
-  float diag = length(uRes);
-  float dist = length(d) / diag;
-  float ang = atan(d.y, d.x);
-  float wave = sin(ang * 30.0 + uTime * 0.04);
-  float stripe = smoothstep(-0.12, 0.12, wave);
-  float fall = 1.0 - smoothstep(0.02, 0.85, dist);
-  vec3 bg = mix(uBg, uRay, stripe * fall * uRays);
-  bg = mix(bg, uRay, (1.0 - smoothstep(0.0, 0.16, dist)) * 0.35 * uRays);
-  // Night: a few stars over the far rays.
-  vec2 sc = floor(fc / 3.0);
-  float star = step(0.9985, hash(sc)) * uDark * (0.5 + 0.5 * sin(uTime * 2.0 + hash(sc + 3.1) * 40.0));
-  bg = mix(bg, uRay * 1.6, star * smoothstep(0.1, 0.4, dist));
-
   vec2 pf = fc;
   if (uPixel > 1.0) pf = (floor((fc - uOrigin) / uPixel) + 0.5) * uPixel + uOrigin;
-  // The scene target holds premultiplied colour (blended over transparent black).
-  vec4 s = texture2D(tScene, pf / uRes);
-  vec3 col = bg * (1.0 - s.a) + s.rgb;
+  // The scene target holds premultiplied colour (blended over transparent black), which
+  // is what the transparent canvas wants.
+  vec4 col = texture2D(tScene, pf / uRes);
 
   if (uAscii > 0.001) {
     vec2 cell = floor(fc / uCell);
@@ -237,17 +222,10 @@ void main() {
     float dens = mix(1.0 - lum, lum, uDark);
     float idx = 1.0 + floor(clamp(dens * 1.25, 0.0, 0.999) * 9.0);
     vec2 lp = fract(fc / uCell);
-    float g = texture2D(tGlyph, vec2((idx + lp.x) / 10.0, lp.y)).r;
-    vec3 glyphCol = mix(ac, uInk, 0.15);
-    vec3 asc = mix(bg, glyphCol, g * a.a);
-    col = mix(col, asc, uAscii);
+    float g = texture2D(tGlyph, vec2((idx + lp.x) / 10.0, lp.y)).r * a.a;
+    col = mix(col, vec4(mix(ac, uInk, 0.15) * g, g), uAscii);
   }
-
-  // Paper grain, and a soft edge.
-  col += (hash(fc + fract(uTime * 0.37) * 91.0) - 0.5) * 0.045;
-  vec2 q = fc / uRes - 0.5;
-  col *= 1.0 - dot(q, q) * 0.22;
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = col;
 }
 `;
 
@@ -269,9 +247,11 @@ export async function createStage(canvas: HTMLCanvasElement): Promise<Stage> {
   // The palette is sRGB and the shaders work in it directly: no conversion anywhere.
   THREE.ColorManagement.enabled = false;
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: "high-performance" });
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true, powerPreference: "high-performance" });
   renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
-  const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
+  renderer.setClearColor(0x000000, 0);
+  // Phones get fewer pixels: the scene is drawn twice a frame, multisampled.
+  const dpr = Math.min(window.devicePixelRatio || 1, matchMedia("(pointer: coarse)").matches ? 1.5 : 1.75);
   renderer.setPixelRatio(dpr);
 
   const scene = new THREE.Scene();
@@ -280,7 +260,7 @@ export async function createStage(canvas: HTMLCanvasElement): Promise<Stage> {
   const group = new THREE.Group();
   scene.add(group);
 
-  const state: StageState = { morph: 0, ascii: 0, pixel: 1, flat: 0, spin: 0, tilt: 0, fade: 1, rays: 1, area: 0, areaAmt: 0, drift: 1, zoom: 1 };
+  const state: StageState = { morph: 0, ascii: 0, pixel: 1, flat: 0, spin: 0, tilt: 0, fade: 1, area: 0, areaAmt: 0, drift: 1, zoom: 1 };
 
   // Nodes ----------------------------------------------------------------------------
   const vox = voxels();
@@ -430,16 +410,11 @@ export async function createStage(canvas: HTMLCanvasElement): Promise<Stage> {
       tScene: { value: target.texture },
       tGlyph: { value: glyphTex },
       uRes: { value: new THREE.Vector2(1, 1) },
-      uCenter: { value: new THREE.Vector2() },
       uOrigin: { value: new THREE.Vector2() },
-      uTime: shared.uTime,
       uPixel: { value: 1 },
       uAscii: { value: 0 },
       uCell: { value: 10 * dpr },
-      uRays: { value: 1 },
       uDark: { value: 0 },
-      uBg: shared.uBg,
-      uRay: { value: new THREE.Color() },
       uInk: shared.uInk,
     },
   });
@@ -454,7 +429,6 @@ export async function createStage(canvas: HTMLCanvasElement): Promise<Stage> {
     const set = (c: THREE.Color, name: string) => c.setRGB(...rgb(name));
     set(shared.uInk.value, "--ink");
     set(shared.uBg.value, "--ground");
-    set(pmat.uniforms.uRay!.value, "--ray");
     set(emat.uniforms.uPulse!.value, "--magenta");
     set(emat.uniforms.uLine!.value, "--dim");
     ELEPHANT_TOKENS.forEach((t, i) => set(vmat.uniforms.uEl!.value[i], t));
@@ -467,9 +441,11 @@ export async function createStage(canvas: HTMLCanvasElement): Promise<Stage> {
   paint();
 
   // Size and anchor ---------------------------------------------------------------------
+  // The canvas is as tall as the largest viewport (100lvh in the CSS), so a phone's
+  // toolbar coming and going does not resize it while you scroll.
   let W = 0, H = 0;
   const resize = () => {
-    const w = window.innerWidth, h = window.innerHeight;
+    const w = canvas.clientWidth || window.innerWidth, h = canvas.clientHeight || window.innerHeight;
     if (w === W && h === H) return;
     W = w;
     H = h;
@@ -484,15 +460,17 @@ export async function createStage(canvas: HTMLCanvasElement): Promise<Stage> {
   resize();
 
   let anchor: Element | null = null;
-  // The box the elephant is in now (centre and height, CSS px), easing toward the anchor's.
+  // The box the elephant is in now: centre and height, CSS px.
   const box2 = { x: window.innerWidth / 2, y: window.innerHeight / 2, h: 220 };
-  let snapNext = true;
+  // A move toward a new anchor: from a box, over `ms`, lifted by `arc` at its middle.
+  let move: { from: { x: number; y: number; h: number }; t0: number; ms: number; arc: number } | null = null;
   const goal = () => {
     if (!anchor || !anchor.isConnected) return null;
     const r = anchor.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) return null;
     return { x: r.left + r.width / 2, y: r.top + r.height / 2, h: Math.min(r.width, r.height) };
   };
+  const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
   const pointer = { x: 0, y: 0, tx: 0, ty: 0 };
   const onPointer = (ev: PointerEvent) => {
@@ -504,13 +482,14 @@ export async function createStage(canvas: HTMLCanvasElement): Promise<Stage> {
   const frame = (t: number) => {
     resize();
     const g = goal();
-    if (g) {
-      const k = snapNext || reduced ? 1 : 0.14;
-      box2.x += (g.x - box2.x) * k;
-      box2.y += (g.y - box2.y) * k;
-      box2.h += (g.h - box2.h) * k;
-      snapNext = false;
-    }
+    if (g && move) {
+      const k = Math.min(1, (clock - move.t0) / move.ms);
+      const e = ease(k);
+      box2.x = move.from.x + (g.x - move.from.x) * e;
+      box2.y = move.from.y + (g.y - move.from.y) * e - Math.sin(Math.PI * e) * move.arc;
+      box2.h = move.from.h + (g.h - move.from.h) * e;
+      if (k >= 1) move = null;
+    } else if (g) Object.assign(box2, g);
     pointer.x += (pointer.tx - pointer.x) * 0.05;
     pointer.y += (pointer.ty - pointer.y) * 0.05;
 
@@ -530,15 +509,12 @@ export async function createStage(canvas: HTMLCanvasElement): Promise<Stage> {
     vmat.uniforms.uFlat!.value = state.flat;
     pmat.uniforms.uPixel!.value = state.pixel * dpr;
     pmat.uniforms.uAscii!.value = state.ascii;
-    pmat.uniforms.uRays!.value = state.rays;
-    pmat.uniforms.uCenter!.value.set(box2.x * dpr, (H - box2.y) * dpr);
     // Align the pixel grid with the elephant's own grid, so each block is one sprite pixel.
     const cell = (box2.h / 18) * dpr;
     pmat.uniforms.uOrigin!.value.set((box2.x * dpr) - cell * 9, (H - box2.y) * dpr - cell * 9);
     canvas.style.opacity = String(state.fade);
 
     renderer.setRenderTarget(target);
-    renderer.setClearColor(0x000000, 0);
     renderer.clear();
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
@@ -547,16 +523,24 @@ export async function createStage(canvas: HTMLCanvasElement): Promise<Stage> {
 
   let raf = 0;
   let last = { ...state };
-  const start = performance.now();
+  // The stage's own clock, in ms. A frame never advances it by more than about two
+  // frames' worth, so when the page stalls (a big layout, a slow phone) a move carries
+  // on from where it was instead of skipping ahead to where it should have been.
+  let clock = 0;
+  let prev = performance.now();
   const loop = () => {
     raf = requestAnimationFrame(loop);
+    const now = performance.now();
+    clock += Math.min(now - prev, 34);
+    prev = now;
     if (document.hidden) return;
     const changed = (Object.keys(state) as (keyof StageState)[]).some((k) => state[k] !== last[k]);
     if (reduced && !needs && !changed) return;
+    if (move) needs = true;
     if (state.fade < 0.005 && !changed) return;
     last = { ...state };
     needs = false;
-    frame((performance.now() - start) / 1000);
+    frame(clock / 1000);
   };
   // Reduced motion still follows the page as it scrolls, without the floating and spinning.
   const onScroll = () => (needs = true);
@@ -567,17 +551,29 @@ export async function createStage(canvas: HTMLCanvasElement): Promise<Stage> {
   return {
     state,
     setAnchor(el, opts) {
-      if (el) anchor = el;
-      if (opts?.instant) snapNext = true;
+      if (!el) return;
+      const changed = el !== anchor || opts?.from;
+      anchor = el;
+      if (opts?.instant || reduced) move = null;
+      else if (changed) {
+        const f = opts?.from;
+        move = {
+          from: f ? { x: f.left + f.width / 2, y: f.top + f.height / 2, h: f.height } : { ...box2 },
+          t0: clock,
+          ms: opts?.ms ?? 900,
+          arc: opts?.arc ?? 0,
+        };
+      }
       needs = true;
     },
     snapTo(r) {
       anchor = null;
+      move = null;
       box2.x = r.left + r.width / 2;
       box2.y = r.top + r.height / 2;
       box2.h = r.height;
       needs = true;
-      frame((performance.now() - start) / 1000);
+      frame(clock / 1000);
     },
     invalidate() {
       needs = true;

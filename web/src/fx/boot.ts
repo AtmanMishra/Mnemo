@@ -1,8 +1,12 @@
-// The loading screen. It shows real work: each line is something the page waits for
-// (fonts, the 3D library, compiling the shaders, building the memory graph, the page's
-// images), and Mne is drawn as ASCII that turns into pixels as those finish. When all
-// of it is done the pixel elephant is handed to the stage, which draws the same picture
-// underneath, so the loader can lift away with nothing jumping.
+// The loading screen. It shows real work: the count and the line under it follow what
+// the page waits for (fonts, the 3D library, compiling the shaders, building the memory
+// graph, the page's images), and Mne's pixels arrive as that work does. When all of it
+// is done the pixel elephant is handed to the stage, which draws the same picture in
+// the same place, so the loader can go with nothing jumping: the stage then flies the
+// elephant to its place on the page (src/fx/host.ts).
+//
+// The loader has no backdrop of its own. It hides the page's parts and shows the same
+// sky the page uses, so there is nothing to lift away.
 //
 // It runs only when public/boot.js marked the page `booting` (scripts on, motion allowed).
 import { PIXELS, SPRITE_W } from "./mne";
@@ -10,12 +14,19 @@ import { mulberry32 } from "../art/rng";
 import { ELEPHANT_TOKENS, token } from "./theme";
 
 export type Task = "type" | "three.js" | "shaders" | "memory graph" | "images" | "page";
-const TASKS: Task[] = ["type", "three.js", "shaders", "memory graph", "images", "page"];
+const TASKS: [Task, string][] = [
+  ["type", "setting the type"],
+  ["three.js", "loading three.js"],
+  ["shaders", "compiling the shaders"],
+  ["memory graph", "building the memory graph"],
+  ["images", "developing the pictures"],
+  ["page", "finishing the page"],
+];
 
 type Handoff = (rect: DOMRect) => Promise<void> | void;
 
 let resolveFinished!: () => void;
-/** Resolves once the loader is gone (at once when there is none). */
+/** Resolves when the loader hands over (at once when there is none). */
 export const finished = new Promise<void>((r) => (resolveFinished = r));
 
 const done = new Set<Task>();
@@ -50,21 +61,19 @@ export function startBoot() {
   } catch {
     /* storage off: treat as a first visit */
   }
-  const minMs = seen ? 500 : 2200;
+  const minMs = seen ? 400 : 1600;
 
-  const ui = root.querySelector<HTMLElement>(".boot-ui")!;
-  ui.innerHTML = `
+  // Shown by `booting` at first paint; `on` keeps it up while the page comes back.
+  root.classList.add("on");
+  root.innerHTML = `
     <div class="boot-card">
       <canvas class="boot-px"></canvas>
-      <p class="boot-brand">Mnemo</p>
-      <p class="boot-ribbon"><span>Loading memories</span></p>
-      <div class="boot-bar"><i></i><span>000%</span></div>
-      <ol class="boot-log">${TASKS.map((t) => `<li data-task="${t}"><span>${t}</span><b></b><em>····</em></li>`).join("")}</ol>
+      <p class="boot-count">000</p>
+      <p class="boot-task"></p>
     </div>`;
   const canvas = root.querySelector<HTMLCanvasElement>(".boot-px")!;
-  const bar = root.querySelector<HTMLElement>(".boot-bar i")!;
-  const pct = root.querySelector<HTMLElement>(".boot-bar span")!;
-  const rows = new Map(TASKS.map((t) => [t, root.querySelector<HTMLElement>(`[data-task="${t}"]`)!]));
+  const count = root.querySelector<HTMLElement>(".boot-count")!;
+  const task = root.querySelector<HTMLElement>(".boot-task")!;
 
   // Work every page has, tracked here; the stage reports its own.
   const fontsReady = Promise.all(
@@ -80,15 +89,15 @@ export function startBoot() {
   void images().then(() => complete("images"));
   if (document.readyState === "complete") complete("page");
   else window.addEventListener("load", () => complete("page"), { once: true });
-  // Nothing may hold the page hostage: whatever has not reported in 9 seconds counts as done.
-  setTimeout(() => TASKS.forEach(complete), 9000);
+  // Nothing may hold the page hostage: whatever has not reported in 8 seconds counts as done.
+  setTimeout(() => TASKS.forEach(([t]) => complete(t)), 8000);
 
   const ctx = canvas.getContext("2d")!;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   let cell = 0;
   const size = () => {
     const s = Math.min(window.innerWidth, window.innerHeight);
-    cell = Math.max(6, Math.floor((s * 0.3) / SPRITE_W));
+    cell = Math.max(6, Math.floor((s * 0.34) / SPRITE_W));
     const px = cell * SPRITE_W;
     canvas.width = px * dpr;
     canvas.height = px * dpr;
@@ -98,47 +107,45 @@ export function startBoot() {
   size();
   window.addEventListener("resize", size);
 
+  // Each pixel has its moment in the count; it pops in over a short beat when reached.
   const rand = mulberry32(7);
-  const order = PIXELS.map(() => rand());
+  const order = PIXELS.map(() => 0.04 + rand() * 0.92);
   const colors = ELEPHANT_TOKENS.map(token);
-  const ink = token("--ink");
-  const glyphs = "@%#*+=-:.";
-  const t0 = performance.now();
-  let shown = 0;
+  const dot = token("--rule");
+  const POP = 0.06;
 
   const draw = (p: number) => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.font = `${Math.round(cell * 0.95)}px "DM Mono", ui-monospace, monospace`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
     PIXELS.forEach((px, i) => {
-      const o = order[i]!;
       const x = px.x * cell, y = px.y * cell;
-      if (o < p) {
-        ctx.fillStyle = colors[px.c]!;
-        ctx.fillRect(x, y, cell, cell);
-      } else {
-        // Not loaded yet: the pixel is still a character, denser as it gets close.
-        const k = Math.min(glyphs.length - 1, Math.floor(((o - p) / 0.6) * glyphs.length));
-        ctx.globalAlpha = 0.35 + 0.65 * (1 - k / glyphs.length);
-        ctx.fillStyle = colors[px.c] === colors[1] ? ink : colors[px.c]!;
-        ctx.fillText(glyphs[k]!, x + cell / 2, y + cell / 2 + 1);
-        ctx.globalAlpha = 1;
+      const k = Math.max(0, Math.min(1, (p - order[i]!) / POP));
+      if (k <= 0) {
+        // Not remembered yet: a dot where the pixel will be, so the shape is already there.
+        ctx.fillStyle = dot;
+        const d = Math.max(2, cell * 0.22);
+        ctx.fillRect(x + (cell - d) / 2, y + (cell - d) / 2, d, d);
+        return;
       }
+      // A small overshoot as it lands; whole pixels once it has.
+      const s = k >= 1 ? cell : cell * (0.3 + 0.85 * Math.sin((k * Math.PI) / 1.6));
+      ctx.fillStyle = colors[px.c]!;
+      ctx.fillRect(x + (cell - s) / 2, y + (cell - s) / 2, s, s);
     });
   };
 
+  const t0 = performance.now();
+  let shown = 0;
   const tick = () => {
     const elapsed = performance.now() - t0;
     const real = done.size / TASKS.length;
     const target = Math.min(real, elapsed / minMs);
-    shown += (target - shown) * 0.09;
+    shown += (target - shown) * 0.12;
     if (target - shown < 0.002) shown = target;
-    draw(shown);
-    bar.style.transform = `scaleX(${shown})`;
-    pct.textContent = `${String(Math.floor(shown * 100)).padStart(3, "0")}%`;
-    for (const [t, li] of rows) if (done.has(t) && !li.classList.contains("ok")) li.classList.add("ok");
+    draw(shown * (1 + POP));
+    count.textContent = String(Math.floor(shown * 100)).padStart(3, "0");
+    const next = TASKS.find(([t]) => !done.has(t));
+    task.textContent = next ? next[1] : "remembering";
     if (shown >= 1 && done.size === TASKS.length) void finish();
     else requestAnimationFrame(tick);
   };
@@ -146,21 +153,24 @@ export function startBoot() {
 
   const finish = async () => {
     window.removeEventListener("resize", size);
-    draw(1);
-    pct.textContent = "100%";
+    draw(2);
+    count.textContent = "100";
     const { default: gsap } = await import("gsap");
-    const rect = canvas.getBoundingClientRect();
+    await gsap.to([count, task], { opacity: 0, y: 10, duration: 0.3, stagger: 0.05, ease: "power2.in" }).then();
+    // The page comes back first, still in its hidden starting states, so the browser
+    // lays it out and paints it before anything moves, not halfway through the flight.
+    const header = document.querySelector("header.top");
+    if (header) gsap.set(header, { opacity: 0, y: -24 });
+    html.classList.remove("booting");
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     // The stage now draws the same elephant, flat and pixelated, in the same place.
+    const rect = canvas.getBoundingClientRect();
     await handoff?.(rect);
-    html.classList.add("boot-lift");
-    const tl = gsap.timeline({ defaults: { ease: "power3.inOut" } });
-    tl.to(root.querySelectorAll(".boot-brand, .boot-ribbon, .boot-bar, .boot-log li"), { opacity: 0, y: -12, duration: 0.35, stagger: 0.03, ease: "power2.in" });
-    tl.to(root.querySelectorAll(".boot-shutter"), { yPercent: -101, duration: 0.8, stagger: 0.07 }, ">-0.15");
-    tl.to(canvas, { opacity: 0, duration: 0.2, ease: "none" }, handoff ? ">-0.1" : "<");
-    await tl.then();
-    root.remove();
-    html.classList.remove("booting", "boot-lift");
+    if (handoff) canvas.style.visibility = "hidden";
+    if (header) gsap.to(header, { opacity: 1, y: 0, duration: 0.7, delay: 0.5, ease: "power3.out", clearProps: "opacity,transform" });
     active = false;
     resolveFinished();
+    if (handoff) root.remove();
+    else gsap.to(canvas, { opacity: 0, duration: 0.4, onComplete: () => root.remove() });
   };
 }

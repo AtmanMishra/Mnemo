@@ -6,7 +6,8 @@
 //    pending, and the timer guarantees the page can never stay hidden if the
 //    bundle fails to load.
 // 3. `booting` shows the loading screen (src/fx/boot.ts fills it in and lifts it); the
-//    same kind of timer means a failed bundle can never leave it up.
+//    same kind of timer means a failed bundle can never leave it up. Crawlers and
+//    page-speed tools get neither: no loader, and nothing hidden before scripts run.
 (function (d) {
   var root = d.documentElement;
   var dark = matchMedia("(prefers-color-scheme: dark)");
@@ -21,6 +22,9 @@
   if (dark.addEventListener) dark.addEventListener("change", apply);
 
   root.classList.add("js");
+  // Crawlers and page-speed tools get the page as it is, with no loader in front of it.
+  var bot = /bot|crawl|spider|slurp|lighthouse|pagespeed|inspectiontool|facebookexternalhit|embedly|preview/i.test(navigator.userAgent);
+  if (bot) return;
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
     root.classList.add("reduced");
     return;

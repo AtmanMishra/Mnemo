@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ThemeToggle } from "./ThemeToggle";
 import { Seal } from "./Seal";
 import { AUTHOR, BUILD_DATE, REPO, VERSION } from "./site";
@@ -25,6 +25,15 @@ const external = (href: string) => /^https?:/.test(href);
 export function Shell({ path, children }: { path: string; children: ReactNode }) {
   const stage = useRef<HTMLCanvasElement>(null);
   const main = useRef<HTMLElement>(null);
+  // The menu on narrow screens, where the ribbon has no room for every link.
+  const [menu, setMenu] = useState(false);
+  useEffect(() => setMenu(false), [path]);
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenu(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [menu]);
 
   // The stage is mounted once for the visit; the router swaps pages over it.
   useEffect(() => {
@@ -74,22 +83,33 @@ export function Shell({ path, children }: { path: string; children: ReactNode })
   return (
     <>
       <a className="skip" href="#main">Skip to content</a>
+      <div className="sky" aria-hidden="true" />
       <canvas ref={stage} className="stage-canvas" aria-hidden="true" />
       <div className="grain" aria-hidden="true" />
       <div className="progress" aria-hidden="true"><i /></div>
-      <header className="top">
+      <header className={menu ? "top menu-open" : "top"}>
         <div className="bar">
           <nav className="nav-l" aria-label="Primary">{LEFT.map(link)}</nav>
           <a className="brand" href="/" aria-label="Mnemo home" translate="no">
             <Seal />
           </a>
-          <nav className="nav-r" aria-label="More">
-            {RIGHT.map(link)}
-            <a href={REPO}>GitHub</a>
+          <div className="bar-r">
+            <nav className="nav-r" aria-label="More">
+              {RIGHT.map(link)}
+              <a href={REPO}>GitHub</a>
+            </nav>
             <a className="nav-cta" href="/download" aria-current={path === "/download" ? "page" : undefined}>Download</a>
             <ThemeToggle />
-          </nav>
+            <button type="button" className="menu-btn" aria-expanded={menu} aria-controls="menu" onClick={() => setMenu((m) => !m)}>
+              <span className="visually-hidden">Menu</span>
+              <i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" />
+            </button>
+          </div>
         </div>
+        <nav id="menu" className="menu" aria-label="Menu" hidden={!menu} onClick={() => setMenu(false)}>
+          {[...LEFT, ...RIGHT, ["/download", "Download"] as [string, string]].map(link)}
+          <a href={REPO}>GitHub</a>
+        </nav>
       </header>
 
       <main id="main" ref={main} key={path}>{children}</main>
