@@ -188,3 +188,70 @@ test("without git, the file list uses / so the tree nests", () => {
   expect(files).toEqual(["src/lib/util.ts"]);
   expect(sep === "/" || !files[0]!.includes(sep)).toBe(true);
 });
+
+test("hub: n then enter starts a new agent instead of jumping to the first; ctrl+n does not also open the picker", async () => {
+  const { fleet } = await fleetOf(["alpha", "beta"]);
+  const r = render(React.createElement(Shell, { fleet, motion: false }));
+  await wait();
+  r.stdin.write(KEY.ctrlG);
+  await wait();
+  r.stdin.write("n");
+  await wait();
+  expect(r.lastFrame()).toContain("new agent in…");
+  r.stdin.write(KEY.enter);
+  await waitFor(() => expect(fleet.snapshot().agents).toHaveLength(3));
+  expect(fleet.snapshot().agents[2]!.name).toBe("alpha·2");
+  r.stdin.write(KEY.ctrlG);
+  await wait();
+  r.stdin.write(KEY.ctrlN);
+  await waitFor(() => expect(fleet.snapshot().agents).toHaveLength(4));
+  expect(r.lastFrame()).not.toContain("new agent in…");
+  r.unmount();
+});
+
+test("hub: s puts the chosen agents in the split and ctrl+s shows exactly them", async () => {
+  const { fleet } = await fleetOf(["alpha", "beta", "gamma"]);
+  const r = render(React.createElement(Shell, { fleet, motion: false }));
+  await wait();
+  r.stdin.write(KEY.ctrlG);
+  await wait();
+  // Three agents default into the split; s on the second takes it out, and its card loses the ◫.
+  // (The active agent, alpha, always stays in the split.)
+  expect(r.lastFrame()!.match(/◫/g)).toHaveLength(3);
+  r.stdin.write("\x1b[C");
+  await wait();
+  r.stdin.write("s");
+  await wait();
+  expect(r.lastFrame()!.match(/◫/g)).toHaveLength(2);
+  r.stdin.write(KEY.ctrlS);
+  await wait(150);
+  const frame = r.lastFrame()!;
+  // Two framed panes: alpha and gamma; beta is not drawn.
+  expect(frame).toContain("│ alpha ");
+  expect(frame).toContain("│ gamma ");
+  expect(frame).not.toContain("│ beta ");
+  r.unmount();
+});
+
+test("alt+. and alt+, cycle agents; hub: x closes (twice if busy) and ctrl+x does not", async () => {
+  const { fleet } = await fleetOf(["alpha", "beta", "gamma"]);
+  const r = render(React.createElement(Shell, { fleet, motion: false }));
+  await wait();
+  const [, b, c] = fleet.snapshot().agents;
+  b!.controller.transcript.notice("at beta");
+  c!.controller.transcript.notice("at gamma");
+  r.stdin.write(KEY.alt("."));
+  await waitFor(() => expect(r.lastFrame()).toContain("at beta"));
+  r.stdin.write(KEY.alt("."));
+  await waitFor(() => expect(r.lastFrame()).toContain("at gamma"));
+  r.stdin.write(KEY.alt(","));
+  await waitFor(() => expect(r.lastFrame()).toContain("at beta"));
+  r.stdin.write(KEY.ctrlG);
+  await wait();
+  r.stdin.write("\x18"); // ctrl+x
+  await wait();
+  expect(fleet.snapshot().agents).toHaveLength(3);
+  r.stdin.write("x");
+  await waitFor(() => expect(fleet.snapshot().agents).toHaveLength(2));
+  r.unmount();
+});

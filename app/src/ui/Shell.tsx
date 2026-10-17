@@ -130,6 +130,8 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   const [activeId, setActiveId] = useState<number | undefined>(agents[0]?.id);
   const [splitIds, setSplitIds] = useState<number[]>([]);
   const [picker, setPicker] = useState(initial?.picker ?? false);
+  /** The picker was opened to start an agent (the hub's n), not to go to a project. */
+  const [pickerFresh, setPickerFresh] = useState(false);
   const [error, setError] = useState<string | undefined>();
 
   // The active agent left: focus a neighbour.
@@ -141,7 +143,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   // The split shows the chosen agents, else the first four, always including the active one.
   const split = useMemo(() => {
     const chosen = splitIds.filter((id) => agents.some((a) => a.id === id));
-    const ids = chosen.length >= 2 ? chosen : agents.slice(0, SPLIT_MAX).map((a) => a.id);
+    const ids = chosen.length >= 1 ? chosen : agents.slice(0, SPLIT_MAX).map((a) => a.id);
     return active && !ids.includes(active.id) ? [...ids.slice(0, SPLIT_MAX - 1), active.id] : ids.slice(0, SPLIT_MAX);
   }, [splitIds, agents, active?.id]);
 
@@ -157,6 +159,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   };
   const open = async (cwd: string, fresh: boolean) => {
     setPicker(false);
+    setPickerFresh(false);
     const existing = agents.find((a) => samePath(a.cwd, cwd));
     if (existing && !fresh) return go(existing.id, screen === "hub" ? "agent" : screen);
     try {
@@ -172,7 +175,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   useInput(
     (input, key) => {
       if (key.ctrl && input === "g") return setScreen((s) => (s === "hub" ? "agent" : "hub"));
-      if (key.ctrl && input === "p") return setPicker(true);
+      if (key.ctrl && input === "p") return (setPickerFresh(false), setPicker(true));
       if (key.ctrl && input === "n" && active) return void open(active.cwd, true);
       if (key.ctrl && input === "s") return setScreen((s) => (s === "split" ? "agent" : "split"));
       if (key.meta && /^[1-9]$/.test(input)) {
@@ -222,10 +225,14 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
             split={split}
             onOpen={(id) => go(id, "agent")}
             onSplit={(id) =>
-              setSplitIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...(ids.length ? ids : split), id].slice(-SPLIT_MAX)))
+              setSplitIds((ids) => {
+                // Toggle against what the split shows now, which is the first four until you choose.
+                const now = ids.length ? ids : split;
+                return now.includes(id) ? now.filter((x) => x !== id) : [...now, id].slice(-SPLIT_MAX);
+              })
             }
             onClose={(id) => void fleet.close(id)}
-            onNew={() => setPicker(true)}
+            onNew={() => (setPickerFresh(true), setPicker(true))}
             onOpenProject={(cwd) => void open(cwd, false)}
           />
         ) : null}
@@ -268,9 +275,10 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
           <ProjectPicker
             fleet={snap}
             current={active?.cwd}
+            fresh={pickerFresh}
             width={columns}
             onPick={(cwd, fresh) => void open(cwd, fresh)}
-            onCancel={() => setPicker(false)}
+            onCancel={() => (setPicker(false), setPickerFresh(false))}
           />
         ) : null}
       </Box>

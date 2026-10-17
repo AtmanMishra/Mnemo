@@ -136,19 +136,21 @@ export function Hub(p: HubProps): React.ReactElement {
   useInput(
     (input, key) => {
       const inCards = at < p.agents.length;
+      // ctrl+n / ctrl+s / ctrl+x are the shell's; only the bare letters are the hub's.
+      const bare = !key.ctrl && !key.meta;
       if (closing !== undefined && input !== "x") setClosing(undefined);
       if (key.leftArrow) return setSel(Math.max(0, at - 1));
       if (key.rightArrow) return setSel(Math.min(count - 1, at + 1));
       if (key.upArrow) return setSel(inCards ? Math.max(0, at - cols) : at === p.agents.length ? Math.max(0, p.agents.length - 1) : at - 1);
       if (key.downArrow) return setSel(inCards ? Math.min(count - 1, at + cols >= p.agents.length ? Math.max(at + cols, p.agents.length) : at + cols) : Math.min(count - 1, at + 1));
-      if (input === "n") return p.onNew();
+      if (bare && input === "n") return p.onNew();
       if (key.return) {
         if (onAgent) return p.onOpen(onAgent.id);
         if (onProject) return p.onOpenProject(onProject);
       }
       if (!onAgent) return;
-      if (input === "s") return p.onSplit(onAgent.id);
-      if (input === "x") {
+      if (bare && input === "s") return p.onSplit(onAgent.id);
+      if (bare && input === "x") {
         const busy = (p.states.get(onAgent.id)?.kind ?? "idle") !== "idle";
         if (busy && closing !== onAgent.id) return setClosing(onAgent.id);
         setClosing(undefined);
@@ -179,7 +181,7 @@ export function Hub(p: HubProps): React.ReactElement {
     closing !== undefined && closing === onAgent?.id
       ? `${p.states.get(closing)?.kind === "waiting" ? "it is waiting on you" : "it is still working"} · x again to close it · any other key keeps it`
       : p.width >= 100
-      ? "←→↑↓ choose · enter open · s split in/out · x close · n new agent · ^p projects · ^g back"
+      ? "←→↑↓ choose · enter open · s split in/out · ^s view split · x close · n new agent · ^p projects · ^g back"
       : p.width >= 60
         ? "↑↓ choose · enter open · s split · x close · n new · ^g back"
         : "enter open · n new · ^g back";
