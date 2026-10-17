@@ -10,6 +10,7 @@ import { Box, Text, useAnimation } from "ink";
 import type { Agent } from "../runtime/fleet.ts";
 import { reaction } from "./components/MneBadge.tsx";
 import { MotionContext } from "./components/motion.ts";
+import { useSettings } from "./settings-context.ts";
 import { palette } from "./theme.ts";
 
 export interface Toast {
@@ -20,16 +21,18 @@ export interface Toast {
   at: number;
 }
 
+/** How long a toast stays unless the settings say otherwise. */
 const LIFE_MS = 4500;
 const IN_MS = 300;
 const OUT_MS = 450;
-const MAX = 3;
 
 /**
  * Collect toasts from every agent that is not on screen and focused: its
  * latest activity, and a dialog that started waiting for you.
  */
 export function useToasts(agents: readonly Agent[], visible: (id: number) => boolean, version: number): Toast[] {
+  const { toastSeconds, toastMax } = useSettings();
+  const lifeMs = toastSeconds * 1000;
   const seen = useRef(new Map<string, true>());
   const [toasts, setToasts] = useState<Toast[]>([]);
   useEffect(() => {
@@ -53,22 +56,22 @@ export function useToasts(agents: readonly Agent[], visible: (id: number) => boo
         }
       }
     }
-    if (fresh.length) setToasts((t) => [...t, ...fresh].slice(-MAX));
+    if (fresh.length) setToasts((t) => [...t, ...fresh].slice(-toastMax));
   }, [version]);
   // Expire old ones.
   useEffect(() => {
     if (toasts.length === 0) return;
-    const next = Math.min(...toasts.map((t) => t.at + LIFE_MS)) - Date.now();
-    const timer = setTimeout(() => setToasts((t) => t.filter((x) => Date.now() - x.at < LIFE_MS)), Math.max(30, next));
+    const next = Math.min(...toasts.map((t) => t.at + lifeMs)) - Date.now();
+    const timer = setTimeout(() => setToasts((t) => t.filter((x) => Date.now() - x.at < lifeMs)), Math.max(30, next));
     return () => clearTimeout(timer);
   }, [toasts]);
   return toasts;
 }
 
 /** A toast's text at an age: sliding in, held, or dithering out. Pure, for tests. */
-export function toastFrame(text: string, age: number): { text: string; shift: number } {
+export function toastFrame(text: string, age: number, lifeMs = LIFE_MS): { text: string; shift: number } {
   if (age < IN_MS) return { text, shift: Math.ceil((1 - age / IN_MS) * 8) };
-  const left = LIFE_MS - age;
+  const left = lifeMs - age;
   if (left < OUT_MS) {
     const p = 1 - left / OUT_MS;
     const ramp = ["▓", "▒", "░", " "];
@@ -81,6 +84,7 @@ export function toastFrame(text: string, age: number): { text: string; shift: nu
 
 export function Toasts({ toasts, columns }: { toasts: readonly Toast[]; columns: number }): React.ReactElement | null {
   const motion = React.useContext(MotionContext);
+  const { toastSeconds } = useSettings();
   const { frame } = useAnimation({ interval: 60, isActive: motion && toasts.length > 0 });
   void frame;
   if (toasts.length === 0) return null;
@@ -89,7 +93,7 @@ export function Toasts({ toasts, columns }: { toasts: readonly Toast[]; columns:
     <Box position="absolute" marginTop={1} marginLeft={Math.max(0, columns - width - 1)} width={width} flexDirection="column" alignItems="flex-end">
       {toasts.map((t) => {
         const body = ` ${t.agent}  ${t.label} `.slice(0, width - 2);
-        const f = motion ? toastFrame(body, Date.now() - t.at) : { text: body, shift: 0 };
+        const f = motion ? toastFrame(body, Date.now() - t.at, toastSeconds * 1000) : { text: body, shift: 0 };
         return (
           <Box key={t.key} marginRight={f.shift}>
             <Text color={t.tone}>▐</Text>

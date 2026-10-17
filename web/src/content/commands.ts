@@ -27,6 +27,7 @@ export const GROUPS: Group[] = [
       ["`/accept-edits`", "toggle accept edits: change project files without asking; commands still ask"],
       ["`/plan`", "toggle plan mode (read-only)"],
       ["`/theme`", "switch the look: Mnemo Night, Dracula, Nord, Gruvbox, Tokyo Night, Catppuccin, Synthwave, Amber CRT, Game Boy, Paper, Solarized"],
+      ["`/settings [name value]`", "change how Mnemo looks and behaves: theme, keys, agent limits, notifications; `/settings hops 20` sets one, `/settings reset` undoes them"],
       ["`/mouse`", "mouse wheel scrolls the conversation (on), or your terminal selects text (off)"],
       ["`/bestof <n> \"<check>\" <task>`", "race n attempts at a task and keep the smallest change that passes the check"],
       ["`/skills`", "the skills Mnemo can load"],
@@ -40,6 +41,7 @@ export const GROUPS: Group[] = [
   {
     id: "prompt",
     title: "Keys in the prompt",
+    intro: "Fourteen of the chords on this page can be changed in `/settings` (the Keys group): the palette, sidebar, find, expand, clear, thinking level, hub, playground, project switch, new agent, split, next layout and previous and next agent. The defaults are shown here; `/help` and the `?` panel show the ones you set.",
     rows: [
       ["`enter`", "send; while Mnemo works, the message is queued"],
       ["`alt+enter`", "new line (or end a line with `\\`)"],
@@ -120,6 +122,7 @@ export const GROUPS: Group[] = [
       ["`mnemo doctor [--fix]`", "what is installed, configured and reachable; `--fix` repairs what it can"],
       ["`mnemo install [--yes]`", "put this copy and its `memsrv` in `~/.mnemo/bin` and on your PATH (a downloaded `mnemo.exe` offers this on its own)"],
       ["`mnemo update [--check] [--auto on|off]`", "install the latest release; `--check` only says if one exists; `--auto` sets the daily check (off by default)"],
+      ["`mnemo settings [set <name> <value> | reset [name]]`", "the same settings as `/settings`, from a shell; with no arguments, lists them and what differs from the default"],
       ["`mnemo uninstall [--deep] [--yes]`", "remove the program; `--deep` also deletes memory, sessions, credentials and settings"],
       ["`mnemo memory …`", "memory for other agents: `setup claude-code|codex`, `ingest`, `tidy [--apply]`, `curate [--apply]`, `status`"],
       ["`mnemo --demo`", "a scripted session in a scratch project; needs no key"],

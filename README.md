@@ -79,6 +79,14 @@ Inside Mnemo, `/update` does the same. Homebrew and Scoop installs update with
 `brew upgrade mnemo` / `scoop update mnemo`. The daily check is off by default:
 until you turn it on, Mnemo never contacts anything but your model provider.
 
+### Settings
+
+`/settings` opens a menu of everything you can tune: the theme and layout, the keys, the agent
+limits (message chain, sub-agent counts, the woken-turn budget), notifications, Python cell time
+and more. `/settings hops 20` changes one setting in a sentence and `mnemo settings` does the same
+from a shell. Defaults are what Mnemo always did; choices are kept in `~/.mnemo/config.json`.
+The full list is [docs/SETTINGS.md](docs/SETTINGS.md).
+
 ### Uninstalling
 
 ```bash

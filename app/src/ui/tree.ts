@@ -67,7 +67,7 @@ export function linkedRoots(snap: Pick<RosterSnapshot, "nodes" | "groups">, root
 }
 
 /** The summary the agents page puts on a card: "⇄ beta · ⑂ 3 sub-agents (1 running) · ✉ 2 waiting for you". */
-export function relation(snap: Pick<RosterSnapshot, "nodes" | "groups">, rootId: number): string {
+export function relation(snap: Pick<RosterSnapshot, "nodes" | "groups"> & { limits?: RosterSnapshot["limits"] }, rootId: number): string {
   const linked = linkedRoots(snap, rootId);
   const subs = subsOf(snap, rootId);
   const running = subs.filter(live).length;
@@ -79,7 +79,7 @@ export function relation(snap: Pick<RosterSnapshot, "nodes" | "groups">, rootId:
     // Messages that stopped at the chain bound: the agent reads them at your next prompt.
     held ? `✉ ${held} waiting for you` : "",
     // Its turns that messages started spent their allowance: no message wakes it until you prompt it.
-    self && self.wakeSpend >= LIMITS.wakeSpend ? `$ woken turns spent $${self.wakeSpend.toFixed(2)}, waits for you` : "",
+    self && self.wakeSpend >= (snap.limits ?? LIMITS).wakeSpend ? `$ woken turns spent $${self.wakeSpend.toFixed(2)}, waits for you` : "",
   ].filter(Boolean);
   return parts.join(" · ");
 }

@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { kernelExtension } from "../src/extensions/kernel.ts";
+import { SettingsStore } from "../src/runtime/settings.ts";
 import { callerSignals, policyExtension } from "../src/extensions/policy.ts";
 import { KernelClient, probeInterpreter, resolveInterpreter, spawnKernel, type KernelChild } from "../src/kernel/kernel.ts";
 
@@ -20,7 +21,7 @@ function ipyTool() {
   let tool: { execute: (...a: unknown[]) => Promise<{ content: { text: string }[] }> } | undefined;
   let shutdown: (() => Promise<void>) | undefined;
   const pi = { registerTool: (t: typeof tool) => (tool = t), on: (_: string, h: typeof shutdown) => (shutdown = h) };
-  kernelExtension({ home, agentDir: home, python: () => python } as never)(pi as never);
+  kernelExtension({ home, agentDir: home, python: () => python, settings: new SettingsStore() } as never)(pi as never);
   const ctx = (label: string, executeTool?: (name: string, args: unknown, o?: { signal?: AbortSignal }) => Promise<unknown>) => ({
     cwd: home,
     executeTool: executeTool ?? (async (name: string) => ({ isError: false, result: { content: [{ type: "text", text: `${label} ran ${name}` }] } })),

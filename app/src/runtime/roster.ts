@@ -55,6 +55,9 @@ export const LIMITS = {
   events: 300,
 } as const;
 
+/** The numbers a roster enforces: `LIMITS` unless the user tuned them. */
+export type Limits = { -readonly [K in keyof typeof LIMITS]: number };
+
 export interface RosterNode {
   id: number;
   kind: NodeKind;
@@ -100,6 +103,8 @@ export interface RosterSnapshot {
   events: readonly RosterEvent[];
   /** Every node's name, including nodes that have left, for the event feed. */
   labels: ReadonlyMap<number, string>;
+  /** What the roster enforces now (the user may have tuned it). */
+  limits: Limits;
 }
 
 /** The interface's whole view of the roster: it can look and subscribe, nothing more. */
@@ -161,8 +166,17 @@ export class Roster implements RosterView {
   private snap: RosterSnapshot;
   private listeners = new Set<() => void>();
 
-  constructor(private readonly now: () => number = Date.now) {
+  constructor(
+    private readonly now: () => number = Date.now,
+    /** Mutable so the settings menu can change them while agents run; a lowered cap stops new work, it never ends work in progress. */
+    public limits: Limits = { ...LIMITS },
+  ) {
     this.snap = this.build();
+  }
+
+  setLimits(patch: Partial<Limits>): void {
+    this.limits = { ...this.limits, ...patch };
+    this.changed();
   }
 
   // ── reading ──────────────────────────────────────────────────────────────
@@ -276,13 +290,13 @@ export class Roster implements RosterView {
     const p = this.nodes.get(parent);
     if (!p) throw new RosterError("the agent that asked is no longer running");
     if (isEnded(p.status)) throw new RosterError("this agent has already finished");
-    if (p.depth >= LIMITS.maxDepth) throw new RosterError(`sub-agents nest at most ${LIMITS.maxDepth} deep; do this one yourself`);
+    if (p.depth >= this.limits.maxDepth) throw new RosterError(`sub-agents nest at most ${this.limits.maxDepth} deep; do this one yourself`);
     if (p.access === "read-only" && o.access === "full") throw new RosterError("a read-only agent can only start read-only sub-agents");
     const live = this.children(parent).filter((c) => !isEnded(c.status)).length;
-    if (live >= LIMITS.maxChildren) throw new RosterError(`this agent already has ${live} sub-agents running (limit ${LIMITS.maxChildren}); wait for one to finish`);
+    if (live >= this.limits.maxChildren) throw new RosterError(`this agent already has ${live} sub-agents running (limit ${this.limits.maxChildren}); wait for one to finish`);
     const root = this.rootOf(parent)!;
     const total = this.descendants(root.id).filter((c) => !isEnded(c.status)).length;
-    if (total >= LIMITS.maxLive) throw new RosterError(`${total} sub-agents are already running under this conversation (limit ${LIMITS.maxLive})`);
+    if (total >= this.limits.maxLive) throw new RosterError(`${total} sub-agents are already running under this conversation (limit ${this.limits.maxLive})`);
     const node = this.make({
       kind: "sub",
       parent,
@@ -340,7 +354,7 @@ export class Roster implements RosterView {
     if (!root || !root.woken) return;
     const before = root.wakeSpend;
     root.wakeSpend += usd;
-    if (before < LIMITS.wakeSpend && root.wakeSpend >= LIMITS.wakeSpend) {
+    if (before < this.limits.wakeSpend && root.wakeSpend >= this.limits.wakeSpend) {
       this.event({ at: this.now(), kind: "capped", node: root.id, spent: root.wakeSpend });
       if (root.status === "running") this.handles.get(root.id)?.stop();
     }
@@ -352,7 +366,7 @@ export class Roster implements RosterView {
     const n = this.nodes.get(id);
     if (!n || n.kind !== "sub") return { ok: false, reason: "only a sub-agent is told things from its pane" };
     if (isEnded(n.status)) return { ok: false, reason: `${n.label} has finished; its answer went to its parent` };
-    const body = clean(text, LIMITS.messageChars * 2).trim();
+    const body = clean(text, this.limits.messageChars * 2).trim();
     if (!body) return { ok: false, reason: "the message is empty" };
     if (!this.handles.get(id)?.tell?.(body)) return { ok: false, reason: `${n.label} cannot be reached right now` };
     // Its user spoke: what it sends from here starts a new chain.
@@ -430,22 +444,22 @@ export class Roster implements RosterView {
     // One answer for "does not exist" and "not yours to reach", so ids in other trees cannot be probed.
     if (!target || !this.canReach(from, to)) return { ok: false, reason: `agent #${to} is not in your family; list_agents shows who you can message` };
     if (isEnded(target.status)) return { ok: false, reason: `agent #${to} has finished` };
-    const body = clean(text, LIMITS.messageChars + 1);
+    const body = clean(text, this.limits.messageChars + 1);
     if (!body.trim()) return { ok: false, reason: "the message is empty" };
-    if (body.length > LIMITS.messageChars) return { ok: false, reason: `the message is over ${LIMITS.messageChars} characters; say it shorter` };
+    if (body.length > this.limits.messageChars) return { ok: false, reason: `the message is over ${this.limits.messageChars} characters; say it shorter` };
     const t = this.now();
     const recent = (this.sent.get(from) ?? []).filter((x) => t - x < LIMITS.rateWindowMs);
-    if (recent.length >= LIMITS.sendsPerWindow) return { ok: false, reason: "you are sending too fast; wait a minute" };
+    if (recent.length >= this.limits.sendsPerWindow) return { ok: false, reason: "you are sending too fast; wait a minute" };
     const handle = this.handles.get(to);
     if (!handle) return { ok: false, reason: `agent #${to} cannot receive messages right now` };
     const hop = sender.hops + 1;
-    const spent = target.wakeSpend >= LIMITS.wakeSpend;
-    const delivery: Delivery = hop > LIMITS.hops || (spent && target.status !== "running") ? "held" : target.status === "running" ? "now" : "woken";
+    const spent = target.wakeSpend >= this.limits.wakeSpend;
+    const delivery: Delivery = hop > this.limits.hops || (spent && target.status !== "running") ? "held" : target.status === "running" ? "now" : "woken";
     if (delivery === "held") {
-      const over = `the agents have exchanged ${LIMITS.hops} messages since a user last spoke`;
+      const over = `the agents have exchanged ${this.limits.hops} messages since a user last spoke`;
       // A sub-agent has no user and no next prompt: a message held for it would never be read.
       if (target.kind === "sub") return { ok: false, reason: `${over}; stop messaging and report to your user` };
-      if (target.pending >= LIMITS.inbox) return { ok: false, reason: `agent #${to} already has ${target.pending} messages waiting for its user` };
+      if (target.pending >= this.limits.inbox) return { ok: false, reason: `agent #${to} already has ${target.pending} messages waiting for its user` };
       target.pending++;
     } else if (delivery === "woken") {
       // A woken turn is its own link in the chain; a running agent keeps the longest chain it is in.
@@ -458,7 +472,7 @@ export class Roster implements RosterView {
     const taken = handle.deliver({ from, fromLabel: sender.label, fromRole: sender.kind === "root" ? "top-level agent" : `sub-agent (depth ${sender.depth})`, text: body, at: t }, delivery);
     if (taken && delivery === "held") target.pending--;
     this.event({ at: t, kind: "message", from, to, text: body, delivery });
-    return delivery === "held" ? { ok: true, delivery, held: hop > LIMITS.hops ? "chain" : "spend" } : { ok: true, delivery };
+    return delivery === "held" ? { ok: true, delivery, held: hop > this.limits.hops ? "chain" : "spend" } : { ok: true, delivery };
   }
 
   // ── internals ────────────────────────────────────────────────────────────
@@ -481,6 +495,7 @@ export class Roster implements RosterView {
       groups: new Map(this.group),
       events: this.events,
       labels: new Map(this.labels),
+      limits: this.limits,
     };
   }
 

@@ -9,6 +9,8 @@ import { color, glyph, ground } from "../theme.ts";
 import * as ed from "../editor.ts";
 import { matchFiles, subsequence } from "../files.ts";
 import { Footer } from "./Footer.tsx";
+import { chordMatches, type Settings } from "../../runtime/settings.ts";
+import { useSettings } from "../settings-context.ts";
 
 export interface ComposerProps {
   working: boolean;
@@ -55,27 +57,29 @@ export function rankCommands(commands: readonly CommandInfo[], query: string): C
   return [...prefix, ...rest, ...byDescription];
 }
 
-const SHORTCUTS: [string, string][] = [
-  ["enter", "send · queue while working"],
-  ["alt+enter", "newline (or end a line with \\)"],
-  ["esc", "interrupt · close menu · twice to clear"],
-  ["esc esc", "on an empty prompt: rewind to an earlier message"],
-  ["↑ ↓", "history"],
-  ["tab", "accept suggestion"],
-  ["@", "mention a file"],
-  ["/", "commands"],
-  ["shift+tab", "mode: default → accept edits → plan"],
-  ["ctrl+t", "thinking level"],
-  ["ctrl+o", "expand output"],
-  ["ctrl+f", "find in the conversation"],
-  ["ctrl+k", "on an empty prompt: go to a command, file, session, skill or agent"],
-  ["ctrl+l", "clear screen"],
-  ["ctrl+c", "clear · interrupt · twice to quit"],
+/** `needs` hides a line where the thing it names is not there (find in a workspace only, the palette where one is wired). */
+const shortcuts = (k: Settings): { key: string; text: string; needs?: "find" | "palette" }[] => [
+  { key: "enter", text: "send · queue while working" },
+  { key: "alt+enter", text: "newline (or end a line with \\)" },
+  { key: "esc", text: "interrupt · close menu · twice to clear" },
+  { key: "esc esc", text: "on an empty prompt: rewind to an earlier message" },
+  { key: "↑ ↓", text: "history" },
+  { key: "tab", text: "accept suggestion" },
+  { key: "@", text: "mention a file" },
+  { key: "/", text: "commands" },
+  { key: "shift+tab", text: "mode: default → accept edits → plan" },
+  { key: k["keys.thinking"], text: "thinking level" },
+  { key: k["keys.expand"], text: "expand output" },
+  { key: k["keys.find"], text: "find in the conversation", needs: "find" },
+  { key: k["keys.palette"], text: "on an empty prompt: go to a command, file, session, skill or agent", needs: "palette" },
+  { key: k["keys.clear"], text: "clear screen" },
+  { key: "ctrl+c", text: "clear · interrupt · twice to quit" },
 ];
 
 export function Composer(props: ComposerProps): React.ReactElement {
   const terminal = useWindowSize();
   const width = props.width ?? terminal.columns;
+  const prefs = useSettings();
   const [draft, setDraftState] = useState<ed.Draft>(ed.empty);
   const [menuIndex, setMenuIndex] = useState(0);
   const [menuClosed, setMenuClosed] = useState(false);
@@ -235,6 +239,11 @@ export function Composer(props: ComposerProps): React.ReactElement {
       // Most terminals send DEL for backspace and Ink reports it as `delete`;
       // treating both as backspace is what every Ink app ends up doing.
       if (key.backspace || key.delete) return setDraft(key.meta ? ed.deleteWordBack : ed.backspace);
+      if (chordMatches(prefs["keys.expand"], input, key)) return props.onToggleExpanded();
+      if (chordMatches(prefs["keys.clear"], input, key)) return props.onClear();
+      if (chordMatches(prefs["keys.thinking"], input, key)) return props.onCycleThinking();
+      // On an empty prompt there is nothing to kill, so the palette's chord (ctrl+k unless rebound) opens the palette.
+      if (!draft.text && props.onPalette && chordMatches(prefs["keys.palette"], input, key)) return props.onPalette();
       if (key.ctrl) {
         switch (input) {
           case "a":
@@ -244,17 +253,9 @@ export function Composer(props: ComposerProps): React.ReactElement {
           case "u":
             return setDraft(ed.killToStart);
           case "k":
-            // On an empty prompt there is nothing to kill: ctrl+k opens the palette instead.
-            if (!draft.text && props.onPalette) return props.onPalette();
             return setDraft(ed.killToEnd);
           case "w":
             return setDraft(ed.deleteWordBack);
-          case "o":
-            return props.onToggleExpanded();
-          case "l":
-            return props.onClear();
-          case "t":
-            return props.onCycleThinking();
           default:
             return;
         }
@@ -343,10 +344,12 @@ export function Composer(props: ComposerProps): React.ReactElement {
         </Box>
       ) : showShortcuts ? (
         <Box flexDirection="column" paddingX={2}>
-          {SHORTCUTS.filter(([k]) => (k !== "ctrl+f" || props.canFind) && (k !== "ctrl+k" || props.onPalette)).map(([k, v]) => (
-            <Text key={k}>
-              <Text color={color.accent}>{k.padEnd(12)}</Text>
-              <Text color={color.muted}>{v}</Text>
+          {shortcuts(prefs)
+            .filter((x) => (x.needs !== "find" || props.canFind) && (x.needs !== "palette" || props.onPalette))
+            .map(({ key, text }) => (
+            <Text key={key}>
+              <Text color={color.accent}>{key.padEnd(12)}</Text>
+              <Text color={color.muted}>{text}</Text>
             </Text>
           ))}
         </Box>

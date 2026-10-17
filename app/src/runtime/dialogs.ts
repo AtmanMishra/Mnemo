@@ -31,7 +31,7 @@ export interface ApprovalRequest {
 export type ApprovalAnswer = { kind: "yes" } | { kind: "always" } | { kind: "no"; feedback?: string };
 
 export type Dialog =
-  | { id: number; kind: "select"; title: string; choices: Choice[]; resolve: (value: string | undefined) => void }
+  | { id: number; kind: "select"; title: string; choices: Choice[]; /** The choice the cursor starts on. */ initial?: string; resolve: (value: string | undefined) => void }
   | { id: number; kind: "confirm"; title: string; message: string; resolve: (ok: boolean) => void }
   | { id: number; kind: "approval"; request: ApprovalRequest; resolve: (answer: ApprovalAnswer) => void }
   | {
@@ -88,8 +88,8 @@ export class Dialogs {
     });
   }
 
-  select(title: string, choices: Choice[], signal?: AbortSignal): Promise<string | undefined> {
-    return this.open({ kind: "select", title, choices }, signal, undefined);
+  select(title: string, choices: Choice[], signal?: AbortSignal, initial?: string): Promise<string | undefined> {
+    return this.open({ kind: "select", title, choices, initial }, signal, undefined);
   }
 
   confirm(title: string, message: string, signal?: AbortSignal): Promise<boolean> {

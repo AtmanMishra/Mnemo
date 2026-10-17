@@ -35,6 +35,8 @@ import { setLinks } from "../src/ui/link.ts";
 import { clearReplaced, compareVersions, installKind, latestVersion, manualStep, runInstaller, shouldCheck } from "../src/runtime/update.ts";
 import { bestOf, describeBestOf } from "../src/runtime/best-of.ts";
 import { selfCommand } from "../src/runtime/self.ts";
+import { openSettings } from "../src/runtime/settings.ts";
+import { settingsCommand } from "../src/runtime/settings-menu.ts";
 import { checkMemory, findProblems } from "../src/runtime/doctor.ts";
 import { describePlan, looksLikeMnemoHome, planUninstall, runUninstall } from "../src/runtime/uninstall.ts";
 import { mayOffer, ownConsole, placementProblems, selfInstall, selfInstallOffer } from "../src/runtime/self-install.ts";
@@ -51,6 +53,7 @@ usage
   mnemo update             install the latest release · --check · --auto on|off (a daily check, off by default)
   mnemo uninstall          remove Mnemo; what it learned stays · --deep also deletes memory, sessions,
                            credentials and settings · --yes skips the question
+  mnemo settings …         every setting: list, get <name>, set <name> <value>, reset [name] (or /settings in a session)
   mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
 
@@ -437,7 +440,15 @@ async function updateCommand(argv: string[], home: string): Promise<number> {
   return code;
 }
 
+/** `mnemo settings`: the same list and changes as /settings, for a script or a machine with no terminal. */
+function settingsCli(argv: string[], home: string): number {
+  const r = settingsCommand(openSettings(home), argv);
+  (r.ok ? console.log : console.error)(r.text);
+  return r.ok ? 0 : 1;
+}
+
 async function main(): Promise<number> {
+  if (process.argv[2] === "settings") return settingsCli(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "update") return updateCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "install") return installCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "uninstall") return uninstallCommand(process.argv.slice(3), mnemoHome());
@@ -461,6 +472,13 @@ async function main(): Promise<number> {
   if (args.command === "doctor") return doctor(home, dir, args.fix === true);
   if (args.bestOf !== undefined) return runBestOf(args, home);
 
+  // What the user tuned. A flag or an environment variable names this run only and wins; the settings can switch things
+  // off that are on by default, never turn on what a flag turned off.
+  const settings = openSettings(home);
+  const cfg = settings.get();
+  args.motion &&= cfg.motion;
+  args.boot &&= cfg.bootAnimation;
+
   let cwd = path.resolve(args.cwd ?? process.cwd());
   let modelRuntime = undefined as Awaited<ReturnType<typeof createModelRuntime>> | undefined;
   let injected: Partial<Parameters<typeof startRuntime>[0]> = {};
@@ -477,6 +495,8 @@ async function main(): Promise<number> {
     if (args.dump && args.mode === "default") args.mode = "yolo";
   }
   modelRuntime ??= await createModelRuntime(dir);
+  // Not in the demo, whose script expects the mode it was written for. Bypass modes are never a default (see settings.ts).
+  if (args.mode === "default" && !args.demo) args.mode = cfg.mode;
 
   const memsrv = args.memory ? findMemsrv(home) : undefined;
   const memory = memsrv ? new MemoryService(memsrv, journal) : undefined;
@@ -486,7 +506,7 @@ async function main(): Promise<number> {
   const roster = new Roster();
   /** One agent's host and pi session in `agentCwd`; the first gets --continue and the demo's injections. */
   const makeAgent = async (agentCwd: string, first = false) => {
-    const host = createHost({ roster, home, agentDir: dir, modelRuntime: runtimeModels, memory, mode: args.mode, reflect: args.reflect, verify: args.verify, escalate: args.escalate });
+    const host = createHost({ roster, home, agentDir: dir, modelRuntime: runtimeModels, memory, mode: args.mode, settings, reflect: args.reflect, verify: args.verify, escalate: args.escalate });
     try {
       const runtime = await startRuntime({
         cwd: agentCwd,
@@ -543,7 +563,7 @@ async function main(): Promise<number> {
   let finished!: () => void;
   const done = new Promise<void>((r) => (finished = r));
   const state = readState(home);
-  applyTheme(state.theme ?? "night");
+  applyTheme(cfg.theme);
   const updater: Updater = {
     current: pkg.version,
     kind: installKind(process.execPath, home),
@@ -556,14 +576,13 @@ async function main(): Promise<number> {
     setAuto: (on) => writeState(home, { ...readState(home), autoUpdate: on }),
   };
   // Long turns and approvals tell a terminal in the background (see ui/notify.ts).
-  const notifier = interactive && process.env.MNEMO_NOTIFY !== "0" ? new Notifier((t) => process.stdout.write(t)) : undefined;
+  const notifier = interactive && cfg.notify && process.env.MNEMO_NOTIFY !== "0" ? new Notifier((t) => process.stdout.write(t), Date.now, () => settings.get().notifyAfter * 1000) : undefined;
   const watch = (dir: string, c: Controller) => notifier?.watch(path.basename(dir) || dir, c);
-  const saveTheme = (theme: ThemeName) => writeState(home, { ...readState(home), theme });
   // Every agent of this process. The program ends when the last one closes.
   const fleet = new Fleet(
     async (agentCwd, exit) => {
       const made = await makeAgent(agentCwd);
-      const c = new Controller(made.runtime, { exit, onClearScreen: clearTerminal, host: made.host, onTheme: saveTheme, updater });
+      const c = new Controller(made.runtime, { exit, onClearScreen: clearTerminal, host: made.host, updater });
       await c.bind();
       c.transcript.push({ kind: "welcome" });
       watch(agentCwd, c);
@@ -582,7 +601,7 @@ async function main(): Promise<number> {
     },
   );
   let firstId = 0;
-  const controller = new Controller(runtime, { exit: (code) => fleet.closed(firstId, code ?? 0), onClearScreen: clearTerminal, host, onTheme: saveTheme, updater });
+  const controller = new Controller(runtime, { exit: (code) => fleet.closed(firstId, code ?? 0), onClearScreen: clearTerminal, host, updater });
   await controller.bind();
   controller.transcript.push({ kind: "welcome" });
   watch(cwd, controller);
@@ -646,7 +665,7 @@ async function main(): Promise<number> {
 
   // The full-screen workspace has no scrollback, so the wheel is ours: ask the terminal to report it.
   // Handed back on every way out; MNEMO_MOUSE=0 never takes it (text selection stays the terminal's).
-  if (interactive && layout === "workspace" && process.env.MNEMO_MOUSE !== "0") {
+  if (interactive && layout === "workspace" && process.env.MNEMO_MOUSE !== "0" && cfg.mouse) {
     mouse.set(true);
     process.on("exit", () => mouse.set(false));
   }

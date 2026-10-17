@@ -13,6 +13,7 @@ import { Pulse } from "./Pulse.tsx";
 import { Dither } from "./Dither.tsx";
 import { Welcome, type WelcomeInfo } from "./Welcome.tsx";
 import { fileLink, hyperlink, linkLabel, linksOn } from "../link.ts";
+import { useSettings } from "../settings-context.ts";
 
 export interface BlockProps {
   block: Block;
@@ -142,6 +143,7 @@ export function TestHeatmap({ output, width }: { output: string; width: number }
 const FILE_TOOLS = new Set(["read", "edit", "write", "ls"]);
 
 function ToolView({ block, cwd, expanded }: { block: Extract<Block, { kind: "tool" }>; cwd: string; expanded: boolean }) {
+  const expandKey = useSettings()["keys.expand"];
   const { name, arg } = toolTitle(block, cwd);
   const body = toolBody(block, expanded);
   const icon =
@@ -194,7 +196,7 @@ function ToolView({ block, cwd, expanded }: { block: Extract<Block, { kind: "too
           ))}
           {body.hidden > 0 ? (
             <Text color={color.subtle}>
-              … +{body.hidden} lines <Text color={color.muted}>(ctrl+o to expand)</Text>
+              … +{body.hidden} lines <Text color={color.muted}>({expandKey} to expand)</Text>
             </Text>
           ) : null}
         </Box>
@@ -204,6 +206,7 @@ function ToolView({ block, cwd, expanded }: { block: Extract<Block, { kind: "too
 }
 
 function ThinkingView({ block, expanded }: { block: Extract<Block, { kind: "thinking" }>; expanded: boolean }) {
+  const expandKey = useSettings()["keys.expand"];
   if (!block.done) {
     const last = block.text.trim().split("\n").at(-1) ?? "";
     return (
@@ -225,7 +228,7 @@ function ThinkingView({ block, expanded }: { block: Extract<Block, { kind: "thin
     <Gutter mark={glyph.thinking} tint={color.subtle}>
       <Text color={color.muted} italic>
         {label}
-        {expanded ? "" : <Text color={color.subtle}> (ctrl+o to show)</Text>}
+        {expanded ? "" : <Text color={color.subtle}> ({expandKey} to show)</Text>}
       </Text>
       {expanded ? (
         <Text color={color.muted} italic>

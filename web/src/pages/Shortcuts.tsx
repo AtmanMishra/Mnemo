@@ -62,7 +62,7 @@ export function Shortcuts() {
         shown.map((g) => (
           <section key={g.id} id={g.id} aria-labelledby={`${g.id}-h`} className="block">
             <h2 id={`${g.id}-h`}>{g.title}</h2>
-            {g.intro ? <p className="lead-sm">{g.intro}</p> : null}
+            {g.intro ? <p className="lead-sm"><Inline text={g.intro} /></p> : null}
             <div className="tablewrap">
               <table className="keys">
                 <thead><tr><th scope="col">{g.id === "env" ? "Variable" : g.id === "slash" || g.id === "cli" ? "Command" : "Key"}</th><th scope="col">What it does</th></tr></thead>

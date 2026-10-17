@@ -43,6 +43,8 @@ export class Notifier {
   constructor(
     private readonly write: (s: string) => void,
     private readonly now: () => number = Date.now,
+    /** How long a turn must run to notify (the settings can change it while Mnemo runs). */
+    private readonly after: () => number = () => NOTIFY_AFTER_MS,
   ) {}
 
   input(chunk: string): void {
@@ -63,7 +65,7 @@ export class Notifier {
       if (since === undefined) return;
       const took = this.now() - since;
       since = undefined;
-      if (!this.focused && took >= NOTIFY_AFTER_MS) this.write(notification(`mnemo · ${name}: done in ${duration(took)}`));
+      if (!this.focused && took >= this.after()) this.write(notification(`mnemo · ${name}: done in ${duration(took)}`));
     });
     const offDialogs = c.dialogs.subscribe(() => {
       const open = c.dialogs.current() != null;
