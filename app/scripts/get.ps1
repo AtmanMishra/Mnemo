@@ -130,7 +130,10 @@ function Install-Mnemo {
     Fetch "$base/SHA256SUMS" (Join-Path $tmp "SHA256SUMS")
     $want = (Get-Content (Join-Path $tmp "SHA256SUMS") | Where-Object { $_ -match " \*?$([regex]::Escape($archive))$" }) -replace " .*", ""
     if (-not $want) { throw "$archive is not in SHA256SUMS" }
-    $got = (Get-FileHash -Algorithm SHA256 (Join-Path $tmp $archive)).Hash.ToLower()
+    # .NET rather than Get-FileHash: some PowerShell hosts have no Microsoft.PowerShell.Utility on the module path.
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $fs = [IO.File]::OpenRead((Join-Path $tmp $archive))
+    try { $got = ([BitConverter]::ToString($sha.ComputeHash($fs)) -replace "-", "").ToLower() } finally { $fs.Dispose(); $sha.Dispose() }
     if ($want -ne $got) { throw "checksum mismatch for $archive" }
     Ok "checksum"
     # Take the two files we expect by name, never a path from inside the archive.
