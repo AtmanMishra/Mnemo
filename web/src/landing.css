@@ -262,7 +262,10 @@ header.top .bar { pointer-events: auto; position: relative; display: grid; grid-
 .release { background: var(--panel); border: 2px solid var(--ink) !important; box-shadow: var(--hard); padding: 28px; margin-bottom: 28px; }
 .release h2 { font-family: var(--display); font-weight: 400; color: var(--magenta); }
 .block > h2, .rm-lane h2 { font-family: var(--display); font-weight: 400; }
-.block, .rm-lane { background: color-mix(in srgb, var(--ground) 82%, transparent); }
+/* Sections on inner pages are inked cards, like .prose and .release, with room inside so
+   text never starts on the card's edge. */
+.page .block { background: color-mix(in srgb, var(--ground) 94%, transparent); border: 2px solid var(--ink); border-radius: 4px; box-shadow: var(--hard); padding: clamp(24px, 3.4vw, 40px) clamp(18px, 3.4vw, 40px); margin-top: 40px; }
+.page .block > h2 { margin-top: 0; }
 .chips button { border: 2px solid var(--ink); border-radius: 3px; }
 .filters input[type="search"] { border: 2px solid var(--ink); border-radius: 3px; background: var(--panel); }
 .dl-hero { background: var(--panel); }
@@ -281,8 +284,9 @@ header.top .bar { pointer-events: auto; position: relative; display: grid; grid-
 @media (hover: hover) and (pointer: fine) { .reel-card a:hover { transform: rotate(-2deg) translateY(-6px); color: inherit; } }
 @media (max-width: 899px) { .reel { overflow-x: auto; scroll-snap-type: x mandatory; } .reel-card { scroll-snap-align: start; } .reel-card a { width: 210px; height: 230px; } }
 .features .demo, .features .sections { position: relative; z-index: 3; }
-.features .demo-pin { background: color-mix(in srgb, var(--ground) 88%, transparent); }
-.sections .feature { background: color-mix(in srgb, var(--ground) 86%, transparent); }
+/* The pinned demo fills the screen, so it fades out at its sides instead of ending on a line. */
+.features .demo-pin { padding: 0 clamp(20px, 4vw, 56px); background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ground) 90%, transparent) 6% 94%, transparent); }
+.sections .feature { background: color-mix(in srgb, var(--ground) 94%, transparent); border: 2px solid var(--ink); border-radius: 4px; box-shadow: var(--hard); padding: clamp(28px, 4.4vw, 60px) clamp(18px, 4.4vw, 60px); margin-top: 56px; }
 
 /* How it works */
 .how-page section { position: relative; z-index: 3; }
