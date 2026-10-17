@@ -7,7 +7,7 @@
  *   │  └─ ✓ reader   read src/fetch.ts
  *   └─ ● checker     check the API
  */
-import type { NodeStatus, RosterNode, RosterSnapshot } from "../runtime/roster.ts";
+import { LIMITS, type NodeStatus, type RosterNode, type RosterSnapshot } from "../runtime/roster.ts";
 import { palette } from "./theme.ts";
 
 export interface TreeLine {
@@ -78,6 +78,8 @@ export function relation(snap: Pick<RosterSnapshot, "nodes" | "groups">, rootId:
     subs.length ? `⑂ ${subs.length} sub-agent${subs.length === 1 ? "" : "s"}${running ? ` (${running} running)` : ""}` : "",
     // Messages that stopped at the chain bound: the agent reads them at your next prompt.
     held ? `✉ ${held} waiting for you` : "",
+    // Its turns that messages started spent their allowance: no message wakes it until you prompt it.
+    self && self.wakeSpend >= LIMITS.wakeSpend ? `$ woken turns spent $${self.wakeSpend.toFixed(2)}, waits for you` : "",
   ].filter(Boolean);
   return parts.join(" · ");
 }

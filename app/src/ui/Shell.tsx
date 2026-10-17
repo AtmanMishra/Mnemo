@@ -11,7 +11,8 @@
  *   ctrl+g  hub              ctrl+p  switch project (or open one)
  *   ctrl+n  another agent on this project, in parallel
  *   ctrl+s  split / single   alt+l  next split layout   ctrl+y  playground
- *   alt+1…9 go to an agent   alt+, alt+.  previous, next
+ *   alt+1…9 go to an agent   alt+, alt+.  previous, next (in a split, every pane:
+ *                            a sub-agent's pane, focused, is a prompt to it; esc leaves it)
  *
  * Every agent's workspace stays mounted (hidden when off screen), so a draft,
  * a scroll position or an open dialog survives moving between screens.
@@ -45,7 +46,7 @@ export interface ShellProps {
 /** What a shell with no agent reads from (never shown: it has no agents). */
 const NO_ROSTER = new Roster();
 
-/** A split pane is an agent (`a<id>`, the full workspace) or a sub-agent (`n<id>`, a read-only view). */
+/** A split pane is an agent (`a<id>`, the full workspace) or a sub-agent (`n<id>`, its view and a prompt to it). */
 const agentKey = (id: number) => `a${id}`;
 
 /** Re-render when any agent's transcript, chrome or dialogs change. */
@@ -146,6 +147,8 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   /** The picker was opened to start an agent (the hub's n), not to go to a project. */
   const [pickerFresh, setPickerFresh] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  /** In a split, a sub-agent pane you moved to (`n<id>`); otherwise the active agent has the keys. */
+  const [paneFocus, setPaneFocus] = useState<string | undefined>();
 
   // The active agent left: focus a neighbour.
   const active = agents.find((a) => a.id === activeId) ?? agents[0];
@@ -165,6 +168,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
     return mine && !keys.includes(mine) ? [...keys.slice(0, SPLIT_MAX - 1), mine] : keys.slice(0, SPLIT_MAX);
   }, [splitKeys, agents, tree, active?.id]);
   const splitAgents = split.filter((k) => k[0] === "a").map((k) => Number(k.slice(1)));
+  const nodeFocus = screen === "split" && paneFocus && split.includes(paneFocus) ? paneFocus : undefined;
 
   // A sub-agent that starts under an agent on screen joins the split (in a free pane, or one whose sub-agent ended).
   const seenSpawns = useRef<Set<number> | undefined>(undefined);
@@ -187,9 +191,15 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   const go = (id: number, to: Screen = landing) => {
     setActiveId(id);
     setScreen(to);
+    setPaneFocus(undefined);
   };
   const cycle = (delta: number) => {
     if (agents.length === 0) return;
+    if (screen === "split" && split.length > 1) {
+      const at = Math.max(0, split.indexOf(nodeFocus ?? (active ? agentKey(active.id) : "")));
+      const k = split[(at + delta + split.length) % split.length]!;
+      return k[0] === "a" ? go(Number(k.slice(1))) : setPaneFocus(k);
+    }
     const pool = screen === "split" ? agents.filter((a) => splitAgents.includes(a.id)) : agents;
     const at = Math.max(0, pool.findIndex((a) => a.id === active?.id));
     go(pool[(at + delta + pool.length) % pool.length]!.id);
@@ -232,6 +242,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
         if (a) go(a.id);
         return;
       }
+      if (key.escape && nodeFocus) return setPaneFocus(undefined);
       if (key.meta && input === ",") return cycle(-1);
       if (key.meta && input === ".") return cycle(1);
     },
@@ -321,7 +332,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
             const at = split.indexOf(agentKey(a.id));
             const inSplit = view === "split" && at >= 0;
             const shown = view === "agent" ? a.id === active?.id : inSplit;
-            const focused = a.id === active?.id && !picker;
+            const focused = a.id === active?.id && !picker && !(view === "split" && nodeFocus);
             const framed = view === "split";
             const r = framed && at >= 0 ? rects[at]! : solo;
             return (
@@ -356,9 +367,10 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
                 const node = tree.nodes.find((n) => `n${n.id}` === k);
                 if (!node) return null;
                 const r = rects[i]!;
+                const on = nodeFocus === k && !picker;
                 return (
-                  <Box key={k} position="absolute" left={r.x} top={r.y} width={r.w} height={r.h} borderStyle="round" borderBackgroundColor={ground()} borderColor={palette.faint}>
-                    <NodePane node={node} nodes={tree.nodes} width={r.w - 2} height={r.h - 2} focused={false} />
+                  <Box key={k} position="absolute" left={r.x} top={r.y} width={r.w} height={r.h} borderStyle="round" borderBackgroundColor={ground()} borderColor={on ? palette.magenta : palette.faint}>
+                    <NodePane node={node} nodes={tree.nodes} width={r.w - 2} height={r.h - 2} focused={on} onTell={(text) => roster.tell(node.id, text)} />
                   </Box>
                 );
               })

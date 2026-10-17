@@ -1,7 +1,8 @@
 /**
  * The playground: every agent and what passes between them, to watch.
  *
- *   ↑↓ select · enter open that agent in the agents page · m messages only · ^y back
+ *   ↑↓ select · enter open that agent in the agents page · m messages only
+ *   c the selected agent's conversation with another (tab: the next one) · ^y back
  *
  * It is read-only by construction. It is given a `RosterView` (a snapshot and a
  * subscription, nothing that changes the roster), has no prompt, and cannot stop,
@@ -51,7 +52,43 @@ export function feedLine(e: RosterEvent, labels: ReadonlyMap<number, string>): {
       return { text: `⇄ ${name(e.node)} linked with ${name(e.other)}`, tone: palette.magenta };
     case "unlink":
       return { text: `⇄ ${name(e.node)} left its siblings`, tone: palette.dim };
+    case "told":
+      return { text: `✎ you → ${name(e.node)}: ${e.text.replace(/\s+/g, " ")}`, tone: palette.cyan };
+    case "capped":
+      return { text: `$ ${name(e.node)} spent $${e.spent.toFixed(2)} on turns messages started: stopped, and woken by none until you prompt it`, tone: palette.amber };
   }
+}
+
+type Message = Extract<RosterEvent, { kind: "message" }>;
+
+/** Who `id` has exchanged messages with, most messages first. */
+export function partners(snap: Pick<RosterSnapshot, "events">, id: number): number[] {
+  const count = new Map<number, number>();
+  for (const e of snap.events)
+    if (e.kind === "message" && (e.from === id || e.to === id)) {
+      const other = e.from === id ? e.to : e.from;
+      count.set(other, (count.get(other) ?? 0) + 1);
+    }
+  return [...count].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([n]) => n);
+}
+
+/** The messages between two nodes as a thread: a heading per message, then its text wrapped to `width`. */
+export function threadLines(snap: Pick<RosterSnapshot, "events" | "labels">, a: number, b: number, width: number): { text: string; tone: string }[] {
+  const name = (id: number) => snap.labels.get(id) ?? `#${id}`;
+  const out: { text: string; tone: string }[] = [];
+  const w = Math.max(8, width - 2);
+  for (const e of snap.events) {
+    if (e.kind !== "message" || !((e.from === a && e.to === b) || (e.from === b && e.to === a))) continue;
+    const m = e as Message;
+    const how = m.delivery === "woken" ? " · woke it" : m.delivery === "held" ? " · held for its user" : "";
+    out.push({ text: `${clock(m.at)} ${name(m.from)} → ${name(m.to)}${how}`, tone: m.from === a ? palette.cyan : palette.magenta });
+    const words = m.text.replace(/\s+/g, " ").trim();
+    const lines: string[] = [];
+    for (let i = 0; i < words.length && lines.length < 6; i += w) lines.push(words.slice(i, i + w));
+    if (lines.length === 6 && words.length > 6 * w) lines[5] = `${lines[5]!.slice(0, w - 1)}…`;
+    for (const l of lines) out.push({ text: `  ${l}`, tone: m.delivery === "held" ? palette.amber : palette.text });
+  }
+  return out;
 }
 
 interface Row {
@@ -79,16 +116,22 @@ export function Playground(p: PlaygroundProps): React.ReactElement {
   // The selection is a node, not a row: rows move as agents start and end.
   const [sel, setSel] = useState<number | undefined>(undefined);
   const [onlyMessages, setOnlyMessages] = useState(false);
+  /** The conversation view: which of the selected agent's partners it shows, or off. */
+  const [talk, setTalk] = useState<number | undefined>(undefined);
   const rows = playgroundRows(snap);
   const found = rows.findIndex((r) => r.node.id === sel);
   const at = found >= 0 ? found : 0;
   const chosen = rows[at]?.node;
+  const pals = chosen ? partners(snap, chosen.id) : [];
+  const partner = talk === undefined || pals.length === 0 ? undefined : pals[talk % pals.length];
 
   useInput(
     (input, key) => {
       if (key.upArrow) return setSel(rows[Math.max(0, at - 1)]?.node.id);
       if (key.downArrow) return setSel(rows[Math.min(rows.length - 1, at + 1)]?.node.id);
-      if (input === "m") return setOnlyMessages((v) => !v);
+      if (input === "m") return (setTalk(undefined), setOnlyMessages((v) => !v));
+      if (input === "c") return setTalk((t) => (t === undefined ? 0 : undefined));
+      if (key.tab && talk !== undefined) return setTalk((t) => (t ?? 0) + 1);
       if (key.return && chosen) return p.onOpen(rootOf(snap, chosen).id);
     },
     { isActive: p.active },
@@ -105,6 +148,7 @@ export function Playground(p: PlaygroundProps): React.ReactElement {
   const first = Math.max(0, Math.min(at - listH + 1, rows.length - listH));
   const shown = rows.slice(first, first + listH);
 
+  const thread = chosen && partner !== undefined ? threadLines(snap, chosen.id, partner, feedW).slice(-Math.max(1, feedH - 1)) : undefined;
   const events = snap.events.filter((e) => !onlyMessages || e.kind === "message");
   const feed = events.slice(-Math.max(1, feedH - 1));
   const running = snap.nodes.filter((n) => n.status === "running").length;
@@ -161,9 +205,24 @@ export function Playground(p: PlaygroundProps): React.ReactElement {
         </Box>
         {wide ? <Box width={2} /> : null}
         <Box flexDirection="column" width={feedW} height={feedH}>
-          <Text color={palette.faint}>{onlyMessages ? "MESSAGES" : "ACTIVITY"}</Text>
-          {feed.length === 0 ? <Text color={palette.faint}>nothing has happened yet</Text> : null}
-          {feed.map((e, i) => {
+          <Text color={palette.faint} wrap="truncate-end">
+            {talk === undefined
+              ? onlyMessages
+                ? "MESSAGES"
+                : "ACTIVITY"
+              : partner === undefined
+                ? `CONVERSATION · ${chosen?.label ?? ""} has not exchanged a message yet`
+                : `CONVERSATION · ${chosen!.label} ⇄ ${snap.labels.get(partner) ?? `#${partner}`}${pals.length > 1 ? ` · ${(talk % pals.length) + 1} of ${pals.length}, tab next` : ""}`}
+          </Text>
+          {thread
+            ? thread.map((l, i) => (
+                <Text key={i} color={l.tone} wrap="truncate-end">
+                  {clip(l.text, feedW)}
+                </Text>
+              ))
+            : null}
+          {!thread && talk === undefined && feed.length === 0 ? <Text color={palette.faint}>nothing has happened yet</Text> : null}
+          {(thread || talk !== undefined ? [] : feed).map((e, i) => {
             const l = feedLine(e, snap.labels);
             return (
               <Text key={`${e.at}-${i}`} wrap="truncate-end">
@@ -176,7 +235,7 @@ export function Playground(p: PlaygroundProps): React.ReactElement {
       </Box>
       <Box flexGrow={1} />
       <Text color={palette.faint} wrap="truncate-end">
-        {p.width >= 80 ? `↑↓ select · enter open in the agents page · m ${onlyMessages ? "all activity" : "messages only"} · ^y back` : "↑↓ · enter open · m · ^y back"}
+        {p.width >= 80 ? `↑↓ select · enter open in the agents page · m ${onlyMessages ? "all activity" : "messages only"} · c ${talk === undefined ? "conversation" : "back to the feed"} · ^y back` : "↑↓ · enter open · m · c · ^y back"}
       </Text>
     </Box>
   );

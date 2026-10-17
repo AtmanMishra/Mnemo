@@ -37,6 +37,9 @@ test("the relation line says who is linked and how many sub-agents are running",
   r.send(a, b, "one");
   r.send(a, b, "two");
   expect(relation(r.snapshot(), b)).toBe("⇄ alpha · ✉ 2 waiting for you");
+  r.get(b)!.woken = true; // a message started its turn, which spent the whole allowance
+  r.spend(b, LIMITS.wakeSpend);
+  expect(relation(r.snapshot(), b)).toBe(`⇄ alpha · ✉ 2 waiting for you · $ woken turns spent $${LIMITS.wakeSpend.toFixed(2)}, waits for you`);
 });
 
 test("a family split shows at most four: the agent, its linked roots, then running sub-agents first", () => {

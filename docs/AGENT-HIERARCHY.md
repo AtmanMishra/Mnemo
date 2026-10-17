@@ -97,11 +97,23 @@ still asks the user, but it is a real prompt-injection path between agents.
   live feed of spawns, messages, answers and links on the right, the selected node's
   detail below. Supervise only; `enter` jumps to the agent page to interact.
 
-The user talks to **roots only**. Sub-agents are watched, not typed to (they are in-process
-sessions with no composer). If you want to talk to a sub-agent directly, that is a later
-release.
+Since 0.1.6 you can **type to a running sub-agent**: in a split, `alt+,` / `alt+.` move
+through every pane, and a focused sub-agent pane has a one-line prompt. What you send
+is your words (not a peer message), read after its current step; its parent still
+drives it and gets its answer. A finished sub-agent cannot be told anything. `esc`
+gives the keys back to the agent.
 
-## Not in 0.1.5
+**Links are remembered** by project folder (real paths, in `state.json`): two projects
+you linked are linked again when both are open, in a later run too, and the agent says
+so. Unlinking forgets the link.
 
-Persisting links across restarts, user-typed messages into the tree from the playground.
-(Waking an idle agent from a message shipped in 0.1.6, bounded by the hop limit.)
+**Woken turns have an allowance** (`LIMITS.wakeSpend`, $0.50 per agent since its user
+last prompted, sub-agents included): the call that crosses it stops the turn, and the
+agent is not woken again until you prompt it. The agents page shows `$ woken turns spent`.
+
+The playground's **conversation view** (`c`) shows the selected agent's messages with
+one other as a thread; `tab` moves to its next partner.
+
+## Not yet
+
+User-typed messages into the tree from the playground (it stays supervise-only).

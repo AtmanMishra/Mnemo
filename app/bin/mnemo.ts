@@ -248,6 +248,8 @@ interface State {
   updateAvailable?: string;
   /** Folders agents were opened in, most recent first. */
   recent?: string[];
+  /** Project folders the user linked, so they are linked again when both are open. */
+  links?: [string, string][];
   theme?: ThemeName;
   /** The folder a downloaded copy was told not to install itself from. */
   selfInstallDeclined?: string;
@@ -575,6 +577,8 @@ async function main(): Promise<number> {
       },
       recent: state.recent,
       saveRecent: (recent) => writeState(home, { ...readState(home), recent }),
+      links: state.links,
+      saveLinks: (links) => writeState(home, { ...readState(home), links }),
     },
   );
   let firstId = 0;

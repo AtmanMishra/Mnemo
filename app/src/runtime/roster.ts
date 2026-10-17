@@ -44,6 +44,12 @@ export const LIMITS = {
    * agents answering each other (and waking each other) cannot go on forever.
    */
   hops: 12,
+  /**
+   * Dollars an agent may spend on turns that messages started (and the sub-agents they
+   * started) since its user last prompted. Past it a message no longer wakes the agent,
+   * and a turn a message started is stopped: agents cannot run up a bill while you are away.
+   */
+  wakeSpend: 0.5,
   /** Step lines and events kept. */
   steps: 20,
   events: 300,
@@ -71,6 +77,10 @@ export interface RosterNode {
   pending: number;
   /** How many messages led here since a user last prompted (see `LIMITS.hops`). */
   hops: number;
+  /** Its current or latest turn was started by a message, not by its user. */
+  woken: boolean;
+  /** Dollars spent on such turns since its user last prompted (see `LIMITS.wakeSpend`). */
+  wakeSpend: number;
 }
 
 export type RosterEvent =
@@ -78,7 +88,9 @@ export type RosterEvent =
   | { at: number; kind: "spawn"; node: number; parent: number }
   | { at: number; kind: "done" | "failed" | "stopped"; node: number }
   | { at: number; kind: "message"; from: number; to: number; text: string; delivery: Delivery }
-  | { at: number; kind: "link" | "unlink"; node: number; other?: number };
+  | { at: number; kind: "link" | "unlink"; node: number; other?: number }
+  | { at: number; kind: "told"; node: number; text: string }
+  | { at: number; kind: "capped"; node: number; spent: number };
 
 export interface RosterSnapshot {
   version: number;
@@ -107,13 +119,18 @@ export interface PeerMessage {
 /** How a message reached its target: during its run, by starting a turn, or held for the user's next prompt. */
 export type Delivery = "now" | "woken" | "held";
 
-export type SendResult = { ok: true; delivery: Delivery } | { ok: false; reason: string };
+/** For a held message, why: the chain of messages is too long, or the agent spent its allowance. */
+export type SendResult = { ok: true; delivery: Delivery; held?: "chain" | "spend" } | { ok: false; reason: string };
 
 /** What a node's extension gives the roster so messages and stops can reach it. */
 export interface NodeHandle {
-  /** Hand over a message: read during the current run (`now`), start a turn (`woken`), or wait for the next prompt (`held`). */
-  /** True when the agent took the message at once (a tool call was waiting for it). */
+  /**
+   * Hand over a message: read during the current run (`now`), start a turn (`woken`), or wait
+   * for the next prompt (`held`). True when the agent took it at once (a tool call was waiting for it).
+   */
   deliver(message: PeerMessage, how: Delivery): boolean | void;
+  /** The user's own words to a running sub-agent, read after its current step. */
+  tell?(text: string): boolean;
   /** End the node's run (its root was closed, or its parent was stopped). */
   stop(): void;
 }
@@ -304,10 +321,45 @@ export class Roster implements RosterView {
   /** The user prompted this node: it reads what was held for it, and what it sends now starts a new chain. */
   userTurn(id: number): void {
     const n = this.nodes.get(id);
-    if (!n || (n.hops === 0 && n.pending === 0)) return;
+    if (!n || (n.hops === 0 && n.pending === 0 && !n.woken && n.wakeSpend === 0)) return;
     n.hops = 0;
     n.pending = 0;
+    n.woken = false;
+    n.wakeSpend = 0;
     this.changed();
+  }
+
+  /**
+   * A model call of this node cost `usd`. It counts against its root's allowance when the
+   * root's turn was started by a message; the call that crosses it stops that turn.
+   */
+  spend(id: number, usd: number): void {
+    if (!(usd > 0)) return;
+    let root = this.nodes.get(id);
+    while (root && root.parent !== undefined) root = this.nodes.get(root.parent);
+    if (!root || !root.woken) return;
+    const before = root.wakeSpend;
+    root.wakeSpend += usd;
+    if (before < LIMITS.wakeSpend && root.wakeSpend >= LIMITS.wakeSpend) {
+      this.event({ at: this.now(), kind: "capped", node: root.id, spent: root.wakeSpend });
+      if (root.status === "running") this.handles.get(root.id)?.stop();
+    }
+    this.changed();
+  }
+
+  /** The user types to a running sub-agent: it reads it after its current step, as its user's words. */
+  tell(id: number, text: string): { ok: true } | { ok: false; reason: string } {
+    const n = this.nodes.get(id);
+    if (!n || n.kind !== "sub") return { ok: false, reason: "only a sub-agent is told things from its pane" };
+    if (isEnded(n.status)) return { ok: false, reason: `${n.label} has finished; its answer went to its parent` };
+    const body = clean(text, LIMITS.messageChars * 2).trim();
+    if (!body) return { ok: false, reason: "the message is empty" };
+    if (!this.handles.get(id)?.tell?.(body)) return { ok: false, reason: `${n.label} cannot be reached right now` };
+    // Its user spoke: what it sends from here starts a new chain.
+    n.hops = 0;
+    this.step(id, `✎ you: ${body.split("\n")[0]}`);
+    this.event({ at: this.now(), kind: "told", node: id, text: body });
+    return { ok: true };
   }
 
   setTask(id: number, task: string): void {
@@ -387,7 +439,8 @@ export class Roster implements RosterView {
     const handle = this.handles.get(to);
     if (!handle) return { ok: false, reason: `agent #${to} cannot receive messages right now` };
     const hop = sender.hops + 1;
-    const delivery: Delivery = hop > LIMITS.hops ? "held" : target.status === "running" ? "now" : "woken";
+    const spent = target.wakeSpend >= LIMITS.wakeSpend;
+    const delivery: Delivery = hop > LIMITS.hops || (spent && target.status !== "running") ? "held" : target.status === "running" ? "now" : "woken";
     if (delivery === "held") {
       const over = `the agents have exchanged ${LIMITS.hops} messages since a user last spoke`;
       // A sub-agent has no user and no next prompt: a message held for it would never be read.
@@ -397,19 +450,20 @@ export class Roster implements RosterView {
     } else if (delivery === "woken") {
       // A woken turn is its own link in the chain; a running agent keeps the longest chain it is in.
       target.hops = hop;
+      target.woken = true;
     } else {
       target.hops = Math.max(target.hops, hop);
     }
     this.sent.set(from, [...recent, t]);
     const taken = handle.deliver({ from, fromLabel: sender.label, fromRole: sender.kind === "root" ? "top-level agent" : `sub-agent (depth ${sender.depth})`, text: body, at: t }, delivery);
     if (taken && delivery === "held") target.pending--;
-    this.event({ at: t, kind: "message", from, to, text: body.slice(0, 200), delivery });
-    return { ok: true, delivery };
+    this.event({ at: t, kind: "message", from, to, text: body, delivery });
+    return delivery === "held" ? { ok: true, delivery, held: hop > LIMITS.hops ? "chain" : "spend" } : { ok: true, delivery };
   }
 
   // ── internals ────────────────────────────────────────────────────────────
   private make(o: Pick<RosterNode, "kind" | "label" | "task" | "depth" | "access" | "status"> & Partial<RosterNode>): RosterNode {
-    const node: RosterNode = { steps: [], stepCount: 0, startedAt: this.now(), pending: 0, hops: 0, ...o, id: this.nextNode++ };
+    const node: RosterNode = { steps: [], stepCount: 0, startedAt: this.now(), pending: 0, hops: 0, woken: false, wakeSpend: 0, ...o, id: this.nextNode++ };
     this.nodes.set(node.id, node);
     this.labels.set(node.id, node.label);
     return node;

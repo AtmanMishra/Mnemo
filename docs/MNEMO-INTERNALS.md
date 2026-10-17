@@ -458,7 +458,15 @@ so two agents answering each other stop. `message_agent` with `wait` registers a
 listener for the target's next message and returns it as the tool result (two minutes
 at most, or until the target ends) instead of delivering it. It never waits on an
 ancestor, which is blocked in `spawn_subagent` until this agent answers. Other bounds: 2,000 characters, 30 sends a minute per
-sender, 20 held per node (cleared at its user's next prompt). Text is stripped of control characters and passed through
+sender, 20 held per node (cleared at its user's next prompt), and **spend**: every
+model call's `usage.cost.total` goes to `Roster.spend`, which counts it against the
+root's `wakeSpend` while the root's turn was started by a message (`woken`); crossing
+`LIMITS.wakeSpend` ($0.50) stops that turn (`capped` event) and holds messages to it
+until its user prompts (`held: "spend"`). The user can also type to a running
+sub-agent from its split pane: `Roster.tell` steers it with the user's words
+(`sendUserMessage`, only while it streams) and restarts its chain. Links are kept by
+the fleet in `state.json` as pairs of real project paths and made again when both
+projects are open. Text is stripped of control characters and passed through
 `redact` before it is stored, shown or delivered. The receiving agent's gate decides
 every edit and command exactly as before. Closing a root stops its tree, drops its
 links and its inboxes. Details and the review: `docs/AGENT-HIERARCHY.md`, `SECURITY.md`.

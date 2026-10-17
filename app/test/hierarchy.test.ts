@@ -293,3 +293,65 @@ test("a peer message that asks for a command does not skip the receiver's approv
   expect(fs.existsSync(path.join(b.cwd, "pwned.txt"))).toBe(false);
   expect(b.runtime.session.messages.filter((m) => m.role === "user")).toHaveLength(0);
 });
+
+test("what the user tells a running sub-agent reaches its model as the user's words, after its current step", async () => {
+  const roster = new Roster();
+  const e = await env({ mode: "yolo", roster });
+  let heard = "";
+  e.faux.setResponses([
+    call("spawn_subagent", { task: "list the files", name: "lister" }),
+    // The child's first call: the user types to it while it works.
+    () => {
+      const kid = roster.snapshot().nodes.find((n) => n.label === "lister")!;
+      expect(roster.tell(kid.id, "also count them")).toEqual({ ok: true });
+      return call("ls", { path: "." });
+    },
+    (context: { messages: { role: string; content: unknown }[] }) => {
+      heard = JSON.stringify(context.messages.filter((m) => m.role === "user").map((m) => m.content));
+      return say("2 files");
+    },
+    say("lister counted 2 files"),
+  ]);
+  await e.controller.submit("delegate");
+  await e.idle();
+  expect(heard).toContain("also count them");
+  expect(roster.snapshot().nodes.find((n) => n.label === "lister")).toMatchObject({ status: "done", answer: "2 files" });
+});
+
+test("an agent that spent its allowance for woken turns is not woken: the message waits for its user", async () => {
+  const roster = new Roster();
+  const a = await env({ mode: "yolo", roster, label: "alpha" });
+  const b = await env({ mode: "yolo", roster, label: "beta" });
+  roster.link(a.host.node, b.host.node);
+  Object.assign(roster.get(b.host.node)!, { woken: true, wakeSpend: LIMITS.wakeSpend });
+  a.faux.setResponses([call("message_agent", { to: b.host.node, text: "one more thing" }), say("told beta")]);
+  await a.controller.submit("tell beta");
+  await settle(roster, a, b);
+  expect(toolOutput(a, "message_agent")[0]!.output).toContain("allowance");
+  expect(b.runtime.session.messages.filter((m) => m.role === "assistant")).toHaveLength(0);
+  // Its user prompts it: it reads the message, and the allowance starts again.
+  b.faux.setResponses([say("read it")]);
+  await b.controller.submit("hi");
+  await b.idle();
+  expect(peerMessages(b).join()).toContain("one more thing");
+  expect(roster.get(b.host.node)).toMatchObject({ wakeSpend: 0, pending: 0 });
+});
+
+test("a woken turn that spends past the allowance is stopped", async () => {
+  const roster = new Roster();
+  const a = await env({ mode: "yolo", roster, label: "alpha" });
+  const b = await env({ mode: "yolo", roster, label: "beta" });
+  roster.link(a.host.node, b.host.node);
+  a.faux.setResponses([call("message_agent", { to: b.host.node, text: "go do a lot" }), say("asked")]);
+  b.faux.setResponses([
+    () => {
+      roster.spend(b.host.node, LIMITS.wakeSpend); // as if this call cost the whole allowance
+      return call("ls", { path: "." });
+    },
+    say("still going"),
+  ]);
+  await a.controller.submit("start beta");
+  await settle(roster, a, b);
+  expect(roster.snapshot().events.some((x) => x.kind === "capped" && x.node === b.host.node)).toBe(true);
+  expect(assistantTexts(b)).not.toContain("still going");
+});

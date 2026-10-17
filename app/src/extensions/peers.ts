@@ -53,6 +53,8 @@ export function peersExtension(host: Host) {
     const { roster } = host;
     const me = host.node;
     let abort: (() => void) | undefined;
+    /** Between agent_start and agent_end: only then can a steer be read (before it, it would start a second run). */
+    let streaming = false;
     /** Agents this one is waiting on (message_agent with wait): their next message is the tool's result. */
     const waiting = new Map<number, (m: PeerMessage) => void>();
 
@@ -72,16 +74,33 @@ export function peersExtension(host: Host) {
           /* the session is going away */
         }
       },
+      tell(text) {
+        if (!streaming) return false;
+        try {
+          pi.sendUserMessage(text, { deliverAs: "steer" });
+          return true;
+        } catch {
+          return false;
+        }
+      },
       stop() {
         abort?.();
       },
     });
 
+    // What each model call cost, for the allowance of turns that messages start.
+    pi.on("message_end", async (e) => {
+      const m = e.message as { role?: string; usage?: { cost?: { total?: number } } };
+      if (m.role === "assistant") roster.spend(me, m.usage?.cost?.total ?? 0);
+    });
+
     pi.on("agent_start", async (_e, ctx) => {
       abort = () => ctx.abort();
+      streaming = true;
       roster.setStatus(me, "running");
     });
     pi.on("agent_end", async () => {
+      streaming = false;
       if (host.depth === 0) roster.setStatus(me, "idle");
     });
     pi.on("tool_execution_start", async (e) => {
@@ -182,7 +201,10 @@ export function peersExtension(host: Host) {
           const state: Record<Delivery, string> = {
             now: "it will read this after its current step",
             woken: "it was idle and is reading it now; its reply, if any, will reach you as a message",
-            held: `the agents have exchanged ${LIMITS.hops} messages since a user last spoke, so it will read this at its user's next prompt; stop messaging and report to your user`,
+            held:
+              r.held === "spend"
+                ? `it has spent its $${LIMITS.wakeSpend.toFixed(2)} allowance for turns that messages start, so it will read this at its user's next prompt; stop messaging and report to your user`
+                : `the agents have exchanged ${LIMITS.hops} messages since a user last spoke, so it will read this at its user's next prompt; stop messaging and report to your user`,
           };
           const note = blocked ? " It cannot reply before you finish: it is waiting for your answer, so put what you need from it in your answer." : "";
           return { content: [{ type: "text", text: `Sent to #${to} "${target?.label ?? ""}": ${state[r.delivery]}.${note}` }], details: { to, text: clean(params.text, 200), replied: false } };
