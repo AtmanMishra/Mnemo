@@ -1,14 +1,18 @@
 /** The roster decides who may talk to whom; these are its rules, one by one. */
 import { test, expect } from "bun:test";
-import { LIMITS, Roster, RosterError, clean, forest, type PeerMessage } from "../src/runtime/roster.ts";
+import { LIMITS, Roster, RosterError, clean, forest, type Delivery, type PeerMessage } from "../src/runtime/roster.ts";
 
 /** A roster whose nodes record what they were sent. */
 function world() {
   const r = new Roster(() => clock.t);
   const clock = { t: 1_000_000 };
   const inbox = new Map<number, PeerMessage[]>();
+  const how = new Map<number, Delivery[]>();
   const handle = (id: () => number) => ({
-    deliver: (m: PeerMessage) => void (inbox.get(id()) ?? inbox.set(id(), []).get(id())!).push(m),
+    deliver: (m: PeerMessage, d: Delivery) => {
+      (inbox.get(id()) ?? inbox.set(id(), []).get(id())!).push(m);
+      (how.get(id()) ?? how.set(id(), []).get(id())!).push(d);
+    },
     stop: () => {},
   });
   const root = (name: string) => {
@@ -22,7 +26,7 @@ function world() {
     r.attach(n.id, handle(() => n.id));
     return n.id;
   };
-  return { r, clock, inbox, root, sub };
+  return { r, clock, inbox, how, root, sub };
 }
 
 test("a node reaches its parent, children, siblings and its ancestors' siblings, and nobody else", () => {
@@ -56,7 +60,7 @@ test("a send is refused outside the family, to the ended, and from the ended; in
   const c = root("C");
   r.link(a, b);
   const a1 = sub(a, "researcher");
-  expect(r.send(a1, b, "found it")).toEqual({ ok: true }); // a sub-agent reaches its parent's sibling
+  expect(r.send(a1, b, "found it")).toEqual({ ok: true, delivery: "woken" }); // a sub-agent reaches its parent's sibling
   expect(inbox.get(b)![0]).toMatchObject({ from: a1, fromLabel: "researcher", fromRole: "sub-agent (depth 1)", text: "found it" });
   expect(r.send(a1, c, "hi")).toMatchObject({ ok: false });
   // A node that does not exist and one that is out of reach answer alike: ids in other trees cannot be probed.
@@ -141,19 +145,49 @@ test("messages are bounded: size, rate, and what an idle node will hold", () => 
   r.link(a, b);
   expect(r.send(a, b, "x".repeat(LIMITS.messageChars + 1))).toMatchObject({ ok: false });
   expect(r.send(a, b, "   ")).toMatchObject({ ok: false });
-  for (let i = 0; i < LIMITS.inbox; i++) expect(r.send(a, b, `m${i}`)).toEqual({ ok: true });
+  for (let i = 0; i < LIMITS.inbox; i++) expect(r.send(a, b, `m${i}`)).toMatchObject({ ok: true });
   // B is idle and holds LIMITS.inbox unread messages: the next is refused.
   expect(r.send(a, b, "one more")).toMatchObject({ ok: false, reason: expect.stringContaining("unread") });
   // Running agents read as they go, so they hold nothing; the rate limit is what bounds them.
   r.setStatus(b, "running");
   let sent = LIMITS.inbox;
   while (sent < LIMITS.sendsPerWindow) {
-    expect(r.send(a, b, "go")).toEqual({ ok: true });
+    expect(r.send(a, b, "go")).toEqual({ ok: true, delivery: "now" });
     sent++;
   }
   expect(r.send(a, b, "too fast")).toMatchObject({ ok: false, reason: expect.stringContaining("too fast") });
   clock.t += LIMITS.rateWindowMs + 1;
-  expect(r.send(a, b, "again")).toEqual({ ok: true });
+  expect(r.send(a, b, "again")).toEqual({ ok: true, delivery: "now" });
+});
+
+test("a message wakes an idle agent, and a chain of messages stops at a bound until a user speaks", () => {
+  const { r, root, sub, how } = world();
+  const a = root("A");
+  const b = root("B");
+  r.link(a, b);
+  r.userTurn(a);
+  // A and B answer each other while both are idle between turns: every message wakes the other.
+  let [from, to] = [a, b];
+  for (let hop = 1; hop <= LIMITS.hops; hop++) {
+    expect(r.send(from, to, `hop ${hop}`)).toEqual({ ok: true, delivery: "woken" });
+    expect(r.get(to)!.hops).toBe(hop);
+    [from, to] = [to, from];
+  }
+  // One more and the chain is over: the message waits for a user's next prompt instead of waking anyone.
+  expect(r.send(from, to, "and another")).toEqual({ ok: true, delivery: "held" });
+  expect(how.get(to)!.at(-1)).toBe("held");
+  // Even a running agent does not take it now: steering would keep the chain going.
+  r.setStatus(to, "running");
+  expect(r.send(from, to, "still going")).toEqual({ ok: true, delivery: "held" });
+  // A user prompts: what that agent sends starts a new chain.
+  r.userTurn(from);
+  expect(r.send(from, to, "fresh")).toEqual({ ok: true, delivery: "now" });
+  expect(r.get(to)!.hops).toBe(LIMITS.hops - 1); // it keeps the longer chain it is already in
+  // A sub-agent started by an agent deep in a chain continues that chain: one more message, then held.
+  const s1 = sub(to, "helper");
+  expect(r.get(s1)!.hops).toBe(LIMITS.hops - 1);
+  expect(r.send(s1, to, "done")).toEqual({ ok: true, delivery: "now" });
+  expect(r.send(to, s1, "thanks")).toEqual({ ok: true, delivery: "held" });
 });
 
 test("everything an agent writes is cleaned of terminal control codes and secrets before anyone sees it", () => {

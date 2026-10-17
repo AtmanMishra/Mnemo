@@ -99,6 +99,13 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             signal?.addEventListener("abort", onAbort);
             if (signal?.aborted) onAbort();
             await session.prompt(params.task);
+            // A failed model call does not throw out of prompt(): it is the last reply, with an error and no text.
+            // Say why, so the parent (and the user) see the cause instead of an empty answer.
+            const last = session.messages.filter((m) => m.role === "assistant").at(-1) as { stopReason?: string; errorMessage?: string } | undefined;
+            if (!last || last.stopReason === "error") {
+              answer = `the sub-agent's model call failed: ${last?.errorMessage?.trim() || "no reply from the model"}`;
+              throw new Error(answer);
+            }
             answer = session.getLastAssistantText()?.trim() || "(the sub-agent finished without an answer)";
             outcome = "done";
             return {

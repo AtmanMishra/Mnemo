@@ -43,7 +43,10 @@ export function feedLine(e: RosterEvent, labels: ReadonlyMap<number, string>): {
     case "stopped":
       return { text: `■ ${name(e.node)} stopped`, tone: palette.amber };
     case "message":
-      return { text: `✉ ${name(e.from)} → ${name(e.to)}: ${e.text.replace(/\s+/g, " ")}`, tone: palette.text };
+      return {
+        text: `✉ ${name(e.from)} → ${name(e.to)}${e.delivery === "woken" ? " (woke it)" : e.delivery === "held" ? " (held for its user)" : ""}: ${e.text.replace(/\s+/g, " ")}`,
+        tone: e.delivery === "held" ? palette.amber : palette.text,
+      };
     case "link":
       return { text: `⇄ ${name(e.node)} linked with ${name(e.other)}`, tone: palette.magenta };
     case "unlink":

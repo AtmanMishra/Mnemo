@@ -44,11 +44,12 @@ never has to be trusted for it.
 
 - `list_agents`: the family, each with id, role, status, task, last steps (and for a
   root its last prompt and the files it edited). No transcripts, no file contents.
-- `message_agent(to, text)`: a short message (2,000 characters). A running node gets it
-  as a follow-up in its current run; an idle node holds it until its next turn.
-  **A message never starts a turn on its own**, so a sibling cannot make an idle agent
-  spend money or act; the user's next prompt (or the run it is already in) is when it
-  reads. This also bounds ping-pong between two agents.
+- `message_agent(to, text, wait?)`: a short message (2,000 characters). A running node
+  gets it as a follow-up in its current run; an idle node is **woken** by it and can
+  answer on its own (since 0.1.6; 0.1.5 held it for the next prompt). With `wait`, the
+  sender's tool call returns the reply. Ping-pong is bounded by hops: a message counts
+  one more than the message that led to it, and past 12 since a user prompted, messages
+  are held for the user's next prompt.
 - A one-line family summary arrives each turn as a hidden message, so siblings "know what
   the other is doing" without being asked.
 
@@ -62,7 +63,8 @@ never has to be trusted for it.
 3. **Only the user links roots.** There is no tool for it, and a sub-agent cannot link
    itself to anything.
 4. **Bounded**: message size, 30 sends a minute per sender, 20 undelivered per node, the
-   depth and fan-out limits above, and no auto-wake of idle agents.
+   depth and fan-out limits above, and a chain of at most 12 messages (each may wake an
+   idle agent) before the user prompts again.
 5. **Redacted**: text passes through `redact()` before it is stored, shown or delivered;
    the playground and the trace never see a raw key.
 6. **No privilege growth**: a child's access is at most its parent's; the mode stays the
@@ -99,5 +101,5 @@ release.
 
 ## Not in 0.1.5
 
-Waking an idle agent from a message (an explicit, per-link opt-in later), persisting links
-across restarts, user-typed messages into the tree from the playground.
+Persisting links across restarts, user-typed messages into the tree from the playground.
+(Waking an idle agent from a message shipped in 0.1.6, bounded by the hop limit.)

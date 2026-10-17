@@ -27,7 +27,9 @@ export type Block =
       durationMs?: number;
     }
   | { kind: "notice"; id: string; tone: Tone; text: string; extra?: NoticeExtra }
-  | { kind: "memory"; id: string; title: string; items: string[] };
+  | { kind: "memory"; id: string; title: string; items: string[] }
+  /** A message from another agent (`message_agent`), shown as what it is: not the user's words. */
+  | { kind: "peer"; id: string; from: number; label: string; text: string };
 
 /** What a notice can carry beyond its text: a code to type somewhere, links to open. */
 export interface NoticeExtra {
@@ -48,6 +50,14 @@ export interface Snapshot {
   live: readonly Block[];
   working: Working | null;
   queue: readonly string[];
+}
+
+/** The block for a peer message, from the details `peersExtension` attaches; anything else custom stays hidden. */
+function peerBlock(m: { customType?: string; details?: unknown }, id: string): Block | undefined {
+  if (m.customType !== "mnemo-peer") return undefined;
+  const d = m.details as { from?: unknown; label?: unknown; text?: unknown } | undefined;
+  if (typeof d?.from !== "number" || typeof d.text !== "string") return undefined;
+  return { kind: "peer", id, from: d.from, label: typeof d.label === "string" ? d.label : "", text: d.text };
 }
 
 function isFinal(b: Block): boolean {
@@ -206,7 +216,7 @@ export class Transcript {
   /** Rebuild the transcript from a session's stored messages (resume). */
   load(messages: readonly unknown[]): void {
     for (const raw of messages) {
-      const m = raw as { role?: string; content?: unknown; toolCallId?: string; isError?: boolean; details?: unknown };
+      const m = raw as { role?: string; content?: unknown; toolCallId?: string; isError?: boolean; details?: unknown; customType?: string };
       if (m.role === "user") {
         const text = textOf(m.content);
         if (text) this.live.push({ kind: "user", id: this.nextId("u"), text });
@@ -225,6 +235,9 @@ export class Transcript {
               output: "",
             });
         }
+      } else if (m.role === "custom") {
+        const peer = peerBlock(m, this.nextId("p"));
+        if (peer) this.live.push(peer);
       } else if (m.role === "toolResult" && m.toolCallId) {
         const tool = this.find("tool", m.toolCallId);
         if (tool)
@@ -257,7 +270,7 @@ export class Transcript {
         break;
 
       case "message_end": {
-        const m = event.message as { role: string; content?: unknown; stopReason?: string; errorMessage?: string };
+        const m = event.message as { role: string; content?: unknown; stopReason?: string; errorMessage?: string; customType?: string; details?: unknown };
         if (m.role === "user") {
           const text = textOf(m.content);
           if (text) this.live.push({ kind: "user", id: this.nextId("u"), text });
@@ -265,6 +278,9 @@ export class Transcript {
             this.live.push(this.pendingRecall);
             this.pendingRecall = undefined;
           }
+        } else if (m.role === "custom") {
+          const peer = peerBlock(m, this.nextId("p"));
+          if (peer) this.live.push(peer);
         } else if (m.role === "assistant") {
           this.finishMessage();
           if (m.stopReason === "aborted") this.live.push({ kind: "notice", id: this.nextId("n"), tone: "warn", text: "Interrupted" });

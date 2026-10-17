@@ -38,6 +38,12 @@ export const LIMITS = {
   rateWindowMs: 60_000,
   /** Messages an idle node may hold for its next turn. */
   inbox: 20,
+  /**
+   * Messages in a row since a user last prompted: each message counts one more than
+   * the message that led to it. Past this, messages wait for a user's next prompt, so
+   * agents answering each other (and waking each other) cannot go on forever.
+   */
+  hops: 12,
   /** Step lines and events kept. */
   steps: 20,
   events: 300,
@@ -63,13 +69,15 @@ export interface RosterNode {
   endedAt?: number;
   /** Messages held for the next turn. */
   pending: number;
+  /** How many messages led here since a user last prompted (see `LIMITS.hops`). */
+  hops: number;
 }
 
 export type RosterEvent =
   | { at: number; kind: "root" | "close"; node: number }
   | { at: number; kind: "spawn"; node: number; parent: number }
   | { at: number; kind: "done" | "failed" | "stopped"; node: number }
-  | { at: number; kind: "message"; from: number; to: number; text: string }
+  | { at: number; kind: "message"; from: number; to: number; text: string; delivery: Delivery }
   | { at: number; kind: "link" | "unlink"; node: number; other?: number };
 
 export interface RosterSnapshot {
@@ -96,12 +104,15 @@ export interface PeerMessage {
   at: number;
 }
 
-export type SendResult = { ok: true } | { ok: false; reason: string };
+/** How a message reached its target: during its run, by starting a turn, or held for the user's next prompt. */
+export type Delivery = "now" | "woken" | "held";
+
+export type SendResult = { ok: true; delivery: Delivery } | { ok: false; reason: string };
 
 /** What a node's extension gives the roster so messages and stops can reach it. */
 export interface NodeHandle {
-  /** Hand over a message; the node's extension decides now (running) or next turn (idle). */
-  deliver(message: PeerMessage): void;
+  /** Hand over a message: read during the current run (`now`), start a turn (`woken`), or wait for the next prompt (`held`). */
+  deliver(message: PeerMessage, how: Delivery): void;
   /** End the node's run (its root was closed, or its parent was stopped). */
   stop(): void;
 }
@@ -262,6 +273,8 @@ export class Roster implements RosterView {
       depth: p.depth + 1,
       access: o.access,
       status: "running",
+      // Started by a chain of messages, it continues that chain.
+      hops: p.hops,
     });
     this.event({ at: this.now(), kind: "spawn", node: node.id, parent });
     return node;
@@ -286,6 +299,12 @@ export class Roster implements RosterView {
     n.status = status;
     if (status === "running") n.pending = 0;
     this.changed();
+  }
+
+  /** The user prompted this node: what it sends now starts a new chain of messages. */
+  userTurn(id: number): void {
+    const n = this.nodes.get(id);
+    if (n) n.hops = 0;
   }
 
   setTask(id: number, task: string): void {
@@ -362,19 +381,22 @@ export class Roster implements RosterView {
     const t = this.now();
     const recent = (this.sent.get(from) ?? []).filter((x) => t - x < LIMITS.rateWindowMs);
     if (recent.length >= LIMITS.sendsPerWindow) return { ok: false, reason: "you are sending too fast; wait a minute" };
-    if (target.status === "idle" && target.pending >= LIMITS.inbox) return { ok: false, reason: `agent #${to} already has ${target.pending} unread messages` };
+    if (target.pending >= LIMITS.inbox) return { ok: false, reason: `agent #${to} already has ${target.pending} unread messages` };
     const handle = this.handles.get(to);
     if (!handle) return { ok: false, reason: `agent #${to} cannot receive messages right now` };
     this.sent.set(from, [...recent, t]);
-    if (target.status === "idle") target.pending++;
-    handle.deliver({ from, fromLabel: sender.label, fromRole: sender.kind === "root" ? "top-level agent" : `sub-agent (depth ${sender.depth})`, text: body, at: t });
-    this.event({ at: t, kind: "message", from, to, text: body.slice(0, 200) });
-    return { ok: true };
+    const hop = sender.hops + 1;
+    const delivery: Delivery = hop > LIMITS.hops ? "held" : target.status === "running" ? "now" : "woken";
+    if (delivery !== "held") target.hops = Math.max(target.hops, hop);
+    if (delivery !== "now") target.pending++;
+    handle.deliver({ from, fromLabel: sender.label, fromRole: sender.kind === "root" ? "top-level agent" : `sub-agent (depth ${sender.depth})`, text: body, at: t }, delivery);
+    this.event({ at: t, kind: "message", from, to, text: body.slice(0, 200), delivery });
+    return { ok: true, delivery };
   }
 
   // ── internals ────────────────────────────────────────────────────────────
   private make(o: Pick<RosterNode, "kind" | "label" | "task" | "depth" | "access" | "status"> & Partial<RosterNode>): RosterNode {
-    const node: RosterNode = { steps: [], stepCount: 0, startedAt: this.now(), pending: 0, ...o, id: this.nextNode++ };
+    const node: RosterNode = { steps: [], stepCount: 0, startedAt: this.now(), pending: 0, hops: 0, ...o, id: this.nextNode++ };
     this.nodes.set(node.id, node);
     this.labels.set(node.id, node.label);
     return node;

@@ -16,7 +16,7 @@
  * Every agent's workspace stays mounted (hidden when off screen), so a draft,
  * a scroll position or an open dialog survives moving between screens.
  */
-import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Box, Text, useInput, useWindowSize } from "ink";
 import type { Agent, Fleet } from "../runtime/fleet.ts";
 import { MotionContext } from "./components/motion.ts";
@@ -28,7 +28,7 @@ import { Hub, agentState, type AgentState } from "./Hub.tsx";
 import { Playground } from "./Playground.tsx";
 import { NodePane } from "./NodePane.tsx";
 import { Roster } from "../runtime/roster.ts";
-import { familyPanes, linkedRoots, subsOf } from "./tree.ts";
+import { familyPanes, linkedRoots, subsOf, withNewSub } from "./tree.ts";
 import { defaultLayout, fitsPanes, LAYOUT_LABEL, layoutsFor, nextLayout, SPLIT_MAX, splitRects, type SplitLayout } from "./layout.ts";
 import { Toasts, useToasts } from "./Toasts.tsx";
 import { ExitCard } from "./ExitCard.tsx";
@@ -153,16 +153,31 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
     if (active && active.id !== activeId) setActiveId(active.id);
   }, [active?.id]);
 
-  // The split shows the chosen panes (agents, or sub-agents to watch), else the first four
-  // agents, never more than four and always including the active agent.
+  // The split shows the chosen panes (agents, or sub-agents to watch), else the first four agents
+  // with any room left to the active agent's sub-agents; never more than four, always the active agent.
   const split = useMemo(() => {
     const exists = (k: string) => (k[0] === "a" ? agents.some((a) => agentKey(a.id) === k) : tree.nodes.some((n) => `n${n.id}` === k));
     const chosen = splitKeys.filter(exists);
-    const keys = chosen.length >= 1 ? chosen : agents.slice(0, SPLIT_MAX).map((a) => agentKey(a.id));
+    const rootId = tree.nodes.find((n) => n.kind === "root" && n.agentId === active?.id)?.id;
+    const subs = rootId === undefined ? [] : familyPanes(tree, rootId, SPLIT_MAX).keys.filter((k) => k[0] === "n");
+    const keys = chosen.length >= 1 ? chosen : [...agents.slice(0, SPLIT_MAX).map((a) => agentKey(a.id)), ...subs];
     const mine = active ? agentKey(active.id) : undefined;
     return mine && !keys.includes(mine) ? [...keys.slice(0, SPLIT_MAX - 1), mine] : keys.slice(0, SPLIT_MAX);
   }, [splitKeys, agents, tree, active?.id]);
   const splitAgents = split.filter((k) => k[0] === "a").map((k) => Number(k.slice(1)));
+
+  // A sub-agent that starts under an agent on screen joins the split (in a free pane, or one whose sub-agent ended).
+  const seenSpawns = useRef<Set<number> | undefined>(undefined);
+  useEffect(() => {
+    const spawned = tree.events.filter((e) => e.kind === "spawn").map((e) => e.node);
+    if (!seenSpawns.current) return void (seenSpawns.current = new Set(spawned));
+    const fresh = spawned.filter((id) => !seenSpawns.current!.has(id));
+    for (const id of fresh) seenSpawns.current.add(id);
+    if (screen !== "split" || fresh.length === 0) return;
+    let keys = split;
+    for (const id of fresh) keys = withNewSub(keys, tree, id, SPLIT_MAX);
+    if (keys.join() !== split.join()) setSplitKeys(keys);
+  }, [tree]);
 
   // How many agents and sub-agents are related to the active one: more than the panes can show is said in the bar.
   const activeNode = tree.nodes.find((n) => n.kind === "root" && n.agentId === active?.id);

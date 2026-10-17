@@ -111,7 +111,9 @@ test("the playground shows the forest and the feed, and nothing typed in it chan
   const [a, b] = fleet.snapshot().agents;
   fleet.link(a!.id, b!.id);
   const scout = roster.addSub(a!.host.node, { label: "scout", task: "look around", access: "read-only" });
-  roster.send(scout.id, b!.host.node, "beta: the API moved");
+  roster.send(scout.id, b!.host.node, "beta: the API moved"); // beta is idle: this wakes it
+  await waitFor(() => expect(roster.get(b!.host.node)!.status).toBe("idle"));
+  await b!.controller.session.waitForIdle();
   const r = render(React.createElement(Shell, { fleet, motion: false }));
   size(r, 140, 40);
   await waitFor(() => expect(r.lastFrame()).toContain("Ask anything"));
@@ -121,7 +123,7 @@ test("the playground shows the forest and the feed, and nothing typed in it chan
     expect(f).toContain("PLAYGROUND");
     expect(f).toContain("supervise only");
     expect(f).toContain("scout");
-    expect(f).toContain("✉ scout → beta: beta: the API moved");
+    expect(f).toContain("✉ scout → beta (woke it): beta: the API moved");
     expect(f).toContain("⑂ alpha started scout");
   });
 
@@ -194,6 +196,25 @@ test("f splits an agent with its family: linked agents and its busiest sub-agent
   expect(paneCount(f)).toBe(4);
   expect(f).toContain("sub-agent · depth 1"); // a sub-agent is a read-only pane
   expect(f).toContain("beta");
+  r.unmount();
+});
+
+test("a sub-agent that starts while its agent is in the split appears in the split by itself", async () => {
+  const { fleet, roster } = await fleetOf(["alpha", "beta"]);
+  const [a] = fleet.snapshot().agents;
+  const r = render(React.createElement(Shell, { fleet, motion: false }));
+  size(r, 160, 50);
+  await waitFor(() => expect(r.lastFrame()).toContain("Ask anything"));
+  r.stdin.write(KEY.ctrlS);
+  await waitFor(() => expect(paneCount(r.lastFrame()!)).toBe(2));
+  roster.addSub(a!.host.node, { label: "geo-1", task: "find pi with polygons", access: "read-only" });
+  await waitFor(() => expect(paneCount(r.lastFrame()!)).toBe(3));
+  expect(r.lastFrame()).toContain("geo-1");
+  roster.addSub(a!.host.node, { label: "geo-2", task: "find pi by sampling", access: "read-only" });
+  await waitFor(() => expect(paneCount(r.lastFrame()!)).toBe(4));
+  roster.addSub(a!.host.node, { label: "geo-3", task: "find pi by series", access: "read-only" });
+  await tick();
+  expect(paneCount(r.lastFrame()!)).toBe(4); // never more than four
   r.unmount();
 });
 

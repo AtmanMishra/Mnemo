@@ -47,6 +47,25 @@ export const AREA_LABEL: Record<Area, string> = {
 
 export const RELEASES: Release[] = [
   {
+    version: "0.1.6",
+    date: "2026-10-17",
+    headline: "Agents talk to each other on their own: a message wakes an idle agent, an agent can ask and wait for the answer, and you can see who said what.",
+    changes: [
+      { kind: "changed", area: "agents", text: "A message wakes an idle agent", detail: "A sibling or sub-agent no longer waits for you to prompt the agent it wrote to: the agent reads it at once and can answer, and the answer wakes the sender in turn. You no longer have to ask 'did you get it?'." },
+      { kind: "added", area: "agents", text: "Ask and wait", detail: "message_agent with wait holds the question open for up to two minutes and returns the reply as its result, so an agent can ask a sibling something and use the answer in the same turn." },
+      { kind: "security", area: "safety", text: "A chain of messages is bounded", detail: "Each message counts one more than the one that led to it. After 12 in a row since you last prompted, messages wait for your next prompt, so two agents cannot keep each other busy, and spending, forever. The agents page shows '✉ 2 waiting for you' on the agent holding them." },
+      { kind: "added", area: "interface", text: "Messages between agents appear in the conversation", detail: "Marked ✉ with who sent them and 'another agent, not you', so an agent that starts on its own shows why. The playground feed says when a message woke an agent or was held." },
+      { kind: "changed", area: "interface", text: "Your messages stand out", detail: "What you typed is drawn on a raised band with an accent rule down its left, not just after a ❯." },
+      { kind: "changed", area: "interface", text: "Sub-agents join the split by themselves", detail: "A sub-agent that starts while its agent is in the split takes a free pane, or the pane of one that finished. ctrl+s fills spare panes with the active agent's sub-agents." },
+      { kind: "fixed", area: "agents", text: "A sub-agent whose model call fails says why", detail: "It used to finish 'without an answer' and no reason. Now the tool fails with the model's error, so you and the parent agent can see it (a rate limit, say)." },
+    ],
+    known: [
+      "Sub-agents are watched, not typed to: you talk to top-level agents only.",
+      "Links last for the session; they are not restored when Mnemo restarts.",
+      "In yolo mode, a message can now start an agent working without you: it runs commands the way any yolo turn does. In the other modes, its edits and commands still ask you.",
+    ],
+  },
+  {
     version: "0.1.5",
     date: "2026-10-17",
     headline: "Agents work in teams: sub-agents that start sub-agents, sibling agents that see and message each other, split layouts, and a playground to watch them.",
