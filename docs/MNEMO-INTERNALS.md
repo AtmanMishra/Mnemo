@@ -310,7 +310,7 @@ transcript).
 
 ## 3. The agent runtime (`app/`)
 
-### 3.1 pi in process, and the nine extensions
+### 3.1 pi in process, and the ten extensions
 
 `bin/mnemo.ts` is the only place that touches the process: arguments, the
 terminal, exit codes. It handles the local subcommands that need no provider
@@ -323,7 +323,7 @@ from a standalone pi install). A folder's own `.pi/` extensions, settings, promp
 and skills load only if the folder is trusted (`ProjectTrustStore`; `--trust-project`
 or an answer at launch), because extensions run as code before any approval.
 
-Mnemo's behaviour is nine `InlineExtension`s (inline = shipped with the binary, no
+Mnemo's behaviour is ten `InlineExtension`s (inline = shipped with the binary, no
 per-user install, identical in every mode), built in this order so the gate sees
 every call first (`src/extensions/index.ts`). They share one `Host`
 (`extensions/host.ts`): where state lives, the model runtime, the memory service,
@@ -661,7 +661,7 @@ everywhere** (`.gitattributes`).
 
 ### A stranger's extension: pi's on-disk path
 
-Mnemo's own nine extensions are **inline** — shipped with the binary. The
+Mnemo's own ten extensions are **inline** — shipped with the binary. The
 third-party path is pi's, and it is a directory, not a PR:
 
 | Where | Scope |
