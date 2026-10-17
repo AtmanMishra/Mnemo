@@ -81,7 +81,7 @@ function SelectDialog({ dialog }: { dialog: Extract<Dialog, { kind: "select" }> 
   const space = React.useContext(DialogSpace);
   const WINDOW = Math.max(3, Math.min(8, space.rows - 6));
   const [query, setQuery] = useState("");
-  const [index, setIndex] = useState(0);
+  const [index, setIndex] = useState(() => Math.max(0, dialog.choices.findIndex((c) => c.value === dialog.initial)));
   const items = filterChoices(dialog.choices, query);
   const at = Math.min(index, Math.max(0, items.length - 1));
   useInput((input, key) => {

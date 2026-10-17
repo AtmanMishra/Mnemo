@@ -26,7 +26,7 @@ const READ_ONLY = ["read", "grep", "find", "ls", "memory_search", "spawn_subagen
 
 export function agentsExtension(host: Host, extensionsFor: (child: Host) => import("@earendil-works/pi-coding-agent").InlineExtension[]) {
   return (pi: ExtensionAPI): void => {
-    if (host.depth >= host.maxDepth) return;
+    if (host.depth >= host.roster.limits.maxDepth) return;
     pi.registerTool(
       defineTool({
         name: "spawn_subagent",

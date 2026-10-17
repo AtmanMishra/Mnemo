@@ -9,6 +9,7 @@ import type { Controller } from "../runtime/controller.ts";
 import { App } from "./App.tsx";
 import { Boot, type BootInfo } from "./components/Boot.tsx";
 import { MotionContext } from "./components/motion.ts";
+import { SettingsContext } from "./settings-context.ts";
 import { Onboarding, type OnboardingChoice } from "./components/Onboarding.tsx";
 import type { Fleet } from "../runtime/fleet.ts";
 import { Shell } from "./Shell.tsx";
@@ -33,6 +34,14 @@ export interface RootProps {
 type Phase = "boot" | "onboarding" | "main";
 
 export function Root(p: RootProps): React.ReactElement {
+  return (
+    <SettingsContext.Provider value={p.controller.settings}>
+      <Phases {...p} />
+    </SettingsContext.Provider>
+  );
+}
+
+function Phases(p: RootProps): React.ReactElement {
   const { columns, rows } = useWindowSize();
   const [phase, setPhase] = useState<Phase>(p.boot ? "boot" : p.onboard ? "onboarding" : "main");
   if (phase === "boot")

@@ -30,6 +30,8 @@ import { Playground } from "./Playground.tsx";
 import { NodePane } from "./NodePane.tsx";
 import { Roster } from "../runtime/roster.ts";
 import { familyPanes, linkedRoots, subsOf, withNewSub } from "./tree.ts";
+import { caret, chordMatches } from "../runtime/settings.ts";
+import { useSettings } from "./settings-context.ts";
 import { defaultLayout, fitsPanes, LAYOUT_LABEL, layoutsFor, nextLayout, SPLIT_MAX, splitRects, type SplitLayout } from "./layout.ts";
 import { Toasts, useToasts } from "./Toasts.tsx";
 import { ExitCard } from "./ExitCard.tsx";
@@ -84,9 +86,10 @@ function FleetBar({
   /** In a split: its layout, how many panes, and how many agents are related to the active one. */
   split?: { layout: SplitLayout; shown: number; related: number };
 }): React.ReactElement {
+  const k = useSettings();
   const hints = split
-    ? `◫ ${LAYOUT_LABEL[split.layout]}${split.related > split.shown ? ` · ${split.shown} of ${split.related}` : ""}  alt+l layout  ^g hub  ^y play `
-    : "^g hub  ^p projects  ^n new  ^s split  ^y play ";
+    ? `◫ ${LAYOUT_LABEL[split.layout]}${split.related > split.shown ? ` · ${split.shown} of ${split.related}` : ""}  ${caret(k["keys.layout"])} layout  ${caret(k["keys.hub"])} hub  ${caret(k["keys.playground"])} play `
+    : `${caret(k["keys.hub"])} hub  ${caret(k["keys.projects"])} projects  ${caret(k["keys.newAgent"])} new  ${caret(k["keys.split"])} split  ${caret(k["keys.playground"])} play `;
   const showHints = columns >= 100;
   // One row, always: names shorten to share the room; with no room for names, numbers only.
   const room = columns - 9 - (screen === "hub" || screen === "playground" ? 6 : 0) - (showHints ? hints.length : 0);
@@ -139,6 +142,9 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   const tree = useSyncExternalStore(roster.subscribe, roster.snapshot);
   const { states, version } = useAgentStates(agents);
   const { columns, rows } = useWindowSize();
+  const prefs = useSettings();
+  /** The layout a split opens in: the one chosen in settings if it fits this many panes, else by terminal width. */
+  const startLayout = (n: number): SplitLayout => (prefs.splitLayout !== "auto" && layoutsFor(n).includes(prefs.splitLayout) ? prefs.splitLayout : defaultLayout(n, columns));
   const [screen, setScreen] = useState<Screen>(initial?.screen ?? "agent");
   const [activeId, setActiveId] = useState<number | undefined>(agents[0]?.id);
   const [splitKeys, setSplitKeys] = useState<string[]>([]);
@@ -231,20 +237,20 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
 
   useInput(
     (input, key) => {
-      if (key.ctrl && input === "g") return setScreen((s) => (s === "hub" ? "agent" : "hub"));
-      if (key.ctrl && input === "y") return setScreen((s) => (s === "playground" ? "agent" : "playground"));
-      if (key.ctrl && input === "p") return (setPickerFresh(false), setPicker(true));
-      if (key.ctrl && input === "n" && active) return void open(active.cwd, true);
-      if (key.ctrl && input === "s") return setScreen((s) => (s === "split" ? "agent" : "split"));
-      if (key.meta && input === "l" && screen === "split") return setLayoutChoice((l) => nextLayout(split.length, l ?? defaultLayout(split.length, columns)));
+      if (chordMatches(prefs["keys.hub"], input, key)) return setScreen((s) => (s === "hub" ? "agent" : "hub"));
+      if (chordMatches(prefs["keys.playground"], input, key)) return setScreen((s) => (s === "playground" ? "agent" : "playground"));
+      if (chordMatches(prefs["keys.projects"], input, key)) return (setPickerFresh(false), setPicker(true));
+      if (chordMatches(prefs["keys.newAgent"], input, key) && active) return void open(active.cwd, true);
+      if (chordMatches(prefs["keys.split"], input, key)) return setScreen((s) => (s === "split" ? "agent" : "split"));
+      if (chordMatches(prefs["keys.layout"], input, key) && screen === "split") return setLayoutChoice((l) => nextLayout(split.length, l ?? startLayout(split.length)));
       if (key.meta && /^[1-9]$/.test(input)) {
         const a = agents[Number(input) - 1];
         if (a) go(a.id);
         return;
       }
       if (key.escape && nodeFocus) return setPaneFocus(undefined);
-      if (key.meta && input === ",") return cycle(-1);
-      if (key.meta && input === ".") return cycle(1);
+      if (chordMatches(prefs["keys.prevAgent"], input, key)) return cycle(-1);
+      if (chordMatches(prefs["keys.nextAgent"], input, key)) return cycle(1);
     },
     { isActive: !picker },
   );
@@ -260,7 +266,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
       </MotionContext.Provider>
     );
   // A split needs room: below about 40×10 a pane, one agent is shown instead, and the bar says why.
-  const layout: SplitLayout = layoutsFor(split.length).includes(layoutChoice as SplitLayout) ? layoutChoice! : defaultLayout(split.length, columns);
+  const layout: SplitLayout = layoutsFor(split.length).includes(layoutChoice as SplitLayout) ? layoutChoice! : startLayout(split.length);
   const tooSmall = screen === "split" && !fitsPanes(splitRects(split.length, layout, columns, body - 1));
   const view: Screen = tooSmall ? "agent" : screen;
   const main = body - (tooSmall ? 1 : 0);

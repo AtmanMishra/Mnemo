@@ -12,7 +12,8 @@ import type { ApprovalAnswer, ApprovalRequest } from "../runtime/dialogs.ts";
 import type { MemoryNote, MemoryService } from "@mnemo/memory";
 import { probeInterpreter, resolveInterpreter } from "../kernel/kernel.ts";
 import { Checkpoints } from "../runtime/checkpoints.ts";
-import { LIMITS, Roster, type Access } from "../runtime/roster.ts";
+import { Roster, type Access } from "../runtime/roster.ts";
+import { limitsOf, SettingsStore } from "../runtime/settings.ts";
 
 /**
  * How much Mnemo may do without asking.
@@ -45,7 +46,6 @@ export interface Host {
   python: () => string | undefined;
   /** 0 for the session the user talks to, 1 for its sub-agents, … */
   depth: number;
-  maxDepth: number;
   /** Every agent of the process as a tree (shared by all hosts; see runtime/roster.ts). */
   roster: Roster;
   /** This agent's node in the roster. */
@@ -53,6 +53,8 @@ export interface Host {
   /** What this agent may do; a sub-agent never has more than its parent. */
   access: Access;
   mode: Mode;
+  /** What the user tuned (shared by every agent); read at the moment of use so a change applies at once. */
+  settings: SettingsStore;
   /** Extract durable facts after each run (costs one small model call). */
   reflect: boolean;
   /** Send a run that changed code and checked nothing back once, to verify. */
@@ -101,10 +103,11 @@ export interface HostOptions {
   modelRuntime: ModelRuntime;
   memory?: MemoryService;
   mode?: Mode;
+  /** The process's settings; defaults when absent (tests, headless runs). */
+  settings?: SettingsStore;
   reflect?: boolean;
   verify?: boolean;
   escalate?: string;
-  maxDepth?: number;
   /** The process's roster; a private one when absent (tests, headless runs). */
   roster?: Roster;
   /** The root's name in the roster (the interface sets it once the fleet names the agent). */
@@ -116,6 +119,7 @@ export interface HostOptions {
 export function createHost(o: HostOptions): Host {
   let python: string | undefined | null = null;
   const roster = o.roster ?? new Roster();
+  if (o.settings) roster.setLimits(limitsOf(o.settings.get()));
   return {
     home: o.home,
     agentDir: o.agentDir,
@@ -128,11 +132,11 @@ export function createHost(o: HostOptions): Host {
         return python;
       }),
     depth: 0,
-    maxDepth: o.maxDepth ?? LIMITS.maxDepth,
     roster,
     node: roster.addRoot(o.label ?? "mnemo").id,
     access: "full",
     mode: o.mode ?? "default",
+    settings: o.settings ?? new SettingsStore(),
     reflect: o.reflect ?? true,
     verify: o.verify ?? true,
     escalate: o.escalate,

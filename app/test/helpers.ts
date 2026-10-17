@@ -14,6 +14,7 @@ import { MemoryService } from "@mnemo/memory";
 import { createHost, settleBackground, type Mode } from "../src/extensions/host.ts";
 import { mnemoExtensions } from "../src/extensions/index.ts";
 import type { Roster } from "../src/runtime/roster.ts";
+import type { SettingsStore } from "../src/runtime/settings.ts";
 import { findMemsrv } from "../src/runtime/paths.ts";
 
 export const MEMSRV = findMemsrv("/nonexistent");
@@ -34,6 +35,8 @@ export interface EnvOptions {
   roster?: Roster;
   /** The root's name in the roster. */
   label?: string;
+  /** What the user tuned (see settings.test.ts); the defaults when absent. */
+  settings?: SettingsStore;
   /** What /update talks to (see update.test.ts). */
   updater?: Updater;
 }
@@ -46,7 +49,7 @@ export async function mnemoEnv(o: EnvOptions = {}) {
   const cwd = o.cwd ?? createDemoProject();
   const { modelRuntime, faux } = await createFaux(agentDir, { strong: !!o.escalate });
   const memory = o.memory && MEMSRV ? new MemoryService(MEMSRV, path.join(home, "memory", "journal.jsonl")) : undefined;
-  const host = createHost({ home, agentDir, modelRuntime, memory, mode: o.mode, reflect: o.reflect ?? false, verify: o.verify ?? false, escalate: o.escalate, roster: o.roster, label: o.label });
+  const host = createHost({ home, agentDir, modelRuntime, memory, mode: o.mode, reflect: o.reflect ?? false, verify: o.verify ?? false, escalate: o.escalate, roster: o.roster, label: o.label, settings: o.settings });
   const runtime = await startRuntime({
     cwd,
     agentDir,

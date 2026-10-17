@@ -14,12 +14,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { VERIFY } from "@mnemo/memory";
 import type { Host } from "./host.ts";
 
-export const ESCALATE_AFTER = 2;
-
 export function escalateExtension(host: Host) {
   return (pi: ExtensionAPI): void => {
-    const spec = host.escalate;
-    if (!spec || host.depth > 0) return;
+    if (host.depth > 0) return;
     let failedChecks = 0;
     let original: Parameters<ExtensionAPI["setModel"]>[0] | undefined;
     const commands = new Map<string, string>();
@@ -37,8 +34,11 @@ export function escalateExtension(host: Host) {
       const command = commands.get(event.toolCallId);
       commands.delete(event.toolCallId);
       if (!command || !event.isError || !VERIFY.test(command) || original) return;
+      // A flag or MNEMO_ESCALATE_MODEL wins over the menu's choice.
+      const spec = host.escalate ?? (host.settings.get().escalateModel || undefined);
+      if (!spec) return;
       failedChecks++;
-      if (failedChecks < ESCALATE_AFTER) return;
+      if (failedChecks < host.settings.get().escalateAfter) return;
       const [provider, ...rest] = spec.split("/");
       const strong = host.modelRuntime.getModel(provider!, rest.join("/"));
       if (!strong || !ctx.model || (strong.provider === ctx.model.provider && strong.id === ctx.model.id)) return;

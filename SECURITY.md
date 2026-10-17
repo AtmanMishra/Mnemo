@@ -194,12 +194,13 @@ What that does and does not allow:
   that agent's pane). In `yolo` a message can now start an agent running commands while
   you are away; that is what `yolo` means, so keep `yolo` agents unlinked from ones that
   read untrusted text. What turns that messages start may spend is bounded too: $0.50
-  per agent (with the sub-agents those turns start) since you last prompted it. The
+  per agent (by default; `/settings`) (with the sub-agents those turns start) since you last prompted it. The
   model call that crosses it stops the turn, and until you prompt that agent no message
   wakes it. A model that reports no price (a local one) is not bounded by this; the
   chain bound still holds. Messages are also bounded in size (2,000 characters), rate (30 a
   minute per sender) and backlog (20 held per agent), and so is the tree (depth 3, 4
-  live children, 16 live sub-agents per conversation); a sub-agent never has more access
+  live children, 16 live sub-agents per conversation); these numbers are the defaults, and
+  the settings can change them within fixed ceilings (see Settings below); a sub-agent never has more access
   than its parent.
 - **What agents write is cleaned and redacted** (control and bidirectional-override
   characters removed, credential shapes redacted) before it is stored, shown on the
@@ -212,6 +213,38 @@ What that does and does not allow:
   last prompt (not transcripts or file contents), and a read-only research agent that
   reads hostile text can pass it on as a message. The framing, the gate and the limits
   above are the mitigations; this is still a prompt-injection path between agents.
+
+## Settings
+
+Since 0.1.7 `/settings` (and `mnemo settings`) change how Mnemo behaves. The reference is
+`docs/SETTINGS.md`; what matters here:
+
+- **No setting loosens the gate.** The default mode can be `default` or `plan`, never
+  `yolo` or `accept-edits` (a file cannot switch those on at launch; you choose them in a
+  session with `--yolo`, `/yolo` or `shift+tab`). The settings that touch agents only set
+  how much agents may do *unprompted* (chain length, sub-agent counts, the woken-turn
+  budget); what an agent may edit or run is still decided by the gate and your rules.
+- **Every value is checked once, in one place** (`src/runtime/settings.ts`): the type, a
+  hard range, a closed list of choices. A value outside that is refused, and in a file it is
+  ignored in favour of the default. The only free text is the escalation model, which must be
+  `provider/model-id` and at most 100 characters. No setting holds a key or a path.
+- **The ceilings are fixed in code**, not in the file: at most 64 live sub-agents per
+  conversation, 100 messages in a chain, 6 levels of nesting, $100 woken-turn budget. Raising a
+  limit raises what agents can do or spend while you are away, so each is a choice you make
+  deliberately; `wakeSpend` 0 means no message ever starts an agent.
+- **The model cannot change them.** `/settings` is a command you type; no tool the model has
+  reads or writes the settings, and `config.json` sits in your Mnemo home, outside the project,
+  so an edit to it from the agent (a file write or a shell redirect) asks you in `default` and
+  `accept-edits` and is refused in `plan`. In `yolo` nothing asks, as for every other file. A
+  project you open cannot set them either: they are read from your home, never from `.pi/` or
+  the folder.
+- **Key bindings cannot hide a safety key.** `ctrl+c`, `ctrl+d` and `esc` are not rebindable, nor
+  are the prompt's line-editing keys, and two actions cannot hold one chord.
+- **A file you do not control is read defensively.** `config.json` is written beside and moved
+  over (a crash leaves the old file), with mode 0600. A damaged or hand-edited one is read value by
+  value; anything wrong is the default. Someone who can already write to your Mnemo home can
+  change these settings, but they can equally replace `permissions.json`; the settings add no
+  weaker place to attack.
 
 ## The legacy stack
 

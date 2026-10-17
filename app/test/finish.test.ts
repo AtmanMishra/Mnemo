@@ -94,11 +94,9 @@ test("themes recolour in place, and pixel art follows", () => {
 test("/theme switches and remembers", async () => {
   const e = await mnemoEnv();
   envs.push(e);
-  let saved = "";
-  (e.controller as unknown as { options: Record<string, unknown> }).options.onTheme = (n: string) => (saved = n);
   await e.controller.submit("/theme gameboy");
   expect(themeName()).toBe("gameboy");
-  expect(saved).toBe("gameboy");
+  expect(e.controller.settings.get().theme).toBe("gameboy");
 });
 
 test("the context gauge, toasts sliding and dissolving, the exit card", () => {

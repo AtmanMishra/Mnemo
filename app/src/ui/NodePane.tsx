@@ -9,6 +9,7 @@ import { Box, Text, useInput } from "ink";
 import { isEnded, type RosterNode } from "../runtime/roster.ts";
 import { statusStyle, treeOf } from "./tree.ts";
 import { palette } from "./theme.ts";
+import { useSettings } from "./settings-context.ts";
 
 const clip = (s: string, n: number) => (n <= 0 ? "" : s.length > n ? `${s.slice(0, Math.max(0, n - 1))}…` : s);
 
@@ -30,6 +31,7 @@ export function NodePane({
   /** Send what you typed to the sub-agent. */
   onTell?: (text: string) => TellResult;
 }): React.ReactElement {
+  const prefs = useSettings();
   const [draft, setDraft] = useState("");
   const [said, setSaid] = useState<{ text: string; ok: boolean } | undefined>();
   const open = node.status === "running" && !!onTell;
@@ -82,7 +84,7 @@ export function NodePane({
       <Box flexGrow={1} />
       {!focused && open && height >= 8 ? (
         <Text color={palette.faint} wrap="truncate-end">
-          {clip("alt+, alt+. to focus it and type to it", width - 2)}
+          {clip(`${prefs["keys.prevAgent"]} ${prefs["keys.nextAgent"]} to focus it and type to it`, width - 2)}
         </Text>
       ) : null}
       {focused && open ? (

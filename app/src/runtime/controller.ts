@@ -23,6 +23,8 @@ import { compareVersions, manualStep, type InstallKind } from "./update.ts";
 import { setTheme, themeName, THEMES, type ThemeName } from "../ui/theme.ts";
 import { bestOf, describeBestOf, type CandidateRunner, type LaneState } from "./best-of.ts";
 import { selfCommand } from "./self.ts";
+import { settingsCommand, settingsMenu } from "./settings-menu.ts";
+import { limitsOf, SettingsStore, type Settings, type SettingKey } from "./settings.ts";
 import { summarizeSession, summaryText, titleFrom } from "./sessions.ts";
 import { readLogs, statsText } from "./stats.ts";
 
@@ -113,6 +115,7 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "accept-edits", description: "toggle accept edits: change project files without asking, still ask before commands" },
   { name: "theme", description: "the look: Mnemo Night, Dracula, Nord, Gruvbox, Tokyo Night, Catppuccin, Synthwave, Amber CRT, Game Boy, Paper, Solarized" },
   { name: "update", description: "install the latest Mnemo · /update auto on|off: a daily check that only tells you" },
+  { name: "settings", description: "change how Mnemo looks and behaves: theme, keys, agent limits, notifications · /settings <name> <value> sets one" },
   { name: "mouse", description: "mouse wheel scrolls the conversation (on) or your terminal selects text (off)" },
   { name: "bestof", description: 'race N attempts at a task, keep the smallest that passes: /bestof 3 "npm test" <task>' },
   { name: "plan", description: "toggle plan mode (read-only)" },
@@ -121,16 +124,17 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "quit", description: "leave Mnemo" },
 ];
 
-export const HELP_TEXT = [
+/** `/help`: the commands, and the keys as bound now. */
+export const helpText = (k: Settings): string => [
   "Commands",
   ...BUILTINS.map((c) => `  /${c.name.padEnd(10)} ${c.description}`),
   "  /skill:name  run a skill · /<template> run a prompt template",
   "",
   "Keys",
   "  enter send (queues while Mnemo works) · alt+enter newline · esc interrupt",
-  "  ↑/↓ history · tab accept suggestion · @ mention a file · shift+tab mode · ctrl+t thinking level",
-  "  ctrl+o expand output (everything printed, too) · ctrl+l clear screen · ctrl+k on an empty prompt: go to a command or file",
-  "  ctrl+f find in the conversation (full screen; with --inline your terminal's own search does it)",
+  `  ↑/↓ history · tab accept suggestion · @ mention a file · shift+tab mode · ${k["keys.thinking"]} thinking level`,
+  `  ${k["keys.expand"]} expand output (everything printed, too) · ${k["keys.clear"]} clear screen · ${k["keys.palette"]} on an empty prompt: go to a command or file`,
+  `  ${k["keys.find"]} find in the conversation (full screen; with --inline your terminal's own search does it)`,
   "  ctrl+c twice / ctrl+d quit",
 ].join("\n");
 
@@ -214,8 +218,6 @@ export class Controller {
       onClearScreen?: () => void;
       now?: () => number;
       host?: Host;
-      /** Persist a theme the user picked. */
-      onTheme?: (name: ThemeName) => void;
       /** `/update`: what is installed and how to replace it (see update.ts). Absent in tests and in-process runs. */
       updater?: Updater;
       /** How a best-of candidate runs (tests inject one; the default is this program, headless). */
@@ -239,7 +241,7 @@ export class Controller {
       };
       void this.refreshMemory();
     }
-    this.chrome = { footer: this.readFooter(), statuses: [], workingVisible: true, expanded: false, sessionSeq: 0 };
+    this.chrome = { footer: this.readFooter(), statuses: [], workingVisible: true, expanded: this.settings.get().expandOutput, sessionSeq: 0 };
   }
 
   get session(): AgentSession {
@@ -589,6 +591,22 @@ export class Controller {
     }
   }
 
+  /** What the user tuned. Defaults when this controller has no host (tests). */
+  get settings(): SettingsStore {
+    return this.options.host?.settings ?? (this.#fallback ??= new SettingsStore());
+  }
+
+  #fallback: SettingsStore | undefined;
+
+  /** A setting changed: apply what is not read live (the palette, the wheel, the roster's caps). */
+  private applySetting(key: SettingKey | undefined): void {
+    const s = this.settings.get();
+    if ((key === undefined || key === "theme") && themeName() !== s.theme) setTheme(s.theme);
+    if (key === "mouse") mouse.set(s.mouse);
+    else if (key === undefined && mouse.on && !s.mouse) mouse.set(false);
+    this.options.host?.roster.setLimits(limitsOf(s));
+  }
+
   get mode(): Mode {
     return this.options.host?.mode ?? "default";
   }
@@ -615,7 +633,7 @@ export class Controller {
   private async builtin(name: string, arg: string): Promise<boolean> {
     switch (name) {
       case "help":
-        this.transcript.notice(HELP_TEXT);
+        this.transcript.notice(helpText(this.settings.get()));
         return true;
       case "quit":
       case "exit":
@@ -732,6 +750,7 @@ export class Controller {
         const auto = /^auto\s+(on|off)$/.exec(arg)?.[1];
         if (auto) {
           u.setAuto(auto === "on");
+          this.settings.set("autoUpdate", auto === "on");
           this.transcript.notice(
             auto === "on"
               ? "Update check on: once a day, at launch, Mnemo asks GitHub for the latest version and tells you when there is a newer one. Nothing installs without you."
@@ -772,6 +791,15 @@ export class Controller {
         }
         return true;
       }
+      case "settings": {
+        if (arg.trim()) {
+          const r = settingsCommand(this.settings, arg.trim().split(/\s+/), (k) => this.applySetting(k));
+          this.transcript.notice(r.text, r.ok ? "info" : "warn");
+          return true;
+        }
+        await settingsMenu({ settings: this.settings, dialogs: this.dialogs, notice: (t, tone) => this.transcript.notice(t, tone), applied: (k) => this.applySetting(k) });
+        return true;
+      }
       case "mouse": {
         const on = mouse.toggle();
         this.transcript.notice(
@@ -798,7 +826,7 @@ export class Controller {
           )) as ThemeName | undefined);
         if (pick) {
           setTheme(pick);
-          this.options.onTheme?.(pick);
+          this.settings.set("theme", pick);
           this.transcript.notice(`Theme: ${THEMES[pick].label}`);
         }
         return true;
