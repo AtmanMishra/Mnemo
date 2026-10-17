@@ -15,10 +15,14 @@ export function Inline({ text, kbd }: { text: string; kbd?: boolean }) {
 export function PageHead({ eyebrow, title, lead, children }: { eyebrow: string; title: string; lead: ReactNode; children?: ReactNode }) {
   return (
     <header className="pagehead">
-      <p className="eyebrow" data-intro="">{eyebrow}</p>
-      <Split as="h1" text={title} hero />
-      <p className="lead" data-intro="">{lead}</p>
-      {children ? <div className="pagehead-extra" data-intro="">{children}</div> : null}
+      <div className="pagehead-copy">
+        <p className="eyebrow" data-intro=""><span className="ribbon-tag">{eyebrow}</span></p>
+        <Split as="h1" text={title} hero />
+        <p className="lead" data-intro="">{lead}</p>
+        {children ? <div className="pagehead-extra" data-intro="">{children}</div> : null}
+      </div>
+      {/* The memory graph floats here (the stage follows this box). */}
+      <div className="pagehead-slot" data-stage-anchor="" aria-hidden="true" />
     </header>
   );
 }

@@ -2,7 +2,7 @@
 
 ## Pages
 
-One prerendered file per route (`web/src/routes.ts` is the list): `/`, `/download`, `/docs`, `/shortcuts`,
+One prerendered file per route (`web/src/routes.ts` is the list): `/`, `/features`, `/how-it-works`, `/download`, `/docs`, `/shortcuts`,
 `/changelog`, `/roadmap`, `/security`, `/privacy`, `/terms`, plus `404.html`, `sitemap.xml`, the Atom feed
 `/changelog.xml` and `/mnemo-commands-and-shortcuts.md`. `npm run build` ends with `scripts/check.mjs`, which fails on
 a missing page, a wrong `<h1>` count, a duplicate title, a dead internal link or `#fragment`, or a page missing from the sitemap.
@@ -32,9 +32,18 @@ Vercel at <https://mnemo.atmanmishra.dev>, with DNS on Cloudflare. It replaced t
 - One section per feature in `web/src/sections/`, each with a working demo built from the app's own text (command and tool descriptions, the `--demo` turn, the gate's rules, the theme palettes). Interactive state is local; the server render and reduced motion show every demo in its finished state.
 - Each feature is paired with a figure from [Hairline](https://hairline.lucasmarkes.com) (`@lucasmarkes/hairline`, MIT): isometric line drawings that answer the pointer, loaded only as they near the screen (`web/src/Figure.tsx`). They style themselves with constructable stylesheets, so the CSP needs no change, and draw with the page's colour tokens.
 - Themes: light and dark tokens at the top of `web/src/styles.css`; the header toggle cycles system → light → dark, kept in `localStorage` and applied by `public/boot.js` before first paint.
-- Motion is loaded after hydration (GSAP + Lenis, one smooth-scroll engine, fine pointers only) and does not
-  run under `prefers-reduced-motion`. The hero is `src/art/engram.ts`; the idea behind it is in
-  `art/ENGRAM.md`.
+- The look is mid-century print (cream and teal night, a red ribbon header, seals, ticket buttons) with
+  self-hosted fonts from Fontsource. Pages are listed in `web/src/App.tsx`.
+- The stage (`src/fx/stage.ts`, three.js, lazy loaded) is one WebGL canvas behind every page: Mne as voxels
+  that come apart into a memory graph of six areas, drawn through a post pass (sunburst, pixelation, ASCII,
+  grain). `src/fx/host.ts` points it at each page's `[data-stage-anchor]`; scroll scenes in `src/motion.ts`
+  drive it. Without WebGL2 the page keeps its CSS sunburst and still images.
+- The loader (`src/fx/boot.ts`) shows real progress (fonts, three.js, shader compile, graph, images) and
+  hands its pixel elephant to the stage. It runs only when `public/boot.js` marks the first paint.
+- `src/Router.tsx` swaps pages in the client behind a pixel wipe (`src/fx/transition.ts`); every page is
+  still a prerendered file, so links work without JavaScript.
+- Motion is loaded after hydration (GSAP + ScrollTrigger + Lenis, one smooth-scroll engine, fine pointers
+  only) and does not run under `prefers-reduced-motion`.
 - Headers (HSTS, a strict CSP with no inline script or style, no framing) are in `web/vercel.json`.
 
 ## Vercel

@@ -1,20 +1,6 @@
 /* Pages other than the home page, and the footer every page shares. Tokens come from styles.css. */
 
-.bar nav a[aria-current="page"] { color: var(--text); box-shadow: 0 2px 0 var(--magenta); }
-.nav-cta[aria-current="page"] { box-shadow: 0 2px 0 var(--magenta); }
-
-/* Footer */
-.foot { margin-top: 96px; border-top: 1px solid var(--rule); background: var(--sunken); font-size: 14px; }
-.foot-grid { display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); gap: 32px 40px; padding: 40px 0 8px; }
-.foot-about p { margin: 12px 0 0; color: var(--dim); max-width: 34ch; }
-.foot-ver { font: 13px var(--mono); }
-.foot h2 { font: 700 12px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); margin: 0 0 12px; }
-.foot ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.foot a { color: var(--dim); text-decoration: none; display: inline-block; padding: 3px 0; }
-.foot .brand { color: var(--text); }
-@media (hover: hover) and (pointer: fine) { .foot a:hover { color: var(--text); text-decoration: underline; } }
-.foot-line { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0; padding: 24px 0 40px; font: 13px var(--mono); color: var(--faint); border-top: 1px solid var(--rule); margin-top: 28px; }
-.foot-line a { color: var(--faint); padding: 0; }
+/* The header and footer are in landing.css. */
 
 /* Page frame */
 .page { padding-bottom: 8px; }
@@ -140,7 +126,7 @@ a.badge { background: var(--sunken); color: var(--cyan); border: 1px solid var(-
 .rm-lane .cards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
 
 .notfound { text-align: center; padding-top: 72px; }
-.notfound img { image-rendering: pixelated; }
+.notfound-slot { width: 260px; aspect-ratio: 1; margin: 0 auto 24px; }
 .notfound h1 { margin-top: 12px; }
 .notfound .lead { margin-left: auto; margin-right: auto; }
 .notfound .cards { text-align: left; max-width: 760px; margin: 28px auto; }

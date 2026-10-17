@@ -5,6 +5,8 @@
 //    hidden starting states of the entrance animation exist only while motion is
 //    pending, and the timer guarantees the page can never stay hidden if the
 //    bundle fails to load.
+// 3. `booting` shows the loading screen (src/fx/boot.ts fills it in and lifts it); the
+//    same kind of timer means a failed bundle can never leave it up.
 (function (d) {
   var root = d.documentElement;
   var dark = matchMedia("(prefers-color-scheme: dark)");
@@ -23,6 +25,7 @@
     root.classList.add("reduced");
     return;
   }
-  root.classList.add("motion-pending");
-  setTimeout(function () { root.classList.remove("motion-pending"); }, 4000);
+  root.classList.add("motion-pending", "booting");
+  setTimeout(function () { root.classList.remove("motion-pending"); }, 11000);
+  setTimeout(function () { root.classList.remove("booting"); }, 11000);
 })(document);

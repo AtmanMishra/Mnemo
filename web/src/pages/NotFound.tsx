@@ -3,7 +3,7 @@ import { ROUTES } from "../routes";
 export function NotFound() {
   return (
     <div className="wrap page notfound">
-      <img src="/mne.svg" alt="Mne, the pixel elephant" width="120" height="120" />
+      <div className="notfound-slot" data-stage-anchor="" aria-hidden="true" />
       <h1>Nothing here.</h1>
       <p className="lead">Mne looked and does not remember this page.</p>
       <ul className="cards">
