@@ -26,6 +26,7 @@ import { Root } from "../src/ui/Root.tsx";
 import { workspaceSource } from "../src/runtime/workspace-source.ts";
 import { runMemoryCommand } from "../src/memory-cli.ts";
 import { Fleet } from "../src/runtime/fleet.ts";
+import { Roster } from "../src/runtime/roster.ts";
 import { exitLine } from "../src/ui/ExitCard.tsx";
 import { applyTheme, themePaints, type ThemeName } from "../src/ui/theme.ts";
 import { mouse } from "../src/ui/mouse.ts";
@@ -479,9 +480,11 @@ async function main(): Promise<number> {
   const memory = memsrv ? new MemoryService(memsrv, journal) : undefined;
   const runtimeModels = modelRuntime;
   const firstTrust = args.demo ? undefined : await trustDecision(cwd, dir, args);
+  /** Every agent of the process, as a tree: sub-agents, sibling links and who may message whom. */
+  const roster = new Roster();
   /** One agent's host and pi session in `agentCwd`; the first gets --continue and the demo's injections. */
   const makeAgent = async (agentCwd: string, first = false) => {
-    const host = createHost({ home, agentDir: dir, modelRuntime: runtimeModels, memory, mode: args.mode, reflect: args.reflect, verify: args.verify, escalate: args.escalate });
+    const host = createHost({ roster, home, agentDir: dir, modelRuntime: runtimeModels, memory, mode: args.mode, reflect: args.reflect, verify: args.verify, escalate: args.escalate });
     const runtime = await startRuntime({
       cwd: agentCwd,
       agentDir: dir,

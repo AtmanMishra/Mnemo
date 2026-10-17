@@ -132,7 +132,12 @@ cd app && bun bin/mnemo.ts --demo
   and MCP entry that give Claude Code (or Codex) the same memory; `mnemo memory
   ingest` learns from Claude Code sessions you already have.
 - **Many agents, one window.** `ctrl+g` the hub, `ctrl+s` split view (up to
-  four), `ctrl+p` switch project, `ctrl+n` another agent on this project.
+  four, in several layouts with `alt+l`), `ctrl+p` switch project, `ctrl+n`
+  another agent on this project.
+- **Agents that work in teams.** An agent can start sub-agents, and they can start
+  their own; the hub draws the tree. Link two agents as siblings (`l` in the hub)
+  and they can see and message each other, and a sub-agent can reach its parent's
+  siblings. `ctrl+y` is the playground, a read-only view of them all at work.
 - **Keyboard first.** `ctrl+k` on an empty prompt goes to any command, agent,
   session or file; `ctrl+f` finds in the conversation; `/stats` shows the
   session and the week; `ctrl+o` expands output that is already printed; file

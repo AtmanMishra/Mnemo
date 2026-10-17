@@ -13,6 +13,7 @@ import { createDemoProject, createFaux } from "../src/runtime/demo.ts";
 import { MemoryService } from "@mnemo/memory";
 import { createHost, settleBackground, type Mode } from "../src/extensions/host.ts";
 import { mnemoExtensions } from "../src/extensions/index.ts";
+import type { Roster } from "../src/runtime/roster.ts";
 import { findMemsrv } from "../src/runtime/paths.ts";
 
 export const MEMSRV = findMemsrv("/nonexistent");
@@ -29,6 +30,10 @@ export interface EnvOptions {
   persistent?: boolean;
   /** `provider/id` to escalate to; registers a second faux model, `mnemo-demo/demo-strong`. */
   escalate?: string;
+  /** Share a roster with other envs: agents of one process (sub-agents, sibling links). */
+  roster?: Roster;
+  /** The root's name in the roster. */
+  label?: string;
   /** What /update talks to (see update.test.ts). */
   updater?: Updater;
 }
@@ -41,7 +46,7 @@ export async function mnemoEnv(o: EnvOptions = {}) {
   const cwd = o.cwd ?? createDemoProject();
   const { modelRuntime, faux } = await createFaux(agentDir, { strong: !!o.escalate });
   const memory = o.memory && MEMSRV ? new MemoryService(MEMSRV, path.join(home, "memory", "journal.jsonl")) : undefined;
-  const host = createHost({ home, agentDir, modelRuntime, memory, mode: o.mode, reflect: o.reflect ?? false, verify: o.verify ?? false, escalate: o.escalate });
+  const host = createHost({ home, agentDir, modelRuntime, memory, mode: o.mode, reflect: o.reflect ?? false, verify: o.verify ?? false, escalate: o.escalate, roster: o.roster, label: o.label });
   const runtime = await startRuntime({
     cwd,
     agentDir,

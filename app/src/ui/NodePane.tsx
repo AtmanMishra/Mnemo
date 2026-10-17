@@ -1,0 +1,47 @@
+/**
+ * A sub-agent in a split pane: what it was asked, what it is doing, what it
+ * answered, and the agents under it. Read-only; it has no prompt, because a
+ * sub-agent is a session its parent drives, not one you type to.
+ */
+import React from "react";
+import { Box, Text } from "ink";
+import type { RosterNode } from "../runtime/roster.ts";
+import { statusStyle, treeOf } from "./tree.ts";
+import { palette } from "./theme.ts";
+
+const clip = (s: string, n: number) => (n <= 0 ? "" : s.length > n ? `${s.slice(0, Math.max(0, n - 1))}…` : s);
+
+export function NodePane({ node, nodes, width, height, focused }: { node: RosterNode; nodes: readonly RosterNode[]; width: number; height: number; focused: boolean }): React.ReactElement {
+  const st = statusStyle(node.status);
+  const lines: { text: string; tone: string }[] = [];
+  const wrap = (label: string, text: string, tone: string, max: number) => {
+    const words = `${label}${text.replace(/\s+/g, " ")}`;
+    for (let i = 0, n = 0; i < words.length && n < max; i += width - 2, n++) lines.push({ text: words.slice(i, i + width - 2), tone });
+  };
+  wrap("task: ", node.task, palette.dim, 4);
+  lines.push({ text: node.stepCount ? `steps (${node.stepCount})` : "no steps yet", tone: palette.faint });
+  for (const s of node.steps.slice(-6)) lines.push({ text: `  ${s}`, tone: palette.dim });
+  if (node.answer) wrap("answer: ", node.answer, palette.text, 6);
+  const kids = treeOf(nodes, node.id).slice(1);
+  if (kids.length) {
+    lines.push({ text: "under it", tone: palette.faint });
+    for (const k of kids.slice(0, 6)) lines.push({ text: `${k.prefix.slice(0)}${statusStyle(k.node.status).glyph} ${k.node.label}`, tone: palette.dim });
+  }
+  const room = Math.max(0, height - 1);
+  return (
+    <Box flexDirection="column" width={width} height={height} paddingX={1}>
+      <Text wrap="truncate-end">
+        <Text color={st.tone}>{st.glyph} </Text>
+        <Text bold color={focused ? palette.text : palette.dim}>
+          {clip(node.label, Math.max(4, width - 24))}
+        </Text>
+        <Text color={palette.faint}>{`  sub-agent · depth ${node.depth} · ${node.access} · ${node.status}`}</Text>
+      </Text>
+      {lines.slice(0, room).map((l, i) => (
+        <Text key={i} color={l.tone} wrap="truncate-end">
+          {clip(l.text, width - 2)}
+        </Text>
+      ))}
+    </Box>
+  );
+}

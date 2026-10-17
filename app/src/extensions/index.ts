@@ -9,6 +9,7 @@ import { checkpointsExtension } from "./checkpoints.ts";
 import { escalateExtension } from "./escalate.ts";
 import { kernelExtension } from "./kernel.ts";
 import { memoryExtension } from "./memory.ts";
+import { peersExtension } from "./peers.ts";
 import { policyExtension } from "./policy.ts";
 import { shellExtension } from "./shell.ts";
 import { skillsExtension } from "./skills.ts";
@@ -22,6 +23,7 @@ export function mnemoExtensions(host: Host): InlineExtension[] {
     { name: "mnemo-memory", factory: memoryExtension(host) },
     { name: "mnemo-kernel", factory: kernelExtension(host) },
     { name: "mnemo-agents", factory: agentsExtension(host, mnemoExtensions) },
+    { name: "mnemo-peers", factory: peersExtension(host) },
     { name: "mnemo-skills", factory: skillsExtension(host) },
     { name: "mnemo-escalate", factory: escalateExtension(host) },
     { name: "mnemo-trace", factory: traceExtension(host) },

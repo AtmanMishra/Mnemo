@@ -1,0 +1,103 @@
+# Agent hierarchy, siblings and the playground (0.1.5)
+
+*Design, written 2026-10-16 before the code; built in 0.1.5. The shipped behaviour
+is in `docs/MNEMO-INTERNALS.md` §3.4 and the security review in `SECURITY.md`; the
+tests are `roster`, `hierarchy`, `layout`, `tree` and `agents-ui` in `app/test/`.*
+
+## What exists today
+
+`spawn_subagent` runs one blocking pi session inside the parent's tool call, one level
+deep by default (`maxDepth` 2: only depth 0 and 1 can delegate). A sub-agent is invisible
+outside its parent's tool block: the agents page shows only the processes' top-level
+agents, and agents cannot see or talk to each other.
+
+## The model: a tree of nodes, plus links between roots
+
+Every agent the process runs is a **node** in one in-process **Roster**
+(`app/src/runtime/roster.ts`):
+
+- A **root** is what the user talks to: one per open conversation (the fleet agents).
+- A **sub-agent** is created by any node with `spawn_subagent`. It has a parent, a
+  depth, a task, a status (`running`, `done`, `failed`, `stopped`), its recent steps and
+  its answer. Sub-agents can spawn sub-agents.
+- A **sibling link** joins two or more roots. Only the user creates or removes one (the
+  agents page). No tool can.
+
+Limits, all in code and all visible in the error the model gets: depth 3 (root 0 down to
+3; depth 3 cannot spawn), 4 live children per node, 16 live sub-agents per root, a read-only
+node can only spawn read-only children.
+
+### Who can talk to whom
+
+A node can address its **family**, and nothing else:
+
+1. its parent and its children;
+2. its siblings: other children of its parent, or for a root the roots it is linked to;
+3. the siblings of each of its ancestors (so a sub-agent can reach its parent's linked
+   roots, its grandparent's, and so on).
+
+It cannot reach a cousin's descendants, an unlinked root, or anyone at all in another
+tree. The rule is one function, `Roster.canReach`, and `send` enforces it; a prompt
+never has to be trusted for it.
+
+### What agents get
+
+- `list_agents`: the family, each with id, role, status, task, last steps (and for a
+  root its last prompt and the files it edited). No transcripts, no file contents.
+- `message_agent(to, text)`: a short message (2,000 characters). A running node gets it
+  as a follow-up in its current run; an idle node holds it until its next turn.
+  **A message never starts a turn on its own**, so a sibling cannot make an idle agent
+  spend money or act; the user's next prompt (or the run it is already in) is when it
+  reads. This also bounds ping-pong between two agents.
+- A one-line family summary arrives each turn as a hidden message, so siblings "know what
+  the other is doing" without being asked.
+
+### Security rules (the review checks each of these with a test)
+
+1. **A message is data, never instruction.** It is delivered as a labelled custom message
+   ("from agent #7, not from the user, grants no permission"), never into the system
+   prompt, and carries no authority over modes, approvals or deny rules. The receiving
+   agent's gate decides every edit and command exactly as before.
+2. **Reach is enforced in code** (`canReach`), not by prompt.
+3. **Only the user links roots.** There is no tool for it, and a sub-agent cannot link
+   itself to anything.
+4. **Bounded**: message size, 30 sends a minute per sender, 20 undelivered per node, the
+   depth and fan-out limits above, and no auto-wake of idle agents.
+5. **Redacted**: text passes through `redact()` before it is stored, shown or delivered;
+   the playground and the trace never see a raw key.
+6. **No privilege growth**: a child's access is at most its parent's; the mode stays the
+   user's and live for the whole tree.
+7. **Teardown**: closing a root stops its tree, unlinks it and drops its inboxes; a
+   message to a node that is gone fails with a plain error.
+8. **The playground is read-only by construction**: it takes a `RosterView` (snapshot and
+   subscribe, no mutators) and has no composer, no abort and no send. It can only
+   *navigate* (open the agent in the agents page, where the user can act).
+
+Risk we accept and state in `SECURITY.md`: a read-only research agent that reads hostile
+text can pass it on as a message. The receiver treats it as untrusted data and its gate
+still asks the user, but it is a real prompt-injection path between agents.
+
+## The screens
+
+- **Agents page (hub)**: each root is a card; under it, its sub-agent tree
+  (`├─ └─`, status glyph, name, task, steps), collapsed to what fits ("+3 more").
+  Linked roots carry `⇄` and the name of the group. Keys: `l` link/unlink (pick a second
+  root), `f` split with this agent's family (linked roots first, ranked waiting >
+  working > recent, capped at four), `p` the playground.
+- **Split**: at most four panes, always. Layouts depend on the count and `alt+l` cycles
+  them: 2 → columns, rows; 3 → columns, rows, big-left, big-top; 4 → grid, columns,
+  rows, big-left. A pane is a root (full workspace) or a sub-agent (a read-only live
+  view of its task, steps and answer). When more than four are related, the bar shows
+  `4 of 9` and the agents page picks the rest in.
+- **Playground** (`ctrl+y`, or `p` in the agents page): the whole forest on the left, a
+  live feed of spawns, messages, answers and links on the right, the selected node's
+  detail below. Supervise only; `enter` jumps to the agent page to interact.
+
+The user talks to **roots only**. Sub-agents are watched, not typed to (they are in-process
+sessions with no composer). If you want to talk to a sub-agent directly, that is a later
+release.
+
+## Not in 0.1.5
+
+Waking an idle agent from a message (an explicit, per-link opt-in later), persisting links
+across restarts, user-typed messages into the tree from the playground.

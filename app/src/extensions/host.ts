@@ -12,6 +12,7 @@ import type { ApprovalAnswer, ApprovalRequest } from "../runtime/dialogs.ts";
 import type { MemoryNote, MemoryService } from "@mnemo/memory";
 import { probeInterpreter, resolveInterpreter } from "../kernel/kernel.ts";
 import { Checkpoints } from "../runtime/checkpoints.ts";
+import { LIMITS, Roster, type Access } from "../runtime/roster.ts";
 
 /**
  * How much Mnemo may do without asking.
@@ -45,6 +46,12 @@ export interface Host {
   /** 0 for the session the user talks to, 1 for its sub-agents, … */
   depth: number;
   maxDepth: number;
+  /** Every agent of the process as a tree (shared by all hosts; see runtime/roster.ts). */
+  roster: Roster;
+  /** This agent's node in the roster. */
+  node: number;
+  /** What this agent may do; a sub-agent never has more than its parent. */
+  access: Access;
   mode: Mode;
   /** Extract durable facts after each run (costs one small model call). */
   reflect: boolean;
@@ -98,12 +105,17 @@ export interface HostOptions {
   verify?: boolean;
   escalate?: string;
   maxDepth?: number;
+  /** The process's roster; a private one when absent (tests, headless runs). */
+  roster?: Roster;
+  /** The root's name in the roster (the interface sets it once the fleet names the agent). */
+  label?: string;
   /** Injected by tests; the default probes for a Python that actually runs. */
   python?: () => string | undefined;
 }
 
 export function createHost(o: HostOptions): Host {
   let python: string | undefined | null = null;
+  const roster = o.roster ?? new Roster();
   return {
     home: o.home,
     agentDir: o.agentDir,
@@ -116,7 +128,10 @@ export function createHost(o: HostOptions): Host {
         return python;
       }),
     depth: 0,
-    maxDepth: o.maxDepth ?? 2,
+    maxDepth: o.maxDepth ?? LIMITS.maxDepth,
+    roster,
+    node: roster.addRoot(o.label ?? "mnemo").id,
+    access: "full",
     mode: o.mode ?? "default",
     reflect: o.reflect ?? true,
     verify: o.verify ?? true,

@@ -87,12 +87,14 @@ export const GROUPS: Group[] = [
   {
     id: "agents",
     title: "Agents (several projects at once)",
-    after: "In the hub: `←` `→` `↑` `↓` choose a card, `enter` opens it, `n` new agent, `s` split with it, `x` close it.",
+    after: "In the hub: `←` `→` `↑` `↓` choose a card, `enter` opens it, `n` new agent, `s` split with it, `x` close it, `l` then `l` on another card links the two as siblings (they can see and message each other), `u` unlinks, `f` splits with its family, `p` opens the playground. Each card shows its sub-agents and links.",
     rows: [
       ["`ctrl+g`", "hub: a card per agent (again to go back)"],
       ["`ctrl+p`", "switch project, or open one by typing its path"],
       ["`ctrl+n`", "another agent on the same project, in parallel"],
-      ["`ctrl+s`", "split view (up to four agents side by side); again for single view"],
+      ["`ctrl+s`", "split view (never more than four panes); again for single view"],
+      ["`alt+l`", "in a split: the next layout (columns, rows, grid, main + side)"],
+      ["`ctrl+y`", "playground: every agent, sub-agent and message between them, to watch only"],
       ["`alt+1` … `alt+9`", "go to agent 1–9"],
       ["`alt+,` `alt+.`", "previous / next agent"],
     ],
