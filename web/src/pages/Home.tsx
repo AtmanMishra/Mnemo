@@ -3,6 +3,7 @@ import { Install } from "../Install";
 import { Split } from "../Split";
 import { Seal } from "../Seal";
 import { GraphPlay } from "../GraphPlay";
+import { Showcase } from "../sections/Showcase";
 import { REPO, VERSION } from "../site";
 
 const MARQUEE = ["An elephant never forgets", "Neither does your agent", "Bring your own model", "Memory stays on your machine", "No telemetry", "Open source"];
@@ -129,6 +130,8 @@ export function Home() {
           </ul>
         </div>
       </section>
+
+      <Showcase />
 
       <section className="play-sec" aria-labelledby="play-h">
         <div className="wrap play-grid">
