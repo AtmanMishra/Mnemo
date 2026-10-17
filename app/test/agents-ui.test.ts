@@ -111,7 +111,9 @@ test("the playground shows the forest and the feed, and nothing typed in it chan
   const [a, b] = fleet.snapshot().agents;
   fleet.link(a!.id, b!.id);
   const scout = roster.addSub(a!.host.node, { label: "scout", task: "look around", access: "read-only" });
-  roster.send(scout.id, b!.host.node, "beta: the API moved");
+  roster.send(scout.id, b!.host.node, "beta: the API moved"); // beta is idle: this wakes it
+  await waitFor(() => expect(roster.get(b!.host.node)!.status).toBe("idle"));
+  await b!.controller.session.waitForIdle();
   const r = render(React.createElement(Shell, { fleet, motion: false }));
   size(r, 140, 40);
   await waitFor(() => expect(r.lastFrame()).toContain("Ask anything"));
@@ -121,7 +123,7 @@ test("the playground shows the forest and the feed, and nothing typed in it chan
     expect(f).toContain("PLAYGROUND");
     expect(f).toContain("supervise only");
     expect(f).toContain("scout");
-    expect(f).toContain("✉ scout → beta: beta: the API moved");
+    expect(f).toContain("✉ scout → beta (woke it): beta: the API moved");
     expect(f).toContain("⑂ alpha started scout");
   });
 
@@ -197,6 +199,25 @@ test("f splits an agent with its family: linked agents and its busiest sub-agent
   r.unmount();
 });
 
+test("a sub-agent that starts while its agent is in the split appears in the split by itself", async () => {
+  const { fleet, roster } = await fleetOf(["alpha", "beta"]);
+  const [a] = fleet.snapshot().agents;
+  const r = render(React.createElement(Shell, { fleet, motion: false }));
+  size(r, 160, 50);
+  await waitFor(() => expect(r.lastFrame()).toContain("Ask anything"));
+  r.stdin.write(KEY.ctrlS);
+  await waitFor(() => expect(paneCount(r.lastFrame()!)).toBe(2));
+  roster.addSub(a!.host.node, { label: "geo-1", task: "find pi with polygons", access: "read-only" });
+  await waitFor(() => expect(paneCount(r.lastFrame()!)).toBe(3));
+  expect(r.lastFrame()).toContain("geo-1");
+  roster.addSub(a!.host.node, { label: "geo-2", task: "find pi by sampling", access: "read-only" });
+  await waitFor(() => expect(paneCount(r.lastFrame()!)).toBe(4));
+  roster.addSub(a!.host.node, { label: "geo-3", task: "find pi by series", access: "read-only" });
+  await tick();
+  expect(paneCount(r.lastFrame()!)).toBe(4); // never more than four
+  r.unmount();
+});
+
 test("f on an agent with nothing around it says so and splits nothing", async () => {
   const { fleet } = await fleetOf(["alpha", "beta"]);
   const r = render(React.createElement(Shell, { fleet, motion: false, initial: { screen: "hub" } }));
@@ -226,4 +247,95 @@ test("control keys that share a letter with a hub key (ctrl+p, ctrl+f, ctrl+l, c
   expect(r.lastFrame()).not.toContain("choose the agent to link with");
   expect(roster.snapshot().version).toBe(before);
   r.unmount();
+});
+
+test("in a split, alt+. moves to a sub-agent's pane, and what you type there reaches that sub-agent", async () => {
+  const { fleet, roster } = await fleetOf(["alpha"]);
+  const [a] = fleet.snapshot().agents;
+  const told: string[] = [];
+  const r = render(React.createElement(Shell, { fleet, motion: false }));
+  size(r, 160, 50);
+  await waitFor(() => expect(r.lastFrame()).toContain("Ask anything"));
+  r.stdin.write(KEY.ctrlS);
+  const scout = roster.addSub(a!.host.node, { label: "scout", task: "map the repo", access: "read-only" });
+  roster.attach(scout.id, { deliver: () => {}, stop: () => {}, tell: (t) => (told.push(t), true) });
+  await waitFor(() => expect(r.lastFrame()).toContain("alt+, alt+. to focus it"));
+  const before = transcriptSize(fleet);
+  r.stdin.write(KEY.alt("."));
+  await waitFor(() => expect(r.lastFrame()).toContain("type to tell it something"));
+  r.stdin.write("also read the tests");
+  await tick();
+  r.stdin.write(KEY.enter);
+  await waitFor(() => expect(told).toEqual(["also read the tests"]));
+  await waitFor(() => expect(r.lastFrame()).toContain("✎ you: also read the tests"));
+  expect(r.lastFrame()).toContain("sent: it reads it after its current step");
+  expect(transcriptSize(fleet)).toEqual(before); // alpha's prompt got none of it
+  // esc gives the keys back to alpha; a finished sub-agent cannot be told anything.
+  r.stdin.write("\x1b");
+  await waitFor(() => expect(r.lastFrame()).not.toContain("type to tell it something"));
+  roster.finish(scout.id, "done", "mapped");
+  await waitFor(() => expect(r.lastFrame()).toContain("answer: mapped"));
+  await tick(200);
+  r.stdin.write(KEY.alt("."));
+  await waitFor(() => expect(r.lastFrame()).toContain("it has finished: nothing more reaches it"));
+  r.stdin.write("more\r");
+  await tick();
+  expect(told).toHaveLength(1);
+  r.unmount();
+});
+
+test("c in the playground shows the selected agent's conversation as a thread", async () => {
+  const { fleet, roster } = await fleetOf(["alpha", "beta"]);
+  const [a, b] = fleet.snapshot().agents;
+  fleet.link(a!.id, b!.id);
+  const scout = roster.addSub(a!.host.node, { label: "scout", task: "look around", access: "read-only" });
+  roster.send(scout.id, b!.host.node, "the API moved to v2, and the old routes return 410 since this morning");
+  await waitFor(() => expect(roster.get(b!.host.node)!.status).toBe("idle"));
+  await b!.controller.session.waitForIdle();
+  const r = render(React.createElement(Shell, { fleet, motion: false }));
+  size(r, 140, 40);
+  await waitFor(() => expect(r.lastFrame()).toContain("Ask anything"));
+  r.stdin.write(KEY.ctrlY);
+  await waitFor(() => expect(r.lastFrame()).toContain("PLAYGROUND"));
+  r.stdin.write(KEY.down); // scout, under alpha
+  await tick();
+  r.stdin.write("c");
+  await waitFor(() => {
+    const f = r.lastFrame()!;
+    expect(f).toContain("CONVERSATION · scout ⇄ beta");
+    expect(f).toContain("scout → beta · woke it");
+    expect(f).toContain("return 410 since this morning");
+  });
+  r.stdin.write("c");
+  await waitFor(() => expect(r.lastFrame()).toContain("ACTIVITY"));
+  r.unmount();
+});
+
+test("two linked projects are linked again when both are open in a later run, until you unlink them", async () => {
+  let saved: [string, string][] = [];
+  const roster1 = new Roster();
+  const spawn = (roster: Roster) => async (cwd: string, exit: (code?: number) => void) => {
+    const e = await mnemoEnv({ cwd, roster });
+    envs.push(e);
+    (e.controller as unknown as { options: { exit: (c?: number) => void } }).options.exit = exit;
+    return { controller: e.controller, host: e.host, source: workspaceSource(e.controller, e.host, e.home) };
+  };
+  const [alpha, beta, gamma] = [project("alpha"), project("beta"), project("gamma")];
+  const first = new Fleet(spawn(roster1), { onEmpty: () => {}, saveLinks: (l) => (saved = l) });
+  const [a1, b1] = [await first.open(alpha), await first.open(beta)];
+  first.link(a1.id, b1.id);
+  expect(saved).toHaveLength(1);
+
+  // A later run, with the projects given in another spelling (a trailing slash): opening both links them again.
+  const roster2 = new Roster();
+  const second = new Fleet(spawn(roster2), { onEmpty: () => {}, links: saved, saveLinks: (l) => (saved = l) });
+  const b2 = await second.open(`${beta}${path.sep}`);
+  const g2 = await second.open(gamma);
+  expect(roster2.canReach(b2.host.node, g2.host.node)).toBe(false);
+  const a2 = await second.open(alpha);
+  expect(roster2.canReach(a2.host.node, b2.host.node)).toBe(true);
+  expect(a2.controller.transcript.snapshot().committed.some((x) => x.kind === "notice" && x.text.includes("Linked with beta again"))).toBe(true);
+  // Unlinking is remembered too.
+  second.unlink(a2.id);
+  expect(saved).toEqual([]);
 });

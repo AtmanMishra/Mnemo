@@ -183,12 +183,24 @@ What that does and does not allow:
   before a command, whoever suggested it. In `yolo` nothing asks, so a message can
   talk a `yolo` agent into running something; do not link agents you want to keep
   unattended and unrestricted to ones that read untrusted text.
-- **A message never starts work.** It reaches a running agent after its current step and
-  an idle one at its next prompt, so an agent cannot spend your money or act on another
-  one's behalf while you are away. Messages are bounded (2,000 characters, 30 a minute
-  per sender, 20 unread per idle agent) and so is the tree (depth 3, 4 live children,
-  16 live sub-agents per conversation); a sub-agent never has more access than its
-  parent.
+- **A message can start work, but only a bounded chain of it.** Since 0.1.6 a message
+  wakes an idle agent so siblings can talk without you relaying. Each message counts one
+  more than the message that led to it, and after 12 in a row since a user last prompted
+  any agent in the chain, messages are held for your next prompt instead of delivered
+  (a sub-agent has no prompt of its own, so one to it is refused instead),
+  so two agents cannot keep each other working, and spending, indefinitely. A woken
+  agent's turn goes through its gate exactly like one you started: in `default`,
+  `accept-edits` and `plan` its edits and commands still ask you (the approval appears in
+  that agent's pane). In `yolo` a message can now start an agent running commands while
+  you are away; that is what `yolo` means, so keep `yolo` agents unlinked from ones that
+  read untrusted text. What turns that messages start may spend is bounded too: $0.50
+  per agent (with the sub-agents those turns start) since you last prompted it. The
+  model call that crosses it stops the turn, and until you prompt that agent no message
+  wakes it. A model that reports no price (a local one) is not bounded by this; the
+  chain bound still holds. Messages are also bounded in size (2,000 characters), rate (30 a
+  minute per sender) and backlog (20 held per agent), and so is the tree (depth 3, 4
+  live children, 16 live sub-agents per conversation); a sub-agent never has more access
+  than its parent.
 - **What agents write is cleaned and redacted** (control and bidirectional-override
   characters removed, credential shapes redacted) before it is stored, shown on the
   agents page or the playground, or delivered, so an agent cannot repaint your

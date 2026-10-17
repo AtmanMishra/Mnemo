@@ -241,10 +241,20 @@ export function BlockView({ block, cwd, expanded, welcome }: BlockProps): React.
     case "welcome":
       return welcome ? <Welcome info={welcome} /> : <></>;
     case "user":
+      // What you said stands apart from what came back: a raised band with an accent rule down its left.
       return (
-        <Gutter mark={glyph.user} tint={color.accent}>
-          <Text bold>{block.text}</Text>
-        </Gutter>
+        <Box marginTop={1} borderStyle="bold" borderTop={false} borderRight={false} borderBottom={false} borderLeftColor={color.accent}>
+          <Box flexGrow={1} flexShrink={1} backgroundColor={color.selectBg} paddingX={1}>
+            <Box width={2} flexShrink={0}>
+              <Text color={color.accent} bold>
+                {glyph.user}
+              </Text>
+            </Box>
+            <Text color={color.text} bold>
+              {block.text}
+            </Text>
+          </Box>
+        </Box>
       );
     case "assistant":
       return (
@@ -256,6 +266,19 @@ export function BlockView({ block, cwd, expanded, welcome }: BlockProps): React.
       return <ThinkingView block={block} expanded={expanded} />;
     case "tool":
       return <ToolView block={block} cwd={cwd} expanded={expanded} />;
+    case "peer":
+      // Another agent's words: labelled with who sent them, and never drawn like yours.
+      return (
+        <Gutter mark={glyph.peer} tint={color.accent2}>
+          <Text color={color.accent2}>
+            {`from #${block.from} ${block.label}`}
+            <Text color={color.subtle}> · another agent, not you</Text>
+          </Text>
+          <Box paddingLeft={2}>
+            <Text color={color.muted}>{block.text}</Text>
+          </Box>
+        </Gutter>
+      );
     case "memory":
       return (
         <Gutter mark={glyph.memory} tint={color.accent}>

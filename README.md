@@ -137,7 +137,9 @@ cd app && bun bin/mnemo.ts --demo
 - **Agents that work in teams.** An agent can start sub-agents, and they can start
   their own; the hub draws the tree. Link two agents as siblings (`l` in the hub)
   and they can see and message each other, and a sub-agent can reach its parent's
-  siblings. `ctrl+y` is the playground, a read-only view of them all at work.
+  siblings; links come back when both projects are open again. In a split you can
+  type to a running sub-agent. `ctrl+y` is the playground, a read-only view of them
+  all at work, with each pair's conversation as a thread (`c`).
 - **Keyboard first.** `ctrl+k` on an empty prompt goes to any command, agent,
   session or file; `ctrl+f` finds in the conversation; `/stats` shows the
   session and the week; `ctrl+o` expands output that is already printed; file

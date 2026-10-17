@@ -5,6 +5,9 @@
  *
  * The interface reads a snapshot and calls open/close/focus; it never builds an
  * agent itself. Closing the last agent ends the program.
+ *
+ * Links are remembered by project folder (state.json): two projects you linked are
+ * linked again when both are open, in this run or a later one, until you unlink them.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -65,10 +68,27 @@ export function agentSummary(a: Pick<Agent, "controller">): Omit<FleetSummary, "
 }
 
 const RECENT_MAX = 20;
+const LINKS_MAX = 50;
+
+/** A folder as one spelling: its real path (macOS /private/var, Windows 8.3 names), case-folded on Windows. */
+function folderKey(p: string): string {
+  let r: string;
+  try {
+    r = fs.realpathSync.native(p);
+  } catch {
+    r = path.resolve(p);
+  }
+  return process.platform === "win32" ? r.toLowerCase() : r;
+}
+
+/** Two folders as a link, in one order. */
+const pairOf = (a: string, b: string): [string, string] => (a <= b ? [a, b] : [b, a]);
 
 export class Fleet {
   private agents: Agent[] = [];
   private recent: string[];
+  /** Linked project folders, as folder keys; kept while either is closed. */
+  private links: [string, string][];
   private nextId = 1;
   private listeners = new Set<() => void>();
   private snap: FleetSnapshot;
@@ -83,10 +103,14 @@ export class Fleet {
       recent?: string[];
       /** Persist the recent list (state.json). */
       saveRecent?: (recent: string[]) => void;
+      /** Project folders linked before. */
+      links?: [string, string][];
+      saveLinks?: (links: [string, string][]) => void;
       now?: () => number;
     },
   ) {
     this.recent = (o.recent ?? []).slice(0, RECENT_MAX);
+    this.links = (o.links ?? []).filter((l) => Array.isArray(l) && typeof l[0] === "string" && typeof l[1] === "string").slice(0, LINKS_MAX);
     this.done = { agents: 0, turns: 0, files: 0, learned: 0, cost: 0, startedAt: (o.now ?? Date.now)() };
     this.snap = { agents: [], recent: this.recent, summary: this.done };
   }
@@ -109,6 +133,7 @@ export class Fleet {
     this.agents.push(agent);
     agent.host.roster.describeRoot(agent.host.node, { label: agent.name, agentId: agent.id });
     this.remember(cwd);
+    this.relink(agent);
     this.changed();
     return agent;
   }
@@ -123,6 +148,7 @@ export class Fleet {
     this.agents.push(agent);
     agent.host.roster.describeRoot(agent.host.node, { label: agent.name, agentId: id });
     this.remember(dir);
+    this.relink(agent);
     this.changed();
     return agent;
   }
@@ -136,13 +162,45 @@ export class Fleet {
   link(a: number, b: number): boolean {
     const x = this.agents.find((n) => n.id === a);
     const y = this.agents.find((n) => n.id === b);
-    return !!x && !!y && x.host.roster.link(x.host.node, y.host.node);
+    const ok = !!x && !!y && x.host.roster.link(x.host.node, y.host.node);
+    if (ok) this.saveLinks();
+    return ok;
   }
 
   /** Take an agent out of its sibling group. */
   unlink(id: number): boolean {
     const x = this.agents.find((n) => n.id === id);
-    return !!x && x.host.roster.unlink(x.host.node);
+    const ok = !!x && x.host.roster.unlink(x.host.node);
+    if (ok) this.saveLinks();
+    return ok;
+  }
+
+  /** Link a newly open agent with the open agents its project was linked with before, and say so. */
+  private relink(agent: Agent): void {
+    const mine = folderKey(agent.cwd);
+    const joined: string[] = [];
+    for (const [a, b] of this.links) {
+      if (a !== mine && b !== mine) continue;
+      const other = a === mine ? b : a;
+      const peer = this.agents.find((x) => x.id !== agent.id && folderKey(x.cwd) === other && !joined.includes(x.name));
+      if (peer && agent.host.roster.link(agent.host.node, peer.host.node)) joined.push(peer.name);
+    }
+    if (joined.length) agent.controller.transcript.notice(`Linked with ${joined.join(", ")} again, as you left them (u in the hub unlinks)`);
+  }
+
+  /** Remember the links among open agents; a link to a project that is not open stays as it was. */
+  private saveLinks(): void {
+    const open = new Set(this.agents.map((a) => folderKey(a.cwd)));
+    const keep = this.links.filter(([a, b]) => !(open.has(a) && open.has(b)));
+    const now: [string, string][] = [];
+    for (const x of this.agents)
+      for (const y of this.agents) {
+        if (x.id >= y.id || x.host.roster.groupOf(x.host.node) === undefined) continue;
+        if (x.host.roster.groupOf(x.host.node) === y.host.roster.groupOf(y.host.node)) now.push(pairOf(folderKey(x.cwd), folderKey(y.cwd)));
+      }
+    const seen = new Set<string>();
+    this.links = [...now, ...keep].filter((l) => !seen.has(l.join("\0")) && !!seen.add(l.join("\0"))).slice(0, LINKS_MAX);
+    this.o.saveLinks?.(this.links);
   }
 
   /** Everything done so far: closed agents and open ones. */

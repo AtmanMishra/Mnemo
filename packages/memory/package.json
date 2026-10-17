@@ -1,6 +1,6 @@
 {
   "name": "@mnemo/memory",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Mnemo's memory, detachable: recall, session understanding, failure-to-fix learning and skills over the memsrv sidecar, for any coding agent.",
   "type": "module",
   "private": true,

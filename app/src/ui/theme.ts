@@ -273,6 +273,7 @@ export const glyph = {
   tool: "▣",
   result: "└",
   memory: "◈",
+  peer: "✉",
   notice: "▸",
   ok: "✓",
   fail: "✗",

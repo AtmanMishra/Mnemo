@@ -44,11 +44,14 @@ never has to be trusted for it.
 
 - `list_agents`: the family, each with id, role, status, task, last steps (and for a
   root its last prompt and the files it edited). No transcripts, no file contents.
-- `message_agent(to, text)`: a short message (2,000 characters). A running node gets it
-  as a follow-up in its current run; an idle node holds it until its next turn.
-  **A message never starts a turn on its own**, so a sibling cannot make an idle agent
-  spend money or act; the user's next prompt (or the run it is already in) is when it
-  reads. This also bounds ping-pong between two agents.
+- `message_agent(to, text, wait?)`: a short message (2,000 characters). A running node
+  gets it as a follow-up in its current run; an idle node is **woken** by it and can
+  answer on its own (since 0.1.6; 0.1.5 held it for the next prompt). With `wait`, the
+  sender's tool call returns the reply. Ping-pong is bounded by hops: a message counts
+  one more than the message that led to it, and past 12 since a user prompted, messages
+  are held for the user's next prompt (refused for a sub-agent, which has no prompt of
+  its own). A wait ends early when the target finishes, and a sub-agent never waits on
+  its parent, which is blocked until the sub-agent answers.
 - A one-line family summary arrives each turn as a hidden message, so siblings "know what
   the other is doing" without being asked.
 
@@ -62,7 +65,8 @@ never has to be trusted for it.
 3. **Only the user links roots.** There is no tool for it, and a sub-agent cannot link
    itself to anything.
 4. **Bounded**: message size, 30 sends a minute per sender, 20 undelivered per node, the
-   depth and fan-out limits above, and no auto-wake of idle agents.
+   depth and fan-out limits above, and a chain of at most 12 messages (each may wake an
+   idle agent) before the user prompts again.
 5. **Redacted**: text passes through `redact()` before it is stored, shown or delivered;
    the playground and the trace never see a raw key.
 6. **No privilege growth**: a child's access is at most its parent's; the mode stays the
@@ -93,11 +97,23 @@ still asks the user, but it is a real prompt-injection path between agents.
   live feed of spawns, messages, answers and links on the right, the selected node's
   detail below. Supervise only; `enter` jumps to the agent page to interact.
 
-The user talks to **roots only**. Sub-agents are watched, not typed to (they are in-process
-sessions with no composer). If you want to talk to a sub-agent directly, that is a later
-release.
+Since 0.1.6 you can **type to a running sub-agent**: in a split, `alt+,` / `alt+.` move
+through every pane, and a focused sub-agent pane has a one-line prompt. What you send
+is your words (not a peer message), read after its current step; its parent still
+drives it and gets its answer. A finished sub-agent cannot be told anything. `esc`
+gives the keys back to the agent.
 
-## Not in 0.1.5
+**Links are remembered** by project folder (real paths, in `state.json`): two projects
+you linked are linked again when both are open, in a later run too, and the agent says
+so. Unlinking forgets the link.
 
-Waking an idle agent from a message (an explicit, per-link opt-in later), persisting links
-across restarts, user-typed messages into the tree from the playground.
+**Woken turns have an allowance** (`LIMITS.wakeSpend`, $0.50 per agent since its user
+last prompted, sub-agents included): the call that crosses it stops the turn, and the
+agent is not woken again until you prompt it. The agents page shows `$ woken turns spent`.
+
+The playground's **conversation view** (`c`) shows the selected agent's messages with
+one other as a thread; `tab` moves to its next partner.
+
+## Not yet
+
+User-typed messages into the tree from the playground (it stays supervise-only).
