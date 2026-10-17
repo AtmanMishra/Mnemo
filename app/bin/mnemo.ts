@@ -485,16 +485,22 @@ async function main(): Promise<number> {
   /** One agent's host and pi session in `agentCwd`; the first gets --continue and the demo's injections. */
   const makeAgent = async (agentCwd: string, first = false) => {
     const host = createHost({ roster, home, agentDir: dir, modelRuntime: runtimeModels, memory, mode: args.mode, reflect: args.reflect, verify: args.verify, escalate: args.escalate });
-    const runtime = await startRuntime({
-      cwd: agentCwd,
-      agentDir: dir,
-      modelRuntime: runtimeModels,
-      continueRecent: first && args.continueRecent,
-      trustProject: first ? firstTrust : undefined,
-      extensions: mnemoExtensions(host),
-      ...(first ? injected : {}),
-    });
-    return { host, runtime };
+    try {
+      const runtime = await startRuntime({
+        cwd: agentCwd,
+        agentDir: dir,
+        modelRuntime: runtimeModels,
+        continueRecent: first && args.continueRecent,
+        trustProject: first ? firstTrust : undefined,
+        extensions: mnemoExtensions(host),
+        ...(first ? injected : {}),
+      });
+      return { host, runtime };
+    } catch (e) {
+      // The host put the agent in the roster; one that never started must not stay listed.
+      roster.removeRoot(host.node);
+      throw e;
+    }
   };
   const { host, runtime } = await makeAgent(cwd, true);
 

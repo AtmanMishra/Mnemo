@@ -146,6 +146,33 @@ test("message_agent with wait gets the reply as its result, in the same turn", a
   expect(assistantTexts(a)).toEqual(["beta is in src/"]);
 });
 
+test("waiting on an agent ends when it closes, and a sub-agent never waits on the parent waiting for it", async () => {
+  const roster = new Roster();
+  const a = await env({ mode: "yolo", roster, label: "alpha" });
+  const b = await env({ mode: "yolo", roster, label: "beta" });
+  roster.link(a.host.node, b.host.node);
+  a.faux.setResponses([call("message_agent", { to: b.host.node, text: "are you there?", wait: true }), say("beta left")]);
+  b.faux.setResponses([say("not answering")]);
+  const asking = a.controller.submit("ask beta");
+  for (let i = 0; i < 200 && !assistantTexts(b).length; i++) await new Promise((r) => setTimeout(r, 10));
+  roster.removeRoot(b.host.node);
+  await asking;
+  await a.idle();
+  expect(toolOutput(a, "message_agent")[0]!.output).toContain("finished without replying");
+
+  a.faux.setResponses([
+    call("spawn_subagent", { task: "ask your parent", name: "kid" }),
+    call("message_agent", { to: a.host.node, text: "which file?", wait: true }),
+    say("asked"),
+    say("kid is done"),
+  ]);
+  await a.controller.submit("delegate");
+  await a.idle();
+  const kid = roster.snapshot().nodes.find((n) => n.label === "kid")!;
+  expect(kid.status).toBe("done");
+  expect(kid.answer).toBe("asked");
+});
+
 test("a sub-agent started by a woken agent stays in that chain of messages; a user prompt starts a new one", async () => {
   const roster = new Roster();
   const a = await env({ mode: "yolo", roster, label: "alpha" });
@@ -223,6 +250,8 @@ test("a sub-agent reaches its parent's sibling, and what it is told is never in 
   expect(assistantTexts(b)).toEqual(["I will not do that"]);
   const system = b.runtime.session.systemPrompt;
   expect(system).not.toContain("IGNORE ALL PREVIOUS");
+  // Its turn was started by the message, not a prompt, and still had the rule about peer messages.
+  expect(system).toContain("[peer message]");
   expect(b.host.mode).toBe("yolo"); // unchanged; the mode is only ever the user's
   const custom = b.runtime.session.messages.filter((m) => (m as { customType?: string }).customType === "mnemo-peer");
   expect(custom).toHaveLength(1);

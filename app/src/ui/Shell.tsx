@@ -281,14 +281,17 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
             split={splitAgents}
             roster={tree}
             onOpen={(id) => go(id, "agent")}
-            onSplit={(id) =>
+            onSplit={(id) => {
+              // The agent you are in is always in the split, so taking it out would do nothing.
+              if (id === active?.id && split.includes(agentKey(id))) return setError("the agent you are in always stays in the split");
+              setError(undefined);
               setSplitKeys((ks) => {
                 const k = agentKey(id);
                 // Toggle against what the split shows now, which is the first four until you choose.
                 const now = ks.length ? ks : split;
                 return now.includes(k) ? now.filter((x) => x !== k) : [...now, k].slice(-SPLIT_MAX);
-              })
-            }
+              });
+            }}
             onClose={(id) => void fleet.close(id)}
             onNew={() => (setPickerFresh(true), setPicker(true))}
             onOpenProject={(cwd) => void open(cwd, false)}

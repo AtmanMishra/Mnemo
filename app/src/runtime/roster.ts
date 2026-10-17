@@ -36,7 +36,7 @@ export const LIMITS = {
   /** Messages one node may send per `rateWindowMs`. */
   sendsPerWindow: 30,
   rateWindowMs: 60_000,
-  /** Messages an idle node may hold for its next turn. */
+  /** Messages a node may hold for its user's next prompt. */
   inbox: 20,
   /**
    * Messages in a row since a user last prompted: each message counts one more than
@@ -67,7 +67,7 @@ export interface RosterNode {
   agentId?: number;
   startedAt: number;
   endedAt?: number;
-  /** Messages held for the next turn. */
+  /** Messages held for the user's next prompt (past `LIMITS.hops`). */
   pending: number;
   /** How many messages led here since a user last prompted (see `LIMITS.hops`). */
   hops: number;
@@ -112,7 +112,8 @@ export type SendResult = { ok: true; delivery: Delivery } | { ok: false; reason:
 /** What a node's extension gives the roster so messages and stops can reach it. */
 export interface NodeHandle {
   /** Hand over a message: read during the current run (`now`), start a turn (`woken`), or wait for the next prompt (`held`). */
-  deliver(message: PeerMessage, how: Delivery): void;
+  /** True when the agent took the message at once (a tool call was waiting for it). */
+  deliver(message: PeerMessage, how: Delivery): boolean | void;
   /** End the node's run (its root was closed, or its parent was stopped). */
   stop(): void;
 }
@@ -297,14 +298,16 @@ export class Roster implements RosterView {
     const n = this.nodes.get(id);
     if (!n || isEnded(n.status) || n.status === status) return;
     n.status = status;
-    if (status === "running") n.pending = 0;
     this.changed();
   }
 
-  /** The user prompted this node: what it sends now starts a new chain of messages. */
+  /** The user prompted this node: it reads what was held for it, and what it sends now starts a new chain. */
   userTurn(id: number): void {
     const n = this.nodes.get(id);
-    if (n) n.hops = 0;
+    if (!n || (n.hops === 0 && n.pending === 0)) return;
+    n.hops = 0;
+    n.pending = 0;
+    this.changed();
   }
 
   setTask(id: number, task: string): void {
@@ -381,15 +384,25 @@ export class Roster implements RosterView {
     const t = this.now();
     const recent = (this.sent.get(from) ?? []).filter((x) => t - x < LIMITS.rateWindowMs);
     if (recent.length >= LIMITS.sendsPerWindow) return { ok: false, reason: "you are sending too fast; wait a minute" };
-    if (target.pending >= LIMITS.inbox) return { ok: false, reason: `agent #${to} already has ${target.pending} unread messages` };
     const handle = this.handles.get(to);
     if (!handle) return { ok: false, reason: `agent #${to} cannot receive messages right now` };
-    this.sent.set(from, [...recent, t]);
     const hop = sender.hops + 1;
     const delivery: Delivery = hop > LIMITS.hops ? "held" : target.status === "running" ? "now" : "woken";
-    if (delivery !== "held") target.hops = Math.max(target.hops, hop);
-    if (delivery !== "now") target.pending++;
-    handle.deliver({ from, fromLabel: sender.label, fromRole: sender.kind === "root" ? "top-level agent" : `sub-agent (depth ${sender.depth})`, text: body, at: t }, delivery);
+    if (delivery === "held") {
+      const over = `the agents have exchanged ${LIMITS.hops} messages since a user last spoke`;
+      // A sub-agent has no user and no next prompt: a message held for it would never be read.
+      if (target.kind === "sub") return { ok: false, reason: `${over}; stop messaging and report to your user` };
+      if (target.pending >= LIMITS.inbox) return { ok: false, reason: `agent #${to} already has ${target.pending} messages waiting for its user` };
+      target.pending++;
+    } else if (delivery === "woken") {
+      // A woken turn is its own link in the chain; a running agent keeps the longest chain it is in.
+      target.hops = hop;
+    } else {
+      target.hops = Math.max(target.hops, hop);
+    }
+    this.sent.set(from, [...recent, t]);
+    const taken = handle.deliver({ from, fromLabel: sender.label, fromRole: sender.kind === "root" ? "top-level agent" : `sub-agent (depth ${sender.depth})`, text: body, at: t }, delivery);
+    if (taken && delivery === "held") target.pending--;
     this.event({ at: t, kind: "message", from, to, text: body.slice(0, 200), delivery });
     return { ok: true, delivery };
   }

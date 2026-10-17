@@ -145,10 +145,18 @@ test("messages are bounded: size, rate, and what an idle node will hold", () => 
   r.link(a, b);
   expect(r.send(a, b, "x".repeat(LIMITS.messageChars + 1))).toMatchObject({ ok: false });
   expect(r.send(a, b, "   ")).toMatchObject({ ok: false });
-  for (let i = 0; i < LIMITS.inbox; i++) expect(r.send(a, b, `m${i}`)).toMatchObject({ ok: true });
-  // B is idle and holds LIMITS.inbox unread messages: the next is refused.
-  expect(r.send(a, b, "one more")).toMatchObject({ ok: false, reason: expect.stringContaining("unread") });
+  // Past the chain bound messages wait for B's user, and B holds at most LIMITS.inbox of them.
+  r.get(a)!.hops = LIMITS.hops;
+  for (let i = 0; i < LIMITS.inbox; i++) expect(r.send(a, b, `m${i}`)).toEqual({ ok: true, delivery: "held" });
+  expect(r.send(a, b, "one more")).toMatchObject({ ok: false, reason: expect.stringContaining("waiting for its user") });
+  // They wait through B's own work, and its user's next prompt clears them.
+  r.setStatus(b, "running");
+  r.setStatus(b, "idle");
+  expect(r.get(b)!.pending).toBe(LIMITS.inbox);
+  r.userTurn(b);
+  expect(r.get(b)!.pending).toBe(0);
   // Running agents read as they go, so they hold nothing; the rate limit is what bounds them.
+  r.get(a)!.hops = 0;
   r.setStatus(b, "running");
   let sent = LIMITS.inbox;
   while (sent < LIMITS.sendsPerWindow) {
@@ -187,7 +195,8 @@ test("a message wakes an idle agent, and a chain of messages stops at a bound un
   const s1 = sub(to, "helper");
   expect(r.get(s1)!.hops).toBe(LIMITS.hops - 1);
   expect(r.send(s1, to, "done")).toEqual({ ok: true, delivery: "now" });
-  expect(r.send(to, s1, "thanks")).toEqual({ ok: true, delivery: "held" });
+  // A sub-agent has no user to hold a message for, so past the bound it is refused instead.
+  expect(r.send(to, s1, "thanks")).toMatchObject({ ok: false, reason: expect.stringContaining("report to your user") });
 });
 
 test("everything an agent writes is cleaned of terminal control codes and secrets before anyone sees it", () => {

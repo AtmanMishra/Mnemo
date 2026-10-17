@@ -186,14 +186,15 @@ What that does and does not allow:
 - **A message can start work, but only a bounded chain of it.** Since 0.1.6 a message
   wakes an idle agent so siblings can talk without you relaying. Each message counts one
   more than the message that led to it, and after 12 in a row since a user last prompted
-  any agent in the chain, messages are held for your next prompt instead of delivered,
+  any agent in the chain, messages are held for your next prompt instead of delivered
+  (a sub-agent has no prompt of its own, so one to it is refused instead),
   so two agents cannot keep each other working, and spending, indefinitely. A woken
   agent's turn goes through its gate exactly like one you started: in `default`,
   `accept-edits` and `plan` its edits and commands still ask you (the approval appears in
   that agent's pane). In `yolo` a message can now start an agent running commands while
   you are away; that is what `yolo` means, so keep `yolo` agents unlinked from ones that
   read untrusted text. Messages are also bounded in size (2,000 characters), rate (30 a
-  minute per sender) and backlog (20 unread per agent), and so is the tree (depth 3, 4
+  minute per sender) and backlog (20 held per agent), and so is the tree (depth 3, 4
   live children, 16 live sub-agents per conversation); a sub-agent never has more access
   than its parent.
 - **What agents write is cleaned and redacted** (control and bidirectional-override

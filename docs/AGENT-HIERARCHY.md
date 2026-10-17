@@ -49,7 +49,9 @@ never has to be trusted for it.
   answer on its own (since 0.1.6; 0.1.5 held it for the next prompt). With `wait`, the
   sender's tool call returns the reply. Ping-pong is bounded by hops: a message counts
   one more than the message that led to it, and past 12 since a user prompted, messages
-  are held for the user's next prompt.
+  are held for the user's next prompt (refused for a sub-agent, which has no prompt of
+  its own). A wait ends early when the target finishes, and a sub-agent never waits on
+  its parent, which is blocked until the sub-agent answers.
 - A one-line family summary arrives each turn as a hidden message, so siblings "know what
   the other is doing" without being asked.
 

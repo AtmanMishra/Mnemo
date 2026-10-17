@@ -76,16 +76,18 @@ function rootOf(snap: Pick<RosterSnapshot, "nodes">, n: RosterNode): RosterNode 
 
 export function Playground(p: PlaygroundProps): React.ReactElement {
   const snap = useSyncExternalStore(p.roster.subscribe, p.roster.snapshot);
-  const [sel, setSel] = useState(0);
+  // The selection is a node, not a row: rows move as agents start and end.
+  const [sel, setSel] = useState<number | undefined>(undefined);
   const [onlyMessages, setOnlyMessages] = useState(false);
   const rows = playgroundRows(snap);
-  const at = Math.min(sel, Math.max(0, rows.length - 1));
+  const found = rows.findIndex((r) => r.node.id === sel);
+  const at = found >= 0 ? found : 0;
   const chosen = rows[at]?.node;
 
   useInput(
     (input, key) => {
-      if (key.upArrow) return setSel(Math.max(0, at - 1));
-      if (key.downArrow) return setSel(Math.min(rows.length - 1, at + 1));
+      if (key.upArrow) return setSel(rows[Math.max(0, at - 1)]?.node.id);
+      if (key.downArrow) return setSel(rows[Math.min(rows.length - 1, at + 1)]?.node.id);
       if (input === "m") return setOnlyMessages((v) => !v);
       if (key.return && chosen) return p.onOpen(rootOf(snap, chosen).id);
     },
