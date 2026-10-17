@@ -43,9 +43,6 @@ function textOf(result: { content?: { type: string; text?: string }[] } | undefi
     .join("\n");
 }
 
-const DEFAULT_SECONDS = 120;
-const MAX_SECONDS = 600;
-
 export function kernelExtension(host: Host) {
   return (pi: ExtensionAPI): void => {
     const python = host.python();
@@ -70,14 +67,15 @@ export function kernelExtension(host: Host) {
           "tools.parallel([(\"read\", {\"path\": \"a\"}), ...]) runs several at once. The value of the last expression is returned.",
         parameters: Type.Object({
           code: Type.String({ description: "Python source to run" }),
-          timeout: Type.Optional(Type.Number({ description: `Seconds before the cell is stopped (default ${DEFAULT_SECONDS}, at most ${MAX_SECONDS})` })),
+          timeout: Type.Optional(Type.Number({ description: `Seconds before the cell is stopped (default ${host.settings.get().kernelTimeout}, at most ${host.settings.get().kernelMaxTimeout})` })),
         }),
         async execute(id, params, signal, _update, ctx) {
           // Ends when this cell does, and closes any question one of its calls is waiting on.
           const done = new AbortController();
           callerSignals.set(id, done.signal);
           try {
-            const seconds = Math.min(MAX_SECONDS, Math.max(1, params.timeout ?? DEFAULT_SECONDS));
+            const { kernelTimeout, kernelMaxTimeout } = host.settings.get();
+            const seconds = Math.min(kernelMaxTimeout, Math.max(1, params.timeout ?? kernelTimeout));
             const r = await kernel(ctx.cwd).run(params.code, {
               timeoutMs: seconds * 1000,
               signal,

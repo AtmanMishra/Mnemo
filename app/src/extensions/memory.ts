@@ -39,7 +39,8 @@ export function memoryExtension(host: Host) {
         source: { agent: "mnemo", model },
         parentEpisode: host.parentEpisode,
         // A sub-agent's work is part of its parent's run, which reflects on the whole.
-        reflect: host.reflect && host.depth === 0 ? reflector : undefined,
+        // Off in the settings menu: no model call, and an empty reflection writes nothing.
+        reflect: host.reflect && host.depth === 0 ? (system, user) => (host.settings.get().reflect ? reflector(system, user) : Promise.resolve("{}")) : undefined,
         notify: (note) => host.ui?.note(note),
         approveSkill: async (offer) => {
           if (!host.ui) return false;
@@ -188,7 +189,7 @@ export function memoryExtension(host: Host) {
       const s = session;
       const messages = [...held, ...event.messages];
       // Changed code and checked nothing: back once, to verify, before it is called done.
-      const nudge = host.verify && host.depth === 0 && last.stopReason !== "error" ? await s.verifyNudge() : undefined;
+      const nudge = host.verify && host.settings.get().verify && host.depth === 0 && last.stopReason !== "error" ? await s.verifyNudge() : undefined;
       if (nudge) {
         held = messages;
         pi.sendMessage({ customType: "mnemo-verify", content: nudge, display: true }, { triggerTurn: true });

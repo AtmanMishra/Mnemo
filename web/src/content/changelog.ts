@@ -47,6 +47,23 @@ export const AREA_LABEL: Record<Area, string> = {
 
 export const RELEASES: Release[] = [
   {
+    version: "0.1.7",
+    date: "2026-10-17",
+    headline: "A settings menu: /settings tunes the agent limits, the look, the keys, notifications and more, with every default what Mnemo always did.",
+    changes: [
+      { kind: "added", area: "interface", text: "/settings", detail: "A menu of everything you can tune: type to filter, enter to change. /settings hops 20 sets one in a sentence, /settings reset undoes them, and mnemo settings does the same from a shell. Choices are kept in ~/.mnemo/config.json, and a value that does not fit is refused with the reason." },
+      { kind: "added", area: "agents", text: "Agent limits you can set", detail: "The message chain (12), the woken-turn budget ($0.50), sub-agent depth and counts, message length and rate, held messages, and how long message_agent waits for a reply. 0 for the budget means no message ever starts an agent." },
+      { kind: "added", area: "interface", text: "Rebindable keys", detail: "Fourteen chords: the palette, sidebar, find, expand, clear, thinking level, hub, playground, project switch, new agent, split, next layout, and previous and next agent. The footer, the ? panel and /help show the chords you set; a key the prompt needs for editing, or one another action holds, is refused." },
+      { kind: "added", area: "interface", text: "Look and feel", detail: "Animation, the launch sequence, whether the sidebar starts open and how wide it is, the split layout, wheel speed, expanded output, and how long toasts stay." },
+      { kind: "added", area: "tools", text: "Behaviour you can turn down", detail: "Learning after runs, the check after changed code, the escalation model and how many failed checks it takes, how long a Python cell may run, the desktop notice and its delay, and the daily update check." },
+      { kind: "security", area: "safety", text: "No setting loosens the gate", detail: "The default mode can be default or plan, never yolo or accept-edits. Values are checked against fixed ranges, flags and environment variables still win for a run, the model has no tool that changes a setting, and an edit to config.json from the agent asks like any file outside the project." },
+    ],
+    known: [
+      "Animation, the launch sequence, the sidebar's starting state, the default mode, the desktop notice and the update check are read at launch.",
+      "Keys that belong to one screen (the hub's l and u, the sidebar's panes) are not rebindable.",
+    ],
+  },
+  {
     version: "0.1.6",
     date: "2026-10-17",
     headline: "Agents talk to each other on their own, within a spending allowance; you can type to a running sub-agent, links survive a restart, and the playground shows each conversation as a thread.",

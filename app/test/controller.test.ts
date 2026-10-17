@@ -378,12 +378,11 @@ test("an unknown command is caught, not sent to the model; a path is still words
 
 test("/theme takes a theme's shown name in any case, and says when there is none", async () => {
   const { controller } = await setup();
-  const picked: string[] = [];
-  (controller as unknown as { options: { onTheme: (n: string) => void } }).options.onTheme = (n) => void picked.push(n);
   try {
     await controller.submit("/theme Tokyo Night");
+    expect(controller.settings.get().theme).toBe("tokyo");
     await controller.submit("/theme DRACULA");
-    expect(picked).toEqual(["tokyo", "dracula"]);
+    expect(controller.settings.get().theme).toBe("dracula");
     await controller.submit("/theme bogus");
     expect(controller.dialogs.current()).toBeUndefined();
     expect(notices(controller).at(-1)).toBe("No theme called bogus. /theme lists them.");

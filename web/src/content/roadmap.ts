@@ -66,6 +66,12 @@ export const LANES: Lane[] = [
     title: "Shipped",
     blurb: "Done, in the release named.",
     items: [
+      { title: "Agents that talk to each other on their own", why: "A message wakes an idle agent, which can answer; bounded at 12 messages in a row and a $0.50 allowance for turns messages start, until you prompt again.", in: "0.1.6" },
+      { title: "Type to a running sub-agent; links that survive a restart", why: "A focused sub-agent pane in the split is a prompt to it, and linked projects are linked again when both are open.", in: "0.1.6" },
+      { title: "The playground's conversation view", why: "One pair of agents' messages as a thread.", in: "0.1.6" },
+      { title: "Agents in teams", why: "Sub-agents that start sub-agents, sibling agents that see and message each other, split layouts and the playground.", in: "0.1.5" },
+      { title: "Permission holes from v0.1.3 closed", why: "An approval no longer covers a subcommand that runs something else, and plan mode does not write memory.", in: "0.1.4" },
+      { title: "Login, memory and Windows install fixes from a full review", why: "Subscription login in the downloaded binary, memory that stays on, a Windows exe that installs itself, about sixty fixes.", in: "0.1.3" },
       { title: "Install, update and uninstall commands, animated installers", why: "mnemo update, mnemo uninstall --deep and installers that draw themselves.", in: "0.1.2" },
       { title: "Provider keys kept out of agent commands; a bounded Python kernel", why: "The model's commands no longer inherit your API keys.", in: "0.1.2" },
       { title: "Rewind, with a checkpoint before each edit", why: "Go back to an earlier message, the files, or both.", in: "0.1.2" },

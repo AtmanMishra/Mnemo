@@ -28,13 +28,14 @@ steers it on failure, stores different kinds of facts, and writes and patches it
 own skills. The interface is the table stakes; the memory is the reason to exist.
 Both have to ship.
 
-## Where things actually stand (updated 2026-10-16, v0.1.3)
+## Where things actually stand (updated 2026-10-17, v0.1.6)
 
 | Area | State |
 |---|---|
-| Releases | v0.1.0 (2026-10-09), v0.1.1 (2026-10-12), v0.1.2 (2026-10-13), v0.1.3 (2026-10-16: compiled-binary fixes for `/login`, Bedrock and image reads; Windows install; about sixty review fixes, `docs/REVIEW-2026-10.md`). A tag builds, smoke-tests and attests five archives (linux x64/arm64, macOS arm64/x64, Windows x64) and publishes them with `SHA256SUMS`; `docs/RELEASING.md`. |
-| `app/` | The program: Ink interface on pi 1.1's in-process SDK, with Mnemo's behaviour as pi extensions (policy, memory, kernel, shell, checkpoints, sub-agents, skills, trace, escalate, update). 309 unit/integration tests (plus 62 in `packages/memory` and 55 binary/terminal e2e) pass on a scripted model, `tsc` clean, on Linux, macOS and Windows CI. |
+| Releases | v0.1.0 (2026-10-09), v0.1.1 (2026-10-12), v0.1.2 (2026-10-13), v0.1.3 (2026-10-16: compiled-binary fixes for `/login`, Bedrock and image reads; Windows install; about sixty review fixes, `docs/REVIEW-2026-10.md`), v0.1.4 (2026-10-17: permission holes from 0.1.3 closed), v0.1.5 (2026-10-17: agent hierarchy, siblings, split layouts, playground), v0.1.6 (2026-10-17: agents wake each other within a hop and spend bound, typing to sub-agents, persisted links, playground conversations). A tag builds, smoke-tests and attests five archives (linux x64/arm64, macOS arm64/x64, Windows x64) and publishes them with `SHA256SUMS`; `docs/RELEASING.md`. |
+| `app/` | The program: Ink interface on pi 1.1's in-process SDK, with Mnemo's behaviour as pi extensions (policy, memory, kernel, shell, checkpoints, sub-agents, peers, skills, trace, escalate, update). 362 unit/integration tests (plus 62 in `packages/memory` and 55 binary/terminal e2e) pass on a scripted model, `tsc` clean, on Linux, macOS and Windows CI. |
 | Memory loop | profiles injected every turn; trust-weighted recall linked to the episode; failures steer, clean runs reinforce; a reflection call after each run writes durable facts; `mnemo memory tidy`; consolidation at shutdown; shared with Claude Code (hooks) and Codex, Cursor, opencode (MCP). |
+| Agents | Sub-agents to depth 3 and sibling links in one roster (`app/src/runtime/roster.ts`); `list_agents` / `message_agent`; a message wakes an idle agent, bounded by 12 hops and a $0.50 allowance for woken turns since the user's last prompt; the user types to a running sub-agent from its split pane; links kept by project in `state.json`; split auto-join; playground with a conversation view. `docs/AGENT-HIERARCHY.md`. |
 | Install | `get.sh` / `get.ps1` (animated on a terminal, checksummed), `mnemo update`, `mnemo uninstall [--deep]`, `mnemo doctor [--fix]`; Docker clean-install test in `app/scripts/test-install.sh`. |
 | Site | `web/` (Vite + React on Vercel): home, download, docs, shortcuts, changelog, roadmap, security, privacy, terms; `docs/WEB.md`. |
 | Not verified | Long real-provider sessions beyond the dogfood and benchmark runs (`research/`); a person following the README on a clean Windows and macOS machine; the background curator against a real model (it is on `feature/background-curator`, not in a release). |

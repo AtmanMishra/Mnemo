@@ -15,7 +15,9 @@
  */
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Box, Text, useAnimation, useInput, useStdin, useWindowSize, type DOMElement } from "ink";
-import { parseWheel, WHEEL_ROWS } from "../mouse.ts";
+import { parseWheel } from "../mouse.ts";
+import { chordMatches } from "../../runtime/settings.ts";
+import { useSettings } from "../settings-context.ts";
 import type { Controller } from "../../runtime/controller.ts";
 import { BlockView } from "../components/Blocks.tsx";
 import { Composer } from "../components/Composer.tsx";
@@ -41,7 +43,6 @@ import { decorateFiles } from "./decorate.ts";
 export type Focus = "composer" | "sidebar" | "main";
 
 const SIDEBAR_MIN_COLUMNS = 84;
-const SIDEBAR_WIDTH = 34;
 const TRANSCRIPT_BLOCKS = 80;
 const TIMELINE_MAX = 24;
 
@@ -146,8 +147,10 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   const columns = width ?? size.columns;
   const rows = height ?? size.rows;
   const cwd = controller.runtime.cwd;
+  const prefs = useSettings();
+  const sidebarWidth = prefs.sidebarWidth;
 
-  const [sidebar, setSidebar] = useState(!compact && columns >= SIDEBAR_MIN_COLUMNS);
+  const [sidebar, setSidebar] = useState(prefs.sidebar && !compact && columns >= SIDEBAR_MIN_COLUMNS);
   const [focus, setFocus] = useState<Focus>(initial?.focus ?? "composer");
   const [pane, setPane] = useState<Pane>(initial?.pane ?? "files");
   const [selected, setSelected] = useState<Record<Pane, number>>(() => {
@@ -229,7 +232,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   // (a forced minimum would spill the conversation over the rows above it).
   const mainHeight = Math.max(0, bodyHeight - 1);
   const showSidebar = sidebar && !compact && columns >= 60;
-  const mainWidth = columns - (showSidebar ? SIDEBAR_WIDTH : 0);
+  const mainWidth = columns - (showSidebar ? sidebarWidth : 0);
 
   const transcriptBlocks = snap.committed.filter((b) => b.kind !== "welcome");
   const turnList = useMemo(() => turnsOf([...transcriptBlocks, ...snap.live], snap.working !== null), [snap.committed, snap.live, snap.working]);
@@ -263,13 +266,13 @@ export function Workspace({ controller, source, motion, initial, width, height, 
 
   useInput(
     (input, key) => {
-      if (key.ctrl && input === "k" && focus !== "composer") return void openPalette();
-      if (key.ctrl && input === "b" && !compact) {
+      if (chordMatches(prefs["keys.palette"], input, key) && focus !== "composer") return void openPalette();
+      if (chordMatches(prefs["keys.sidebar"], input, key) && !compact) {
         setSidebar((v) => !v);
         if (focus === "sidebar") setFocus("composer");
         return;
       }
-      if (key.ctrl && input === "f") {
+      if (chordMatches(prefs["keys.find"], input, key)) {
         setPreview(undefined);
         setMap(undefined);
         return setSearch((s) => s ?? { query: "", at: 0 });
@@ -374,7 +377,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
   const wheel = useRef<(notches: number) => void>(() => {});
   wheel.current = (notches) => {
     if (!active || dialog || map !== undefined || search) return;
-    const rows = notches * WHEEL_ROWS;
+    const rows = notches * prefs.wheelRows;
     if (preview) setPreviewBack((b) => Math.max(0, b + rows));
     else setBack((b) => Math.min(Math.max(0, b + rows), Math.max(0, contentHeight.current - mainHeight)));
   };
@@ -411,7 +414,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
               items={items}
               selected={sel}
               focused={focus === "sidebar"}
-              width={SIDEBAR_WIDTH}
+              width={sidebarWidth}
               height={bodyHeight}
               learned={learnedFresh && chrome.activity ? { count: chrome.activity.count ?? 1, age: dropAge } : undefined}
             />
@@ -456,7 +459,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
                     ) : null}
                     <Text color={palette.dim}>Ask anything about this project.</Text>
                     <Text color={palette.faint} wrap="truncate-end">
-                      {mainWidth >= 56 ? "/ commands · @ files · tab sidebar · ctrl+b hide it" : "/ commands · @ files"}
+                      {mainWidth >= 56 ? `/ commands · @ files · tab sidebar · ${prefs["keys.sidebar"]} hide it` : "/ commands · @ files"}
                     </Text>
                   </Box>
                 ) : (
