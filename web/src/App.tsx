@@ -1,6 +1,8 @@
 import type { ComponentType } from "react";
 import { Shell } from "./Shell";
 import { Home } from "./pages/Home";
+import { Features } from "./pages/Features";
+import { HowItWorks } from "./pages/HowItWorks";
 import { Download } from "./pages/Download";
 import { Docs } from "./pages/Docs";
 import { Shortcuts } from "./pages/Shortcuts";
@@ -14,6 +16,8 @@ import { normalize } from "./routes";
 
 const PAGES: Record<string, ComponentType> = {
   "/": Home,
+  "/features": Features,
+  "/how-it-works": HowItWorks,
   "/download": Download,
   "/docs": Docs,
   "/shortcuts": Shortcuts,
