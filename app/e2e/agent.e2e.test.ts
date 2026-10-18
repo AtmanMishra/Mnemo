@@ -100,6 +100,9 @@ describe("the tool loop", () => {
     const r = await mnemo(w, ["-p", "write hello.txt"]);
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("wrote it");
+    // What the run took goes to stderr, never into the answer.
+    expect(r.stderr).toMatch(/mnemo: \d+ model calls, 1 tool calls, .* tokens, \$\d/);
+    expect(r.stdout).not.toContain("model calls");
     expect(fs.readFileSync(path.join(w.project, "hello.txt"), "utf8")).toBe("hi there\n");
   }, T);
 

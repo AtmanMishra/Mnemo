@@ -296,3 +296,23 @@ test("the user can tell a running sub-agent something, and nothing else is told 
   expect(r.tell(s1, "too late")).toMatchObject({ ok: false, reason: expect.stringContaining("has finished") });
   expect(told.get(s1)).toHaveLength(1);
 });
+
+test("a run budget stops the prompt that crosses it, sub-agents' calls included, and the next prompt starts again", () => {
+  const { r, root, sub, stops } = world();
+  const a = root("A");
+  r.setLimits({ runSpend: 1 });
+  r.setStatus(a, "running");
+  r.spend(a, 0.6);
+  expect(stops).toEqual([]);
+  const helper = sub(a, "helper");
+  r.spend(helper, 0.5);
+  expect(stops).toEqual([a]);
+  expect(r.snapshot().events.at(-1)).toMatchObject({ kind: "budget", node: a });
+  expect(r.get(a)!.runSpend).toBeCloseTo(1.1);
+  r.userTurn(a);
+  expect(r.get(a)!.runSpend).toBe(0);
+  // 0 is no limit.
+  r.setLimits({ runSpend: 0 });
+  r.spend(a, 50);
+  expect(stops).toEqual([a]);
+});

@@ -62,6 +62,7 @@ export interface Settings extends Record<KeyAction, string> {
   escalateAfter: number;
   kernelTimeout: number;
   kernelMaxTimeout: number;
+  runSpend: number;
   // Agents
   maxDepth: number;
   maxChildren: number;
@@ -130,6 +131,7 @@ export const DEFS: Record<SettingKey, Def> = {
   escalateAfter: int("Behaviour", "Escalate after", "failed checks in one run before escalating", 2, 1, 10, "checks"),
   kernelTimeout: int("Behaviour", "Python cell time", "seconds a Python cell may run when it names no limit", 120, 5, 3600, "s"),
   kernelMaxTimeout: int("Behaviour", "Python cell ceiling", "the longest a Python cell may ask to run", 600, 5, 3600, "s"),
+  runSpend: { group: "Behaviour", label: "Run budget", help: "dollars one prompt may spend, sub-agents included, before Mnemo stops it (0: no limit)", kind: "number", default: 0, min: 0, max: 1000, unit: "$" },
 
   maxDepth: int("Agents", "Sub-agent depth", "how deep sub-agents nest (0: none; raising it reaches conversations opened after)", 3, 0, 6),
   maxChildren: int("Agents", "Sub-agents per agent", "live sub-agents one agent may have", 4, 1, 16),
@@ -170,7 +172,7 @@ export function defaults(): Settings {
 
 /** The roster's caps, from the settings that name them. */
 export function limitsOf(s: Settings): Partial<Limits> {
-  return { maxDepth: s.maxDepth, maxChildren: s.maxChildren, maxLive: s.maxLive, hops: s.hops, wakeSpend: s.wakeSpend, messageChars: s.messageChars, sendsPerWindow: s.sendsPerMinute, inbox: s.inbox };
+  return { maxDepth: s.maxDepth, maxChildren: s.maxChildren, maxLive: s.maxLive, hops: s.hops, wakeSpend: s.wakeSpend, runSpend: s.runSpend, messageChars: s.messageChars, sendsPerWindow: s.sendsPerMinute, inbox: s.inbox };
 }
 
 export const isKey = (k: string): k is SettingKey => Object.hasOwn(DEFS, k);

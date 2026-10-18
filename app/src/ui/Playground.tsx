@@ -56,6 +56,8 @@ export function feedLine(e: RosterEvent, labels: ReadonlyMap<number, string>): {
       return { text: `✎ you → ${name(e.node)}: ${e.text.replace(/\s+/g, " ")}`, tone: palette.cyan };
     case "capped":
       return { text: `$ ${name(e.node)} spent $${e.spent.toFixed(2)} on turns messages started: stopped, and woken by none until you prompt it`, tone: palette.amber };
+    case "budget":
+      return { text: `$ ${name(e.node)} reached its run budget at $${e.spent.toFixed(2)}: stopped`, tone: palette.amber };
   }
 }
 
