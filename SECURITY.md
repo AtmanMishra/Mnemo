@@ -67,7 +67,9 @@ in a place you can afford to lose: a container, a throwaway checkout.
 - **Reads are free, except credentials.** `read`, `grep`, `find` and `ls` never ask,
   but refuse Mnemo's own `auth.json`, `models.json`, `grants.json` and `.env`,
   `~/.ssh`, `~/.aws`, `~/.gnupg`, and a process's `/proc/<pid>/environ` and `mem`
-  (where the provider keys are). `grep` also refuses a folder that holds any of
+  (where the provider keys are), and anywhere a `.env` or `.env.*` file (not
+  `.env.example`, `.sample`, `.template`, `.dist`, `.default`), a private key
+  (`id_rsa`, `id_ed25519`, …, not `.pub`), `.netrc` or `.pgpass`. `grep` also refuses a folder that holds any of
   them (`~`, `$MNEMO_HOME`, `/`), since it searches hidden files; search a folder
   below it. An `allow` rule can open any of these. A shell command can still `cat`
   them, or `cat /proc/$PPID/environ`: in `default` mode that asks, and no "always"
