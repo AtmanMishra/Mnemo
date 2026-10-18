@@ -561,6 +561,15 @@ async function main(): Promise<number> {
         return 1;
       }
       await session.prompt(args.print);
+      const st = session.getSessionStats();
+      const spent = host.roster.get(host.node)?.runSpend ?? st.cost;
+      // What the run took, on stderr so the answer on stdout stays clean for a script.
+      console.error(`mnemo: ${st.assistantMessages} model calls, ${st.toolCalls} tool calls, ${st.tokens.input.toLocaleString()} in / ${st.tokens.output.toLocaleString()} out tokens, $${spent.toFixed(4)}`);
+      const budget = host.roster.limits.runSpend;
+      if (budget > 0 && spent >= budget) {
+        console.error(`mnemo: stopped at the run budget ($${budget.toFixed(2)}; mnemo settings runSpend <dollars> changes it)`);
+        return 1;
+      }
       // A refused or failed model call (a bad key, an outage) ends the turn quietly: say so, and fail.
       const last = session.messages.findLast((m) => m.role === "assistant");
       if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {

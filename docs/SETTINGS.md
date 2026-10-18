@@ -66,6 +66,7 @@ much agents may do on their own; what an agent may *touch* is decided by the gat
 | Escalate after | `escalateAfter` | 2 checks | 1–10 | failed checks in one run before escalating |
 | Python cell time | `kernelTimeout` | 120 s | 5–3600 | seconds a Python cell may run when it names no limit |
 | Python cell ceiling | `kernelMaxTimeout` | 600 s | 5–3600 | the longest a Python cell may ask to run |
+| Run budget | `runSpend` | $0 (no limit) | 0–1000 | dollars one prompt may spend, sub-agents included, before Mnemo stops it (0: no limit) |
 
 ### Agents
 

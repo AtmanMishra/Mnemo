@@ -96,9 +96,13 @@ export function peersExtension(host: Host) {
       streaming = true;
       roster.setStatus(me, "running");
     });
-    pi.on("agent_end", async () => {
+    pi.on("agent_end", async (_e, ctx) => {
       streaming = false;
       if (host.depth === 0) roster.setStatus(me, "idle");
+      const budget = roster.limits.runSpend;
+      const spent = roster.get(me)?.runSpend ?? 0;
+      if (host.depth === 0 && budget > 0 && spent >= budget)
+        ctx.ui.notify(`Stopped at the run budget: this prompt cost $${spent.toFixed(2)} of $${budget.toFixed(2)} (/settings runSpend).`, "warning");
     });
     pi.on("tool_execution_start", async (e) => {
       roster.step(me, stepLine(e.toolName, (e.args ?? {}) as Record<string, unknown>));

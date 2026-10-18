@@ -44,7 +44,7 @@ afterEach(async () => {
 
 test("every default is what Mnemo did before the menu", () => {
   const d = defaults();
-  expect(limitsOf(d)).toEqual({ maxDepth: LIMITS.maxDepth, maxChildren: LIMITS.maxChildren, maxLive: LIMITS.maxLive, hops: LIMITS.hops, wakeSpend: LIMITS.wakeSpend, messageChars: LIMITS.messageChars, sendsPerWindow: LIMITS.sendsPerWindow, inbox: LIMITS.inbox });
+  expect(limitsOf(d)).toEqual({ maxDepth: LIMITS.maxDepth, maxChildren: LIMITS.maxChildren, maxLive: LIMITS.maxLive, hops: LIMITS.hops, wakeSpend: LIMITS.wakeSpend, runSpend: LIMITS.runSpend, messageChars: LIMITS.messageChars, sendsPerWindow: LIMITS.sendsPerWindow, inbox: LIMITS.inbox });
   expect(d).toMatchObject({ theme: "night", wheelRows: 3, sidebarWidth: 34, toastSeconds: 4.5, toastMax: 3, kernelTimeout: 120, kernelMaxTimeout: 600, escalateAfter: 2, replyWait: 120, notifyAfter: 20, mode: "default", splitLayout: "auto" });
   expect(d).toMatchObject({ motion: true, bootAnimation: true, mouse: true, sidebar: true, reflect: true, verify: true, notify: true, autoUpdate: false, expandOutput: false, escalateModel: "" });
   expect(d["keys.palette"]).toBe("ctrl+k");
