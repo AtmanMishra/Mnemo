@@ -277,6 +277,40 @@ test("agents get messaging and delegation tools, and none that links, stops, or 
   expect(names.filter((n) => /(^|_)(link|unlink|sibling|stop|kill|abort|mode|yolo|approve|playground)(_|$)/i.test(n))).toEqual([]);
 });
 
+test("a full-access sub-agent's command still asks the user, and a refusal runs nothing", async () => {
+  const roster = new Roster();
+  const e = await env({ mode: "default", roster });
+  e.faux.setResponses([
+    call("spawn_subagent", { task: "make the file", name: "writer", access: "full" }),
+    call("bash", { command: "touch child-ran.txt" }), // the child
+    say("declined"), // the child, after the refusal
+    say("ok"), // the parent
+  ]);
+  const turn = e.controller.submit("go");
+  const d = await nextDialog(e.controller);
+  expect(d.kind).toBe("approval");
+  if (d.kind === "approval") d.resolve({ kind: "no" });
+  await turn;
+  await e.idle();
+  expect(fs.existsSync(path.join(e.cwd, "child-ran.txt"))).toBe(false);
+});
+
+test("a read-only sub-agent has no way to run a command or write a file, even in yolo", async () => {
+  const roster = new Roster();
+  const e = await env({ mode: "yolo", roster });
+  e.faux.setResponses([
+    call("spawn_subagent", { task: "research", name: "scout" }),
+    call("bash", { command: "touch scout-ran.txt" }), // not among its tools
+    call("write", { path: "scout-wrote.txt", content: "x" }),
+    say("could not"), // the child
+    say("ok"), // the parent
+  ]);
+  await e.controller.submit("go");
+  await e.idle();
+  expect(fs.existsSync(path.join(e.cwd, "scout-ran.txt"))).toBe(false);
+  expect(fs.existsSync(path.join(e.cwd, "scout-wrote.txt"))).toBe(false);
+});
+
 test("a peer message that asks for a command does not skip the receiver's approval", async () => {
   const roster = new Roster();
   const a = await env({ mode: "yolo", roster, label: "alpha" });

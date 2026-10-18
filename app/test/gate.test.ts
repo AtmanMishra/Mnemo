@@ -31,6 +31,16 @@ test("an approval generalises by subcommand, never by program", () => {
   assert.equal(decide(bash("git stash"), grants).decision, "ask");
 });
 
+test("a subcommand program with no subcommand is approved exactly, never as the whole program", () => {
+  // `git --version` once became `git*`, which covers `git push --force`.
+  for (const command of ["git --version", "npm -v", "make", "git -C /tmp status"]) {
+    assert.equal(generalise(bash(command)), command, command);
+  }
+  const earned = { project: [generalise(bash("git --version"))!], global: [], deny: [] };
+  assert.equal(decide(bash("git push --force origin main"), earned).decision, "ask");
+  assert.equal(decide(bash("git --version"), earned).decision, "allow");
+});
+
 test("a path is never a class", () => {
   // Approving one file cannot be stretched into approving the next one.
   assert.equal(generalise({ toolName: "read_file", input: { path: "/etc/passwd" } }), undefined);
