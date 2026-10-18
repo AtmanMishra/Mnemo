@@ -103,7 +103,7 @@ import { Checkpoints } from "../src/runtime/checkpoints.ts";
 /** The checkpoint hook, then pi's real write tool, for one path spelling. */
 async function writeAs(proj: string, store: Checkpoints, p: string, content: string) {
   let hook: ((event: unknown, ctx: unknown) => unknown) | undefined;
-  checkpointsExtension({ checkpoints: store, depth: 0 } as never)({ on: (_: string, h: typeof hook) => (hook = h) } as never);
+  checkpointsExtension({ checkpoints: store, depth: 0 } as never)({ on: (name: string, h: typeof hook) => void (name === "tool_call" && (hook = h)) } as never);
   const ctx = { cwd: proj, sessionManager: { getBranch: () => [{ id: "u1", type: "message", message: { role: "user" } }] } };
   const input = { path: p, content };
   hook!({ toolName: "write", input }, ctx);
@@ -145,4 +145,27 @@ test("a restore does not write through a symlink, and one file in the way does n
   expect(fs.lstatSync(a).isSymbolicLink()).toBe(false);
   expect(fs.readFileSync(a, "utf8")).toBe("a0");
   expect(fs.readFileSync(c, "utf8")).toBe("c0");
+});
+
+test("what a shell command changed goes back too: an edit, a new file and a deleted one", async () => {
+  const e = await mnemoEnv({ mode: "yolo" });
+  envs.push(e);
+  const a = path.join(e.cwd, "a.txt");
+  const gone = path.join(e.cwd, "gone.txt");
+  const made = path.join(e.cwd, "made.txt");
+  fs.writeFileSync(a, "zero\n");
+  fs.writeFileSync(gone, "keep me\n");
+  e.faux.setResponses([call("bash", { command: "echo one > a.txt && rm gone.txt && echo hi > made.txt" }), say("ran it")]);
+  await e.controller.submit("change things in the shell");
+  await e.idle();
+  expect(fs.readFileSync(a, "utf8")).toBe("one\n");
+  expect(fs.existsSync(gone)).toBe(false);
+  const done = e.controller.rewind();
+  const list = await pick(e, (l) => l.startsWith("change things"));
+  if (list.kind === "select") expect(list.choices[0]!.description).toBe("3 files changed since");
+  await pick(e, (l) => l.startsWith("Only the"));
+  await done;
+  expect(fs.readFileSync(a, "utf8")).toBe("zero\n");
+  expect(fs.readFileSync(gone, "utf8")).toBe("keep me\n");
+  expect(fs.existsSync(made)).toBe(false);
 });
