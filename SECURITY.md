@@ -81,6 +81,12 @@ in a place you can afford to lose: a container, a throwaway checkout.
   as every coding agent does, because it is text the model reads and runs nothing
   by itself. It still steers the model, so in a repository you have not read,
   keep the mode on `default`.
+- **Before you trust a folder, Mnemo runs nothing it chose.** The git calls Mnemo makes
+  itself (the `@` file list, best-of's worktrees) turn off the repository's
+  `core.fsmonitor` and hooks, and `git`, `python` and `taskkill` are looked up on
+  PATH's absolute entries only, so a `git.exe` shipped in the folder is never run
+  (Windows otherwise looks in the current folder first). Best-of's check command is
+  yours, and runs.
 - A `permissions.json` that exists but cannot be parsed (or holds `null`, a number,
   `{"rules": null}`) stops all edits and commands until it is fixed, rather than
   quietly dropping your deny rules. A malformed `grants.json` is read as no grants.

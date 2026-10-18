@@ -23,6 +23,7 @@
  *     does nothing; resolution therefore probes rather than trusts.
  */
 import { spawn, spawnSync } from "node:child_process";
+import { trustedBin } from "../runtime/bin.ts";
 import type { ChildProcess } from "node:child_process";
 
 export interface KernelChild {
@@ -349,7 +350,11 @@ export function spawnKernel(interpreter: string, args: string[], cwd?: string, e
 /** The interpreter and everything it started. */
 function killTree(child: KernelChild): void {
   try {
-    if (child.pid !== undefined && process.platform === "win32") spawnSync("taskkill", ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore" });
+    if (child.pid !== undefined && process.platform === "win32") {
+      // Looked up on PATH only: a bare name is searched for in the project folder first on Windows.
+      const taskkill = trustedBin("taskkill");
+      if (taskkill) spawnSync(taskkill, ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore" });
+    }
     else if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
   } catch {
     /* not a group leader (a test double), or already gone */

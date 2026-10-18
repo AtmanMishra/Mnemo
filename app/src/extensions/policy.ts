@@ -338,7 +338,9 @@ export function approvalPreview(tool: string, input: Record<string, unknown>): A
     return lines(input.command).map((t) => ({ text: plain(t) }));
   if (tool === "create_skill" || tool === "update_skill") {
     const scope = tool === "create_skill" ? `scope: ${input.scope ?? "project"}${input.scope === "user" ? " (every project)" : ""}` : "an existing skill";
-    return [{ text: scope, tone: "muted" as const }, ...lines(input.instructions).map((t) => ({ text: `+ ${plain(t)}`, tone: "add" as const }))];
+    // The description is loaded into every later prompt, so it is part of what is being approved.
+    const description = typeof input.description === "string" ? [{ text: `description: ${plain(input.description.replace(/\s+/g, " ").trim())}`, tone: "muted" as const }] : [];
+    return [{ text: scope, tone: "muted" as const }, ...description, ...lines(input.instructions).map((t) => ({ text: `+ ${plain(t)}`, tone: "add" as const }))];
   }
   return [];
 }

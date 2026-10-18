@@ -49,7 +49,8 @@ export function openBrowser(url: string, env: NodeJS.ProcessEnv = process.env, p
       ? ["open", [url], false]
       : platform === "win32"
         ? // Quoted, `&` in the query reaches start whole; the empty title keeps start from reading the URL as one.
-          ["cmd", ["/c", "start", '""', `"${url}"`], true]
+          // ComSpec, not a bare `cmd`, which Windows looks for in the project folder first.
+          [env.ComSpec || "cmd", ["/c", "start", '""', `"${url}"`], true]
         : [browser || "xdg-open", [url], false];
   try {
     const child = spawn(cmd as string, args as string[], { detached: true, stdio: "ignore", windowsVerbatimArguments: verbatim as boolean });
