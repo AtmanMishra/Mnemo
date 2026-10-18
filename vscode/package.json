@@ -194,6 +194,39 @@
           "default": false,
           "scope": "machine",
           "markdownDescription": "Load a folder's own `.pi/` extensions, skills and settings without asking. They run code in the Mnemo process; leave off unless you wrote them."
+        },
+        "mnemo.theme": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "night",
+            "gameboy",
+            "paper",
+            "dracula",
+            "nord",
+            "gruvbox",
+            "tokyo",
+            "mocha",
+            "solarized",
+            "amber",
+            "synthwave"
+          ],
+          "enumItemLabels": [
+            "Match VS Code",
+            "Mnemo Night",
+            "Game Boy",
+            "Paper",
+            "Dracula",
+            "Nord",
+            "Gruvbox",
+            "Tokyo Night",
+            "Catppuccin Mocha",
+            "Solarized Light",
+            "Amber CRT",
+            "Synthwave"
+          ],
+          "default": "editor",
+          "description": "The panel's colours: your editor's own, or one of Mnemo's palettes (the same as the terminal's). Also set from the picker in the panel."
         }
       }
     },

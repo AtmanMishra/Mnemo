@@ -1,6 +1,7 @@
 /// <reference lib="dom" />
 import type { Block, Dialog, Mode, RosterNode, RpcEvent, SettingDef } from "../protocol";
 import { initial, matchCommands, reduce, tree, type State } from "./reduce.js";
+import { THEME_CHOICES, themeVars } from "./theme.js";
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState(): unknown; setState(s: unknown): void };
 const vscode = acquireVsCodeApi();
@@ -10,6 +11,16 @@ let state: State = initial();
 let host = { running: false, problem: undefined as string | undefined, version: "" };
 let tab: Tab = "chat";
 let pendingYolo = false;
+let theme = "editor";
+
+function applyTheme(): void {
+  const root = document.documentElement;
+  const t = themeVars(theme);
+  for (const k of themeKeys) root.style.removeProperty(k);
+  if (t) for (const [k, v] of Object.entries(t.vars)) root.style.setProperty(k, v);
+  root.style.colorScheme = t?.scheme ?? "";
+}
+const themeKeys = Object.keys(themeVars("night")!.vars);
 let history: string[] = [];
 let historyAt = -1;
 const openTools = new Set<string>();
@@ -189,12 +200,22 @@ function dialogEl(d: Dialog): HTMLElement {
 
 // ---- header ----
 
-const MODE_LABEL: Record<Mode, string> = { default: "Ask before changes", "accept-edits": "Accept edits", plan: "Plan (read-only)", yolo: "Bypass: ask nothing" };
+const MODE_LABEL: Record<Mode, string> = { default: "Ask first", "accept-edits": "Accept edits", plan: "Plan", yolo: "Bypass" };
+
+function themePicker(): HTMLElement {
+  const sel = h("select", { class: "theme", title: "Theme", "aria-label": "Theme" }, ...THEME_CHOICES.map((c) => h("option", { value: c.value, text: c.label, selected: c.value === theme })));
+  sel.addEventListener("change", () => {
+    theme = sel.value;
+    applyTheme();
+    vscode.postMessage({ type: "setTheme", theme });
+  });
+  return sel;
+}
 
 function header(): HTMLElement {
   const f = state.footer;
   const bar = h("div", { class: "header" });
-  if (!f) return bar.appendChild(h("span", { class: "dim", text: host.running ? "Starting Mnemo…" : "Mnemo is not running" })).parentElement!;
+  if (!f) return (bar.append(h("span", { class: "brand", text: "mnemo" }), h("span", { class: "dim", text: host.running ? "Starting Mnemo…" : "Mnemo is not running" }), themePicker()), bar);
   const mode = h("select", { class: "mode", title: "How much Mnemo may do without asking", "aria-label": "Mode" }, ...(Object.keys(MODE_LABEL) as Mode[]).map((m) => h("option", { value: m, text: MODE_LABEL[m], selected: m === f.mode })));
   mode.addEventListener("change", () => {
     if (mode.value === "yolo") {
@@ -205,13 +226,14 @@ function header(): HTMLElement {
   });
   const ctx = f.contextPercent;
   bar.append(
-    ...[h("span", { class: "chip model", title: "Model", text: f.model }),
+    ...[h("span", { class: "brand", text: "mnemo" }), h("span", { class: "chip model", title: "Model", text: f.model }),
     f.thinking && h("button", { class: "chip", title: "Thinking level (click to cycle)", text: `thinking: ${f.thinking}`, onclick: () => cmd({ type: "cycleThinking" }) }),
     mode,
     ctx !== null && h("span", { class: "chip", title: "Context used" }, `ctx ${Math.round(ctx)}%`, h("span", { class: "meter" }, h("span", { style: `width:${Math.min(100, ctx)}%` }))),
     h("span", { class: "chip", title: "Spent this session", text: `$${f.cost.toFixed(2)}` }),
     f.memory && h("button", { class: `chip${f.memory.answering ? "" : " warn"}`, title: f.memory.answering ? "Memory nodes (click to open)" : "Memory is not answering", text: `◈ ${f.memory.nodes ?? "?"}`, onclick: () => setTab("memory") }),
     f.branch && h("span", { class: "chip dim", title: "Git branch", text: f.branch }),
+    themePicker(),
   ].filter((k): k is HTMLElement => !!k));
   return bar;
 }
@@ -512,7 +534,13 @@ function mount(): void {
 window.addEventListener("message", (e) => {
   const m = e.data;
   switch (m?.type) {
+    case "config":
+      theme = String(m.theme);
+      applyTheme();
+      break;
     case "snapshot":
+      theme = String(m.theme ?? "editor");
+      applyTheme();
       state = m.state as State;
       host = { running: m.running, problem: m.problem, version: m.version };
       renderedReset = -1;

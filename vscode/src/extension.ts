@@ -6,6 +6,7 @@ import { composerDraft, forwardable, launchArgs, reference, relativeTo, rpcArgs 
 import { MnemoClient } from "./client";
 import type { RpcEvent } from "./protocol";
 import { initial, reduce, type State } from "./webview/reduce";
+import { THEMES } from "./webview/themes";
 
 /**
  * Mnemo's interface in the editor: a panel that drives `mnemo --rpc`. Every decision the
@@ -15,6 +16,7 @@ import { initial, reduce, type State } from "./webview/reduce";
  */
 
 const VIEW = "mnemo.chat";
+const THEME_VALUES: string[] = ["editor", ...Object.keys(THEMES)];
 
 class Session implements vscode.Disposable {
   private client: MnemoClient | undefined;
@@ -115,6 +117,10 @@ class Session implements vscode.Disposable {
     for (const v of this.views) void v.postMessage(message);
   }
 
+  themeChanged(): void {
+    this.broadcast({ type: "config", theme: this.cfg("theme", "editor") });
+  }
+
   /** A webview (the side view or an editor tab) is shown; give it everything so far. */
   attach(webview: vscode.Webview, onDispose: vscode.Event<void>): void {
     this.views.add(webview);
@@ -126,7 +132,7 @@ class Session implements vscode.Disposable {
     switch (m?.type) {
       case "ready":
         this.ensure();
-        void webview.postMessage({ type: "snapshot", state: this.state, running: this.running, problem: this.problem, version: this.context.extension.packageJSON.version });
+        void webview.postMessage({ type: "snapshot", theme: this.cfg("theme", "editor"), state: this.state, running: this.running, problem: this.problem, version: this.context.extension.packageJSON.version });
         return;
       case "cmd": {
         const msg = forwardable(m.msg);
@@ -140,6 +146,10 @@ class Session implements vscode.Disposable {
         void this.client.request(msg).then((r) => void webview.postMessage({ type: "response", key: m.key, result: r }));
         return;
       }
+      case "setTheme":
+        // Only a name the panel knows is stored; the setting's enum is the whitelist.
+        if (typeof m.theme === "string" && THEME_VALUES.includes(m.theme)) void vscode.workspace.getConfiguration("mnemo").update("theme", m.theme, vscode.ConfigurationTarget.Global);
+        return;
       case "restart":
         return this.restart();
       case "openSettings":
@@ -213,7 +223,10 @@ function realpath(p: string): string {
 
 export function activate(context: vscode.ExtensionContext): void {
   const session = new Session(context);
-  context.subscriptions.push(session);
+  context.subscriptions.push(
+    session,
+    vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration("mnemo.theme") && session.themeChanged()),
+  );
 
   const provider: vscode.WebviewViewProvider = {
     resolveWebviewView(view) {

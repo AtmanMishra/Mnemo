@@ -7,7 +7,8 @@ Install Mnemo first (`mnemo` on your PATH, or set `mnemo.path`), then click the 
 |---|---|
 | **Chat** | Streaming answers, thinking, tool calls with their output, and edits as coloured diffs with an *Open file* button. `/` completes Mnemo's commands (`/model`, `/login`, `/resume`, `/rewind`, `/compact`, skills…); anything they ask opens as a form in the panel. Messages typed while it works are queued. |
 | **Approvals** | Every command and edit Mnemo would ask about in a terminal is a card above the prompt, with the command or the diff. *Allow once*, *Always allow* (only when Mnemo offers a safe pattern) or *Deny*, with a line telling it what to do instead. The status bar turns amber and a notice appears if the panel is hidden. |
-| **Mode** | *Ask before changes*, *Accept edits*, *Plan (read-only)* from the header. *Bypass* needs a second confirmation and lasts for the session. |
+| **Theme** | *Match VS Code* (default) or any of Mnemo's eleven palettes, the same ones as the terminal (Mnemo Night, Dracula, Nord, Gruvbox, Tokyo Night, Catppuccin Mocha, Synthwave, Amber CRT, Game Boy, Paper, Solarized Light), from the picker in the header or `mnemo.theme`. |
+| **Mode** | *Ask first*, *Accept edits*, *Plan (read-only)* from the header. *Bypass* needs a second confirmation and lasts for the session. |
 | **Agents** | The agent tree: sub-agents Mnemo started, their task, steps, status and answer. |
 | **Memory** | What Mnemo remembers about the project and about you, search, *Remember…*, *Forget*. |
 | **Settings** | All of Mnemo's settings, grouped, validated by Mnemo itself, with reset and a note when one applies at the next launch. |
