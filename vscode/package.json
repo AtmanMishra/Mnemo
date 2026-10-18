@@ -1,8 +1,8 @@
 {
   "name": "mnemo-vscode",
   "displayName": "Mnemo",
-  "description": "Run the Mnemo coding agent in VS Code: send a selection or file, review its changes, check its memory. Approvals stay in Mnemo's own gate.",
-  "version": "0.1.0",
+  "description": "Mnemo in VS Code: a chat panel with approvals, diffs, memory, agents and settings. Every approval is answered by you, in the panel.",
+  "version": "0.2.0",
   "publisher": "selfev",
   "license": "Apache-2.0",
   "author": "Atman Mishra",
@@ -15,39 +15,160 @@
   "engines": {
     "vscode": "^1.90.0"
   },
-  "categories": ["AI", "Other"],
-  "keywords": ["mnemo", "agent", "coding agent", "memory"],
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "mnemo",
+    "agent",
+    "coding agent",
+    "memory"
+  ],
   "main": "./out/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
       "description": "Mnemo runs commands and edits files, so it starts only in a trusted workspace.",
-      "restrictedConfigurations": ["mnemo.path", "mnemo.mode"]
+      "restrictedConfigurations": [
+        "mnemo.path",
+        "mnemo.mode",
+        "mnemo.trustProject"
+      ]
     },
     "virtualWorkspaces": false
   },
   "contributes": {
     "commands": [
-      { "command": "mnemo.open", "title": "Open Mnemo", "category": "Mnemo" },
-      { "command": "mnemo.continue", "title": "Continue the Last Session", "category": "Mnemo" },
-      { "command": "mnemo.sendSelection", "title": "Ask About the Selection", "category": "Mnemo" },
-      { "command": "mnemo.sendFile", "title": "Ask About This File", "category": "Mnemo" },
-      { "command": "mnemo.showChanges", "title": "Review Changes", "category": "Mnemo" },
-      { "command": "mnemo.memoryStatus", "title": "Show Memory Status", "category": "Mnemo" }
+      {
+        "command": "mnemo.open",
+        "title": "Open Mnemo",
+        "category": "Mnemo",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "mnemo.openInTab",
+        "title": "Open Mnemo in an Editor Tab",
+        "category": "Mnemo"
+      },
+      {
+        "command": "mnemo.newSession",
+        "title": "New Session",
+        "category": "Mnemo",
+        "icon": "$(add)"
+      },
+      {
+        "command": "mnemo.continue",
+        "title": "Continue the Last Session",
+        "category": "Mnemo"
+      },
+      {
+        "command": "mnemo.restart",
+        "title": "Restart Mnemo",
+        "category": "Mnemo",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "mnemo.stop",
+        "title": "Stop the Current Run",
+        "category": "Mnemo",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "mnemo.sendSelection",
+        "title": "Ask About the Selection",
+        "category": "Mnemo"
+      },
+      {
+        "command": "mnemo.sendFile",
+        "title": "Ask About This File",
+        "category": "Mnemo"
+      },
+      {
+        "command": "mnemo.showChanges",
+        "title": "Review Changes",
+        "category": "Mnemo"
+      },
+      {
+        "command": "mnemo.memory",
+        "title": "Show Memory",
+        "category": "Mnemo"
+      },
+      {
+        "command": "mnemo.settings",
+        "title": "Mnemo Settings",
+        "category": "Mnemo",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "mnemo.openTerminal",
+        "title": "Open Mnemo in the Terminal",
+        "category": "Mnemo"
+      }
     ],
     "menus": {
       "editor/context": [
-        { "command": "mnemo.sendSelection", "when": "editorHasSelection", "group": "mnemo@1" },
-        { "command": "mnemo.sendFile", "when": "!editorHasSelection", "group": "mnemo@1" }
+        {
+          "command": "mnemo.sendSelection",
+          "when": "editorHasSelection",
+          "group": "mnemo@1"
+        },
+        {
+          "command": "mnemo.sendFile",
+          "when": "!editorHasSelection",
+          "group": "mnemo@1"
+        }
       ],
       "explorer/context": [
-        { "command": "mnemo.sendFile", "when": "!explorerResourceIsFolder", "group": "mnemo@1" }
+        {
+          "command": "mnemo.sendFile",
+          "when": "!explorerResourceIsFolder",
+          "group": "mnemo@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "mnemo.newSession",
+          "when": "view == mnemo.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "mnemo.settings",
+          "when": "view == mnemo.chat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "mnemo.openInTab",
+          "when": "view == mnemo.chat",
+          "group": "1_mnemo@1"
+        },
+        {
+          "command": "mnemo.restart",
+          "when": "view == mnemo.chat",
+          "group": "1_mnemo@2"
+        },
+        {
+          "command": "mnemo.openTerminal",
+          "when": "view == mnemo.chat",
+          "group": "1_mnemo@3"
+        }
       ]
     },
     "keybindings": [
-      { "command": "mnemo.open", "key": "ctrl+alt+m", "mac": "cmd+alt+m" },
-      { "command": "mnemo.sendSelection", "key": "ctrl+alt+a", "mac": "cmd+alt+a", "when": "editorHasSelection" }
+      {
+        "command": "mnemo.open",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m"
+      },
+      {
+        "command": "mnemo.sendSelection",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a",
+        "when": "editorHasSelection"
+      }
     ],
     "configuration": {
       "title": "Mnemo",
@@ -60,17 +181,44 @@
         },
         "mnemo.mode": {
           "type": "string",
-          "enum": ["default", "plan"],
+          "enum": [
+            "default",
+            "plan"
+          ],
           "default": "default",
           "scope": "machine",
-          "markdownDescription": "How a Mnemo terminal starts. `plan` is read-only. There is no `yolo` or `accept-edits` here: choose those inside a session, where Mnemo shows them."
+          "markdownDescription": "How Mnemo starts. `plan` is read-only. `yolo` and `accept-edits` are not offered here: switch to them in the panel, where Mnemo shows them."
+        },
+        "mnemo.trustProject": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Load a folder's own `.pi/` extensions, skills and settings without asking. They run code in the Mnemo process; leave off unless you wrote them."
         }
       }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "mnemo",
+          "title": "Mnemo",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "mnemo": [
+        {
+          "type": "webview",
+          "id": "mnemo.chat",
+          "name": "Mnemo"
+        }
+      ]
     }
   },
   "scripts": {
-    "build": "tsc -p .",
-    "typecheck": "tsc -p . --noEmit",
+    "build": "tsc -p . && tsc -p tsconfig.webview.json",
+    "typecheck": "tsc -p . --noEmit && tsc -p tsconfig.webview.json --noEmit",
     "test": "bun test ./test",
     "package": "npm run build && vsce package --no-dependencies"
   },

@@ -248,6 +248,11 @@ export class Controller {
     return this.runtime.session;
   }
 
+  /** The host this controller's extensions share; absent in headless test setups. */
+  get host(): Host | undefined {
+    return this.options.host;
+  }
+
   /**
    * Whether a turn can run. With no credentials pi still reports a placeholder
    * model (provider "unknown"), so a model alone is not enough: its provider

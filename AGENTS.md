@@ -25,6 +25,9 @@ The project site is `web/` (see `docs/WEB.md`); releases are `docs/RELEASING.md`
   learning, steering). `MemorySession` is the loop any agent drives; `service.ts` is the
   semantics over the sidecar. Test it alone: `cd packages/memory && bun test ./test`.
 - `memory-layer/`: `memsrv`, the Rust sidecar. `cd memory-layer && cargo test`.
+- `vscode/`: the VS Code extension (own `package.json`, not in the Bun workspace). It drives `mnemo --rpc`
+  (`app/src/runtime/rpc.ts`, protocol in `docs/RPC.md`); every approval is answered by the user in
+  its panel, never by the extension. `cd vscode && npm ci && npm run typecheck && npm test`.
 - `web/`: the site (Vite + React, deployed on Vercel), not part of the Bun workspace.
   `cd web && npm run build && npm run check`. `site/` and `.github/workflows/pages.yml`
   are the obsolete GitHub Pages site; leave them alone.

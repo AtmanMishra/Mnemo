@@ -56,3 +56,40 @@ describe("relativeTo", () => {
     expect(inside("/w/proj", "/w/proj-evil/a")).toBe(false);
   });
 });
+
+import { composerDraft, forwardable, rpcArgs } from "../src/core.ts";
+
+describe("rpcArgs", () => {
+  test("rpc first, plan and continue pass through, trust only when asked", () => {
+    expect(rpcArgs("default", false, false)).toEqual(["--rpc"]);
+    expect(rpcArgs("plan", true, true)).toEqual(["--rpc", "--continue", "--plan", "--trust-project"]);
+  });
+
+  test("never an option that turns approvals off", () => {
+    for (const mode of ["yolo", "accept-edits", "--yolo"]) expect(rpcArgs(mode, false, false).join(" ")).not.toMatch(/yolo|accept-edits/);
+  });
+});
+
+describe("forwardable", () => {
+  test("only the commands the panel uses", () => {
+    expect(forwardable({ type: "submit", text: "hi" })).toEqual({ type: "submit", text: "hi" });
+    expect(forwardable({ type: "answer", id: 3, answer: { kind: "yes" } })).toBeDefined();
+    expect(forwardable({ type: "quit" })).toBeUndefined();
+    expect(forwardable({ type: "constructor" })).toBeUndefined();
+    expect(forwardable({ type: "submit", id: "x" })).toBeUndefined();
+    expect(forwardable("submit")).toBeUndefined();
+    expect(forwardable([{ type: "submit" }])).toBeUndefined();
+  });
+});
+
+describe("composerDraft", () => {
+  test("fences the code with a longer fence than any inside it", () => {
+    const d = composerDraft("a.md", { start: 1, end: 2 }, "x ``` y", "markdown");
+    expect(d.startsWith("Look at a.md lines 1-2:")).toBe(true);
+    expect(d).toContain("````markdown\nx ``` y\n````");
+  });
+
+  test("no selection is just the reference", () => {
+    expect(composerDraft("a.ts", undefined, undefined, "ts")).toBe("Look at a.ts: ");
+  });
+});

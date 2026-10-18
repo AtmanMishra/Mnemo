@@ -23,6 +23,7 @@ import { MemoryService } from "@mnemo/memory";
 import { createHost, settleBackground, type Mode } from "../src/extensions/host.ts";
 import { mnemoExtensions } from "../src/extensions/index.ts";
 import { Root } from "../src/ui/Root.tsx";
+import { RpcServer } from "../src/runtime/rpc.ts";
 import { workspaceSource } from "../src/runtime/workspace-source.ts";
 import { runMemoryCommand } from "../src/memory-cli.ts";
 import { Fleet } from "../src/runtime/fleet.ts";
@@ -56,6 +57,8 @@ usage
   mnemo settings …         every setting: list, get <name>, set <name> <value>, reset [name] (or /settings in a session)
   mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
+  mnemo --rpc              the session over JSON lines on stdin/stdout, for an editor extension (docs/RPC.md);
+                           approvals are the client's to answer, as in the terminal
 
 options
   --cwd <dir>              work in another folder
@@ -100,6 +103,7 @@ interface Args {
   continueRecent: boolean;
   trustProject?: boolean;
   print?: string;
+  rpc?: boolean;
   cwd?: string;
 }
 
@@ -138,6 +142,7 @@ function parse(argv: string[]): Args {
     else if (v === "--yolo") a.mode = "yolo";
     else if (v === "--trust-project") a.trustProject = true;
     else if (v === "-c" || v === "--continue") a.continueRecent = true;
+    else if (v === "--rpc") a.rpc = true;
     else if (v === "-p" || v === "--print") a.print = value(++i, v);
     else if (v === "--cwd") a.cwd = value(++i, v);
     else throw new UsageError(`unknown argument ${v} — mnemo --help lists them`);
@@ -525,6 +530,27 @@ async function main(): Promise<number> {
     }
   };
   const { host, runtime } = await makeAgent(cwd, true);
+
+  if (args.rpc) {
+    // stdout is the protocol: anything else that prints goes to stderr.
+    console.log = console.info = console.warn = console.debug = (...a: unknown[]) => console.error(...a);
+    let finish!: () => void;
+    const closed = new Promise<void>((r) => (finish = r));
+    const controller = new Controller(runtime, { exit: () => finish(), host });
+    await controller.bind();
+    const server = new RpcServer({ controller, version: pkg.version, write: (e) => void process.stdout.write(`${JSON.stringify(e)}\n`), onQuit: () => finish() });
+    server.start();
+    if (args.continueRecent && runtime.session.messages.length > 0) controller.transcript.load(runtime.session.messages);
+    const rl = readline.createInterface({ input: process.stdin });
+    rl.on("line", (l) => void server.handle(l));
+    rl.on("close", () => finish());
+    await closed;
+    server.stop();
+    controller.dialogs.cancelAll();
+    await runtime.dispose();
+    memory?.stop();
+    return 0;
+  }
 
   if (args.print !== undefined) {
     const session = runtime.session;

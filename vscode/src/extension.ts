@@ -1,75 +1,206 @@
 import * as vscode from "vscode";
-import { execFile } from "node:child_process";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import { launchArgs, reference, relativeTo } from "./core";
+import * as path from "node:path";
+import { composerDraft, forwardable, launchArgs, reference, relativeTo, rpcArgs } from "./core";
+import { MnemoClient } from "./client";
+import type { RpcEvent } from "./protocol";
+import { initial, reduce, type State } from "./webview/reduce";
 
 /**
- * Mnemo has no machine-readable interface (`-p` prints one answer and, per
- * docs/SECURITY-AUDIT-2026-10.md, allows every call that would ask). So this
- * extension never drives the agent behind the user's back: it opens the real
- * interface in an editor terminal, where Mnemo's own approval prompt decides
- * each command and edit, and adds editor commands around it.
+ * Mnemo's interface in the editor: a panel that drives `mnemo --rpc`. Every decision the
+ * terminal asks of the user (a command, an edit, a login) arrives as a dialog event and
+ * is answered by the user clicking in the panel; this file never answers one itself and
+ * never starts Mnemo with an option that skips them.
  */
 
-let terminal: vscode.Terminal | undefined;
-let output: vscode.OutputChannel | undefined;
+const VIEW = "mnemo.chat";
 
-function folder(): vscode.WorkspaceFolder | undefined {
-  return vscode.workspace.workspaceFolders?.[0];
-}
+class Session implements vscode.Disposable {
+  private client: MnemoClient | undefined;
+  private state: State = initial();
+  private problem: string | undefined;
+  private running = false;
+  private readonly views = new Set<vscode.Webview>();
+  private readonly bar: vscode.StatusBarItem;
+  private lastAsked = 0;
+  private resume = false;
 
-function setting<T>(name: string, fallback: T): T {
-  return vscode.workspace.getConfiguration("mnemo").get<T>(name, fallback);
-}
-
-function open(resume: boolean): vscode.Terminal | undefined {
-  const root = folder();
-  if (!root) {
-    void vscode.window.showWarningMessage("Open a folder first: Mnemo works in a project.");
-    return undefined;
+  constructor(private readonly context: vscode.ExtensionContext) {
+    this.bar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 50);
+    this.bar.command = "mnemo.open";
+    this.paint();
+    this.bar.show();
   }
-  if (!vscode.workspace.isTrusted) {
-    void vscode.window.showWarningMessage("Mnemo runs commands and edits files; trust this workspace first.");
-    return undefined;
+
+  private cfg<T>(name: string, fallback: T): T {
+    return vscode.workspace.getConfiguration("mnemo").get<T>(name, fallback);
   }
-  if (terminal && terminal.exitStatus === undefined) {
-    terminal.show();
-    return terminal;
+
+  private folder(): vscode.WorkspaceFolder | undefined {
+    return vscode.workspace.workspaceFolders?.[0];
   }
-  terminal = vscode.window.createTerminal({
-    name: "Mnemo",
-    shellPath: setting("path", "mnemo"),
-    shellArgs: launchArgs(setting("mode", "default"), resume),
-    cwd: root.uri.fsPath,
-  });
-  terminal.show();
-  return terminal;
+
+  /** Start Mnemo for the first folder, once. Returns whether it is running. */
+  ensure(resume = false): boolean {
+    if (this.client?.running) return true;
+    const root = this.folder();
+    if (!root) {
+      this.fail("Open a folder first: Mnemo works in a project.");
+      return false;
+    }
+    if (!vscode.workspace.isTrusted) {
+      this.fail("Mnemo runs commands and edits files; trust this workspace first.");
+      return false;
+    }
+    this.state = initial();
+    this.problem = undefined;
+    this.resume = resume;
+    this.client = new MnemoClient({
+      command: this.cfg("path", "mnemo"),
+      args: rpcArgs(this.cfg("mode", "default"), resume, this.cfg("trustProject", false)),
+      cwd: root.uri.fsPath,
+      onEvent: (e) => this.event(e),
+      onExit: () => {
+        this.running = false;
+        this.paint();
+        this.broadcast({ type: "host", running: false, problem: this.problem });
+      },
+      onProblem: (m) => {
+        this.problem = m;
+        this.broadcast({ type: "host", running: this.running, problem: m });
+      },
+    });
+    this.running = true;
+    this.client.start();
+    this.paint();
+    return true;
+  }
+
+  private fail(message: string): void {
+    this.problem = message;
+    this.broadcast({ type: "host", running: this.running, problem: message });
+    void vscode.window.showWarningMessage(message);
+  }
+
+  restart(resume = false): void {
+    this.client?.stop();
+    this.client = undefined;
+    this.ensure(resume);
+  }
+
+  private event(e: RpcEvent): void {
+    this.state = reduce(this.state, e);
+    this.broadcast({ type: "event", event: e });
+    this.paint();
+    if (e.type === "dialog" && e.dialog.kind === "approval" && e.dialog.id !== this.lastAsked) {
+      this.lastAsked = e.dialog.id;
+      // Only tells you; the answer is given in the panel, where the whole request is shown.
+      if (![...this.views].length || !this.visible)
+        void vscode.window.showWarningMessage(`Mnemo is asking to use ${e.dialog.tool}: ${e.dialog.subject.slice(0, 80)}`, "Review").then((pick) => pick && void vscode.commands.executeCommand("mnemo.open"));
+    }
+  }
+
+  visible = false;
+
+  private paint(): void {
+    const asking = this.state.dialog?.kind === "approval";
+    const working = !!this.state.working;
+    this.bar.text = asking ? "$(bell) Mnemo: asking" : working ? "$(sync~spin) Mnemo" : "$(hubot) Mnemo";
+    this.bar.tooltip = asking ? "Mnemo is waiting for your answer" : working ? "Mnemo is working" : this.running ? "Mnemo" : "Open Mnemo";
+    this.bar.backgroundColor = asking ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
+  }
+
+  private broadcast(message: unknown): void {
+    for (const v of this.views) void v.postMessage(message);
+  }
+
+  /** A webview (the side view or an editor tab) is shown; give it everything so far. */
+  attach(webview: vscode.Webview, onDispose: vscode.Event<void>): void {
+    this.views.add(webview);
+    onDispose(() => this.views.delete(webview));
+    webview.onDidReceiveMessage((m) => this.fromWebview(webview, m));
+  }
+
+  private fromWebview(webview: vscode.Webview, m: any): void {
+    switch (m?.type) {
+      case "ready":
+        this.ensure();
+        void webview.postMessage({ type: "snapshot", state: this.state, running: this.running, problem: this.problem, version: this.context.extension.packageJSON.version });
+        return;
+      case "cmd": {
+        const msg = forwardable(m.msg);
+        if (!msg) return;
+        if (!this.client?.send(msg)) void webview.postMessage({ type: "host", running: false, problem: "Mnemo is not running." });
+        return;
+      }
+      case "request": {
+        const msg = forwardable(m.msg);
+        if (!msg || !this.client) return;
+        void this.client.request(msg).then((r) => void webview.postMessage({ type: "response", key: m.key, result: r }));
+        return;
+      }
+      case "restart":
+        return this.restart();
+      case "openSettings":
+        void vscode.commands.executeCommand("workbench.action.openSettings", "@ext:selfev.mnemo-vscode");
+        return;
+      case "openFile":
+        return void this.openFile(String(m.path ?? ""), typeof m.line === "number" ? m.line : undefined);
+      case "copy":
+        if (typeof m.text === "string") void vscode.env.clipboard.writeText(m.text);
+        return;
+    }
+  }
+
+  private async openFile(rel: string, line?: number): Promise<void> {
+    const root = this.folder();
+    if (!root || !rel) return;
+    const real = (p: string) => {
+      try {
+        return fs.realpathSync.native(p);
+      } catch {
+        return p;
+      }
+    };
+    const abs = real(path.resolve(root.uri.fsPath, rel));
+    if (!relativeTo(real(root.uri.fsPath), abs)) return void vscode.window.showWarningMessage("That file is outside the project folder.");
+    const doc = await vscode.workspace.openTextDocument(abs).then(undefined, () => undefined);
+    if (!doc) return void vscode.window.showWarningMessage(`Could not open ${rel}`);
+    const editor = await vscode.window.showTextDocument(doc, { preview: true });
+    if (line && line > 0) {
+      const p = new vscode.Position(Math.min(line, doc.lineCount) - 1, 0);
+      editor.selection = new vscode.Selection(p, p);
+      editor.revealRange(new vscode.Range(p, p), vscode.TextEditorRevealType.InCenter);
+    }
+  }
+
+  /** Put text in the composer (not sent) and bring the panel up. */
+  prefill(text: string): void {
+    this.ensure();
+    void vscode.commands.executeCommand("mnemo.open").then(() => this.broadcast({ type: "prefill", text }));
+  }
+
+  tab(name: string): void {
+    this.ensure();
+    void vscode.commands.executeCommand("mnemo.open").then(() => this.broadcast({ type: "tab", tab: name }));
+  }
+
+  send(message: Record<string, unknown>): void {
+    if (this.ensure()) this.client?.send(message);
+  }
+
+  dispose(): void {
+    this.client?.stop();
+    this.bar.dispose();
+  }
 }
 
-/** Type a reference into Mnemo's input without pressing enter: the user adds the question and sends it. */
-function send(text: string): void {
-  const t = open(false);
-  if (t) t.sendText(text, false);
-}
-
-function sendSelection(): void {
-  const editor = vscode.window.activeTextEditor;
-  const root = folder();
-  if (!editor || !root) return;
-  const rel = relativeTo(realpath(root.uri.fsPath), realpath(editor.document.uri.fsPath));
-  if (!rel) return void vscode.window.showWarningMessage("That file is outside the project folder.");
-  if (editor.document.isDirty) void vscode.window.showInformationMessage("Mnemo reads the saved file; save to include your edits.");
-  const s = editor.selection;
-  send(reference(rel, s.isEmpty ? undefined : { start: s.start.line + 1, end: s.end.character === 0 && s.end.line > s.start.line ? s.end.line : s.end.line + 1 }));
-}
-
-function sendFile(uri?: vscode.Uri): void {
-  const root = folder();
-  const file = uri ?? vscode.window.activeTextEditor?.document.uri;
-  if (!root || !file) return;
-  const rel = relativeTo(realpath(root.uri.fsPath), realpath(file.fsPath));
-  if (!rel) return void vscode.window.showWarningMessage("That file is outside the project folder.");
-  send(reference(rel));
+function html(webview: vscode.Webview, root: vscode.Uri): string {
+  const nonce = crypto.randomBytes(16).toString("base64");
+  const uri = (...p: string[]) => webview.asWebviewUri(vscode.Uri.joinPath(root, "media", ...p));
+  const csp = [`default-src 'none'`, `style-src ${webview.cspSource}`, `script-src 'nonce-${nonce}' ${webview.cspSource}`, `font-src ${webview.cspSource}`].join("; ");
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="${uri("webview.css")}"></head><body><div id="app"></div><script nonce="${nonce}" type="module" src="${uri("dist", "webview", "main.js")}"></script></body></html>`;
 }
 
 function realpath(p: string): string {
@@ -80,35 +211,75 @@ function realpath(p: string): string {
   }
 }
 
-function memoryStatus(): void {
-  const root = folder();
-  output ??= vscode.window.createOutputChannel("Mnemo");
-  output.show(true);
-  execFile(setting("path", "mnemo"), ["memory", "status"], { cwd: root?.uri.fsPath, timeout: 20_000 }, (error, stdout, stderr) => {
-    output!.appendLine(error ? `mnemo memory status failed: ${(stderr || error.message).trim()}` : stdout.trim());
-  });
-}
-
 export function activate(context: vscode.ExtensionContext): void {
-  const bar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 50);
-  bar.text = "$(hubot) Mnemo";
-  bar.tooltip = "Open Mnemo";
-  bar.command = "mnemo.open";
-  bar.show();
+  const session = new Session(context);
+  context.subscriptions.push(session);
 
-  const command = (id: string, fn: (...args: any[]) => void) => vscode.commands.registerCommand(id, fn);
+  const provider: vscode.WebviewViewProvider = {
+    resolveWebviewView(view) {
+      view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "media")] };
+      view.webview.html = html(view.webview, context.extensionUri);
+      session.attach(view.webview, view.onDidDispose);
+      session.visible = view.visible;
+      view.onDidChangeVisibility(() => (session.visible = view.visible));
+    },
+  };
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider(VIEW, provider, { webviewOptions: { retainContextWhenHidden: true } }));
+
+  let terminal: vscode.Terminal | undefined;
+  const openTerminal = (resume: boolean) => {
+    const root = vscode.workspace.workspaceFolders?.[0];
+    if (!root) return void vscode.window.showWarningMessage("Open a folder first: Mnemo works in a project.");
+    if (!vscode.workspace.isTrusted) return void vscode.window.showWarningMessage("Mnemo runs commands and edits files; trust this workspace first.");
+    if (terminal && terminal.exitStatus === undefined) return terminal.show();
+    terminal = vscode.window.createTerminal({ name: "Mnemo", shellPath: vscode.workspace.getConfiguration("mnemo").get("path", "mnemo"), shellArgs: launchArgs(vscode.workspace.getConfiguration("mnemo").get("mode", "default"), resume), cwd: root.uri.fsPath });
+    terminal.show();
+  };
+
+  const selection = (): { rel: string; range?: { start: number; end: number }; code?: string; language: string } | undefined => {
+    const editor = vscode.window.activeTextEditor;
+    const root = vscode.workspace.workspaceFolders?.[0];
+    if (!editor || !root) return undefined;
+    const rel = relativeTo(realpath(root.uri.fsPath), realpath(editor.document.uri.fsPath));
+    if (!rel) return void vscode.window.showWarningMessage("That file is outside the project folder.");
+    const s = editor.selection;
+    if (s.isEmpty) return { rel, language: editor.document.languageId };
+    const endLine = s.end.character === 0 && s.end.line > s.start.line ? s.end.line : s.end.line + 1;
+    return { rel, range: { start: s.start.line + 1, end: endLine }, code: editor.document.getText(s).slice(0, 20000), language: editor.document.languageId };
+  };
+
+  const command = (id: string, fn: (...args: any[]) => unknown) => vscode.commands.registerCommand(id, fn);
   context.subscriptions.push(
-    bar,
-    command("mnemo.open", () => open(false)),
-    command("mnemo.continue", () => open(true)),
-    command("mnemo.sendSelection", sendSelection),
-    command("mnemo.sendFile", sendFile),
-    // Mnemo edits files in place, so the editor's own source control view is the diff.
-    command("mnemo.showChanges", () => vscode.commands.executeCommand("workbench.view.scm")),
-    command("mnemo.memoryStatus", memoryStatus),
-    vscode.window.onDidCloseTerminal((t) => {
-      if (t === terminal) terminal = undefined;
+    command("mnemo.open", async () => {
+      session.ensure();
+      await vscode.commands.executeCommand(`${VIEW}.focus`);
     }),
+    command("mnemo.openInTab", () => {
+      session.ensure();
+      const panel = vscode.window.createWebviewPanel("mnemo.tab", "Mnemo", vscode.ViewColumn.Beside, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "media")] });
+      panel.webview.html = html(panel.webview, context.extensionUri);
+      session.attach(panel.webview, panel.onDidDispose);
+    }),
+    command("mnemo.continue", () => session.restart(true)),
+    command("mnemo.restart", () => session.restart()),
+    command("mnemo.newSession", () => session.send({ type: "submit", text: "/new" })),
+    command("mnemo.stop", () => session.send({ type: "interrupt" })),
+    command("mnemo.sendSelection", () => {
+      const s = selection();
+      if (s) session.prefill(composerDraft(s.rel, s.range, s.code, s.language));
+    }),
+    command("mnemo.sendFile", (uri?: vscode.Uri) => {
+      const root = vscode.workspace.workspaceFolders?.[0];
+      const file = uri ?? vscode.window.activeTextEditor?.document.uri;
+      if (!root || !file) return;
+      const rel = relativeTo(realpath(root.uri.fsPath), realpath(file.fsPath));
+      if (!rel) return void vscode.window.showWarningMessage("That file is outside the project folder.");
+      session.prefill(reference(rel));
+    }),
+    command("mnemo.showChanges", () => vscode.commands.executeCommand("workbench.view.scm")),
+    command("mnemo.memory", () => session.tab("memory")),
+    command("mnemo.settings", () => session.tab("settings")),
+    command("mnemo.openTerminal", () => openTerminal(false)),
   );
 }
 

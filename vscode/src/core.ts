@@ -50,3 +50,31 @@ export function relativeTo(root: string, file: string): string | undefined {
   const norm = (s: string) => s.replace(/\\/g, "/");
   return norm(file).slice(norm(root).replace(/\/+$/, "").length + 1);
 }
+
+/** Arguments for the background `mnemo --rpc` the panel talks to. */
+export function rpcArgs(mode: string, resume: boolean, trustProject: boolean): string[] {
+  const args = ["--rpc", ...launchArgs(mode, resume)];
+  if (trustProject) args.push("--trust-project");
+  return args;
+}
+
+/** The commands a webview may send on to Mnemo. Anything else it posts is dropped. */
+const FORWARD = new Set(["submit", "interrupt", "answer", "setMode", "cycleThinking", "setSetting", "resetSetting", "memory"]);
+
+/** `msg` as an object safe to forward, or undefined. The webview is our own page, but treat it as input. */
+export function forwardable(msg: unknown): Record<string, unknown> | undefined {
+  if (!msg || typeof msg !== "object" || Array.isArray(msg)) return undefined;
+  const m = msg as Record<string, unknown>;
+  if (typeof m.type !== "string" || !FORWARD.has(m.type)) return undefined;
+  if (m.id !== undefined && typeof m.id !== "number") return undefined;
+  return m;
+}
+
+/** A selection as the text put in the composer: where it is, and the code itself, fenced so it can be edited. */
+export function composerDraft(relPath: string, range: { start: number; end: number } | undefined, code: string | undefined, language: string): string {
+  const where = reference(relPath, range);
+  if (!code) return where;
+  let fence = "```";
+  while (code.includes(fence)) fence += "`";
+  return `${where}\n\n${fence}${plain(language)}\n${code}\n${fence}\n\n`;
+}
