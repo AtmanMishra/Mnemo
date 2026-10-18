@@ -160,6 +160,17 @@ describe("permission gate", () => {
     expect(lastToolResult().toLowerCase()).toMatch(/plan|blocked|denied|refus/);
   }, T);
 
+  test("an MCP server's tool runs from the compiled binary", async () => {
+    const w = fresh();
+    const server = path.join(import.meta.dir, "..", "test", "fixtures", "mcp-server.ts");
+    fs.mkdirSync(path.join(w.mnemoHome, "agent"), { recursive: true });
+    fs.writeFileSync(path.join(w.mnemoHome, "agent", "mcp.json"), JSON.stringify({ mcpServers: { shouter: { command: process.execPath, args: [server], exposure: "direct" } } }));
+    play(steps({ tools: [{ name: "mcp__shouter__shout", args: { text: "pelican" } }] }, { text: "ok" }));
+    const r = await mnemo(w, ["--yolo", "-p", "shout"]);
+    expect(r.code).toBe(0);
+    expect(lastToolResult()).toContain("PELICAN");
+  }, T);
+
   test("a deny rule holds even in --yolo", async () => {
     const w = fresh();
     fs.writeFileSync(path.join(w.mnemoHome, "permissions.json"), JSON.stringify({ rules: [{ tool: "bash", pattern: "touch*", action: "deny" }] }));

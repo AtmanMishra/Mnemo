@@ -339,7 +339,9 @@ export class Controller {
         getToolsExpanded: () => this.chrome.expanded,
         setToolsExpanded: (expanded) => this.update({ expanded }),
       }),
-      mode: "tui",
+      // Not "tui": that tells extensions they may hand over pi-tui components, which an Ink
+      // interface ignores (ui-context.ts). As "rpc" they ask through dialogs instead (`/mcp`).
+      mode: "rpc",
       commandContextActions: {
         waitForIdle: () => this.runtime.session.waitForIdle(),
         newSession: (o) => this.runtime.newSession(o),

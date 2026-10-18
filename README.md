@@ -136,6 +136,11 @@ cd app && bun bin/mnemo.ts --demo
   and what was marked wrong (`--apply` retires them). Search can use your own
   embedding server: `MNEMO_EMBED_URL=http://localhost:11434/v1/embeddings
   MNEMO_EMBED_MODEL=nomic-embed-text` (Ollama).
+- **MCP servers as tools.** Put servers in `$MNEMO_HOME/agent/mcp.json` (or a
+  trusted project's `.pi/mcp.json`) in the `mcpServers` shape other clients use; stdio
+  and HTTP servers both work, and `/mcp` lists them, signs in and reconnects. Their
+  tools stay out of the prompt until `tool_search` finds them (`"exposure": "direct"`
+  declares them up front). In `default` mode each call asks first; "always" covers that tool.
 - **Memory for other agents.** `mnemo memory setup claude-code` prints the hooks
   and MCP entry that give Claude Code (or Codex) the same memory; `mnemo memory
   ingest` learns from Claude Code sessions you already have.

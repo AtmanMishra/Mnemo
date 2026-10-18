@@ -166,6 +166,30 @@ memory), and the MCP server takes the project from each call, so a model that is
 prompt-injected can ask for another project's memory. Only attach memory to agents
 and repositories you trust with all of it.
 
+## MCP servers
+
+An MCP server is a program (or a web service) you choose, and its tools do whatever it
+says they do. Mnemo connects only the servers in `$MNEMO_HOME/agent/mcp.json`, plus a
+folder's `.pi/mcp.json` once you have trusted that folder (an untrusted folder's servers
+are never started), and a project file may not use `"auth"` to send one of your provider
+credentials anywhere.
+
+- **Every call goes through the gate.** In `default` and `accept-edits` each call to an
+  MCP tool asks you, showing its arguments; "always" covers that one tool of that server
+  in this project. `plan` refuses them all, `yolo` and `-p` allow them, and deny rules
+  match by name (`{"tool": "mcp__github__*", "action": "deny"}`). Reading a server's
+  resources (`read_mcp_resource`) asks the same way; `tool_search`, which only finds
+  tools, does not.
+- **What a tool returns is the server's text,** read by the model like a web page:
+  treat a server you do not control as a source of prompt injection.
+- **A stdio server inherits your environment,** provider keys included, as it does in
+  other clients: it runs as you and could read your files anyway. Give a server only the
+  variables it needs by running it through a wrapper if that matters to you.
+- **Network.** HTTP servers are reached at the address you configured; that, and
+  signing in to one with OAuth (`/mcp login`, which listens on `127.0.0.1` for the
+  browser's redirect until the sign-in ends), are the only connections MCP makes.
+  Nothing is contacted for a server you have not configured. Sub-agents get no MCP tools.
+
 ## Agents that talk to agents
 
 Agents can start sub-agents (to depth 3), you can link top-level agents as siblings,
