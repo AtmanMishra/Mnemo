@@ -15,6 +15,7 @@ import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { SAFE_GIT, trustedBin } from "./bin.ts";
 import { childEnv, configuredKeys } from "./env.ts";
 
 /** Run one candidate in `cwd`; resolves to its final answer. */
@@ -59,7 +60,9 @@ export interface BestOfResult {
 const LINKED = ["node_modules", ".venv", "venv"];
 
 function git(cwd: string, args: string[], input?: string): string {
-  const r = Bun.spawnSync(["git", ...args], { cwd, stdin: input === undefined ? "ignore" : Buffer.from(input), stdout: "pipe", stderr: "pipe" });
+  const bin = trustedBin("git");
+  if (!bin) throw new Error("git was not found on PATH");
+  const r = Bun.spawnSync([bin, ...SAFE_GIT, ...args], { cwd, stdin: input === undefined ? "ignore" : Buffer.from(input), stdout: "pipe", stderr: "pipe" });
   if (r.exitCode !== 0) throw new Error(`git ${args[0]}: ${r.stderr.toString().trim()}`);
   return r.stdout.toString();
 }
@@ -68,7 +71,10 @@ function git(cwd: string, args: string[], input?: string): string {
 function killTree(pid: number | undefined): void {
   if (pid === undefined) return;
   try {
-    if (process.platform === "win32") spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore" });
+    if (process.platform === "win32") {
+      const taskkill = trustedBin("taskkill");
+      if (taskkill) spawnSync(taskkill, ["/T", "/F", "/PID", String(pid)], { stdio: "ignore" });
+    }
     else process.kill(-pid, "SIGKILL");
   } catch {
     /* already gone */

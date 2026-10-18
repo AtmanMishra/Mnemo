@@ -5,17 +5,22 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
+import { SAFE_GIT, trustedBin } from "../runtime/bin.ts";
 
 const SKIP = new Set([".git", "node_modules", "target", "dist", "build", ".next", ".venv", "__pycache__"]);
 const LIMIT = 20_000;
 
 export function listFiles(cwd: string): string[] {
-  const git = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], {
-    cwd,
-    encoding: "utf8",
-    maxBuffer: 32 * 1024 * 1024,
-  });
-  if (git.status === 0 && git.stdout) return git.stdout.split("\n").filter(Boolean).slice(0, LIMIT);
+  // Runs on the first `@`, trusted folder or not.
+  const bin = trustedBin("git");
+  const git = bin
+    ? spawnSync(bin, [...SAFE_GIT, "ls-files", "--cached", "--others", "--exclude-standard"], {
+        cwd,
+        encoding: "utf8",
+        maxBuffer: 32 * 1024 * 1024,
+      })
+    : undefined;
+  if (git?.status === 0 && git.stdout) return git.stdout.split("\n").filter(Boolean).slice(0, LIMIT);
   const out: string[] = [];
   const walk = (dir: string) => {
     if (out.length >= LIMIT) return;
