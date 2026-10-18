@@ -125,6 +125,17 @@ test("reads of /proc environ and memory and of Mnemo's key files are refused, in
     expect(refused(r(p, "yolo")), p).toBe(true);
 });
 
+test("a project's .env, private keys and .netrc are not read, but their examples and public halves are", () => {
+  const proj = tmp("mnemo-proj-");
+  const r = (p: string) => judge({ mode: "yolo" }, [], noGrants, proj, "read", { path: p });
+  for (const p of [".env", "./.env.local", "config/.env.production", "@.ENV", "keys/id_ed25519", "id_rsa", ".netrc"]) expect(refused(r(p)), p).toBe(true);
+  for (const p of [".env.example", ".env.local.sample", "id_rsa.pub", ".envrc", "src/env.ts"]) expect(allowed(r(p)), p).toBe(true);
+  // An allow rule opens one.
+  expect(judge({ mode: "yolo" }, [{ tool: "read", pattern: ".env", action: "allow" }], noGrants, proj, "read", { path: ".env" })).toEqual({ allow: true });
+  const w = (p: string) => judge({ mode: "yolo" }, [], noGrants, "C:\\proj", "read", { path: p }, win);
+  for (const p of [".env.", "sub\\.ENV", ".env::$DATA"]) expect(refused(w(p)), p).toBe(true);
+});
+
 test("a grant never covers a command that reads another process's environment", () => {
   const grants = { project: ["cat*"], global: [], deny: [] };
   expect(judge({ mode: "default" }, [], grants, "/p", "bash", { command: "cat notes.txt" })).toEqual({ allow: true });

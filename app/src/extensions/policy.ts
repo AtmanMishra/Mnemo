@@ -291,12 +291,19 @@ function secretLocations(host: { home?: string; agentDir?: string }, sys: PathSy
 /** A process's environment (where the provider keys are) and memory. */
 const PROC_SECRET = /^\/proc\/[^/]+\/(?:task\/[^/]+\/)?(?:environ|mem)$/;
 
+/**
+ * Files that hold secrets wherever they are: a project's `.env` (not `.env.example` and the like),
+ * a private key, a `.netrc`. Read once, they are in the transcript and the provider's logs.
+ */
+const SECRET_FILE = /^(?:\.env(?:\.(?!(?:example|sample|template|dist|defaults?)$)[^.]+)*|id_(?:rsa|dsa|ecdsa|ed25519)(?:_sk)?|[._]netrc|\.pgpass)$/i;
+
 /** Credentials a read tool is never needed for. A rule in permissions.json can still allow them. */
 function secretPath(host: { home?: string; agentDir?: string }, cwd: string, p: unknown, sys: PathSystem): boolean {
   if (typeof p !== "string") return false;
   const real = realTarget(cwd, p, sys);
   if (real === undefined) return false;
   if (!sys.windows && PROC_SECRET.test(real)) return true;
+  if (SECRET_FILE.test(sys.path.basename(real))) return true;
   return secretLocations(host, sys).some((s) => within(s, real, sys) !== undefined);
 }
 
