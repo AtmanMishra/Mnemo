@@ -36,7 +36,8 @@
       "restrictedConfigurations": [
         "mnemo.path",
         "mnemo.mode",
-        "mnemo.trustProject"
+        "mnemo.trustProject",
+        "mnemo.install"
       ]
     },
     "virtualWorkspaces": false
@@ -177,7 +178,7 @@
           "type": "string",
           "default": "mnemo",
           "scope": "machine",
-          "markdownDescription": "The `mnemo` executable. Machine scope: a workspace cannot choose which program runs."
+          "markdownDescription": "Use this `mnemo` instead of the one the extension finds or downloads. Leave as `mnemo` to let the extension choose. Machine scope: a workspace cannot choose which program runs."
         },
         "mnemo.mode": {
           "type": "string",
@@ -227,6 +228,16 @@
           ],
           "default": "editor",
           "description": "The panel's colours: your editor's own, or one of Mnemo's palettes (the same as the terminal's). Also set from the picker in the panel."
+        },
+        "mnemo.install": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "never"
+          ],
+          "default": "ask",
+          "scope": "machine",
+          "markdownDescription": "When no Mnemo new enough for this panel is found: `ask` offers to download the version this extension needs from GitHub (checked against the release's SHA-256) into the extension's storage; `never` only reports it."
         }
       }
     },

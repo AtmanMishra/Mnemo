@@ -1,7 +1,7 @@
 # Mnemo for VS Code
 
 [Mnemo](https://github.com/AtmanMishra/Mnemo) as a panel in the editor: chat, approvals, diffs, memory, agents and every Mnemo setting, with the agent running exactly as it does in a terminal.
-Install Mnemo first (`mnemo` on your PATH, or set `mnemo.path`), then click the Mnemo icon in the activity bar.
+Click the Mnemo icon in the activity bar. If no Mnemo new enough for the panel is installed, the extension offers to download the version it needs (see *Getting Mnemo* below); you do not have to install anything first.
 
 | | |
 |---|---|
@@ -14,6 +14,17 @@ Install Mnemo first (`mnemo` on your PATH, or set `mnemo.path`), then click the 
 | **Settings** | All of Mnemo's settings, grouped, validated by Mnemo itself, with reset and a note when one applies at the next launch. |
 | **Editor** | *Ask About the Selection* (`ctrl+alt+a`) and *Ask About This File* put the path, line range and code in the prompt for you to finish and send. *Review Changes* opens Source Control. *Open Mnemo in the Terminal* runs the plain terminal interface instead. |
 
+## Getting Mnemo
+
+The panel needs Mnemo 0.1.8 or newer (the first release with `--rpc`). On first use the extension looks, in order, for:
+
+1. the program named in `mnemo.path`, if you set one (never replaced);
+2. the copy it manages in its own storage folder;
+3. a `mnemo` on your PATH that is new enough;
+4. otherwise it asks, then downloads that exact release from `github.com/AtmanMishra/Mnemo` (the archive for your platform, checked against the release's `SHA256SUMS`, redirects only to GitHub) into the extension's storage. Nothing is installed on your PATH, and your memory, sessions and settings in `~/.mnemo` are shared with any other Mnemo. `mnemo.install: never` turns the download off.
+
+This download is the extension's only network request; Mnemo itself still talks only to your model provider.
+
 ## How it works
 
 The extension starts `mnemo --rpc` in your workspace folder and talks to it in JSON lines over standard input and output (the protocol is [`docs/RPC.md`](../docs/RPC.md)). There is no server, no port and no network call of the extension's own.
@@ -22,7 +33,7 @@ The extension starts `mnemo --rpc` in your workspace folder and talks to it in J
 
 - Every ask is answered by you, by clicking, in the panel. The extension never answers one, never starts Mnemo with `--yolo` or `--accept-edits`, and has no setting that does. An ask left open stays waiting for you; if Mnemo exits it counts as *no*.
 - Mnemo's permission gate filters; it is not a sandbox (see the repository's `SECURITY.md`). Plan mode is read-only.
-- `mnemo.path`, `mnemo.mode` and `mnemo.trustProject` are machine-scoped and ignored in untrusted workspaces, so a repository cannot choose which program runs or switch on its own `.pi/` extensions. By default a folder's `.pi/` code is not loaded.
+- `mnemo.path`, `mnemo.mode`, `mnemo.trustProject` and `mnemo.install` are machine-scoped and ignored in untrusted workspaces, so a repository cannot choose which program runs or switch on its own `.pi/` extensions. By default a folder's `.pi/` code is not loaded.
 - The panel renders model output as text nodes, never as HTML, under a strict content security policy.
 
 ## Limits

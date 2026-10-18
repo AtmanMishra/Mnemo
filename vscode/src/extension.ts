@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { composerDraft, forwardable, launchArgs, reference, relativeTo, rpcArgs } from "./core";
 import { MnemoClient } from "./client";
 import type { RpcEvent } from "./protocol";
+import { compareVersions, install, managedPath, probe, REQUIRED_VERSION } from "./install";
 import { initial, reduce, type State } from "./webview/reduce";
 import { THEMES } from "./webview/themes";
 
@@ -16,6 +17,7 @@ import { THEMES } from "./webview/themes";
  */
 
 const VIEW = "mnemo.chat";
+const SUPPORTED_PROTOCOL = 1;
 const THEME_VALUES: string[] = ["editor", ...Object.keys(THEMES)];
 
 class Session implements vscode.Disposable {
@@ -43,9 +45,57 @@ class Session implements vscode.Disposable {
     return vscode.workspace.workspaceFolders?.[0];
   }
 
-  /** Start Mnemo for the first folder, once. Returns whether it is running. */
-  ensure(resume = false): boolean {
-    if (this.client?.running) return true;
+  private starting: Promise<boolean> | undefined;
+
+  /** Start Mnemo for the first folder, once. Resolves to whether it is running. */
+  ensure(resume = false): Promise<boolean> {
+    if (this.client?.running) return Promise.resolve(true);
+    return (this.starting ??= this.start(resume).finally(() => (this.starting = undefined)));
+  }
+
+  /**
+   * The `mnemo` to run: the one named in `mnemo.path` if the user set it, else the copy this
+   * extension manages, else one on PATH that is new enough, else (asking first) a download.
+   */
+  private async resolveBinary(): Promise<string | undefined> {
+    const configured = this.cfg("path", "mnemo");
+    if (configured !== "mnemo") {
+      const v = await probe(configured);
+      if (v && compareVersions(v, REQUIRED_VERSION) >= 0) return configured;
+      this.fail(v ? `${configured} is Mnemo ${v}; this panel needs ${REQUIRED_VERSION} or newer. Update it, or clear mnemo.path to let the extension manage a copy.` : `Could not run ${configured}. Check mnemo.path.`);
+      return undefined;
+    }
+    const dir = vscode.Uri.joinPath(this.context.globalStorageUri, "mnemo").fsPath;
+    const managed = managedPath(dir, REQUIRED_VERSION, process.platform);
+    if (fs.existsSync(managed)) return managed;
+    const onPath = await probe("mnemo");
+    if (onPath && compareVersions(onPath, REQUIRED_VERSION) >= 0) return "mnemo";
+    const found = onPath ? `Mnemo ${onPath} is installed, but` : "Mnemo is not installed, and";
+    if (this.cfg<string>("install", "ask") === "never") {
+      this.fail(`${found} this panel needs ${REQUIRED_VERSION} or newer. Install it from github.com/AtmanMishra/Mnemo, or set mnemo.install to "ask".`);
+      return undefined;
+    }
+    const pick = await vscode.window.showInformationMessage(
+      `${found} this panel needs Mnemo ${REQUIRED_VERSION}. Download it from github.com/AtmanMishra/Mnemo into this extension's storage? It is checked against the release's SHA-256, and your memory and settings in ~/.mnemo are shared with any other Mnemo.`,
+      "Download",
+      "Not now",
+    );
+    if (pick !== "Download") {
+      this.fail("Mnemo was not installed, so the panel cannot start. Reopen it to be asked again.");
+      return undefined;
+    }
+    try {
+      return await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Mnemo ${REQUIRED_VERSION}` }, (progress) =>
+        install({ version: REQUIRED_VERSION, dir, platform: process.platform, arch: process.arch, onProgress: (m) => progress.report({ message: m }) }),
+      );
+    } catch (e) {
+      const text = e instanceof Error ? e.message : String(e);
+      this.fail(/\b404\b/.test(text) ? `Mnemo ${REQUIRED_VERSION} is not published yet. Try again after it is released, or install a build yourself and set mnemo.path.` : `Could not install Mnemo: ${text}`);
+      return undefined;
+    }
+  }
+
+  private async start(resume: boolean): Promise<boolean> {
     const root = this.folder();
     if (!root) {
       this.fail("Open a folder first: Mnemo works in a project.");
@@ -55,11 +105,13 @@ class Session implements vscode.Disposable {
       this.fail("Mnemo runs commands and edits files; trust this workspace first.");
       return false;
     }
+    const command = await this.resolveBinary();
+    if (!command) return false;
     this.state = initial();
     this.problem = undefined;
     this.resume = resume;
     this.client = new MnemoClient({
-      command: this.cfg("path", "mnemo"),
+      command,
       args: rpcArgs(this.cfg("mode", "default"), resume, this.cfg("trustProject", false)),
       cwd: root.uri.fsPath,
       onEvent: (e) => this.event(e),
@@ -76,6 +128,7 @@ class Session implements vscode.Disposable {
     this.running = true;
     this.client.start();
     this.paint();
+    this.broadcast({ type: "host", running: true, problem: undefined });
     return true;
   }
 
@@ -88,10 +141,11 @@ class Session implements vscode.Disposable {
   restart(resume = false): void {
     this.client?.stop();
     this.client = undefined;
-    this.ensure(resume);
+    void this.ensure(resume);
   }
 
   private event(e: RpcEvent): void {
+    if (e.type === "ready" && e.protocol !== SUPPORTED_PROTOCOL) this.fail(`This Mnemo (${e.version}) speaks protocol ${e.protocol}; this panel needs ${SUPPORTED_PROTOCOL}. Update the extension or Mnemo.`);
     this.state = reduce(this.state, e);
     this.broadcast({ type: "event", event: e });
     this.paint();
@@ -131,7 +185,7 @@ class Session implements vscode.Disposable {
   private fromWebview(webview: vscode.Webview, m: any): void {
     switch (m?.type) {
       case "ready":
-        this.ensure();
+        void this.ensure();
         void webview.postMessage({ type: "snapshot", theme: this.cfg("theme", "editor"), state: this.state, running: this.running, problem: this.problem, version: this.context.extension.packageJSON.version });
         return;
       case "cmd": {
@@ -187,17 +241,15 @@ class Session implements vscode.Disposable {
 
   /** Put text in the composer (not sent) and bring the panel up. */
   prefill(text: string): void {
-    this.ensure();
     void vscode.commands.executeCommand("mnemo.open").then(() => this.broadcast({ type: "prefill", text }));
   }
 
   tab(name: string): void {
-    this.ensure();
     void vscode.commands.executeCommand("mnemo.open").then(() => this.broadcast({ type: "tab", tab: name }));
   }
 
   send(message: Record<string, unknown>): void {
-    if (this.ensure()) this.client?.send(message);
+    void this.ensure().then((ok) => ok && this.client?.send(message));
   }
 
   dispose(): void {
@@ -264,11 +316,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const command = (id: string, fn: (...args: any[]) => unknown) => vscode.commands.registerCommand(id, fn);
   context.subscriptions.push(
     command("mnemo.open", async () => {
-      session.ensure();
       await vscode.commands.executeCommand(`${VIEW}.focus`);
     }),
     command("mnemo.openInTab", () => {
-      session.ensure();
       const panel = vscode.window.createWebviewPanel("mnemo.tab", "Mnemo", vscode.ViewColumn.Beside, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "media")] });
       panel.webview.html = html(panel.webview, context.extensionUri);
       session.attach(panel.webview, panel.onDidDispose);
