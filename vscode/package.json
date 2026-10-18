@@ -1,0 +1,83 @@
+{
+  "name": "mnemo-vscode",
+  "displayName": "Mnemo",
+  "description": "Run the Mnemo coding agent in VS Code: send a selection or file, review its changes, check its memory. Approvals stay in Mnemo's own gate.",
+  "version": "0.1.0",
+  "publisher": "selfev",
+  "license": "Apache-2.0",
+  "author": "Atman Mishra",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AtmanMishra/Mnemo.git",
+    "directory": "vscode"
+  },
+  "homepage": "https://github.com/AtmanMishra/Mnemo#readme",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["AI", "Other"],
+  "keywords": ["mnemo", "agent", "coding agent", "memory"],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Mnemo runs commands and edits files, so it starts only in a trusted workspace.",
+      "restrictedConfigurations": ["mnemo.path", "mnemo.mode"]
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "commands": [
+      { "command": "mnemo.open", "title": "Open Mnemo", "category": "Mnemo" },
+      { "command": "mnemo.continue", "title": "Continue the Last Session", "category": "Mnemo" },
+      { "command": "mnemo.sendSelection", "title": "Ask About the Selection", "category": "Mnemo" },
+      { "command": "mnemo.sendFile", "title": "Ask About This File", "category": "Mnemo" },
+      { "command": "mnemo.showChanges", "title": "Review Changes", "category": "Mnemo" },
+      { "command": "mnemo.memoryStatus", "title": "Show Memory Status", "category": "Mnemo" }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "mnemo.sendSelection", "when": "editorHasSelection", "group": "mnemo@1" },
+        { "command": "mnemo.sendFile", "when": "!editorHasSelection", "group": "mnemo@1" }
+      ],
+      "explorer/context": [
+        { "command": "mnemo.sendFile", "when": "!explorerResourceIsFolder", "group": "mnemo@1" }
+      ]
+    },
+    "keybindings": [
+      { "command": "mnemo.open", "key": "ctrl+alt+m", "mac": "cmd+alt+m" },
+      { "command": "mnemo.sendSelection", "key": "ctrl+alt+a", "mac": "cmd+alt+a", "when": "editorHasSelection" }
+    ],
+    "configuration": {
+      "title": "Mnemo",
+      "properties": {
+        "mnemo.path": {
+          "type": "string",
+          "default": "mnemo",
+          "scope": "machine",
+          "markdownDescription": "The `mnemo` executable. Machine scope: a workspace cannot choose which program runs."
+        },
+        "mnemo.mode": {
+          "type": "string",
+          "enum": ["default", "plan"],
+          "default": "default",
+          "scope": "machine",
+          "markdownDescription": "How a Mnemo terminal starts. `plan` is read-only. There is no `yolo` or `accept-edits` here: choose those inside a session, where Mnemo shows them."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "typecheck": "tsc -p . --noEmit",
+    "test": "bun test ./test",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.2.0",
+    "typescript": "^5.6.0"
+  }
+}

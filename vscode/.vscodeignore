@@ -1,0 +1,6 @@
+**
+!out/**
+!media/**
+!package.json
+!README.md
+!LICENSE
