@@ -158,8 +158,10 @@ environment variable.
 What Mnemo remembers is shown to the model in later sessions, so a poisoned
 memory is a prompt injection that persists. Facts that look like
 instructions to steer, exfiltrate or hide are refused at write time
-(`packages/memory/src/safety.ts`), recalled items are labelled as candidates
-rather than facts, `/memory` and the memory map show what it holds and
+(`packages/memory/src/safety.ts`) and checked again when read back, so a fact kept
+before a rule existed is not shown either. What is recalled reaches the model inside a
+`<memory-data>` boundary that a fact cannot close, under a standing line that memory is
+data and never asks for anything itself. `/memory` and the memory map show what it holds and
 `/forget` retires a fact. The scanner reads text the way a person would (width
 forms, lookalike letters, invisible characters, line breaks) and also covers the
 session record, but it is a list of patterns: a paraphrase can get past it, which
