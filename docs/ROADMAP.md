@@ -128,7 +128,8 @@ built-in tools replace Mnemo's own file and shell tools (D2).
   ▢ evidence-gating and `retire_skill` are not.
 - ▣ 2.8 Subcommands: `doctor`, `-p`, `-c`, `--plan`, `--yolo`, `--no-memory`,
   `--demo`, `--dump`. ▢ `consolidate` and `traces` subcommands are not done.
-- ▢ 2.9 *(v0.2)* hooks, schedules, MCP (`pi-mcp`), harness engine, `init`, `pr`.
+- ▢ 2.9 *(v0.2)* hooks, schedules, harness engine, `init`, `pr`. ▣ MCP: pi's MCP client
+  (`app/src/extensions/mcp.ts`), tools found by `tool_search`, every call through the gate.
 
 *Verify (stage):* each extension tested against a faux-provider session; the
 constraint-compliance eval (`scripts/eval-constraint-compliance.mjs`) passes on
@@ -367,7 +368,7 @@ copy their security posture (`AGENTS.md`). Decision D6 already deferred these he
 | Item | Size | Notes |
 |---|---|---|
 | Hooks around tool calls | M | legacy `hooks-inline.ts`; runs user commands, so it goes through the gate and gets bypass tests from day one |
-| MCP servers as tools (`pi-mcp`) | M–L | the same point applies; also decides whether the 0.0.0 version report is fixed |
+| ✔ MCP servers as tools (pi's MCP extension) | M–L | `app/src/extensions/mcp.ts`; the 0.0.0 version report is still open |
 | Schedules | M | legacy `schedules-inline.ts`; *inferred:* unattended runs raise the approval question, so decide the permission story first |
 | `mnemo init` and `mnemo pr` | S–M each | legacy `init.ts`, `pr.ts` |
 | Harness engine | L | legacy `harness-engine/`; *inferred:* the least-asked-for of the set, and the site does not mention it. Cut it, or ship it last. |

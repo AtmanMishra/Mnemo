@@ -23,11 +23,14 @@ import { nativeSystem, realTarget, within, type PathSystem } from "../policy/pat
 import type { ApprovalRequest } from "../runtime/dialogs.ts";
 import type { Host } from "./host.ts";
 
-const READ = new Set(["read", "grep", "find", "ls", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent"]);
+const READ = new Set(["read", "grep", "find", "ls", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent", "tool_search"]);
 /** Read-class tools that still write to memory: plan mode is "change nothing", memory included. */
 const WRITES_MEMORY = new Set(["memory_remember", "memory_steer"]);
 const EDIT = new Set(["edit", "write", "create_skill", "update_skill"]);
 const EXEC = new Set(["bash", "powershell", "ipy_run"]);
+const MCP_RESOURCES = new Set(["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]);
+/** A tool an MCP server provides (`mcp__<server>__<tool>`) or reads through: what it does is the server's to say. */
+const isMcp = (tool: string) => tool.startsWith("mcp__") || MCP_RESOURCES.has(tool);
 
 export interface Rule {
   tool: string;
@@ -105,6 +108,7 @@ export function globMatch(pattern: string, text: string): boolean {
 
 /** The argument that makes a call dangerous: the command, the path, the code. */
 export function subjectOf(tool: string, input: Record<string, unknown>): string {
+  if (isMcp(tool)) return JSON.stringify(input);
   const v = input.command ?? input.path ?? input.code ?? input.pattern ?? input.name ?? "";
   return typeof v === "string" ? v : JSON.stringify(v);
 }
@@ -349,6 +353,7 @@ export function approvalPreview(tool: string, input: Record<string, unknown>): A
     const description = typeof input.description === "string" ? [{ text: `description: ${plain(input.description.replace(/\s+/g, " ").trim())}`, tone: "muted" as const }] : [];
     return [{ text: scope, tone: "muted" as const }, ...description, ...lines(input.instructions).map((t) => ({ text: `+ ${plain(t)}`, tone: "add" as const }))];
   }
+  if (isMcp(tool)) return JSON.stringify(input, null, 2).split("\n").slice(0, 40).map((t) => ({ text: plain(t) }));
   return [];
 }
 
@@ -437,6 +442,14 @@ export function judge(
     subject: plain(shown.length > 200 ? `${shown.slice(0, 200)}… (+${shown.length - 200} more characters)` : shown),
     preview: approvalPreview(tool, input),
   };
+  // An MCP tool is approved by name: "always" covers that one tool of that server, in this project.
+  if (isMcp(tool) && rule?.action !== "ask") {
+    const grant = `tool:${tool}`;
+    if (grants.project.includes(grant) || grants.global.includes(grant)) return { allow: true };
+    request.reason = "A tool of an MCP server: what it does is up to the server.";
+    request.always = tool;
+    return { ask: request, pattern: grant };
+  }
   if (tool === "bash" && rule?.action !== "ask") {
     const g = decide({ toolName: tool, input }, grants);
     if (g.decision === "allow") return { allow: true };
