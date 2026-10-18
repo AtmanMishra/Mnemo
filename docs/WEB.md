@@ -30,6 +30,7 @@ Vercel at <https://mnemo.atmanmishra.dev>, with DNS on Cloudflare. It replaced t
   This reads outside `web/`, so the Vercel project must keep **Include source files outside of the Root
   Directory in the Build Step** on (the default).
 - One section per feature in `web/src/sections/`, each with a working demo built from the app's own text (command and tool descriptions, the `--demo` turn, the gate's rules, the theme palettes). Interactive state is local; the server render and reduced motion show every demo in its finished state.
+- The home page's "See what it does" section (`web/src/sections/Showcase.tsx`) is a simulated Mnemo window with one scene per feature (asks first, memory, sub-agents, split view, siblings, themes), built in HTML from the app's own text the way product pages rebuild their app rather than film it. The chosen theme carries across scenes. The server and reduced motion show each scene finished.
 - Each feature is paired with a figure from [Hairline](https://hairline.lucasmarkes.com) (`@lucasmarkes/hairline`, MIT): isometric line drawings that answer the pointer, loaded only as they near the screen (`web/src/Figure.tsx`). They style themselves with constructable stylesheets, so the CSP needs no change, and draw with the page's colour tokens.
 - Themes: light and dark tokens at the top of `web/src/styles.css`; the header toggle cycles system → light → dark, kept in `localStorage` and applied by `public/boot.js` before first paint.
 - The look is mid-century print (cream and teal night, a red ribbon header, seals, ticket buttons) with
