@@ -6,8 +6,8 @@
  * fact that it did not exist) are kept under that turn's user message. Turns
  * are named by their user message's session entry id. Rewinding to a turn
  * restores every file any later turn touched to the state the earliest of them
- * found it in. Changes made by shell commands are not seen, and the record
- * lives as long as the process.
+ * found it in. What a shell command or a Python cell changed is kept too, in a
+ * git repository (runtime/shell-snapshot.ts). The record lives as long as the process.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -20,17 +20,18 @@ export class Checkpoints {
   turn: string | undefined;
   readonly #byTurn = new Map<string, Map<string, Before>>();
 
-  /** Keep `file` as it is now, unless this turn already has it. */
-  keep(file: string, turn = this.turn): void {
+  /** Keep `file` as it is now (or as `before` says it was), unless this turn already has it. */
+  keep(file: string, turn = this.turn, before?: Before): void {
     if (!turn) return;
     let files = this.#byTurn.get(turn);
     if (!files) this.#byTurn.set(turn, (files = new Map()));
     if (files.has(file)) return;
-    let before: Before;
-    try {
-      before = fs.readFileSync(file);
-    } catch {
-      before = null;
+    if (before === undefined) {
+      try {
+        before = fs.readFileSync(file);
+      } catch {
+        before = null;
+      }
     }
     files.set(file, before);
   }
