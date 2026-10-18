@@ -47,6 +47,24 @@ export const AREA_LABEL: Record<Area, string> = {
 
 export const RELEASES: Release[] = [
   {
+    version: "0.1.8",
+    date: "2026-10-18",
+    headline: "A VS Code extension on a new mnemo --rpc mode, MCP servers as tools, a wider /rewind, a per-prompt budget and a round of security fixes.",
+    changes: [
+      { kind: "added", area: "interface", text: "mnemo --rpc", detail: "Mnemo as JSON lines for an editor or another front end. A tool call that would ask becomes a dialog the client must answer; nothing answers for it, and a client that disconnects leaves every question answered no. Protocol in docs/RPC.md." },
+      { kind: "added", area: "interface", text: "VS Code extension", detail: "A panel with chat, approvals with diffs, agents, memory and every setting, with its own themes. If Mnemo is missing or older than 0.1.8 it offers to download this release, checks it against SHA256SUMS and keeps it in its own storage." },
+      { kind: "added", area: "tools", text: "MCP servers as tools", detail: "Servers from ~/.mnemo/agent/mcp.json (and a trusted folder's .pi/mcp.json) load as tools, found with tool_search so their schemas stay out of a small model's prompt. Every call goes through the permission gate, with an always grant per tool." },
+      { kind: "added", area: "safety", text: "A dollar budget for a prompt", detail: "A prompt that crosses it stops, sub-agents' calls counted. A -p run prints one line of calls, tokens and dollars on stderr." },
+      { kind: "changed", area: "tools", text: "/rewind covers shell commands", detail: "In a git repository it now puts back what bash and Python cells changed, not only the agent's own edits." },
+      { kind: "security", area: "safety", text: "Nothing a folder chose runs before it is trusted", detail: "A downloaded folder can no longer run a command through core.fsmonitor, a git hook, or (on Windows) a program named like a system one." },
+      { kind: "security", area: "memory", text: "Recalled memory is data", detail: "It reaches the model inside a boundary a fact cannot close, marked as data, and is scanned again on the way out." },
+      { kind: "security", area: "safety", text: "Secrets and symlinks", detail: "A project's .env, private keys and .netrc are refused by the read tools; a grant for git --version no longer allows git push; an approved write is refused if its path became a symlink while the question was open." },
+    ],
+    known: [
+      "The extension's download and launch code has not yet been run inside a real VS Code.",
+    ],
+  },
+  {
     version: "0.1.7",
     date: "2026-10-17",
     headline: "A settings menu: /settings tunes the agent limits, the look, the keys, notifications and more, with every default what Mnemo always did.",
