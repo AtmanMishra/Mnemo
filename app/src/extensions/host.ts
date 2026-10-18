@@ -11,6 +11,7 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { ApprovalAnswer, ApprovalRequest } from "../runtime/dialogs.ts";
 import type { MemoryNote, MemoryService } from "@mnemo/memory";
 import { probeInterpreter, resolveInterpreter } from "../kernel/kernel.ts";
+import { trustedBin } from "../runtime/bin.ts";
 import { Checkpoints } from "../runtime/checkpoints.ts";
 import { Roster, type Access } from "../runtime/roster.ts";
 import { limitsOf, SettingsStore } from "../runtime/settings.ts";
@@ -128,7 +129,7 @@ export function createHost(o: HostOptions): Host {
     python:
       o.python ??
       (() => {
-        if (python === null) python = resolveInterpreter({ which: (c) => Bun.which(c), probe: probeInterpreter });
+        if (python === null) python = resolveInterpreter({ which: (c) => trustedBin(c) ?? null, probe: probeInterpreter });
         return python;
       }),
     depth: 0,
