@@ -64,6 +64,9 @@ in a place you can afford to lose: a container, a throwaway checkout.
   `.idea` and `.devcontainer` still ask at any depth (`vendor/x/.git/hooks` too),
   because what is written there runs later, and so do shell dotfiles, `.ssh`,
   `.config` and `.local` in your home folder. Skills are always asked about.
+- **An approval is for where the path led when you said yes.** If a file you are
+  asked about is turned into a symlink (or its folder moved) while the question is
+  open, the call is refused instead of writing where it now leads.
 - **Reads are free, except credentials.** `read`, `grep`, `find` and `ls` never ask,
   but refuse Mnemo's own `auth.json`, `models.json`, `grants.json` and `.env`,
   `~/.ssh`, `~/.aws`, `~/.gnupg`, and a process's `/proc/<pid>/environ` and `mem`

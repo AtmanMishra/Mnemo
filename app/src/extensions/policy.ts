@@ -481,9 +481,15 @@ export function policyExtension(host: Host) {
       if (!host.ui) return undefined;
       const caller = event.parentToolCallId === undefined ? undefined : callerSignals.get(event.parentToolCallId);
       const signal = caller && ctx.signal ? AbortSignal.any([ctx.signal, caller]) : (caller ?? ctx.signal);
+      // Where the file lands, as approved. The question can stay open for minutes, and a symlink
+      // swapped in meanwhile (by a command still running) would carry the write somewhere else.
+      const lands = () => (typeof input.path === "string" ? realTarget(ctx.cwd, input.path) : undefined);
+      const before = lands();
       const answer = await host.ui.approve(verdict.ask, signal);
       // A cell that stopped while the question was open: its call is not run, whatever the answer.
       if (caller?.aborted) return { block: true, reason: "The call's Python cell stopped before it was answered." };
+      if (answer.kind !== "no" && lands() !== before)
+        return { block: true, reason: `${String(input.path)} now leads somewhere else than when it was approved (${lands() ?? "nowhere"}), so the call is refused. Look at it again before retrying.` };
       if (answer.kind === "yes") return undefined;
       if (answer.kind === "always") {
         if (verdict.pattern) grants?.add(ctx.cwd, verdict.pattern);
