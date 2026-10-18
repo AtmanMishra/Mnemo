@@ -136,6 +136,9 @@ cd app && bun bin/mnemo.ts --demo
   and what was marked wrong (`--apply` retires them). Search can use your own
   embedding server: `MNEMO_EMBED_URL=http://localhost:11434/v1/embeddings
   MNEMO_EMBED_MODEL=nomic-embed-text` (Ollama).
+- **Reads your project's instructions.** `AGENTS.md` (or `CLAUDE.md` where a
+  folder has no `AGENTS.md`) in the project and every folder above it, plus
+  `$MNEMO_HOME/agent/AGENTS.md` for all projects, go into the system prompt.
 - **MCP servers as tools.** Put servers in `$MNEMO_HOME/agent/mcp.json` (or a
   trusted project's `.pi/mcp.json`) in the `mcpServers` shape other clients use; stdio
   and HTTP servers both work, and `/mcp` lists them, signs in and reconnects. Their
