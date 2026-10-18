@@ -77,6 +77,10 @@ in a place you can afford to lose: a container, a throwaway checkout.
   steer the model**, so Mnemo loads them only for a folder you have trusted: it asks
   once at start-up (`a` remembers it), headless runs skip them unless you pass
   `--trust-project`. Do not trust a repository you have not read.
+  A folder's `AGENTS.md` or `CLAUDE.md` is different: it is read without asking,
+  as every coding agent does, because it is text the model reads and runs nothing
+  by itself. It still steers the model, so in a repository you have not read,
+  keep the mode on `default`.
 - A `permissions.json` that exists but cannot be parsed (or holds `null`, a number,
   `{"rules": null}`) stops all edits and commands until it is fixed, rather than
   quietly dropping your deny rules. A malformed `grants.json` is read as no grants.
