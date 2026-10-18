@@ -50,6 +50,11 @@ export const LIMITS = {
    * and a turn a message started is stopped: agents cannot run up a bill while you are away.
    */
   wakeSpend: 0.5,
+  /**
+   * Dollars one prompt may cost, its sub-agents and the turns messages start included, before
+   * the run is stopped. 0 is no limit.
+   */
+  runSpend: 0,
   /** Step lines and events kept. */
   steps: 20,
   events: 300,
@@ -84,6 +89,8 @@ export interface RosterNode {
   woken: boolean;
   /** Dollars spent on such turns since its user last prompted (see `LIMITS.wakeSpend`). */
   wakeSpend: number;
+  /** Dollars spent since its user last prompted, whoever started the turn (see `LIMITS.runSpend`). */
+  runSpend: number;
 }
 
 export type RosterEvent =
@@ -93,7 +100,8 @@ export type RosterEvent =
   | { at: number; kind: "message"; from: number; to: number; text: string; delivery: Delivery }
   | { at: number; kind: "link" | "unlink"; node: number; other?: number }
   | { at: number; kind: "told"; node: number; text: string }
-  | { at: number; kind: "capped"; node: number; spent: number };
+  | { at: number; kind: "capped"; node: number; spent: number }
+  | { at: number; kind: "budget"; node: number; spent: number };
 
 export interface RosterSnapshot {
   version: number;
@@ -335,23 +343,32 @@ export class Roster implements RosterView {
   /** The user prompted this node: it reads what was held for it, and what it sends now starts a new chain. */
   userTurn(id: number): void {
     const n = this.nodes.get(id);
-    if (!n || (n.hops === 0 && n.pending === 0 && !n.woken && n.wakeSpend === 0)) return;
+    if (!n || (n.hops === 0 && n.pending === 0 && !n.woken && n.wakeSpend === 0 && n.runSpend === 0)) return;
     n.hops = 0;
     n.pending = 0;
     n.woken = false;
     n.wakeSpend = 0;
+    n.runSpend = 0;
     this.changed();
   }
 
   /**
-   * A model call of this node cost `usd`. It counts against its root's allowance when the
-   * root's turn was started by a message; the call that crosses it stops that turn.
+   * A model call of this node cost `usd`. It counts against its root's run budget, and against
+   * its allowance when the root's turn was started by a message; the call that crosses either
+   * stops that turn.
    */
   spend(id: number, usd: number): void {
     if (!(usd > 0)) return;
     let root = this.nodes.get(id);
     while (root && root.parent !== undefined) root = this.nodes.get(root.parent);
-    if (!root || !root.woken) return;
+    if (!root) return;
+    const ran = root.runSpend;
+    root.runSpend += usd;
+    if (this.limits.runSpend > 0 && ran < this.limits.runSpend && root.runSpend >= this.limits.runSpend) {
+      this.event({ at: this.now(), kind: "budget", node: root.id, spent: root.runSpend });
+      if (root.status === "running") this.handles.get(root.id)?.stop();
+    }
+    if (!root.woken) return void this.changed();
     const before = root.wakeSpend;
     root.wakeSpend += usd;
     if (before < this.limits.wakeSpend && root.wakeSpend >= this.limits.wakeSpend) {
@@ -477,7 +494,7 @@ export class Roster implements RosterView {
 
   // ── internals ────────────────────────────────────────────────────────────
   private make(o: Pick<RosterNode, "kind" | "label" | "task" | "depth" | "access" | "status"> & Partial<RosterNode>): RosterNode {
-    const node: RosterNode = { steps: [], stepCount: 0, startedAt: this.now(), pending: 0, hops: 0, woken: false, wakeSpend: 0, ...o, id: this.nextNode++ };
+    const node: RosterNode = { steps: [], stepCount: 0, startedAt: this.now(), pending: 0, hops: 0, woken: false, wakeSpend: 0, runSpend: 0, ...o, id: this.nextNode++ };
     this.nodes.set(node.id, node);
     this.labels.set(node.id, node.label);
     return node;

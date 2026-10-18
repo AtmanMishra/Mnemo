@@ -23,11 +23,14 @@ import { nativeSystem, realTarget, within, type PathSystem } from "../policy/pat
 import type { ApprovalRequest } from "../runtime/dialogs.ts";
 import type { Host } from "./host.ts";
 
-const READ = new Set(["read", "grep", "find", "ls", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent"]);
+const READ = new Set(["read", "grep", "find", "ls", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent", "tool_search"]);
 /** Read-class tools that still write to memory: plan mode is "change nothing", memory included. */
 const WRITES_MEMORY = new Set(["memory_remember", "memory_steer"]);
 const EDIT = new Set(["edit", "write", "create_skill", "update_skill"]);
 const EXEC = new Set(["bash", "powershell", "ipy_run"]);
+const MCP_RESOURCES = new Set(["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]);
+/** A tool an MCP server provides (`mcp__<server>__<tool>`) or reads through: what it does is the server's to say. */
+const isMcp = (tool: string) => tool.startsWith("mcp__") || MCP_RESOURCES.has(tool);
 
 export interface Rule {
   tool: string;
@@ -105,6 +108,7 @@ export function globMatch(pattern: string, text: string): boolean {
 
 /** The argument that makes a call dangerous: the command, the path, the code. */
 export function subjectOf(tool: string, input: Record<string, unknown>): string {
+  if (isMcp(tool)) return JSON.stringify(input);
   const v = input.command ?? input.path ?? input.code ?? input.pattern ?? input.name ?? "";
   return typeof v === "string" ? v : JSON.stringify(v);
 }
@@ -291,12 +295,19 @@ function secretLocations(host: { home?: string; agentDir?: string }, sys: PathSy
 /** A process's environment (where the provider keys are) and memory. */
 const PROC_SECRET = /^\/proc\/[^/]+\/(?:task\/[^/]+\/)?(?:environ|mem)$/;
 
+/**
+ * Files that hold secrets wherever they are: a project's `.env` (not `.env.example` and the like),
+ * a private key, a `.netrc`. Read once, they are in the transcript and the provider's logs.
+ */
+const SECRET_FILE = /^(?:\.env(?:\.(?!(?:example|sample|template|dist|defaults?)$)[^.]+)*|id_(?:rsa|dsa|ecdsa|ed25519)(?:_sk)?|[._]netrc|\.pgpass)$/i;
+
 /** Credentials a read tool is never needed for. A rule in permissions.json can still allow them. */
 function secretPath(host: { home?: string; agentDir?: string }, cwd: string, p: unknown, sys: PathSystem): boolean {
   if (typeof p !== "string") return false;
   const real = realTarget(cwd, p, sys);
   if (real === undefined) return false;
   if (!sys.windows && PROC_SECRET.test(real)) return true;
+  if (SECRET_FILE.test(sys.path.basename(real))) return true;
   return secretLocations(host, sys).some((s) => within(s, real, sys) !== undefined);
 }
 
@@ -342,6 +353,7 @@ export function approvalPreview(tool: string, input: Record<string, unknown>): A
     const description = typeof input.description === "string" ? [{ text: `description: ${plain(input.description.replace(/\s+/g, " ").trim())}`, tone: "muted" as const }] : [];
     return [{ text: scope, tone: "muted" as const }, ...description, ...lines(input.instructions).map((t) => ({ text: `+ ${plain(t)}`, tone: "add" as const }))];
   }
+  if (isMcp(tool)) return JSON.stringify(input, null, 2).split("\n").slice(0, 40).map((t) => ({ text: plain(t) }));
   return [];
 }
 
@@ -430,6 +442,14 @@ export function judge(
     subject: plain(shown.length > 200 ? `${shown.slice(0, 200)}… (+${shown.length - 200} more characters)` : shown),
     preview: approvalPreview(tool, input),
   };
+  // An MCP tool is approved by name: "always" covers that one tool of that server, in this project.
+  if (isMcp(tool) && rule?.action !== "ask") {
+    const grant = `tool:${tool}`;
+    if (grants.project.includes(grant) || grants.global.includes(grant)) return { allow: true };
+    request.reason = "A tool of an MCP server: what it does is up to the server.";
+    request.always = tool;
+    return { ask: request, pattern: grant };
+  }
   if (tool === "bash" && rule?.action !== "ask") {
     const g = decide({ toolName: tool, input }, grants);
     if (g.decision === "allow") return { allow: true };
@@ -474,9 +494,15 @@ export function policyExtension(host: Host) {
       if (!host.ui) return undefined;
       const caller = event.parentToolCallId === undefined ? undefined : callerSignals.get(event.parentToolCallId);
       const signal = caller && ctx.signal ? AbortSignal.any([ctx.signal, caller]) : (caller ?? ctx.signal);
+      // Where the file lands, as approved. The question can stay open for minutes, and a symlink
+      // swapped in meanwhile (by a command still running) would carry the write somewhere else.
+      const lands = () => (typeof input.path === "string" ? realTarget(ctx.cwd, input.path) : undefined);
+      const before = lands();
       const answer = await host.ui.approve(verdict.ask, signal);
       // A cell that stopped while the question was open: its call is not run, whatever the answer.
       if (caller?.aborted) return { block: true, reason: "The call's Python cell stopped before it was answered." };
+      if (answer.kind !== "no" && lands() !== before)
+        return { block: true, reason: `${String(input.path)} now leads somewhere else than when it was approved (${lands() ?? "nowhere"}), so the call is refused. Look at it again before retrying.` };
       if (answer.kind === "yes") return undefined;
       if (answer.kind === "always") {
         if (verdict.pattern) grants?.add(ctx.cwd, verdict.pattern);

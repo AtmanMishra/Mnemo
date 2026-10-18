@@ -100,6 +100,9 @@ describe("the tool loop", () => {
     const r = await mnemo(w, ["-p", "write hello.txt"]);
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("wrote it");
+    // What the run took goes to stderr, never into the answer.
+    expect(r.stderr).toMatch(/mnemo: \d+ model calls, 1 tool calls, .* tokens, \$\d/);
+    expect(r.stdout).not.toContain("model calls");
     expect(fs.readFileSync(path.join(w.project, "hello.txt"), "utf8")).toBe("hi there\n");
   }, T);
 
@@ -158,6 +161,17 @@ describe("permission gate", () => {
     await mnemo(w, ["--plan", "-p", "write nope.txt"]);
     expect(fs.existsSync(path.join(w.project, "nope.txt"))).toBe(false);
     expect(lastToolResult().toLowerCase()).toMatch(/plan|blocked|denied|refus/);
+  }, T);
+
+  test("an MCP server's tool runs from the compiled binary", async () => {
+    const w = fresh();
+    const server = path.join(import.meta.dir, "..", "test", "fixtures", "mcp-server.ts");
+    fs.mkdirSync(path.join(w.mnemoHome, "agent"), { recursive: true });
+    fs.writeFileSync(path.join(w.mnemoHome, "agent", "mcp.json"), JSON.stringify({ mcpServers: { shouter: { command: process.execPath, args: [server], exposure: "direct" } } }));
+    play(steps({ tools: [{ name: "mcp__shouter__shout", args: { text: "pelican" } }] }, { text: "ok" }));
+    const r = await mnemo(w, ["--yolo", "-p", "shout"]);
+    expect(r.code).toBe(0);
+    expect(lastToolResult()).toContain("PELICAN");
   }, T);
 
   test("a deny rule holds even in --yolo", async () => {

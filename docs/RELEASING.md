@@ -75,6 +75,13 @@ A bad release is fixed by a new version, not by moving the tag. If one must be
 withdrawn, delete the GitHub release (and mark it so in the next notes); never
 re-tag a version people may have installed.
 
+## The VS Code extension
+
+`vscode/` downloads the Mnemo release named by `REQUIRED_VERSION` in `vscode/src/install.ts` (the first
+release with `--rpc`, protocol 1) and checks it against that release's `SHA256SUMS`. The extension cannot
+work until that release is published, so cut it before publishing a `.vsix`. Bump `REQUIRED_VERSION` only to
+a version that exists, when the protocol or the app gains something the panel needs.
+
 ## Who can publish (set this up once)
 
 1. **Tags:** *Settings → Rules → Rulesets → New tag ruleset*, target `v*`, restrict

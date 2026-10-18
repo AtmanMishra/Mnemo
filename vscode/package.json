@@ -1,0 +1,275 @@
+{
+  "name": "mnemo-vscode",
+  "displayName": "Mnemo",
+  "description": "Mnemo in VS Code: a chat panel with approvals, diffs, memory, agents and settings. Every approval is answered by you, in the panel.",
+  "version": "0.2.0",
+  "publisher": "selfev",
+  "license": "Apache-2.0",
+  "author": "Atman Mishra",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AtmanMishra/Mnemo.git",
+    "directory": "vscode"
+  },
+  "homepage": "https://github.com/AtmanMishra/Mnemo#readme",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "mnemo",
+    "agent",
+    "coding agent",
+    "memory"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Mnemo runs commands and edits files, so it starts only in a trusted workspace.",
+      "restrictedConfigurations": [
+        "mnemo.path",
+        "mnemo.mode",
+        "mnemo.trustProject",
+        "mnemo.install"
+      ]
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "mnemo.open",
+        "title": "Open Mnemo",
+        "category": "Mnemo",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "mnemo.openInTab",
+        "title": "Open Mnemo in an Editor Tab",
+        "category": "Mnemo"
+      },
+      {
+        "command": "mnemo.newSession",
+        "title": "New Session",
+        "category": "Mnemo",
+        "icon": "$(add)"
+      },
+      {
+        "command": "mnemo.continue",
+        "title": "Continue the Last Session",
+        "category": "Mnemo"
+      },
+      {
+        "command": "mnemo.restart",
+        "title": "Restart Mnemo",
+        "category": "Mnemo",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "mnemo.stop",
+        "title": "Stop the Current Run",
+        "category": "Mnemo",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "mnemo.sendSelection",
+        "title": "Ask About the Selection",
+        "category": "Mnemo"
+      },
+      {
+        "command": "mnemo.sendFile",
+        "title": "Ask About This File",
+        "category": "Mnemo"
+      },
+      {
+        "command": "mnemo.showChanges",
+        "title": "Review Changes",
+        "category": "Mnemo"
+      },
+      {
+        "command": "mnemo.memory",
+        "title": "Show Memory",
+        "category": "Mnemo"
+      },
+      {
+        "command": "mnemo.settings",
+        "title": "Mnemo Settings",
+        "category": "Mnemo",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "mnemo.openTerminal",
+        "title": "Open Mnemo in the Terminal",
+        "category": "Mnemo"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "mnemo.sendSelection",
+          "when": "editorHasSelection",
+          "group": "mnemo@1"
+        },
+        {
+          "command": "mnemo.sendFile",
+          "when": "!editorHasSelection",
+          "group": "mnemo@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "mnemo.sendFile",
+          "when": "!explorerResourceIsFolder",
+          "group": "mnemo@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "mnemo.newSession",
+          "when": "view == mnemo.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "mnemo.settings",
+          "when": "view == mnemo.chat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "mnemo.openInTab",
+          "when": "view == mnemo.chat",
+          "group": "1_mnemo@1"
+        },
+        {
+          "command": "mnemo.restart",
+          "when": "view == mnemo.chat",
+          "group": "1_mnemo@2"
+        },
+        {
+          "command": "mnemo.openTerminal",
+          "when": "view == mnemo.chat",
+          "group": "1_mnemo@3"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "mnemo.open",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m"
+      },
+      {
+        "command": "mnemo.sendSelection",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a",
+        "when": "editorHasSelection"
+      }
+    ],
+    "configuration": {
+      "title": "Mnemo",
+      "properties": {
+        "mnemo.path": {
+          "type": "string",
+          "default": "mnemo",
+          "scope": "machine",
+          "markdownDescription": "Use this `mnemo` instead of the one the extension finds or downloads. Leave as `mnemo` to let the extension choose. Machine scope: a workspace cannot choose which program runs."
+        },
+        "mnemo.mode": {
+          "type": "string",
+          "enum": [
+            "default",
+            "plan"
+          ],
+          "default": "default",
+          "scope": "machine",
+          "markdownDescription": "How Mnemo starts. `plan` is read-only. `yolo` and `accept-edits` are not offered here: switch to them in the panel, where Mnemo shows them."
+        },
+        "mnemo.trustProject": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Load a folder's own `.pi/` extensions, skills and settings without asking. They run code in the Mnemo process; leave off unless you wrote them."
+        },
+        "mnemo.theme": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "night",
+            "gameboy",
+            "paper",
+            "dracula",
+            "nord",
+            "gruvbox",
+            "tokyo",
+            "mocha",
+            "solarized",
+            "amber",
+            "synthwave"
+          ],
+          "enumItemLabels": [
+            "Match VS Code",
+            "Mnemo Night",
+            "Game Boy",
+            "Paper",
+            "Dracula",
+            "Nord",
+            "Gruvbox",
+            "Tokyo Night",
+            "Catppuccin Mocha",
+            "Solarized Light",
+            "Amber CRT",
+            "Synthwave"
+          ],
+          "default": "editor",
+          "description": "The panel's colours: your editor's own, or one of Mnemo's palettes (the same as the terminal's). Also set from the picker in the panel."
+        },
+        "mnemo.install": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "never"
+          ],
+          "default": "ask",
+          "scope": "machine",
+          "markdownDescription": "When no Mnemo new enough for this panel is found: `ask` offers to download the version this extension needs from GitHub (checked against the release's SHA-256) into the extension's storage; `never` only reports it."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "mnemo",
+          "title": "Mnemo",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "mnemo": [
+        {
+          "type": "webview",
+          "id": "mnemo.chat",
+          "name": "Mnemo"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p . && tsc -p tsconfig.webview.json",
+    "typecheck": "tsc -p . --noEmit && tsc -p tsconfig.webview.json --noEmit",
+    "test": "bun test ./test",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.2.0",
+    "typescript": "^5.6.0"
+  }
+}

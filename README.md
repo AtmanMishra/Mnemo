@@ -139,6 +139,11 @@ cd app && bun bin/mnemo.ts --demo
 - **Reads your project's instructions.** `AGENTS.md` (or `CLAUDE.md` where a
   folder has no `AGENTS.md`) in the project and every folder above it, plus
   `$MNEMO_HOME/agent/AGENTS.md` for all projects, go into the system prompt.
+- **MCP servers as tools.** Put servers in `$MNEMO_HOME/agent/mcp.json` (or a
+  trusted project's `.pi/mcp.json`) in the `mcpServers` shape other clients use; stdio
+  and HTTP servers both work, and `/mcp` lists them, signs in and reconnects. Their
+  tools stay out of the prompt until `tool_search` finds them (`"exposure": "direct"`
+  declares them up front). In `default` mode each call asks first; "always" covers that tool.
 - **Memory for other agents.** `mnemo memory setup claude-code` prints the hooks
   and MCP entry that give Claude Code (or Codex) the same memory; `mnemo memory
   ingest` learns from Claude Code sessions you already have.
@@ -165,8 +170,8 @@ cd app && bun bin/mnemo.ts --demo
   change that passes (`/bestof` does the same from the interface).
 - **Rewinds.** `esc esc` on an empty prompt (or `/rewind`) goes back to before
   an earlier message: the conversation, the files the agent edited since, or
-  both, and your message returns to the prompt. Changes made by shell commands
-  are not tracked.
+  both, and your message returns to the prompt. In a git repository, what shell
+  commands and Python cells changed goes back too (files git ignores do not).
 - **Stays out of your keys.** Commands the agent runs (bash, the Python kernel)
   do not get your model-provider API keys (`MNEMO_PASS_ENV=NAME` hands one
   back), and the Python kernel has a timeout and a memory cap; see

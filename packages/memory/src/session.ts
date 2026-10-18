@@ -30,8 +30,17 @@ import { redact, secretUnderKey } from "./redact.ts";
 import { unsafeMemory } from "./safety.ts";
 import { describeHit, hitLine, profileBlock, recallMessage } from "./recall.ts";
 import { digest, parseReflection, REFLECT_PROMPT, worthReflecting, type Reflection, type ToolEvent } from "./reflect.ts";
-import { factValue, factsOf, type MemoryService, type ProfileFact } from "./service.ts";
+import { factValue, factsOf, type Hit, type MemoryService, type ProfileFact } from "./service.ts";
 import { renderSkill, skillPath, writeSkill, type SkillScope } from "./skills.ts";
+
+/**
+ * What may be read back to a model. Writes are checked as they arrive, but a fact kept before
+ * a rule existed, or written to the journal by another tool, is checked again on the way out.
+ */
+function readable(item: ProfileFact | Hit): boolean {
+  const text = "key" in item ? `${item.key} ${item.value}` : `${item.label} ${factsOf(item.state, { internal: true }).map((f) => `${f.key} ${f.value}`).join(" ")}`;
+  return unsafeMemory(text) === undefined;
+}
 
 /** What memory tells the person, for whatever interface the agent has. */
 export type MemoryNote =
@@ -255,11 +264,9 @@ export class MemorySession {
     this.userNode ??= await mem.userNode();
     const ep = this.episodeId;
     const profiles = [this.project, this.userNode].filter((n): n is number => n !== undefined);
-    const [projectFacts, userFacts, hits] = await Promise.all([
-      mem.profile("project", this.identity.id),
-      mem.profile("user", this.identity.id),
-      mem.recall(prompt, this.project, profiles),
-    ]);
+    const [projectFacts, userFacts, hits] = (
+      await Promise.all([mem.profile("project", this.identity.id), mem.profile("user", this.identity.id), mem.recall(prompt, this.project, profiles)])
+    ).map((list) => list.filter(readable)) as [ProfileFact[], ProfileFact[], Hit[]];
     // The profiles are what this session's knowledge rests on: link them
     // as feeders once, so a failure can blame them and a success credit them.
     const knowledge = [...profiles, ...hits.filter((h) => h.area !== "Salience" && h.kind !== "TaskEpisode").map((h) => h.node)];
@@ -292,7 +299,7 @@ export class MemorySession {
   /** Search within this project, rendered for a model. */
   async search(query: string, k = 5): Promise<string> {
     this.project ??= await this.mem.project(this.identity.id, this.identity.root);
-    const hits = await this.mem.search(query, k, this.project);
+    const hits = (await this.mem.search(query, k, this.project)).filter(readable);
     return hits.length ? hits.map(describeHit).join("\n") : "Nothing in memory matches.";
   }
 

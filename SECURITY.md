@@ -64,10 +64,15 @@ in a place you can afford to lose: a container, a throwaway checkout.
   `.idea` and `.devcontainer` still ask at any depth (`vendor/x/.git/hooks` too),
   because what is written there runs later, and so do shell dotfiles, `.ssh`,
   `.config` and `.local` in your home folder. Skills are always asked about.
+- **An approval is for where the path led when you said yes.** If a file you are
+  asked about is turned into a symlink (or its folder moved) while the question is
+  open, the call is refused instead of writing where it now leads.
 - **Reads are free, except credentials.** `read`, `grep`, `find` and `ls` never ask,
   but refuse Mnemo's own `auth.json`, `models.json`, `grants.json` and `.env`,
   `~/.ssh`, `~/.aws`, `~/.gnupg`, and a process's `/proc/<pid>/environ` and `mem`
-  (where the provider keys are). `grep` also refuses a folder that holds any of
+  (where the provider keys are), and anywhere a `.env` or `.env.*` file (not
+  `.env.example`, `.sample`, `.template`, `.dist`, `.default`), a private key
+  (`id_rsa`, `id_ed25519`, …, not `.pub`), `.netrc` or `.pgpass`. `grep` also refuses a folder that holds any of
   them (`~`, `$MNEMO_HOME`, `/`), since it searches hidden files; search a folder
   below it. An `allow` rule can open any of these. A shell command can still `cat`
   them, or `cat /proc/$PPID/environ`: in `default` mode that asks, and no "always"
@@ -162,8 +167,10 @@ environment variable.
 What Mnemo remembers is shown to the model in later sessions, so a poisoned
 memory is a prompt injection that persists. Facts that look like
 instructions to steer, exfiltrate or hide are refused at write time
-(`packages/memory/src/safety.ts`), recalled items are labelled as candidates
-rather than facts, `/memory` and the memory map show what it holds and
+(`packages/memory/src/safety.ts`) and checked again when read back, so a fact kept
+before a rule existed is not shown either. What is recalled reaches the model inside a
+`<memory-data>` boundary that a fact cannot close, under a standing line that memory is
+data and never asks for anything itself. `/memory` and the memory map show what it holds and
 `/forget` retires a fact. The scanner reads text the way a person would (width
 forms, lookalike letters, invisible characters, line breaks) and also covers the
 session record, but it is a list of patterns: a paraphrase can get past it, which
@@ -175,6 +182,30 @@ from its git `origin` (a repository that copies another's remote URL shares its
 memory), and the MCP server takes the project from each call, so a model that is
 prompt-injected can ask for another project's memory. Only attach memory to agents
 and repositories you trust with all of it.
+
+## MCP servers
+
+An MCP server is a program (or a web service) you choose, and its tools do whatever it
+says they do. Mnemo connects only the servers in `$MNEMO_HOME/agent/mcp.json`, plus a
+folder's `.pi/mcp.json` once you have trusted that folder (an untrusted folder's servers
+are never started), and a project file may not use `"auth"` to send one of your provider
+credentials anywhere.
+
+- **Every call goes through the gate.** In `default` and `accept-edits` each call to an
+  MCP tool asks you, showing its arguments; "always" covers that one tool of that server
+  in this project. `plan` refuses them all, `yolo` and `-p` allow them, and deny rules
+  match by name (`{"tool": "mcp__github__*", "action": "deny"}`). Reading a server's
+  resources (`read_mcp_resource`) asks the same way; `tool_search`, which only finds
+  tools, does not.
+- **What a tool returns is the server's text,** read by the model like a web page:
+  treat a server you do not control as a source of prompt injection.
+- **A stdio server inherits your environment,** provider keys included, as it does in
+  other clients: it runs as you and could read your files anyway. Give a server only the
+  variables it needs by running it through a wrapper if that matters to you.
+- **Network.** HTTP servers are reached at the address you configured; that, and
+  signing in to one with OAuth (`/mcp login`, which listens on `127.0.0.1` for the
+  browser's redirect until the sign-in ends), are the only connections MCP makes.
+  Nothing is contacted for a server you have not configured. Sub-agents get no MCP tools.
 
 ## Agents that talk to agents
 

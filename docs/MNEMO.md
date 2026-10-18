@@ -191,8 +191,10 @@ stopped loses the interpreter and its namespace.
 **Rewind.** Before an `edit` or `write`, the file's bytes are kept under the
 turn's user message. `esc esc` on an empty prompt (or `/rewind`) lists your
 messages and puts back the conversation, the files, or both; your message
-returns to the prompt. Changes made by shell commands are not tracked, and the
-record lives as long as the process.
+returns to the prompt. In a git repository, a shell command's or Python cell's changes
+are found by hashing the files git does not ignore into a private index before and after
+it (`runtime/shell-snapshot.ts`; the user's index and branches are untouched), so they go
+back too. The record lives as long as the process.
 
 **Other commands.** `mnemo -p "<prompt>"` answers once and prints (headless: nobody is there to
 ask, so a call that would ask is allowed; `deny` rules and plan mode still hold). `mnemo -p "<task>" --best-of 3

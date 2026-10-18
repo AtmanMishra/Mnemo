@@ -248,6 +248,11 @@ export class Controller {
     return this.runtime.session;
   }
 
+  /** The host this controller's extensions share; absent in headless test setups. */
+  get host(): Host | undefined {
+    return this.options.host;
+  }
+
   /**
    * Whether a turn can run. With no credentials pi still reports a placeholder
    * model (provider "unknown"), so a model alone is not enough: its provider
@@ -339,7 +344,9 @@ export class Controller {
         getToolsExpanded: () => this.chrome.expanded,
         setToolsExpanded: (expanded) => this.update({ expanded }),
       }),
-      mode: "tui",
+      // Not "tui": that tells extensions they may hand over pi-tui components, which an Ink
+      // interface ignores (ui-context.ts). As "rpc" they ask through dialogs instead (`/mcp`).
+      mode: "rpc",
       commandContextActions: {
         waitForIdle: () => this.runtime.session.waitForIdle(),
         newSession: (o) => this.runtime.newSession(o),
