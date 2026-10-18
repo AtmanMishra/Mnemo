@@ -241,3 +241,33 @@ test("switching to plan mode reaches a sub-agent that is already running", async
   await e.idle();
   expect(fs.existsSync(marker)).toBe(false);
 });
+
+// ── A symlink swapped while the question is open ──
+
+test("an approved write is refused when its path was turned into a symlink while the question was open", async () => {
+  const proj = tmp("mnemo-proj-");
+  const outside = tmp("mnemo-outside-");
+  fs.writeFileSync(path.join(proj, "notes.txt"), "mine\n");
+  let swap = true;
+  const host = {
+    home: tmp("mnemo-home-"),
+    mode: "default",
+    signals: [],
+    ui: {
+      approve: async () => {
+        if (swap) {
+          fs.rmSync(path.join(proj, "notes.txt"));
+          fs.symlinkSync(path.join(outside, "profile"), path.join(proj, "notes.txt"));
+        }
+        return { kind: "yes" };
+      },
+    },
+  };
+  let handler: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
+  policyExtension(host as never)({ on: (_: string, h: typeof handler) => (handler = h) } as never);
+  const call = () => handler!({ toolName: "write", input: { path: "notes.txt", content: "x" } }, { cwd: proj });
+  expect(await call()).toMatchObject({ block: true, reason: expect.stringContaining("somewhere else") });
+  // Nothing changed under the question: the approval stands.
+  swap = false;
+  expect(await call()).toBeUndefined();
+});
