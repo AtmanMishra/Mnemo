@@ -137,7 +137,10 @@ export function generalise(call: ToolCall): string | undefined {
     if (widens(trimmed)) return trimmed;
     // `git status*`; but not `git config*`, whose arguments can name a program to run.
     if (runsOperand(trimmed)) return trimmed;
-    return sub ? `${program} ${sub}*` : `${program}*`;
+    // No subcommand (`git --version`) or an option before it (`git -C dir status`, whose
+    // value would be mistaken for the subcommand): `git*` would hand over `git push`.
+    if (!sub || rest[0]!.startsWith("-")) return trimmed;
+    return `${program} ${sub}*`;
   }
   // Anything else generalises only when there is nothing to generalise over:
   // an operand ("rm dist") is an argument, and arguments are never a class.
