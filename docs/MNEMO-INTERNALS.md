@@ -390,8 +390,11 @@ an out-of-band `tool_call` line and blocks for the reply; `tools.parallel([…])
 sends the whole batch in one `tool_calls` line, the host runs the calls
 concurrently, and results come back in order with a failed call as a `ToolError` in
 place. Each in-kernel call goes through `ctx.executeTool`, so it passes the same
-gate as a call the model makes directly (`extensions/kernel.ts`). The gate does not
-look inside the Python itself (`SECURITY.md`).
+gate as a call the model makes directly (`extensions/kernel.ts`). What the Python does
+itself meets only the deny rules: each `run` carries a `guard` saying which kinds
+(command, read, write) any deny rule could stop, and an audit hook in the bridge sends a
+`check` line before each such action and raises `PermissionError` on a refusal
+(`denial()` and `kernelGuard()` in `extensions/policy.ts`; `SECURITY.md`).
 
 Mechanics worth knowing: output capture uses `redirect_stdout`, so the protocol
 writes on the *raw* file objects captured at startup — otherwise a `print()` would
