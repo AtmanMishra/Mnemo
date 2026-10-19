@@ -360,11 +360,31 @@ reads the keys; only children lose them.
 ### 3.2 Tools
 
 pi's built-in tools are `read`, `bash`, `edit`, `write` by default (`grep`, `find`,
-`ls` and `powershell` exist; a read-only sub-agent gets `read grep find ls
-memory_search`). Mnemo adds `ipy_run`; `memory_search`, `session_search`,
-`memory_remember`, `memory_steer` (only when the sidecar is installed);
+`ls` and `powershell` exist; a read-only sub-agent gets `read grep find ls`, the code
+tools and `memory_search`). Mnemo adds `ipy_run`; `memory_search`, `session_search`,
+`memory_remember`, `memory_steer` (only when the sidecar is installed); `code_search`,
+`code_symbol`, `code_refs`, `code_map` (unless the code index is off);
 `spawn_subagent`; `create_skill` and `update_skill`. There is no tool-exposure file
 in the app: the set is what the extensions register when the session starts.
+
+**The code index** (`mnemo-code`, `src/code/`, the `codeIndex` and `codeImpact` settings) answers
+questions about the project's code by structure instead of by text. tree-sitter grammars (WebAssembly,
+embedded in the binary with `type: "file"`) read TypeScript/JavaScript, Python, Rust and Go into
+definitions (path-scoped names such as `Cache.get`, kind, lines, signature, a hash of the text) and
+references (calls, imports, extends, implements). As the walk goes it records the declared or
+constructed type of each variable, parameter and field, so `s.put()` names `Store` when the code says
+`s` is one. One SQLite file per project under `~/.mnemo/index/` (never in the project) holds them;
+every query first stats the project's files and re-parses only those whose bytes changed, so an answer
+describes the code as it is now. References are tied to definitions at query time: `exact` (same file,
+an imported file, a typed receiver) or `inferred` (the only definition of that name in the language
+family); anything else is counted and never guessed, and no call crosses a language family. The tools
+are `code_search` (BM25 over names and signatures, nudged towards used, exported definitions),
+`code_symbol` (a definition with its source, or a file's outline), `code_refs` (callers or callees, to
+depth 3) and `code_map`. All four are read tools to the gate; the index leaves out every file a read
+would be refused (credentials, deny rules) and stores no file bodies. Nothing is indexed until the
+agent first asks; after that, each edit is followed by the callers elsewhere of the definitions it
+changed. The plan this is the first slice of (the text index, memory anchors, ranking by the graph) is
+in the project's architecture document.
 
 `session_search` is a different question from `memory_search`: memory keeps what
 was *learned*, this keeps the record — every message and command of Mnemo's and

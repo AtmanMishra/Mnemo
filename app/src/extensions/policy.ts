@@ -25,7 +25,7 @@ import type { Host } from "./host.ts";
 import { hostsIn, isMetadata, normalHost } from "../policy/egress.ts";
 import { allowedMode, loadManaged } from "../policy/managed.ts";
 
-const READ = new Set(["read", "grep", "find", "ls", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent", "tool_search", "ask_user"]);
+const READ = new Set(["read", "grep", "find", "ls", "code_search", "code_symbol", "code_refs", "code_map", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent", "tool_search", "ask_user"]);
 /** Read-class tools that still write to memory: plan mode is "change nothing", memory included. */
 const WRITES_MEMORY = new Set(["memory_remember", "memory_steer"]);
 const EDIT = new Set(["edit", "write", "create_skill", "update_skill"]);
@@ -230,7 +230,7 @@ export function commandVariants(command: string, depth = 0, shell: "sh" | "power
 }
 
 /** Tools whose `path` names a file or folder the gate reasons about. */
-const PATH_TOOLS = new Set(["read", "grep", "find", "ls", "edit", "write"]);
+const PATH_TOOLS = new Set(["read", "grep", "find", "ls", "edit", "write", "code_symbol", "code_map"]);
 
 /** The subjects a rule on this call is tested against. */
 function subjectsOf(tool: string, subject: string): string[] {
@@ -312,7 +312,7 @@ const PROC_SECRET = /^\/proc\/[^/]+\/(?:task\/[^/]+\/)?(?:environ|mem)$/;
 const SECRET_FILE = /^(?:\.env(?:\.(?!(?:example|sample|template|dist|defaults?)$)[^.]+)*|id_(?:rsa|dsa|ecdsa|ed25519)(?:_sk)?|[._]netrc|\.pgpass)$/i;
 
 /** Credentials a read tool is never needed for. A rule in permissions.json can still allow them. */
-function secretPath(host: { home?: string; agentDir?: string }, cwd: string, p: unknown, sys: PathSystem): boolean {
+export function secretPath(host: { home?: string; agentDir?: string }, cwd: string, p: unknown, sys: PathSystem): boolean {
   if (typeof p !== "string") return false;
   const real = realTarget(cwd, p, sys);
   if (real === undefined) return false;

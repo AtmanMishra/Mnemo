@@ -66,6 +66,8 @@ much agents may do on their own; what an agent may *touch* is decided by the gat
 | Escalate after | `escalateAfter` | 2 checks | 1–10 | failed checks in one run before escalating |
 | Python cell time | `kernelTimeout` | 120 s | 5–3600 | seconds a Python cell may run when it names no limit |
 | Python cell ceiling | `kernelMaxTimeout` | 600 s | 5–3600 | the longest a Python cell may ask to run |
+| Code index † | `codeIndex` | on | on · off | index this project's definitions and calls for the code_search, code_symbol, code_refs and code_map tools |
+| Edit impact | `codeImpact` | on | on · off | after an edit, tell the agent which code elsewhere calls what it changed (needs the code index) |
 | Run budget | `runSpend` | $0 (no limit) | 0–1000 | dollars one prompt may spend, sub-agents included, before Mnemo stops it (0: no limit) |
 | Pass to commands | `passEnv` | none | variable names, comma-separated | variables bash and Python also get, such as GITHUB_TOKEN, SSH_AUTH_SOCK (they get no tokens otherwise; see SECURITY.md) |
 
