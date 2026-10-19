@@ -16,7 +16,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { KernelClient, spawnKernel, type KernelChild } from "../kernel/kernel.ts";
 import bridgeSource from "../../python/ipy_bridge.py" with { type: "text" };
-import { childEnv, configuredKeys } from "../runtime/env.ts";
+import { childEnv, configuredKeys, envNames } from "../runtime/env.ts";
 import { callerSignals, denial, egress, kernelGuard, rulesOf } from "./policy.ts";
 import type { Host } from "./host.ts";
 import { hostsIn } from "../policy/egress.ts";
