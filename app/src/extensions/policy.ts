@@ -25,7 +25,7 @@ import type { Host } from "./host.ts";
 import { hostsIn, isMetadata, normalHost } from "../policy/egress.ts";
 import { allowedMode, loadManaged } from "../policy/managed.ts";
 
-const READ = new Set(["read", "grep", "find", "ls", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent", "tool_search"]);
+const READ = new Set(["read", "grep", "find", "ls", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent", "tool_search", "ask_user"]);
 /** Read-class tools that still write to memory: plan mode is "change nothing", memory included. */
 const WRITES_MEMORY = new Set(["memory_remember", "memory_steer"]);
 const EDIT = new Set(["edit", "write", "create_skill", "update_skill"]);

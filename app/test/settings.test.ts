@@ -78,6 +78,10 @@ test("values are checked, not bent: wrong type, out of range, unknown choice", (
   expect(parseValue("theme", "Dracula")).toEqual({ ok: true, value: "dracula" });
   expect(parseValue("escalateModel", " anthropic/claude-x ")).toEqual({ ok: true, value: "anthropic/claude-x" });
   expect(parseValue("escalateModel", "")).toEqual({ ok: true, value: "" });
+  expect(parseValue("passEnv", " GITHUB_TOKEN, SSH_AUTH_SOCK ")).toEqual({ ok: true, value: "GITHUB_TOKEN, SSH_AUTH_SOCK" });
+  expect(parseValue("passEnv", "")).toEqual({ ok: true, value: "" });
+  expect(parseValue("passEnv", "GITHUB_TOKEN; rm").ok).toBe(false);
+  expect(parseValue("passEnv", "A,,B").ok).toBe(false);
   // Every theme the interface has is a choice, and nothing else is.
   expect([...DEFS.theme.options!].sort()).toEqual(Object.keys(THEMES).sort());
 });

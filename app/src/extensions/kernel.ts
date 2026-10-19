@@ -54,7 +54,7 @@ export function kernelExtension(host: Host) {
       (client ??= new KernelClient({
         interpreter: python,
         bridgePath: installBridge(host.home),
-        spawn: (i, a) => spawnKernel(i, a, cwd, childEnv(process.env, configuredKeys(host.agentDir))) as unknown as KernelChild,
+        spawn: (i, a) => spawnKernel(i, a, cwd, childEnv(process.env, configuredKeys(host.agentDir), envNames(host.settings.get().passEnv))) as unknown as KernelChild,
         cwd,
       }));
 

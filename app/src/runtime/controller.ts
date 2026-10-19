@@ -23,6 +23,7 @@ import { compareVersions, manualStep, type InstallKind } from "./update.ts";
 import { setTheme, themeName, THEMES, type ThemeName } from "../ui/theme.ts";
 import { bestOf, describeBestOf, type CandidateRunner, type LaneState } from "./best-of.ts";
 import { selfCommand } from "./self.ts";
+import { envNames } from "./env.ts";
 import { settingsCommand, settingsMenu } from "./settings-menu.ts";
 import { limitsOf, SettingsStore, type Settings, type SettingKey } from "./settings.ts";
 import { summarizeSession, summaryText, titleFrom } from "./sessions.ts";
@@ -521,6 +522,7 @@ export class Controller {
         run: runner,
         keepDir: path.join(home, "best-of", new Date(now()).toISOString().replace(/[:.]/g, "-")),
         agentDir: path.join(home, "agent"),
+        passEnv: envNames(this.settings.get().passEnv),
         onProgress: (i, state, info) => {
           const lanes = this.chrome.race!.lanes.map((l, j) => (j === i ? { ...l, state, size: info?.size ?? l.size, endedAt: state === "running" ? undefined : now() } : l));
           set({ lanes });

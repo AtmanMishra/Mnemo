@@ -173,8 +173,8 @@ cd app && bun bin/mnemo.ts --demo
   both, and your message returns to the prompt. In a git repository, what shell
   commands and Python cells changed goes back too (files git ignores do not).
 - **Stays out of your keys.** Commands the agent runs (bash, the Python kernel)
-  do not get your model-provider API keys (`MNEMO_PASS_ENV=NAME` hands one
-  back), and the Python kernel has a timeout and a memory cap; see
+  get an allowlisted environment: no model-provider key, `GITHUB_TOKEN`,
+  `NPM_TOKEN` or `AWS_*` (the `passEnv` setting hands one back), and the Python kernel has a timeout and a memory cap; see
   [SECURITY.md](SECURITY.md).
 - **A pixel interface** with Mne the elephant, eleven themes (`/theme`) and a
   sidebar for files, memory, sessions, skills and logs. The spec is
