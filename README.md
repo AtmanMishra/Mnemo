@@ -144,6 +144,7 @@ cd app && bun bin/mnemo.ts --demo
   and HTTP servers both work, and `/mcp` lists them, signs in and reconnects. Their
   tools stay out of the prompt until `tool_search` finds them (`"exposure": "direct"`
   declares them up front). In `default` mode each call asks first; "always" covers that tool.
+  A stdio server gets only the safe basics and its own `env`, not your tokens.
 - **Memory for other agents.** `mnemo memory setup claude-code` prints the hooks
   and MCP entry that give Claude Code (or Codex) the same memory; `mnemo memory
   ingest` learns from Claude Code sessions you already have.
