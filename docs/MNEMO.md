@@ -180,9 +180,10 @@ permissions on Mnemo's files, sets a broken `state.json` aside, removes best-of
 runs older than 30 days, and reinstalls a missing `memsrv`.
 
 **What the agent's commands inherit.** Bash, the Python kernel and best-of checks
-start without the model-provider API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-and the rest of the list in `app/src/runtime/env.ts`, plus any variable
-`models.json` interpolates). `MNEMO_PASS_ENV=NAME,NAME` hands named ones back. The
+start with an allowlist of your environment (`PATH`, `HOME`, locale, temp and
+toolchain folders, proxies; the list is in `app/src/runtime/env.ts`), so no model
+key, `GITHUB_TOKEN`, `NPM_TOKEN`, `AWS_*` or other token reaches them. The
+`passEnv` setting or `MNEMO_PASS_ENV=NAME,NAME` hands named ones back. The
 Python kernel has a timeout per call (120 s by default, at most 600 s, the
 `timeout` parameter), is stopped by `esc`, and is capped at 8 GB of address space
 on Linux (`MNEMO_KERNEL_MEMORY_MB`, 0 for none). A cell that times out or is

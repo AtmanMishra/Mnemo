@@ -173,21 +173,25 @@ or run a different program, is not bound by it.
   `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `AWS_*`, `OPENCODE_API_KEY`) and may
   choose that provider by default. If you do not want that, unset them for
   the session.
-- **Commands the agent runs do not get the model-provider keys.** The bash
-  tool, the Python kernel and best-of checks (stopped with everything they started
-  when they overrun) start with your environment minus
-  every key pi reads for a model provider (`ANTHROPIC_API_KEY`,
-  `OPENAI_API_KEY`, `OPENCODE_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, … — the
-  list is `app/src/runtime/env.ts`) and any variable a custom provider in
-  `models.json` names as `$NAME`. Mnemo itself still reads them. A command
-  that needs one can have it back with `MNEMO_PASS_ENV=NAME,NAME`.
-  **Everything else is still inherited**, including `AWS_ACCESS_KEY_ID` and
-  friends (your own tools use them, and Bedrock reads them too), `GITHUB_TOKEN`
-  and your project's own secrets. A prompt injection (text in a file, a web page
-  or a tool result that tells the model what to do) can try to read or send
-  those, for example with `env`. Mitigations: leave the mode on `default` so
-  commands need your approval, and put `deny` rules for `env`, `printenv` and
-  `curl`/`wget` to unknown hosts in `permissions.json`.
+- **Commands the agent runs get an allowlisted environment, not yours.** The
+  bash tool, the Python kernel and best-of checks (stopped with everything they
+  started when they overrun) start with only the variables that locate things:
+  `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `LANG` and `LC_*`, `TMPDIR`, `XDG_*`,
+  the Windows system folders, where toolchains are installed (`JAVA_HOME`,
+  `CARGO_HOME`, `VIRTUAL_ENV`, `NVM_DIR`, …), the proxy and CA-bundle settings,
+  and `PI_SESSION_ID`/`PI_MODEL` and friends (the list is
+  `app/src/runtime/env.ts`). **Nothing else is passed:** no model-provider key, no
+  `GITHUB_TOKEN`, `GH_TOKEN`, `NPM_TOKEN` or `AWS_*`, no `SSH_AUTH_SOCK`, no
+  `DATABASE_URL`, and no variable named something nobody predicted. Mnemo itself
+  still reads them. A proxy URL is passed as it is, so a password written into
+  `HTTPS_PROXY` reaches commands too. A command that needs one of the others gets
+  it when you name it: the `passEnv` setting (`/settings passEnv GITHUB_TOKEN,
+  SSH_AUTH_SOCK`) or `MNEMO_PASS_ENV=NAME,NAME` for one run. Naming one hands it
+  to every command the agent runs, so a prompt injection (text in a file, a web
+  page or a tool result that tells the model what to do) can try to read or send
+  it: leave the mode on `default` so commands need your approval. A variable a
+  custom provider in `models.json` names as `$NAME` is held back even if it is on
+  the list, unless you name it.
 - **The Python kernel is an interpreter, not a sandbox.** Each cell is stopped
   after 120 seconds (the model may ask for up to 600), stopping a turn stops the
   cell together with the processes it started (the kernel runs in its own process

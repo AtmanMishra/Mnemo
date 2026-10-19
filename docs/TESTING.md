@@ -85,7 +85,7 @@ expect(lastToolResult()).toContain("…");             // what the binary sent b
 | `-c` continue | | ✓ | |
 | Modes: plan, deny rules, compound commands, broken `permissions.json` / `grants.json` | ✓ `gate.test`, `policy.test`, `extensions.test` | ✓ | ✗ approval dialog |
 | Credential files refused, `/proc/*/environ` | ✓ `policy.test` | ✓ `auth.json`, `/proc/self/environ` | |
-| Provider keys kept out of bash and the kernel; `MNEMO_PASS_ENV` | ✓ `env.test`, `scrub.test` | ✓ | |
+| Bash and the kernel get an allowlisted environment (no provider keys, no `GITHUB_TOKEN`); `passEnv`, `MNEMO_PASS_ENV` | ✓ `env.test`, `scrub.test` | ✓ | |
 | Python kernel (`ipy_run`) | ✓ `kernel.test`, `kernel-cells.test` | ✓ runs from the binary | |
 | Sub-agents | ✓ | ✓ | |
 | Memory across sessions, `memory_search` | ✓ `memory-loop.test`, `packages/memory` | ✓ | |

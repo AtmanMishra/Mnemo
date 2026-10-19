@@ -63,6 +63,7 @@ export interface Settings extends Record<KeyAction, string> {
   kernelTimeout: number;
   kernelMaxTimeout: number;
   runSpend: number;
+  passEnv: string;
   // Agents
   maxDepth: number;
   maxChildren: number;
@@ -132,6 +133,7 @@ export const DEFS: Record<SettingKey, Def> = {
   kernelTimeout: int("Behaviour", "Python cell time", "seconds a Python cell may run when it names no limit", 120, 5, 3600, "s"),
   kernelMaxTimeout: int("Behaviour", "Python cell ceiling", "the longest a Python cell may ask to run", 600, 5, 3600, "s"),
   runSpend: { group: "Behaviour", label: "Run budget", help: "dollars one prompt may spend, sub-agents included, before Mnemo stops it (0: no limit)", kind: "number", default: 0, min: 0, max: 1000, unit: "$" },
+  passEnv: { group: "Behaviour", label: "Pass to commands", help: "variables bash and Python also get, comma-separated, such as GITHUB_TOKEN, SSH_AUTH_SOCK (they get no tokens otherwise)", kind: "text", default: "" },
 
   maxDepth: int("Agents", "Sub-agent depth", "how deep sub-agents nest (0: none; raising it reaches conversations opened after)", 3, 0, 6),
   maxChildren: int("Agents", "Sub-agents per agent", "live sub-agents one agent may have", 4, 1, 16),
@@ -244,6 +246,7 @@ export function parseValue(key: SettingKey, raw: unknown): Parsed<Settings[Setti
       const t = String(text ?? "");
       if (t === "") return { ok: true, value: "" };
       if (key === "escalateModel" && !/^[\w.-]+\/[\w.:/@+-]+$/.test(t)) return { ok: false, error: "escalateModel is provider/model-id, or empty" };
+      if (key === "passEnv" && !/^\s*[A-Za-z_]\w*(\s*,\s*[A-Za-z_]\w*)*\s*$/.test(t)) return { ok: false, error: "passEnv is variable names separated by commas, or empty" };
       return t.length <= 100 ? { ok: true, value: t } : { ok: false, error: `${key} is at most 100 characters` };
     }
     case "chord": {
