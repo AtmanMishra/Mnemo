@@ -97,7 +97,7 @@ withPython("a thread a cell leaves behind cannot run what a rule might deny once
   }
 }, 30_000);
 
-withPython("with no deny rules the kernel asks nothing", async () => {
+withPython("with no deny rules a cell's commands run as before", async () => {
   const k = kernelWith([{ tool: "bash", pattern: "git status*", action: "allow" }]);
   try {
     expect(await k.run(`import subprocess, sys; subprocess.run([sys.executable, "-c", "print('hi')"], capture_output=True, text=True).stdout.strip()`)).toContain("hi");
@@ -107,10 +107,10 @@ withPython("with no deny rules the kernel asks nothing", async () => {
 }, 30_000);
 
 test("the guard asks only about what a deny rule could stop", () => {
-  expect(kernelGuard([{ tool: "bash", pattern: "curl*", action: "deny" }])).toEqual({ exec: true, read: false, write: false });
-  expect(kernelGuard([{ tool: "edit", pattern: ".env", action: "deny" }])).toEqual({ exec: false, read: false, write: true });
-  expect(kernelGuard([{ tool: "*", action: "deny" }])).toEqual({ exec: true, read: true, write: true });
-  expect(kernelGuard([{ tool: "bash", action: "allow" }])).toEqual({ exec: false, read: false, write: false });
+  expect(kernelGuard([{ tool: "bash", pattern: "curl*", action: "deny" }])).toEqual({ exec: true, read: false, write: false, net: true });
+  expect(kernelGuard([{ tool: "edit", pattern: ".env", action: "deny" }])).toEqual({ exec: true, read: false, write: true, net: true });
+  expect(kernelGuard([{ tool: "*", action: "deny" }])).toEqual({ exec: true, read: true, write: true, net: true });
+  expect(kernelGuard([{ tool: "bash", action: "allow" }])).toEqual({ exec: true, read: false, write: false, net: true });
 });
 
 test("denial looks through wrappers and lands paths as the gate does", () => {

@@ -33,10 +33,10 @@ Messages are handled strictly sequentially in arrival order. The process never
 exits on a user-code exception; only a fatal interpreter error ends it.
 
 Deny rules inside a cell: a run request may carry
-  "guard": {"exec": bool, "read": bool, "write": bool}
+  "guard": {"exec": bool, "read": bool, "write": bool, "net": bool}
 saying which of the cell's own actions a deny rule in permissions.json could stop.
 An audit hook (PEP 578) then asks the host before each of them
-  {"op": "check", "tool": "bash"|"read"|"write", "input": {"command"|"path": ..}}
+  {"op": "check", "tool": "bash"|"read"|"write"|"net", "input": {"command"|"path"|"host": ..}}
   {"op": "check_result", "ok": false, "reason": "..."}
 and a refusal is a PermissionError in the cell. It is a filter, like the gate:
 code written to get around it (ctypes, a process that outlives the cell's view)
@@ -207,6 +207,14 @@ def install_guard(proxy):
             if not guard.get("write" if writes else "read"):
                 return
             checks = [("write" if writes else "read", "path", path)]
+        elif event in ("socket.connect", "socket.getaddrinfo"):
+            if not guard.get("net"):
+                return
+            target = args[1] if event == "socket.connect" else args
+            if not isinstance(target, tuple) or not target or not isinstance(target[0], (str, bytes)):
+                return
+            host = os.fsdecode(target[0]) if isinstance(target[0], bytes) else target[0]
+            checks = [("net", "host", host)]
         elif event in _WRITE:
             if not guard.get("write"):
                 return
@@ -226,7 +234,7 @@ def install_guard(proxy):
 
     def arm(guard):
         seen.clear()
-        state["guard"] = guard if isinstance(guard, dict) and any(guard.get(k) for k in ("exec", "read", "write")) else None
+        state["guard"] = guard if isinstance(guard, dict) and any(guard.get(k) for k in ("exec", "read", "write", "net")) else None
         state["running"] = True
 
     def disarm():

