@@ -33,7 +33,7 @@ The extension starts `mnemo --rpc` in your workspace folder and talks to it in J
 
 - Every ask is answered by you, by clicking, in the panel. The extension never answers one, never starts Mnemo with `--yolo` or `--accept-edits`, and has no setting that does. An ask left open stays waiting for you; if Mnemo exits it counts as *no*.
 - Mnemo's permission gate filters; it is not a sandbox (see the repository's `SECURITY.md`). Plan mode is read-only.
-- `mnemo.path`, `mnemo.mode`, `mnemo.trustProject` and `mnemo.install` are machine-scoped and ignored in untrusted workspaces, so a repository cannot choose which program runs or switch on its own `.pi/` extensions. By default a folder's `.pi/` code is not loaded.
+- `mnemo.path`, `mnemo.mode`, `mnemo.trustProject` and `mnemo.install` are machine-scoped and ignored in untrusted workspaces, so a repository cannot choose which program runs or switch on its own `.agents/` extensions. By default a folder's `.agents/` code is not loaded.
 - The panel renders model output as text nodes, never as HTML, under a strict content security policy.
 
 ## Limits

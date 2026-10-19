@@ -319,9 +319,14 @@ runtime (`createAgentSessionRuntime`, `src/runtime/runtime.ts`) **in this
 process** — no RPC, no child process. pi owns the loop, the built-in tools,
 sessions, compaction, skills, prompt templates and provider auth; the models'
 credentials live in `~/.mnemo/agent/` (`PI_CODING_AGENT_DIR` points pi there, apart
-from a standalone pi install). A folder's own `.pi/` extensions, settings, prompts
+from a standalone pi install). A folder's own `.agents/` extensions, settings, prompts
 and skills load only if the folder is trusted (`ProjectTrustStore`; `--trust-project`
-or an answer at launch), because extensions run as code before any approval.
+or an answer at launch), because extensions run as code before any approval. The name
+`.agents` is not pi's default (`.pi`): pi reads it from the `piConfig.configDir` of the
+package.json at `PI_PACKAGE_DIR`, so `runtime/project-dir.ts` writes one under the Mnemo
+home and points the variable at it before pi loads (`bun-setup.ts` imports it first;
+`app/bunfig.toml` preloads it for tests). A folder that still has `.pi/` resources gets a
+one-line notice at launch.
 
 Mnemo's behaviour is ten `InlineExtension`s (inline = shipped with the binary, no
 per-user install, identical in every mode), built in this order so the gate sees
@@ -499,9 +504,8 @@ links and its inboxes. Details and the review: `docs/AGENT-HIERARCHY.md`, `SECUR
 
 ### 3.5 Skills, hooks, schedules
 
-**Skills**: `SKILL.md` with frontmatter, discovered by pi from `.agents/skills`
-(the folder and its ancestors up to the git root), the project's `.pi/skills` and
-the agent directory's `skills/`, creatable by the agent (§3.2) and
+**Skills**: `SKILL.md` with frontmatter, discovered by pi from the project's `.agents/skills`
+(the folder and its ancestors up to the git root) and the agent directory's `skills/`, creatable by the agent (§3.2) and
 curated by `mnemo memory curate` (a skill unused for 30 days is stale, for 90
 archived to `agent/skills-archive/`; only personal skills move, project skills
 belong to the team and are reported). Reading a skill's `SKILL.md` records a `last
@@ -680,8 +684,8 @@ everywhere** (`.gitattributes`).
 | a theme | an entry in `THEMES` and `ThemeName` in `ui/theme.ts` (the contrast test covers it), and the `/theme` description in `controller.ts` |
 | a dialog | `controller.dialogs.select`/`text`/… (`runtime/dialogs.ts`), drawn by `ui/components/Dialogs.tsx` |
 | a sidebar pane | `PANES` in `ui/workspace/model.ts`, the rows from `runtime/workspace-source.ts`, its icon in `Sidebar.tsx` |
-| a prompt template | a `.md` in `~/.mnemo/agent/prompts/` or `.pi/prompts/` — pi expands `/<filename>` before the prompt is sent |
-| a third-party pi extension | `~/.mnemo/agent/extensions/*.ts`, or `.pi/extensions/*` in a project once it is trusted — the path that needs no PR to Mnemo |
+| a prompt template | a `.md` in `~/.mnemo/agent/prompts/` or `.agents/prompts/` — pi expands `/<filename>` before the prompt is sent |
+| a third-party pi extension | `~/.mnemo/agent/extensions/*.ts`, or `.agents/extensions/*` in a project once it is trusted — the path that needs no PR to Mnemo |
 | memory for another agent | `mnemo memory setup <agent>` (hooks, MCP); a new transcript format goes in `packages/memory/src/ingest/` |
 | a background memory job | `research/memory-runtime-design.md` (designed; the curator is on `feature/background-curator`) |
 
@@ -693,7 +697,7 @@ third-party path is pi's, and it is a directory, not a PR:
 | Where | Scope |
 |---|---|
 | `~/.mnemo/agent/extensions/*.ts`, `*/index.ts` | global — every project |
-| `.pi/extensions/*.ts`, `*/index.ts` | project-local, only once the folder is trusted (`--trust-project`, or "always" at the launch prompt) |
+| `.agents/extensions/*.ts`, `*/index.ts` | project-local, only once the folder is trusted (`--trust-project`, or "always" at the launch prompt) |
 
 An extension may register tools, commands, hook handlers and UI requests. Names
 Mnemo already claims, which a third party must not reuse: the tools `ipy_run`,

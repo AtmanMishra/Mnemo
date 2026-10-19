@@ -16,7 +16,7 @@ const KNOWN: { name: RegExp; why: string; ok: () => boolean }[] = [
   { name: /importOAuthModule/, why: "pi-ai's OAuth login flows: bun-setup registers bundled copies", ok: () => /registerBunOAuthFlows\(\)/.test(setup) },
   { name: /importNodeOnlyApi/, why: "pi-ai's Bedrock provider: bun-setup registers the bundled module", ok: () => /setBedrockProviderModule\(/.test(setup) },
   { name: /importNodeModule|dynamicImport/, why: "pi-ai reading node:fs / node:os / node:path, which every runtime has", ok: () => true },
-  { name: /nativeImport|jiti\.import|createJitiImpl/, why: "user extensions (.pi/extensions, ~/.mnemo/agent/extensions) loaded from disk by path", ok: () => true },
+  { name: /nativeImport|jiti\.import|createJitiImpl/, why: "user extensions (.agents/extensions, ~/.mnemo/agent/extensions) loaded from disk by path", ok: () => true },
 ];
 
 test("every computed import() in the binary is accounted for", async () => {

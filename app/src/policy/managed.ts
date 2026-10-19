@@ -1,7 +1,7 @@
 /**
  * Managed policy: what an administrator sets for every user of a machine, and nothing
  * below it can widen. Precedence is managed > user (`$MNEMO_HOME/permissions.json`)
- * > project (a folder's `.pi/`):
+ * > project (a folder's `.agents/`):
  *
  *   rules       tested before the user's: a managed `deny` or `ask` is never answered by
  *               a user `allow` or an "always" grant

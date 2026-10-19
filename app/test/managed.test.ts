@@ -99,8 +99,8 @@ test("MCP servers the policy does not list are not started, from any mcp.json", 
   const agentDir = tmp("mnemo-agent-");
   const cwd = tmp("mnemo-proj-");
   fs.writeFileSync(path.join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: { github: { command: "gh-mcp" }, shady: { command: "x" } } }));
-  fs.mkdirSync(path.join(cwd, ".pi"));
-  fs.writeFileSync(path.join(cwd, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { repo_one: { command: "y" } } }));
+  fs.mkdirSync(path.join(cwd, ".agents"));
+  fs.writeFileSync(path.join(cwd, ".agents", "mcp.json"), JSON.stringify({ mcpServers: { repo_one: { command: "y" } } }));
   const loaded = loadMcpServers(agentDir, cwd, true, policy({ mcpServers: ["github"] }));
   expect(loaded.servers.map((s) => s.name)).toEqual(["github"]);
   expect(loaded.errors.join("\n")).toContain("shady");

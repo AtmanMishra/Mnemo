@@ -55,7 +55,7 @@ const sections: DocSection[] = [
       <>
         <ol>
           <li><code>mnemo doctor</code> reports the model, the memory sidecar and Python. Add <code>--fix</code> to repair what it can (file permissions, a broken settings file, a missing sidecar).</li>
-          <li>Start Mnemo in a project folder: <code>cd my-project &amp;&amp; mnemo</code>. It asks once whether to trust the folder's own <code>.pi/</code> extensions and prompts.</li>
+          <li>Start Mnemo in a project folder: <code>cd my-project &amp;&amp; mnemo</code>. It asks once whether to trust the folder's own <code>.agents/</code> extensions and prompts.</li>
           <li><code>/login</code> adds a provider; <code>/model</code> chooses the model; <code>/thinking</code> sets how hard it thinks. Mnemo also uses keys it finds in your environment, such as <code>ANTHROPIC_API_KEY</code>.</li>
           <li>Ask for something. By default it asks before every edit and command. <code>shift+tab</code> cycles the mode.</li>
           <li>Type <code>/</code> for the command menu, <code>@</code> to mention a file, <code>ctrl+k</code> to jump anywhere. Everything is on <a href="/shortcuts">the shortcuts page</a>.</li>
@@ -174,7 +174,7 @@ const sections: DocSection[] = [
             </tbody>
           </table>
         </div>
-        <p>Project-level files (<code>.pi/</code> extensions, prompts and skills) load only for folders you trust.</p>
+        <p>Project-level files (<code>.agents/</code> extensions, prompts and skills) load only for folders you trust.</p>
       </>
     ),
   },

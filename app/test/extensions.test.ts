@@ -122,7 +122,7 @@ test("accept-edits stays inside the project: ~, @, symlinks and control director
   const w = (p: string) => judge({ mode: "accept-edits" }, [], noGrants, dir, "write", { path: p });
   expect(w("src/a.ts")).toEqual({ allow: true });
   expect(w("new/dir/a.ts")).toEqual({ allow: true });
-  for (const p of ["~/.bashrc", "@/etc/cron.d/x", "lnk/x", "../x", "/etc/hosts", "file:///etc/hosts", "file://evil-host/share/x", ".git/hooks/pre-commit", ".pi/extensions/e.ts", ".mnemo/permissions.json", ".github/workflows/ci.yml"])
+  for (const p of ["~/.bashrc", "@/etc/cron.d/x", "lnk/x", "../x", "/etc/hosts", "file:///etc/hosts", "file://evil-host/share/x", ".git/hooks/pre-commit", ".pi/extensions/e.ts", ".agents/extensions/e.ts", ".mnemo/permissions.json", ".github/workflows/ci.yml"])
     expect("ask" in w(p), p).toBe(true);
 });
 
@@ -410,11 +410,11 @@ test("update_skill refuses a name that walks out of the skills folders", async (
   expect(texts(e.controller).join("\n")).toContain("lowercase letters");
 });
 
-test("a folder's own .pi extension does not run until the folder is trusted", async () => {
+test("a folder's own .agents extension does not run until the folder is trusted", async () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-hostile-"));
   const marker = path.join(cwd, "ran");
-  fs.mkdirSync(path.join(cwd, ".pi", "extensions"), { recursive: true });
-  fs.writeFileSync(path.join(cwd, ".pi", "extensions", "x.ts"), `import * as fs from "node:fs"; fs.writeFileSync(${JSON.stringify(marker)}, "yes"); export default function () {}`);
+  fs.mkdirSync(path.join(cwd, ".agents", "extensions"), { recursive: true });
+  fs.writeFileSync(path.join(cwd, ".agents", "extensions", "x.ts"), `import * as fs from "node:fs"; fs.writeFileSync(${JSON.stringify(marker)}, "yes"); export default function () {}`);
   const e = await env({ cwd });
   await e.close();
   expect(fs.existsSync(marker)).toBe(false);

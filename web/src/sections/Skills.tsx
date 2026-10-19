@@ -35,7 +35,7 @@ export function Skills() {
         { t: "Written when a procedure is demonstrated", d: <><code>create_skill</code> saves a procedure the project or you will need again: a lowercase-with-dashes name, a description that says when to use it (that is how it is found later), and the steps, commands and pitfalls in Markdown. A project skill goes in the repository's <code>.agents/skills/&lt;name&gt;/SKILL.md</code>; a personal one in Mnemo's home.</> },
         { t: "Indexed in memory", d: <>Every skill is also a procedural node in memory, so a later session can recall that the skill exists, and why, from a question that never names it.</> },
         { t: "Revised, with its history", d: <>When a skill fails, <code>update_skill</code> rewrites it and says what went wrong with the old version. The previous body is kept under <code>skill-history/</code>.</> },
-        { t: "Loaded from where you already keep them", d: <><code>SKILL.md</code> files in <code>.claude</code>, <code>.pi</code> and <code>.agents</code> folders, walked up to the repository root, load as well. <code>/skills</code> lists them and <code>/reload</code> picks up changes without a restart.</> },
+        { t: "Loaded from where you already keep them", d: <><code>SKILL.md</code> files in <code>.claude</code> and <code>.agents</code> folders, walked up to the repository root, load as well. <code>/skills</code> lists them and <code>/reload</code> picks up changes without a restart.</> },
         { t: "Curated so the list stays short", d: <><code>mnemo memory curate</code> sorts skills by last use: stale after 30 days, archivable after 90. With <code>--apply</code> a personal skill moves to <code>skills-archive/</code>, where nothing is lost but it is no longer loaded. A project skill belongs to the team: it is reported, never moved.</> },
       ]}
     >
@@ -57,7 +57,7 @@ export function Skills() {
         </div>
         <p className="skill-note"><span className="tagline">{ver.tag}</span>{ver.note}</p>
       </div>
-      <p className="fine" data-reveal="">An example skill. Skills from <code>.claude</code>, <code>.pi</code> and <code>.agents</code> folders load too, and <code>/skills</code> lists what it can use.</p>
+      <p className="fine" data-reveal="">An example skill. Skills from <code>.claude</code> and <code>.agents</code> folders load too, and <code>/skills</code> lists what it can use.</p>
     </Section>
   );
 }
