@@ -17,6 +17,7 @@ import * as readline from "node:readline/promises";
 import pkg from "../package.json" with { type: "json" };
 import { agentDir, findMemsrv, journalPath, memsrvName, mnemoHome, pointPiAt, skillsDir } from "../src/runtime/paths.ts";
 import { createModelRuntime, startRuntime } from "../src/runtime/runtime.ts";
+import { allowedMode, loadManaged, managedPath } from "../src/policy/managed.ts";
 import { Controller, type Updater } from "../src/runtime/controller.ts";
 import { createDemoProject, createFaux, demoScript, DEMO_PROMPT } from "../src/runtime/demo.ts";
 import { MemoryService } from "@mnemo/memory";
@@ -220,6 +221,9 @@ async function doctor(home: string, dir: string, fix: boolean): Promise<number> 
     /* none */
   }
   lines.push(`  skills  ${skills} in ${skillsDir(home)}`);
+  const managed = loadManaged();
+  if (managed?.error) lines.push(`✗ policy  ${managed.file}: ${managed.error} (edits and commands are refused until it is fixed)`);
+  else if (managed) lines.push(`  policy  managed by ${managed.file}: ${managed.rules.length} rules${managed.modes ? `, modes ${managed.modes.join("/")}` : ""}${managed.models ? `, models ${managed.models.join(" ")}` : ""}${managed.mcpServers ? `, MCP ${managed.mcpServers.join(" ") || "none"}` : ""}`);
   const problems = findProblems(home);
   for (const p of problems) lines.push(`✗ ${p.problem}`);
   lines.push(...placement(home));
@@ -517,6 +521,12 @@ async function main(): Promise<number> {
   }
   // Not in the demo, whose script expects the mode it was written for. Bypass modes are never a default (see settings.ts).
   if (args.mode === "default" && !args.demo) args.mode = cfg.mode;
+  // An administrator's managed policy can rule a mode out (`--yolo`, say); say so rather than pretend.
+  const ceiling = allowedMode(args.mode, loadManaged());
+  if (ceiling !== args.mode) {
+    console.error(`mnemo: the managed policy (${managedPath()}) does not allow ${args.mode} mode; starting in ${ceiling}.`);
+    args.mode = ceiling;
+  }
 
   const memsrv = args.memory ? findMemsrv(home) : undefined;
   const memory = memsrv ? new MemoryService(memsrv, journal) : undefined;
