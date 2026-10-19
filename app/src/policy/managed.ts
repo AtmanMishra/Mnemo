@@ -1,13 +1,14 @@
 /**
  * Managed policy: what an administrator sets for every user of a machine, and nothing
  * below it can widen. Precedence is managed > user (`$MNEMO_HOME/permissions.json`)
- * > project (a folder's `.pi/`):
+ * > project (a folder's `.agents/`):
  *
  *   rules       tested before the user's: a managed `deny` or `ask` is never answered by
  *               a user `allow` or an "always" grant
  *   modes       the modes Mnemo may run in (leave out `yolo` and `--yolo` is refused)
  *   models      `provider/id` globs: a request to any other model is refused before it is sent
  *   mcpServers  server names (globs) Mnemo may start, from any mcp.json
+ *   hooks       hooks that run before the user's own (extensions/hooks.ts)
  *
  * The file lives where only an administrator can write it, and Mnemo reads nothing that
  * would move it (no variable, no flag): a policy the user could point elsewhere is not one.
@@ -24,6 +25,8 @@ export interface Managed {
   modes?: Mode[];
   models?: string[];
   mcpServers?: string[];
+  /** Hooks every user runs, before their own (extensions/hooks.ts checks the shape). */
+  hooks?: unknown;
   /** Set when the file is there and could not be understood. */
   error?: string;
 }
@@ -66,7 +69,7 @@ export function loadManaged(file: string = managedPath()): Managed | undefined {
     if (o[key] !== undefined && !strings(o[key])) return broken(file, `"${key}" must be a list of strings`);
   const modes = o.modes as string[] | undefined;
   if (modes && (modes.length === 0 || !modes.every((m) => (MODES as string[]).includes(m)))) return broken(file, `"modes" must name some of ${MODES.join(", ")}`);
-  return { file, rules: rules as Rule[], modes: modes as Mode[] | undefined, models: o.models as string[] | undefined, mcpServers: o.mcpServers as string[] | undefined };
+  return { file, rules: rules as Rule[], modes: modes as Mode[] | undefined, models: o.models as string[] | undefined, mcpServers: o.mcpServers as string[] | undefined, hooks: o.hooks };
 }
 
 /**

