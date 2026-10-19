@@ -72,6 +72,13 @@ export function findProblems(home: string, now = Date.now()): Finding[] {
   return out;
 }
 
+/** Key variables that are close to a name Mnemo reads and silently ignored. */
+const MISSPELLED = [["OPEN_CODE_API_KEY", "OPENCODE_API_KEY"]] as const;
+
+export function envHints(env: Record<string, string | undefined>): string[] {
+  return MISSPELLED.filter(([wrong, right]) => env[wrong] && !env[right]).map(([wrong, right]) => `${wrong} is set but ignored: the variable is named ${right}`);
+}
+
 /** How long `mnemo doctor` waits for memsrv to count what it holds. */
 export const MEMORY_ANSWER_MS = 5_000;
 

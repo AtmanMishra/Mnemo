@@ -23,6 +23,7 @@ import { nativeSystem, realTarget, within, type PathSystem } from "../policy/pat
 import type { ApprovalRequest } from "../runtime/dialogs.ts";
 import type { Host } from "./host.ts";
 import { hostsIn, isMetadata, normalHost } from "../policy/egress.ts";
+import { allowedMode, loadManaged } from "../policy/managed.ts";
 
 const READ = new Set(["read", "grep", "find", "ls", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent", "tool_search"]);
 /** Read-class tools that still write to memory: plan mode is "change nothing", memory included. */
@@ -83,6 +84,14 @@ export function loadRules(home: string): Rule[] {
   const valid = (r: Rule) =>
     r && typeof r.tool === "string" && ["allow", "ask", "deny"].includes(r.action) && (r.pattern === undefined || typeof r.pattern === "string");
   return list.every(valid) ? (list as Rule[]) : BROKEN;
+}
+
+/**
+ * The rules a call is judged by: the administrator's first, so a managed `ask` or `deny` comes
+ * before any `allow` of the user's, then the user's own.
+ */
+export function rulesOf(host: Pick<Host, "home" | "managedFile">): Rule[] {
+  return [...(loadManaged(host.managedFile)?.rules ?? []), ...loadRules(host.home)];
 }
 
 /** `*` matches anything; everything else is literal. Linear in the text, with no backtracking. */
@@ -536,7 +545,11 @@ export function policyExtension(host: Host) {
       try {
         if (broken !== undefined && !READ.has(event.toolName))
           return { block: true, reason: `Mnemo's permission gate could not start (${broken}), so it refuses every change until that is fixed.` };
-        verdict = judge(host, loadRules(host.home), grants?.for(ctx.cwd) ?? NO_GRANTS, ctx.cwd, event.toolName, input);
+        // The mode the user picked, within what the managed policy allows (`yolo` may not be one).
+        const managed = loadManaged(host.managedFile);
+        const rules = [...(managed?.rules ?? []), ...loadRules(host.home)];
+        const at = { mode: allowedMode(host.mode, managed), home: host.home, agentDir: host.agentDir };
+        verdict = judge(at, rules, grants?.for(ctx.cwd) ?? NO_GRANTS, ctx.cwd, event.toolName, input);
       } catch (error) {
         return { block: true, reason: `Mnemo's permission gate failed on this call (${error instanceof Error ? error.message : String(error)}), so it is refused.` };
       }
