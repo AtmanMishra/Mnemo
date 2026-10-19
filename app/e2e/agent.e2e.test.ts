@@ -500,6 +500,19 @@ describe("memory commands", () => {
   }, T);
 });
 
+describe("--model", () => {
+  test("starts the run on the named model, and an unknown one is a usage error", async () => {
+    const w = fresh();
+    play(() => ({ text: "ok" }));
+    const r = await mnemo(w, ["-p", "hi", "--no-reflect", "--model", "mock/mock-1"]);
+    expect(r.code).toBe(0);
+    expect(llm.agentRequests().at(-1)?.model).toBe("mock-1");
+    const bad = await mnemo(w, ["-p", "hi", "--model", "no-such-model"]);
+    expect(bad.code).toBe(2);
+    expect(bad.stderr).toContain("not found");
+  }, T);
+});
+
 describe("a failed model call", () => {
   test("-p exits 1 and says why when the provider refuses the request", async () => {
     const w = fresh();
