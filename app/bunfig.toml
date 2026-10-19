@@ -1,0 +1,3 @@
+[test]
+# pi reads its project folder name when it loads; tests import it directly, not through bun-setup.ts.
+preload = ["./src/runtime/project-dir.ts"]

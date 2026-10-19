@@ -29,7 +29,7 @@ export function Roadmap() {
           <ul className="cards">
             {l.items.map((it) => (
               <li key={it.title} className="card">
-                <h3>{it.title}{it.in ? <a className="badge" href={`/changelog#v${it.in}`}>v{it.in}</a> : null}</h3>
+                <h3>{it.title}{it.in ? <a className="badge" href={`/changelog#v${it.in}`}>v{it.in}</a> : it.badge ? <span className="badge">{it.badge}</span> : null}</h3>
                 <p>{it.why}</p>
                 {it.link ? <p className="fine-sm"><a href={it.link.href}>{it.link.label}</a></p> : null}
               </li>
