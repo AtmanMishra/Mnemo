@@ -510,6 +510,18 @@ describe("a failed model call", () => {
     expect(r.stdout.trim()).toBe("");
   }, T);
 
+  test("-p does not retry a refused payment, whatever else the error says", async () => {
+    const w = fresh();
+    // "server error" is text pi retries on; the 402 in front says waiting will not help.
+    play(() => ({ status: 402, error: "402 Insufficient account funds (server error)" }));
+    const started = Date.now();
+    const r = await mnemo(w, ["-p", "hi", "--no-reflect"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("Insufficient account funds");
+    expect(llm.agentRequests()).toHaveLength(1);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, T);
+
   test("--best-of counts a candidate whose model call failed as failed", async () => {
     const w = fresh();
     play(() => ({ status: 401, error: "invalid api key (mock)" }));
