@@ -19,7 +19,7 @@ permission gate (`/mode`).
 |---|---|
 | `default` | asks before every edit and every command that is not clearly read-only |
 | `accept-edits` | edits project files freely, still asks before commands |
-| `plan` | read-only: nothing is changed, whatever an `allow` rule says |
+| `plan` | read-only: nothing is changed, whatever an `allow` rule says. The model is told it is in plan mode and may ask you clarifying questions (`ask_user`) before it plans |
 | `yolo` | asks for nothing. Only deny rules in `permissions.json` still hold |
 
 Switch with `shift+tab`, `/mode`, `/accept-edits` or `/yolo` (each toggles), or start

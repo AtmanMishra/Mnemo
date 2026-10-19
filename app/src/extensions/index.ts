@@ -12,6 +12,7 @@ import { kernelExtension } from "./kernel.ts";
 import { mcpExtensions } from "./mcp.ts";
 import { memoryExtension } from "./memory.ts";
 import { peersExtension } from "./peers.ts";
+import { planExtension } from "./plan.ts";
 import { policyExtension } from "./policy.ts";
 import { shellExtension } from "./shell.ts";
 import { skillsExtension } from "./skills.ts";
@@ -20,6 +21,8 @@ import { traceExtension } from "./trace.ts";
 export function mnemoExtensions(host: Host): InlineExtension[] {
   return [
     { name: "mnemo-policy", factory: policyExtension(host) },
+    // Before memory, which builds on the rendered system prompt that holds plan mode's section.
+    { name: "mnemo-plan", factory: planExtension(host) },
     { name: "mnemo-checkpoints", factory: checkpointsExtension(host) },
     { name: "mnemo-shell", factory: shellExtension(host) },
     { name: "mnemo-memory", factory: memoryExtension(host) },
