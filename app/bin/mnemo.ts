@@ -15,6 +15,7 @@ import { render } from "ink";
 import { hasTrustRequiringProjectResources, ProjectTrustStore, SessionManager } from "@earendil-works/pi-coding-agent";
 import * as readline from "node:readline/promises";
 import pkg from "../package.json" with { type: "json" };
+import { PROJECT_DIR, strandedPiResources } from "../src/runtime/project-dir.ts";
 import { agentDir, findMemsrv, journalPath, memsrvName, mnemoHome, pointPiAt, skillsDir } from "../src/runtime/paths.ts";
 import { createModelRuntime, startRuntime } from "../src/runtime/runtime.ts";
 import { allowedMode, loadManaged, managedPath } from "../src/policy/managed.ts";
@@ -27,6 +28,7 @@ import { Root } from "../src/ui/Root.tsx";
 import { RpcServer } from "../src/runtime/rpc.ts";
 import { workspaceSource } from "../src/runtime/workspace-source.ts";
 import { runMemoryCommand } from "../src/memory-cli.ts";
+import { scheduleCommand } from "../src/schedule/cli.ts";
 import { Fleet } from "../src/runtime/fleet.ts";
 import { Roster } from "../src/runtime/roster.ts";
 import { exitLine } from "../src/ui/ExitCard.tsx";
@@ -59,6 +61,7 @@ usage
                            credentials and settings · --yes skips the question
   mnemo settings …         every setting: list, get <name>, set <name> <value>, reset [name] (or /settings in a session)
   mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
+  mnemo schedule …         run a prompt on a timer, read-only unless you allow actions (mnemo schedule --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
   mnemo --rpc              the session over JSON lines on stdin/stdout, for an editor extension (docs/RPC.md);
                            approvals are the client's to answer, as in the terminal
@@ -69,7 +72,7 @@ options
   --plan                   start in plan mode (read-only)
   --accept-edits           change files in the project without asking (commands still ask)
   --yolo                   ask for nothing (deny rules in permissions.json still hold)
-  --trust-project          load this folder's .pi/ extensions, settings and skills without asking (they run code)
+  --trust-project          load this folder's .agents/ extensions, settings and skills without asking (they run code)
   --no-memory              run without the memory layer
   --no-reflect             do not extract facts after each run
   --no-verify              do not send a run that changed code back to run a check
@@ -157,8 +160,8 @@ function parse(argv: string[]): Args {
 }
 
 /**
- * A folder can carry code of its own (`.pi/extensions/*.ts` runs in this process, before
- * any approval) and instructions (`.pi/SYSTEM.md`, skills). Cloning a repo must not be
+ * A folder can carry code of its own (`.agents/extensions/*.ts` runs in this process, before
+ * any approval) and instructions (`.agents/SYSTEM.md`, skills). Cloning a repo must not be
  * enough to run it: ask once, remember "always", and without a terminal say what was left out.
  * Returns an override for this run, or undefined to follow what is saved.
  */
@@ -167,7 +170,7 @@ async function trustDecision(cwd: string, dir: string, args: Args): Promise<bool
   if (!hasTrustRequiringProjectResources(cwd)) return undefined;
   const store = new ProjectTrustStore(dir);
   if (store.get(cwd) !== null) return undefined;
-  const found = [".pi/extensions", ".pi/settings.json", ".pi/mcp.json", ".pi/skills", ".pi/prompts", ".pi/themes", ".agents/skills"].filter((f) => fs.existsSync(path.join(cwd, f)));
+  const found = [".agents/extensions", ".agents/settings.json", ".agents/mcp.json", ".agents/skills", ".agents/prompts", ".agents/themes"].filter((f) => fs.existsSync(path.join(cwd, f)));
   const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true && args.print === undefined && !args.dump;
   if (!interactive) {
     console.error(`mnemo: not loading this folder's ${found.join(", ") || "project resources"} (not trusted; --trust-project allows it)`);
@@ -472,6 +475,7 @@ async function main(): Promise<number> {
   if (process.argv[2] === "update") return updateCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "install") return installCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "uninstall") return uninstallCommand(process.argv.slice(3), mnemoHome());
+  if (process.argv[2] === "schedule") return scheduleCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "memory") {
     const home = mnemoHome();
     pointPiAt(agentDir(home));
@@ -532,6 +536,8 @@ async function main(): Promise<number> {
   const memsrv = args.memory ? findMemsrv(home) : undefined;
   const memory = memsrv ? new MemoryService(memsrv, journal) : undefined;
   const runtimeModels = modelRuntime;
+  const stranded = args.demo ? [] : strandedPiResources(cwd);
+  if (stranded.length > 0) console.error(`mnemo: this folder's .pi/${stranded.join(", .pi/")} ${stranded.length > 1 ? "are" : "is"} not loaded; Mnemo reads ${PROJECT_DIR}/ now (rename .pi to ${PROJECT_DIR})`);
   const firstTrust = args.demo ? undefined : await trustDecision(cwd, dir, args);
   /** Every agent of the process, as a tree: sub-agents, sibling links and who may message whom. */
   const roster = new Roster();

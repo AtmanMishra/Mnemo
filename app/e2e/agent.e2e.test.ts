@@ -627,7 +627,7 @@ describe.if(hasPty)("the terminal", () => {
     const w = fresh({
       files: {
         "README.md": "# demo\n",
-        ".pi/extensions/flaky.ts": `export default function () { setTimeout(() => { Promise.reject(new Error("boom from an extension")); }, 2500); }\n`,
+        ".agents/extensions/flaky.ts": `export default function () { setTimeout(() => { Promise.reject(new Error("boom from an extension")); }, 2500); }\n`,
       },
     });
     play(() => ({ text: "still here" }));

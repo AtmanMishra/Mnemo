@@ -128,7 +128,8 @@ built-in tools replace Mnemo's own file and shell tools (D2).
   ▢ evidence-gating and `retire_skill` are not.
 - ▣ 2.8 Subcommands: `doctor`, `-p`, `-c`, `--plan`, `--yolo`, `--no-memory`,
   `--demo`, `--dump`. ▢ `consolidate` and `traces` subcommands are not done.
-- ▢ 2.9 *(v0.2)* hooks, schedules, harness engine, `init`, `pr`. ▣ MCP: pi's MCP client
+- ▢ 2.9 *(v0.2)* schedules, harness engine, `init`, `pr`. ▣ hooks (`app/src/extensions/hooks.ts`: PreToolUse,
+  PostToolUse, SessionStart, SessionEnd from `$MNEMO_HOME/hooks.json` and the managed policy). ▣ MCP: pi's MCP client
   (`app/src/extensions/mcp.ts`), tools found by `tool_search`, every call through the gate.
 
 *Verify (stage):* each extension tested against a faux-provider session; the
@@ -369,7 +370,7 @@ copy their security posture (`AGENTS.md`). Decision D6 already deferred these he
 |---|---|---|
 | Hooks around tool calls | M | legacy `hooks-inline.ts`; runs user commands, so it goes through the gate and gets bypass tests from day one |
 | ✔ MCP servers as tools (pi's MCP extension) | M–L | `app/src/extensions/mcp.ts`; the 0.0.0 version report is still open |
-| Schedules | M | legacy `schedules-inline.ts`; *inferred:* unattended runs raise the approval question, so decide the permission story first |
+| ✔ Schedules | M | `app/src/schedule/`; unattended runs are `--plan` unless a job is added with `--actions` |
 | `mnemo init` and `mnemo pr` | S–M each | legacy `init.ts`, `pr.ts` |
 | Harness engine | L | legacy `harness-engine/`; *inferred:* the least-asked-for of the set, and the site does not mention it. Cut it, or ship it last. |
 | Sandbox decision (4.3 to 4.5): a real sandbox for kernel and commands, or a documented reason not | L | decision first, code second; update the README either way |

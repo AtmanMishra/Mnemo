@@ -319,9 +319,14 @@ runtime (`createAgentSessionRuntime`, `src/runtime/runtime.ts`) **in this
 process** — no RPC, no child process. pi owns the loop, the built-in tools,
 sessions, compaction, skills, prompt templates and provider auth; the models'
 credentials live in `~/.mnemo/agent/` (`PI_CODING_AGENT_DIR` points pi there, apart
-from a standalone pi install). A folder's own `.pi/` extensions, settings, prompts
+from a standalone pi install). A folder's own `.agents/` extensions, settings, prompts
 and skills load only if the folder is trusted (`ProjectTrustStore`; `--trust-project`
-or an answer at launch), because extensions run as code before any approval.
+or an answer at launch), because extensions run as code before any approval. The name
+`.agents` is not pi's default (`.pi`): pi reads it from the `piConfig.configDir` of the
+package.json at `PI_PACKAGE_DIR`, so `runtime/project-dir.ts` writes one under the Mnemo
+home and points the variable at it before pi loads (`bun-setup.ts` imports it first;
+`app/bunfig.toml` preloads it for tests). A folder that still has `.pi/` resources gets a
+one-line notice at launch.
 
 Mnemo's behaviour is ten `InlineExtension`s (inline = shipped with the binary, no
 per-user install, identical in every mode), built in this order so the gate sees
@@ -333,8 +338,10 @@ gets a copy one level deeper.
 | extension | what it does |
 |---|---|
 | `mnemo-policy` | `tool_call` — the only hook that decides: rules, mode, grants, then the approval dialog (§3.6) |
+| `mnemo-hooks` | user and managed hooks (`extensions/hooks.ts`): `tool_call` after the gate (PreToolUse, may only refuse), `tool_result` (PostToolUse, may add a note), `session_start`, `session_shutdown` |
 | `mnemo-plan` | `before_agent_start` (a plan-mode section in the system prompt while the mode is `plan`); `ask_user` (a question in a pick or text dialog; the root session only) |
 | `mnemo-checkpoints` | `tool_call` on `edit`/`write`: keeps the file's bytes under the current turn (rewind) |
+| `mnemo-lsp` | `tool_result` on `edit`/`write` (root session, trusted folder, servers named in `$MNEMO_HOME/lsp.json`): shows the server the new text (`lsp/client.ts`, JSON-RPC over stdio) and appends its errors and warnings to the result; `session_shutdown` stops the servers |
 | `mnemo-shell` | re-registers pi's `bash` with the provider keys taken out of the command's environment |
 | `mnemo-memory` | `before_agent_start` (directive + profiles into the system prompt, recall as a hidden message), `tool_call` (the known-fix guard), `tool_execution_*`, `turn_end`, `agent_end` (verify nudge, then reflection in the background), `session_shutdown`; tools `memory_search`, `session_search`, `memory_remember`, `memory_steer` |
 | `mnemo-kernel` | `ipy_run` (absent when no working Python is found) |
@@ -345,6 +352,8 @@ gets a copy one level deeper.
 | `mnemo-trace` | one JSON line per tool call and turn |
 
 `/remote` is `app/src/runtime/remote.ts`, owned by the `Controller`: a loopback-only, token-guarded, read-only view (SECURITY.md).
+
+Scheduled runs are not an extension: `app/src/schedule/` (`cron`, `store`, `run`, `cli`) starts `mnemo -p` children from `mnemo schedule`; see SECURITY.md.
 
 `Controller` (`runtime/controller.ts`) is the only caller of the session: it owns
 the transcript, the dialog queue and the chrome state, and nothing in `ui/`
@@ -500,9 +509,8 @@ links and its inboxes. Details and the review: `docs/AGENT-HIERARCHY.md`, `SECUR
 
 ### 3.5 Skills, hooks, schedules
 
-**Skills**: `SKILL.md` with frontmatter, discovered by pi from `.agents/skills`
-(the folder and its ancestors up to the git root), the project's `.pi/skills` and
-the agent directory's `skills/`, creatable by the agent (§3.2) and
+**Skills**: `SKILL.md` with frontmatter, discovered by pi from the project's `.agents/skills`
+(the folder and its ancestors up to the git root) and the agent directory's `skills/`, creatable by the agent (§3.2) and
 curated by `mnemo memory curate` (a skill unused for 30 days is stale, for 90
 archived to `agent/skills-archive/`; only personal skills move, project skills
 belong to the team and are reported). Reading a skill's `SKILL.md` records a `last
@@ -681,8 +689,8 @@ everywhere** (`.gitattributes`).
 | a theme | an entry in `THEMES` and `ThemeName` in `ui/theme.ts` (the contrast test covers it), and the `/theme` description in `controller.ts` |
 | a dialog | `controller.dialogs.select`/`text`/… (`runtime/dialogs.ts`), drawn by `ui/components/Dialogs.tsx` |
 | a sidebar pane | `PANES` in `ui/workspace/model.ts`, the rows from `runtime/workspace-source.ts`, its icon in `Sidebar.tsx` |
-| a prompt template | a `.md` in `~/.mnemo/agent/prompts/` or `.pi/prompts/` — pi expands `/<filename>` before the prompt is sent |
-| a third-party pi extension | `~/.mnemo/agent/extensions/*.ts`, or `.pi/extensions/*` in a project once it is trusted — the path that needs no PR to Mnemo |
+| a prompt template | a `.md` in `~/.mnemo/agent/prompts/` or `.agents/prompts/` — pi expands `/<filename>` before the prompt is sent |
+| a third-party pi extension | `~/.mnemo/agent/extensions/*.ts`, or `.agents/extensions/*` in a project once it is trusted — the path that needs no PR to Mnemo |
 | memory for another agent | `mnemo memory setup <agent>` (hooks, MCP); a new transcript format goes in `packages/memory/src/ingest/` |
 | a background memory job | `research/memory-runtime-design.md` (designed; the curator is on `feature/background-curator`) |
 
@@ -694,14 +702,14 @@ third-party path is pi's, and it is a directory, not a PR:
 | Where | Scope |
 |---|---|
 | `~/.mnemo/agent/extensions/*.ts`, `*/index.ts` | global — every project |
-| `.pi/extensions/*.ts`, `*/index.ts` | project-local, only once the folder is trusted (`--trust-project`, or "always" at the launch prompt) |
+| `.agents/extensions/*.ts`, `*/index.ts` | project-local, only once the folder is trusted (`--trust-project`, or "always" at the launch prompt) |
 
 An extension may register tools, commands, hook handlers and UI requests. Names
 Mnemo already claims, which a third party must not reuse: the tools `ipy_run`,
 `memory_search`, `session_search`, `memory_remember`, `memory_steer`,
 `spawn_subagent`, `create_skill`, `update_skill` and `bash` (Mnemo re-registers
 pi's, to scrub the environment), and the extension names `mnemo-policy`,
-`mnemo-checkpoints`, `mnemo-shell`, `mnemo-memory`, `mnemo-kernel`, `mnemo-agents`,
+`mnemo-checkpoints`, `mnemo-lsp`, `mnemo-shell`, `mnemo-memory`, `mnemo-kernel`, `mnemo-agents`,
 `mnemo-skills`, `mnemo-escalate`, `mnemo-trace`. What pi does with two extensions
 claiming one tool name is pi's behaviour, not tested here; the last time it was
 measured (on the previous stack) it refused to start the session.

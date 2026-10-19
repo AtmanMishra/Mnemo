@@ -100,7 +100,7 @@ in a place you can afford to lose: a container, a throwaway checkout.
   them, or `cat /proc/$PPID/environ`: in `default` mode that asks, and no "always"
   grant covers a command that mentions `/proc`, but **in `yolo` and `-p` it runs**
   unless a `deny` rule stops it.
-- **A folder's own `.pi/` extensions, settings, prompts and skills run code and
+- **A folder's own `.agents/` extensions, settings, prompts and skills run code and
   steer the model**, so Mnemo loads them only for a folder you have trusted: it asks
   once at start-up (`a` remembers it), headless runs skip them unless you pass
   `--trust-project`. Do not trust a repository you have not read.
@@ -128,7 +128,7 @@ An administrator can set a policy that the user's own settings and a project can
 widen, in a file only an administrator writes: `/etc/mnemo/managed.json` on Linux,
 `/Library/Application Support/Mnemo/managed.json` on macOS, `%ProgramData%\Mnemo\managed.json`
 on Windows. No variable or flag moves it. Precedence is managed, then the user's
-`permissions.json`, then a folder's `.pi/`.
+`permissions.json`, then a folder's `.agents/`.
 
 ```json
 {
@@ -153,6 +153,28 @@ on Windows. No variable or flag moves it. Precedence is managed, then the user's
 It is only as strong as the file's permissions and the user's: someone who can edit it,
 or run a different program, is not bound by it.
 
+## Hooks
+
+A hook is a command you choose that Mnemo runs at a fixed point: `PreToolUse` (after the
+gate let a call through, before it runs), `PostToolUse`, `SessionStart` and `SessionEnd`.
+They come from `$MNEMO_HOME/hooks.json` and the managed policy's `hooks` (which run first,
+and which you cannot remove); a folder's own hooks are never read.
+
+```json
+{ "hooks": { "PreToolUse": [{ "matcher": "bash", "command": "~/bin/check-command", "timeout": 30 }] } }
+```
+
+- **A hook can refuse, never allow.** The gate has judged the call before any hook sees
+  it, and a call it refused reaches no hook. A `PreToolUse` hook refuses with exit code 2
+  (its stderr is the reason the model reads) or `{"decision": "block", "reason": "…"}`
+  on stdout. One that fails any other way (another exit code, a timeout, a program that
+  is not there) refuses too: a check that did not run passed nothing.
+- A `PostToolUse` hook's exit 2 adds its stderr to what the model reads with the result.
+- A hook gets the event as JSON on stdin (the tool, its arguments, the session) and the
+  same environment as the bash tool, provider keys removed. A hook runs as you, with your
+  permissions: it is your code, not a sandbox. `command` is a shell line, or a list
+  (program and arguments, run without a shell, the program found on PATH's absolute entries).
+
 ## What leaves your machine
 
 - **Your prompts, the files and command output the model reads, and your
@@ -171,7 +193,7 @@ or run a different program, is not bound by it.
   `mcp.json` is contacted only when its entry says `"allowNetwork": true`; the
   model's tool calls, with their arguments, then go to that address, and
   signing in to it with OAuth talks to its sign-in server. Without that line
-  the server is refused, and a project's `.pi/mcp.json` cannot add one at all.
+  the server is refused, and a project's `.agents/mcp.json` cannot add one at all.
   This is the one connection the agent's own work makes to somewhere other than
   your provider, so it is off until you turn it on per server.
 - Memory is stored locally under `$MNEMO_HOME` (default `~/.mnemo`) in a
@@ -251,7 +273,7 @@ and repositories you trust with all of it.
 
 An MCP server is a program (or a web service) you choose, and its tools do whatever it
 says they do. Mnemo connects only the servers in `$MNEMO_HOME/agent/mcp.json`, plus a
-folder's `.pi/mcp.json` once you have trusted that folder (an untrusted folder's servers
+folder's `.agents/mcp.json` once you have trusted that folder (an untrusted folder's servers
 are never started). A server reached over HTTP is off unless its entry in your own
 `mcp.json` sets `"allowNetwork": true`; a project file cannot add one (so it cannot use
 `"auth"` to send one of your provider credentials anywhere, either).
@@ -269,7 +291,7 @@ are never started). A server reached over HTTP is off unless its entry in your o
   proxies; no model key, `GITHUB_TOKEN`, `AWS_*` or other token) plus exactly what its
   entry's `env` sets. To hand one a token, name it there: `"env": {"GITHUB_TOKEN":
   "$GITHUB_TOKEN"}`. The `passEnv` setting is for commands, not servers. A project's
-  `.pi/mcp.json` may set literal values but not name your variables (`$NAME`), as it may
+  `.agents/mcp.json` may set literal values but not name your variables (`$NAME`), as it may
   not set `auth`. A server still runs as you and can read your files: this keeps
   ambient tokens from reaching it, it does not confine it.
 - **Network.** An HTTP server is reached at the address you configured, and only once
@@ -278,6 +300,26 @@ are never started). A server reached over HTTP is off unless its entry in your o
   sign-in ends), are the only connections MCP makes. stdio servers are local programs;
   what they reach is up to them. Nothing is contacted for a server you have not
   configured. Sub-agents get no MCP tools.
+
+## Language servers
+
+Off until you name one in `$MNEMO_HOME/lsp.json` (`{"servers": {"name": {"command": [program,
+args…], "files": {"*.ts": "typescript"}}}}`). After an `edit` or `write` of a file the glob
+claims, Mnemo shows the server the new text and adds its errors and warnings to the tool result,
+so the model sees a type error in the same turn. Nothing is sent anywhere but to that local
+process.
+
+- **A server runs the project's own code** (a TypeScript plugin in `tsconfig`, a Rust build
+  script), so Mnemo starts none in a folder you have not trusted, and a folder's own `lsp.json`
+  is never read. Only servers you named start, and only for the session you talk to: a
+  sub-agent's edits are not checked.
+- The command is a program and its arguments, run without a shell; the program is found on
+  PATH's absolute entries only, never in the folder. It gets the same scrubbed environment as
+  the `bash` tool, so a provider key is not in it. Its log is discarded.
+- A server that does not start, or dies, is switched off for the session with a notice; the
+  edit itself is never held up by it (a result is waited for up to `timeout` seconds, 10 by
+  default). On Windows name the `.exe`, or run an npm-installed server through `node`: a `.cmd`
+  shim is not started without a shell.
 
 ## Agents that talk to agents
 
@@ -349,7 +391,7 @@ Since 0.1.7 `/settings` (and `mnemo settings`) change how Mnemo behaves. The ref
   reads or writes the settings, and `config.json` sits in your Mnemo home, outside the project,
   so an edit to it from the agent (a file write or a shell redirect) asks you in `default` and
   `accept-edits` and is refused in `plan`. In `yolo` nothing asks, as for every other file. A
-  project you open cannot set them either: they are read from your home, never from `.pi/` or
+  project you open cannot set them either: they are read from your home, never from `.agents/` or
   the folder.
 - **Key bindings cannot hide a safety key.** `ctrl+c`, `ctrl+d` and `esc` are not rebindable, nor
   are the prompt's line-editing keys, and two actions cannot hold one chord.
@@ -399,6 +441,19 @@ approval, and approvals and settings are not shown. What it shows is the transcr
 terminal shows, with credentials redacted, long output cut, and at most four viewers at once.
 To read it from another device, tunnel the port yourself (`ssh -L`); Mnemo never binds a
 public address. This is a server on your machine, not a call to anyone else's.
+
+## Scheduled runs
+
+`mnemo schedule` runs a prompt on a timer. Jobs live only in `$MNEMO_HOME/schedules.json`, so
+a folder cannot add one. A run is `mnemo -p` in a child process: the permission gate, the
+managed policy and your settings apply as they do to any run. `-p` allows what would ask, so
+a job is **read-only (`--plan`) unless it was added with `--actions`**, and `--actions` never
+means yolo: deny rules and the gate still hold. `schedule add --actions` warns when `runSpend`
+is 0. Each run has a timeout (30 minutes by default); its log is redacted, mode 0600, and the
+last 20 are kept. `lastRun` is stored before a run starts, a window missed while Mnemo was
+off fires once, and a lock file keeps two schedulers from running the same job. Nothing starts
+by itself: `mnemo schedule run` stays in the foreground, and `run --once` is for your own
+cron, systemd, launchd or Task Scheduler entry.
 
 ## Uninstalling
 

@@ -38,14 +38,14 @@ export interface RuntimeOptions {
   continueRecent?: boolean;
   extensions?: InlineExtension[];
   /**
-   * Whether the folder's own `.pi/` extensions, settings, prompts and skills may load.
+   * Whether the folder's own `.agents/` extensions, settings, prompts and skills may load.
    * Left out, a folder that carries any is trusted only if the user said so earlier.
    */
   trustProject?: boolean;
 }
 
 /**
- * Code that comes with a folder (`.pi/extensions/*.ts` runs inside this process, before
+ * Code that comes with a folder (`.agents/extensions/*.ts` runs inside this process, before
  * any approval) loads only when the user has trusted the folder. A folder with nothing of
  * the kind needs no decision. The answer is kept in pi's own `trust.json`, so it is shared
  * with pi and survives restarts.

@@ -140,7 +140,7 @@ cd app && bun bin/mnemo.ts --demo
   folder has no `AGENTS.md`) in the project and every folder above it, plus
   `$MNEMO_HOME/agent/AGENTS.md` for all projects, go into the system prompt.
 - **MCP servers as tools.** Put servers in `$MNEMO_HOME/agent/mcp.json` (or a
-  trusted project's `.pi/mcp.json`) in the `mcpServers` shape other clients use; stdio
+  trusted project's `.agents/mcp.json`) in the `mcpServers` shape other clients use; stdio
   and HTTP servers both work (an HTTP one only with `"allowNetwork": true` in your own
   file), and `/mcp` lists them, signs in and reconnects. Their
   tools stay out of the prompt until `tool_search` finds them (`"exposure": "direct"`
