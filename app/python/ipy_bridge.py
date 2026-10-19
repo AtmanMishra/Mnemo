@@ -163,6 +163,17 @@ def _command(value) -> str:
     return shlex.join(words)
 
 
+def _unshell(command: str) -> str:
+    """On Windows, `shell=True` hands Popen `cmd.exe /c "<command>"`: judge the command."""
+    if sys.platform == "win32":
+        import re
+
+        m = re.match(r'^\s*(?:"[^"]*"|\S+)\s+/c\s+"(.*)"\s*$', command, re.S | re.I)
+        if m:
+            return m.group(1)
+    return command
+
+
 def _path(value):
     if isinstance(value, int) or value is None:
         return None
@@ -197,7 +208,7 @@ def install_guard(proxy):
         if event in _EXEC:
             if not guard.get("exec"):
                 return
-            checks = [("bash", "command", _command(args[_EXEC[event]]))]
+            checks = [("bash", "command", _unshell(_command(args[_EXEC[event]])))]
         elif event == "open":
             path, mode, flags = (list(args) + [None, None, None])[:3]
             path = _path(path)

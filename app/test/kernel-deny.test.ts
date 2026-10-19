@@ -46,9 +46,9 @@ withPython("a command a cell starts meets the bash deny rules, however it is sta
       ...(process.platform === "win32" ? [] : [`import subprocess; subprocess.run(["/bin/sh", "-c", "true && rm " + ${v}])`]),
     ]) {
       const out = await k.run(code);
-      expect(out).toContain("PermissionError");
-      expect(out).toContain("rm *");
-      expect(fs.existsSync(victim)).toBe(true);
+      expect(out, code).toContain("PermissionError");
+      expect(out, code).toContain("rm *");
+      expect(fs.existsSync(victim), code).toBe(true);
     }
     // What no rule names still runs.
     expect(await k.run(`import subprocess, sys; subprocess.run([sys.executable, "-c", "print('fine')"], capture_output=True, text=True).stdout.strip()`)).toContain("fine");
