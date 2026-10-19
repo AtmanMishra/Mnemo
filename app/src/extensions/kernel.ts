@@ -17,8 +17,9 @@ import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { KernelClient, spawnKernel, type KernelChild } from "../kernel/kernel.ts";
 import bridgeSource from "../../python/ipy_bridge.py" with { type: "text" };
 import { childEnv, configuredKeys, envNames } from "../runtime/env.ts";
-import { callerSignals } from "./policy.ts";
+import { callerSignals, denial, egress, kernelGuard, rulesOf } from "./policy.ts";
 import type { Host } from "./host.ts";
+import { hostsIn } from "../policy/egress.ts";
 
 /** Write the bundled bridge where Python can run it; rewrite only when it changed. */
 export function installBridge(home: string): string {
@@ -81,8 +82,16 @@ export function kernelExtension(host: Host) {
             const rules = rulesOf(host);
             const guard = {
               ...kernelGuard(rules),
-              check: (tool: "bash" | "read" | "write", input: Record<string, unknown>) =>
-                tool === "write" ? (denial(rules, ctx.cwd, "write", input) ?? denial(rules, ctx.cwd, "edit", input)) : denial(rules, ctx.cwd, tool, input),
+              check: (tool: "bash" | "read" | "write" | "net", input: Record<string, unknown>) => {
+                if (tool === "net") {
+                  const net = typeof input.host === "string" ? egress(rules, [input.host]) : undefined;
+                  return net && "refuse" in net ? net.refuse : undefined;
+                }
+                // A command a cell starts names hosts too.
+                const net = tool === "bash" && typeof input.command === "string" ? egress(rules, hostsIn(input.command)) : undefined;
+                if (net && "refuse" in net) return net.refuse;
+                return tool === "write" ? (denial(rules, ctx.cwd, "write", input) ?? denial(rules, ctx.cwd, "edit", input)) : denial(rules, ctx.cwd, tool, input);
+              },
             };
             const r = await kernel(ctx.cwd).run(params.code, {
               timeoutMs: seconds * 1000,
