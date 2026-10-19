@@ -93,3 +93,73 @@ test("/mcp says which servers are connected, with how many tools and how they ar
   await e.controller.submit("/mcp");
   expect(texts(e.controller).join("\n")).toContain("shouter: connected, 1 tools (deferred)");
 }, 30_000);
+
+test("a stdio server gets the allowlisted environment and its own env, not your tokens", async () => {
+  process.env.GITHUB_TOKEN = "ghp_not-for-the-server";
+  process.env.MNEMO_TEST_PASSED = "named-on-purpose";
+  try {
+    const home = homeWith({ envy: { command: process.execPath, args: [SERVER, "env"], exposure: "direct", env: { HANDED: "$MNEMO_TEST_PASSED", LITERAL: "x$$y" } } });
+    const e = await mnemoEnv({ home, mode: "yolo" });
+    envs.push(e);
+    const ask = (name: string) => call("mcp__envy__getenv", { text: name });
+    e.faux.setResponses([ask("GITHUB_TOKEN"), ask("HANDED"), ask("LITERAL"), ask("PATH"), ask("MNEMO_TEST_PASSED"), say("done")]);
+    await e.controller.submit("read the server's env");
+    await e.idle();
+    const results = e.runtime.session.messages.filter((m) => m.role === "toolResult").map((m) => JSON.stringify(m.content));
+    expect(results).toHaveLength(5);
+    expect(results[0]).toContain("<unset>");
+    expect(results[1]).toContain("named-on-purpose");
+    expect(results[2]).toContain("x$y");
+    expect(results[3]).not.toContain("<unset>");
+    expect(results[4]).toContain("<unset>");
+  } finally {
+    delete process.env.GITHUB_TOKEN;
+    delete process.env.MNEMO_TEST_PASSED;
+  }
+}, 30_000);
+
+test("a project's server may not name one of your variables in env or headers", () => {
+  const agent = path.join(homeWith({}), "agent");
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-proj-"));
+  fs.mkdirSync(path.join(proj, ".pi"));
+  fs.writeFileSync(
+    path.join(proj, ".pi", "mcp.json"),
+    JSON.stringify({ mcpServers: { a: { command: "y", env: { T: "${GITHUB_TOKEN}" } }, b: { url: "https://x.example/mcp", headers: { Authorization: "Bearer $GH_TOKEN" } }, c: { command: "z", env: { MODE: "fast", PRICE: "$$5" } } } }),
+  );
+  const loaded = loadMcpServers(agent, proj, true);
+  expect(loaded.servers.map((s) => s.name)).toEqual(["c"]);
+  expect(loaded.errors.filter((e) => e.includes("may only name your variables"))).toHaveLength(2);
+});
+
+test("an HTTP server connects, with its headers read from your environment", async () => {
+  process.env.MNEMO_TEST_HEADER = "from-your-env";
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      if (req.method !== "POST") return new Response(null, { status: 405 });
+      const msg = (await req.json()) as { id?: number; method: string; params?: { protocolVersion?: string } };
+      if (msg.id === undefined) return new Response(null, { status: 202 });
+      const result =
+        msg.method === "initialize"
+          ? { protocolVersion: msg.params?.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "web", version: "1.0.0" } }
+          : msg.method === "tools/list"
+            ? { tools: [{ name: "header", description: "Echo a request header", inputSchema: { type: "object", properties: {} } }] }
+            : { content: [{ type: "text", text: `header=${req.headers.get("x-test")}` }] };
+      return Response.json({ jsonrpc: "2.0", id: msg.id, result });
+    },
+  });
+  try {
+    const home = homeWith({ web: { url: `http://127.0.0.1:${server.port}/mcp`, exposure: "direct", headers: { "X-Test": "$MNEMO_TEST_HEADER" } } });
+    const e = await mnemoEnv({ home, mode: "yolo" });
+    envs.push(e);
+    e.faux.setResponses([call("mcp__web__header", {}), say("done")]);
+    await e.controller.submit("read the header");
+    await e.idle();
+    const result = e.runtime.session.messages.find((m) => m.role === "toolResult");
+    expect(JSON.stringify(result)).toContain("header=from-your-env");
+  } finally {
+    server.stop(true);
+    delete process.env.MNEMO_TEST_HEADER;
+  }
+}, 30_000);
