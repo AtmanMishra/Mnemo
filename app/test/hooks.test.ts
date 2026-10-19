@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
-import { blockOf, loadHooks, parseHooks, runHook, type Hooks } from "../src/extensions/hooks.ts";
+import { blockOf, loadHooks, parseHooks, runHook, type Hook, type Hooks } from "../src/extensions/hooks.ts";
 import { mnemoEnv } from "./helpers.ts";
 
 const tmp = (prefix: string) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
@@ -49,7 +49,7 @@ test("a PreToolUse hook refuses a call with exit 2, and its reason reaches the m
 test("a hook can refuse with JSON, and a hook that fails or hangs refuses too", async () => {
   const dir = tmp("mnemo-hooks-");
   const hook = (body: string, timeout?: number) => ({ command: script(dir, `h${Math.random().toString(36).slice(2)}`, body), timeout, source: "test" });
-  const ask = async (h: ReturnType<typeof hook>) => blockOf(h, await runHook(h, { tool: "bash" }, dir, dir), true);
+  const ask = async (h: Hook) => blockOf(h, await runHook(h, { tool: "bash" }, dir, dir), true);
   expect(await ask(hook(`console.log(JSON.stringify({ decision: "block", reason: "not on Fridays" }))`))).toBe("not on Fridays");
   expect(await ask(hook(`console.log("all good")`))).toBeUndefined();
   expect(await ask(hook(`process.exit(1)`))).toContain("failed (exit 1)");
