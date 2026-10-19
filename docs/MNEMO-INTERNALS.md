@@ -351,6 +351,8 @@ gets a copy one level deeper.
 | `mnemo-escalate` | counts failed checks; moves a run to the stronger model (`--escalate`, `MNEMO_ESCALATE_MODEL`) |
 | `mnemo-trace` | one JSON line per tool call and turn |
 
+Scheduled runs are not an extension: `app/src/schedule/` (`cron`, `store`, `run`, `cli`) starts `mnemo -p` children from `mnemo schedule`; see SECURITY.md.
+
 `Controller` (`runtime/controller.ts`) is the only caller of the session: it owns
 the transcript, the dialog queue and the chrome state, and nothing in `ui/`
 imports pi. That split is what lets a whole turn be tested with a faux model and no

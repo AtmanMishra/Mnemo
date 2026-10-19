@@ -427,6 +427,19 @@ published beside the archive); the attestation is the provenance check.
 it, with the same checksum check and the same limit: the checksum is not
 provenance, so verify the attestation yourself if that matters.
 
+## Scheduled runs
+
+`mnemo schedule` runs a prompt on a timer. Jobs live only in `$MNEMO_HOME/schedules.json`, so
+a folder cannot add one. A run is `mnemo -p` in a child process: the permission gate, the
+managed policy and your settings apply as they do to any run. `-p` allows what would ask, so
+a job is **read-only (`--plan`) unless it was added with `--actions`**, and `--actions` never
+means yolo: deny rules and the gate still hold. `schedule add --actions` warns when `runSpend`
+is 0. Each run has a timeout (30 minutes by default); its log is redacted, mode 0600, and the
+last 20 are kept. `lastRun` is stored before a run starts, a window missed while Mnemo was
+off fires once, and a lock file keeps two schedulers from running the same job. Nothing starts
+by itself: `mnemo schedule run` stays in the foreground, and `run --once` is for your own
+cron, systemd, launchd or Task Scheduler entry.
+
 ## Uninstalling
 
 `mnemo uninstall` removes the program (`mnemo` and `memsrv` in `$MNEMO_HOME/bin`,

@@ -28,6 +28,7 @@ import { Root } from "../src/ui/Root.tsx";
 import { RpcServer } from "../src/runtime/rpc.ts";
 import { workspaceSource } from "../src/runtime/workspace-source.ts";
 import { runMemoryCommand } from "../src/memory-cli.ts";
+import { scheduleCommand } from "../src/schedule/cli.ts";
 import { Fleet } from "../src/runtime/fleet.ts";
 import { Roster } from "../src/runtime/roster.ts";
 import { exitLine } from "../src/ui/ExitCard.tsx";
@@ -60,6 +61,7 @@ usage
                            credentials and settings · --yes skips the question
   mnemo settings …         every setting: list, get <name>, set <name> <value>, reset [name] (or /settings in a session)
   mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
+  mnemo schedule …         run a prompt on a timer, read-only unless you allow actions (mnemo schedule --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
   mnemo --rpc              the session over JSON lines on stdin/stdout, for an editor extension (docs/RPC.md);
                            approvals are the client's to answer, as in the terminal
@@ -473,6 +475,7 @@ async function main(): Promise<number> {
   if (process.argv[2] === "update") return updateCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "install") return installCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "uninstall") return uninstallCommand(process.argv.slice(3), mnemoHome());
+  if (process.argv[2] === "schedule") return scheduleCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "memory") {
     const home = mnemoHome();
     pointPiAt(agentDir(home));
