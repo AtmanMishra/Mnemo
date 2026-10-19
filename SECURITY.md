@@ -167,6 +167,13 @@ or run a different program, is not bound by it.
   (`mnemo update --auto on` or `MNEMO_AUTO_UPDATE=1`), which reads
   `github.com/AtmanMishra/Mnemo/releases/latest` once a day and sends nothing
   about you.
+- **An MCP server over HTTP, only one you name.** An HTTP server in your own
+  `mcp.json` is contacted only when its entry says `"allowNetwork": true`; the
+  model's tool calls, with their arguments, then go to that address, and
+  signing in to it with OAuth talks to its sign-in server. Without that line
+  the server is refused, and a project's `.pi/mcp.json` cannot add one at all.
+  This is the one connection the agent's own work makes to somewhere other than
+  your provider, so it is off until you turn it on per server.
 - Memory is stored locally under `$MNEMO_HOME` (default `~/.mnemo`) in a
   journal file, readable only by you. It is never uploaded by Mnemo. **One
   exception, opt in:** `MNEMO_EMBED_URL` and `MNEMO_EMBED_MODEL` send the text
@@ -245,8 +252,9 @@ and repositories you trust with all of it.
 An MCP server is a program (or a web service) you choose, and its tools do whatever it
 says they do. Mnemo connects only the servers in `$MNEMO_HOME/agent/mcp.json`, plus a
 folder's `.pi/mcp.json` once you have trusted that folder (an untrusted folder's servers
-are never started), and a project file may not use `"auth"` to send one of your provider
-credentials anywhere.
+are never started). A server reached over HTTP is off unless its entry in your own
+`mcp.json` sets `"allowNetwork": true`; a project file cannot add one (so it cannot use
+`"auth"` to send one of your provider credentials anywhere, either).
 
 - **Every call goes through the gate.** In `default` and `accept-edits` each call to an
   MCP tool asks you, showing its arguments; "always" covers that one tool of that server
@@ -256,13 +264,20 @@ credentials anywhere.
   tools, does not.
 - **What a tool returns is the server's text,** read by the model like a web page:
   treat a server you do not control as a source of prompt injection.
-- **A stdio server inherits your environment,** provider keys included, as it does in
-  other clients: it runs as you and could read your files anyway. Give a server only the
-  variables it needs by running it through a wrapper if that matters to you.
-- **Network.** HTTP servers are reached at the address you configured; that, and
-  signing in to one with OAuth (`/mcp login`, which listens on `127.0.0.1` for the
-  browser's redirect until the sign-in ends), are the only connections MCP makes.
-  Nothing is contacted for a server you have not configured. Sub-agents get no MCP tools.
+- **A stdio server does not inherit your environment.** It starts with the same
+  allowlist the agent's commands get (`PATH`, `HOME`, locale, temp and toolchain folders,
+  proxies; no model key, `GITHUB_TOKEN`, `AWS_*` or other token) plus exactly what its
+  entry's `env` sets. To hand one a token, name it there: `"env": {"GITHUB_TOKEN":
+  "$GITHUB_TOKEN"}`. The `passEnv` setting is for commands, not servers. A project's
+  `.pi/mcp.json` may set literal values but not name your variables (`$NAME`), as it may
+  not set `auth`. A server still runs as you and can read your files: this keeps
+  ambient tokens from reaching it, it does not confine it.
+- **Network.** An HTTP server is reached at the address you configured, and only once
+  you have set `"allowNetwork": true` on it; that, and signing in to one with OAuth
+  (`/mcp login`, which listens on `127.0.0.1` for the browser's redirect until the
+  sign-in ends), are the only connections MCP makes. stdio servers are local programs;
+  what they reach is up to them. Nothing is contacted for a server you have not
+  configured. Sub-agents get no MCP tools.
 
 ## Agents that talk to agents
 

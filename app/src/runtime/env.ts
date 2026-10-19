@@ -64,17 +64,20 @@ export function configuredKeys(agentDir: string): string[] {
   return [...new Set([...text.matchAll(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g)].map((m) => m[1]!))];
 }
 
-/**
- * The base names, less `drop` (a custom provider's keys), plus the names the user
- * passes: `MNEMO_PASS_ENV=NAME,NAME` and the `passEnv` setting.
- */
-export function childEnv(env: Env = process.env, drop: Iterable<string> = [], passEnv: Iterable<string> = []): Record<string, string> {
+/** The allowlisted part of `env`, less `drop` (a custom provider's keys): what an MCP server starts from. */
+export function baseEnv(env: Env = process.env, drop: Iterable<string> = []): Record<string, string> {
   const dropped = new Set(drop);
-  const pass = new Set([...envNames(env.MNEMO_PASS_ENV), ...passEnv]);
   const out: Record<string, string> = {};
-  for (const [name, value] of Object.entries(env)) {
-    if (value === undefined) continue;
-    if (pass.has(name) || (inBase(name) && !dropped.has(name))) out[name] = value;
+  for (const [name, value] of Object.entries(env)) if (value !== undefined && inBase(name) && !dropped.has(name)) out[name] = value;
+  return out;
+}
+
+/** `baseEnv`, plus the names the user passes: `MNEMO_PASS_ENV=NAME,NAME` and the `passEnv` setting. */
+export function childEnv(env: Env = process.env, drop: Iterable<string> = [], passEnv: Iterable<string> = []): Record<string, string> {
+  const out = baseEnv(env, drop);
+  for (const name of [...envNames(env.MNEMO_PASS_ENV), ...passEnv]) {
+    const value = env[name];
+    if (value !== undefined) out[name] = value;
   }
   return out;
 }
