@@ -63,6 +63,8 @@ function prepare(version: string, skipTests: boolean): void {
   }
   // Cargo.lock records the crate's own version; the release builds with --locked.
   run(["cargo", "update", "--workspace", "--offline"], path.join(ROOT, "memory-layer"));
+  // bun.lock records each workspace's version too; left alone, the next `bun install` rewrites it.
+  run(["bun", "install"]);
   if (!skipTests) {
     // The checks need the dependencies the lockfile names; a fresh clone has none.
     run(["bun", "install", "--frozen-lockfile"]);
@@ -71,7 +73,7 @@ function prepare(version: string, skipTests: boolean): void {
     run(["bun", "test", "--timeout", "30000", "./test"], path.join(ROOT, "app"));
     run(["bun", "test", "./test"], path.join(ROOT, "packages", "memory"));
   }
-  run(["git", "add", ...VERSIONED, "memory-layer/Cargo.lock"]);
+  run(["git", "add", ...VERSIONED, "memory-layer/Cargo.lock", "bun.lock"]);
   run(["git", "commit", "-m", `release v${version}`]);
   console.log(`\nprepared ${branch}. Next:\n  git push -u origin ${branch}\n  open a pull request, merge it, then:\n  git checkout main && git pull\n  bun app/scripts/release.ts tag ${version} --push`);
 }
