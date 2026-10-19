@@ -139,6 +139,28 @@ on Windows. No variable or flag moves it. Precedence is managed, then the user's
 It is only as strong as the file's permissions and the user's: someone who can edit it,
 or run a different program, is not bound by it.
 
+## Hooks
+
+A hook is a command you choose that Mnemo runs at a fixed point: `PreToolUse` (after the
+gate let a call through, before it runs), `PostToolUse`, `SessionStart` and `SessionEnd`.
+They come from `$MNEMO_HOME/hooks.json` and the managed policy's `hooks` (which run first,
+and which you cannot remove); a folder's own hooks are never read.
+
+```json
+{ "hooks": { "PreToolUse": [{ "matcher": "bash", "command": "~/bin/check-command", "timeout": 30 }] } }
+```
+
+- **A hook can refuse, never allow.** The gate has judged the call before any hook sees
+  it, and a call it refused reaches no hook. A `PreToolUse` hook refuses with exit code 2
+  (its stderr is the reason the model reads) or `{"decision": "block", "reason": "…"}`
+  on stdout. One that fails any other way (another exit code, a timeout, a program that
+  is not there) refuses too: a check that did not run passed nothing.
+- A `PostToolUse` hook's exit 2 adds its stderr to what the model reads with the result.
+- A hook gets the event as JSON on stdin (the tool, its arguments, the session) and the
+  same environment as the bash tool, provider keys removed. A hook runs as you, with your
+  permissions: it is your code, not a sandbox. `command` is a shell line, or a list
+  (program and arguments, run without a shell, the program found on PATH's absolute entries).
+
 ## What leaves your machine
 
 - **Your prompts, the files and command output the model reads, and your
