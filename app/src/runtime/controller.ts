@@ -28,6 +28,7 @@ import { settingsCommand, settingsMenu } from "./settings-menu.ts";
 import { limitsOf, SettingsStore, type Settings, type SettingKey } from "./settings.ts";
 import { summarizeSession, summaryText, titleFrom } from "./sessions.ts";
 import { readLogs, statsText } from "./stats.ts";
+import { allowedMode, loadManaged } from "../policy/managed.ts";
 
 export interface CommandInfo {
   name: string;
@@ -623,7 +624,9 @@ export class Controller {
   setMode(mode: Mode): void {
     const host = this.options.host;
     if (!host) return;
-    host.mode = mode;
+    const allowed = allowedMode(mode, loadManaged(host.managedFile));
+    if (allowed !== mode) this.transcript.notice(`The managed policy does not allow ${mode} mode here, so Mnemo stays in ${allowed}.`, "warn");
+    host.mode = allowed;
     this.refreshFooter();
   }
 

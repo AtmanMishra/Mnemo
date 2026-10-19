@@ -160,7 +160,15 @@ describe.if(hasPty)("interactive", () => {
     try {
       await t.waitFor(/MEET MNE/);
       t.mark();
-      await t.type(KEY.esc);
+      // The intro is drawn a moment before Ink puts the terminal in raw mode, and an esc
+      // sent in between is echoed as a literal ^[ and lost. Send it until the prompt shows.
+      for (let i = 0; i < 10; i++) {
+        await t.type(KEY.esc);
+        try {
+          await t.waitFor(/for commands/, 1_000);
+          break;
+        } catch {}
+      }
       await t.waitFor(/for commands/);
     } finally {
       await t.kill();

@@ -41,6 +41,16 @@ export interface KernelChild {
 export type KernelSpawn = (interpreter: string, args: string[]) => KernelChild;
 /** `signal` aborts when the cell that made the call stops (finished, timed out, cancelled). */
 export type ToolDispatcher = (name: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>;
+/**
+ * Judges what a cell does itself (`subprocess`, `open`) against the deny rules: the reason it is
+ * refused, or undefined. `guard` says which kinds the kernel asks about at all.
+ */
+export interface CellGuard {
+  exec: boolean;
+  read: boolean;
+  write: boolean;
+  check: (tool: "bash" | "read" | "write", input: Record<string, unknown>) => string | undefined;
+}
 
 export interface KernelResult {
   ok: boolean;
@@ -70,6 +80,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 
 interface Cell {
   dispatch?: ToolDispatcher;
+  guard?: CellGuard;
   stopped: AbortController;
 }
 
@@ -99,7 +110,7 @@ export class KernelClient {
   /** Run one cell. Never throws: a failure is a result. */
   /** `timeoutMs` overrides the client's for this cell; aborting `signal` restarts the interpreter. */
   /** `dispatch` answers this cell's tool calls, so overlapping callers never answer each other's. */
-  run(code: string, options: { timeoutMs?: number; signal?: AbortSignal; dispatch?: ToolDispatcher } = {}): Promise<KernelResult> {
+  run(code: string, options: { timeoutMs?: number; signal?: AbortSignal; dispatch?: ToolDispatcher; guard?: CellGuard } = {}): Promise<KernelResult> {
     const task = this.#queue.then(async () => {
       if (options.signal?.aborted) return { ok: false, error: "cancelled" } as KernelResult;
       try {
@@ -107,10 +118,11 @@ export class KernelClient {
       } catch (error) {
         return { ok: false, error: `no interpreter: ${String(error)}` } as KernelResult;
       }
-      const cell = { dispatch: options.dispatch, stopped: new AbortController() };
+      const cell = { dispatch: options.dispatch, guard: options.guard, stopped: new AbortController() };
       this.#cell = cell;
+      const { exec = false, read = false, write = false } = options.guard ?? {};
       try {
-        return await this.#send(code, options.timeoutMs, options.signal);
+        return await this.#send(code, options.timeoutMs, options.signal, { exec, read, write });
       } finally {
         // Tool calls the cell left waiting (an approval dialog, say) end with it.
         if (this.#cell === cell) this.#cell = undefined;
@@ -162,7 +174,7 @@ export class KernelClient {
     this.#child = child;
   }
 
-  #send(code: string, timeout?: number, signal?: AbortSignal): Promise<KernelResult> {
+  #send(code: string, timeout?: number, signal?: AbortSignal, guard?: { exec: boolean; read: boolean; write: boolean }): Promise<KernelResult> {
     const child = this.#child;
     if (!child?.stdin) return Promise.resolve({ ok: false, error: "no interpreter stdin" });
     const id = this.#nextId++;
@@ -198,7 +210,7 @@ export class KernelClient {
       });
 
       try {
-        child.stdin!.write(`${JSON.stringify({ id, op: "run", code })}\n`);
+        child.stdin!.write(`${JSON.stringify({ id, op: "run", code, guard })}\n`);
       } catch (error) {
         clearTimeout(timer);
         this.#pending.delete(id);
@@ -241,6 +253,25 @@ export class KernelClient {
     // answer, so answering is not optional.
     if (parsed.op === "tool_call" || parsed.op === "tool_calls") {
       void this.#answerToolCall(parsed);
+      return;
+    }
+    // A cell about to start a process or open a file, blocked until it hears whether a deny rule
+    // stops it. With no guard (or a guard that fails) the answer is no: it fails closed.
+    if (parsed.op === "check") {
+      let reason: string | undefined = "Mnemo could not check this against permissions.json, so it is refused.";
+      const { tool, input } = parsed as { tool?: unknown; input?: unknown };
+      try {
+        const guard = this.#cell?.guard;
+        if (guard && (tool === "bash" || tool === "read" || tool === "write") && input && typeof input === "object")
+          reason = guard.check(tool, input as Record<string, unknown>);
+      } catch {
+        /* keeps the refusal */
+      }
+      try {
+        this.#child?.stdin?.write(`${JSON.stringify({ op: "check_result", ok: reason === undefined, reason })}\n`);
+      } catch {
+        /* the kernel is gone */
+      }
       return;
     }
 

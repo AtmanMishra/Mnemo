@@ -22,6 +22,7 @@ import { COMPOUND, commandSegments, decide } from "../policy/gate.ts";
 import { nativeSystem, realTarget, within, type PathSystem } from "../policy/paths.ts";
 import type { ApprovalRequest } from "../runtime/dialogs.ts";
 import type { Host } from "./host.ts";
+import { allowedMode, loadManaged } from "../policy/managed.ts";
 
 const READ = new Set(["read", "grep", "find", "ls", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent", "tool_search"]);
 /** Read-class tools that still write to memory: plan mode is "change nothing", memory included. */
@@ -82,6 +83,14 @@ export function loadRules(home: string): Rule[] {
   const valid = (r: Rule) =>
     r && typeof r.tool === "string" && ["allow", "ask", "deny"].includes(r.action) && (r.pattern === undefined || typeof r.pattern === "string");
   return list.every(valid) ? (list as Rule[]) : BROKEN;
+}
+
+/**
+ * The rules a call is judged by: the administrator's first, so a managed `ask` or `deny` comes
+ * before any `allow` of the user's, then the user's own.
+ */
+export function rulesOf(host: Pick<Host, "home" | "managedFile">): Rule[] {
+  return [...(loadManaged(host.managedFile)?.rules ?? []), ...loadRules(host.home)];
 }
 
 /** `*` matches anything; everything else is literal. Linear in the text, with no backtracking. */
@@ -382,6 +391,38 @@ export class Grants {
   }
 }
 
+/** A call as rules see it: its subject, its kind, and every spelling a rule is tested against. */
+function framing(cwd: string, tool: string, input: Record<string, unknown>, sys: PathSystem) {
+  const subject = subjectOf(tool, input);
+  const kind = READ.has(tool) ? "read" : EDIT.has(tool) ? "edit" : EXEC.has(tool) ? "exec" : "other";
+  const command = kind === "exec" && tool !== "ipy_run";
+  const pathy = PATH_TOOLS.has(tool) && typeof input.path === "string";
+  const landed = pathy ? landedSubjects(cwd, input.path as string, sys) : [];
+  const subjects = pathy ? [subject.trim(), ...landed] : subjectsOf(tool, subject);
+  // Names without case: PowerShell and Windows commands, and paths where the file system folds case.
+  const ci = command ? tool === "powershell" || process.platform === "win32" : pathy && sys.fold;
+  return { subject, kind, command, pathy, landed, subjects, ci };
+}
+
+const refusedBy = (r: Rule) => `Refused by a rule in permissions.json (${r.tool}${r.pattern ? ` ${r.pattern}` : ""})${r.note ? `: ${r.note}` : "."}`;
+
+/**
+ * Only the deny rules, for what a Python cell does itself (a subprocess, a file it opens): the
+ * cell was approved as a whole, so nothing in it asks again, but a deny holds inside it too.
+ */
+export function denial(rules: readonly Rule[], cwd: string, tool: string, input: Record<string, unknown>, sys: PathSystem = nativeSystem()): string | undefined {
+  const { subjects, ci } = framing(cwd, tool, input, sys);
+  const denied = rules.find((r) => r.action === "deny" && ruleHits(r, tool, subjects, ci));
+  return denied && refusedBy(denied);
+}
+
+/** Which of a cell's own actions any deny rule could stop, so the kernel checks only those. */
+export function kernelGuard(rules: readonly Rule[]): { exec: boolean; read: boolean; write: boolean } {
+  const deny = rules.filter((r) => r.action === "deny");
+  const names = (...tools: string[]) => deny.some((r) => tools.some((t) => globMatch(r.tool, t)));
+  return { exec: names("bash"), read: names("read"), write: names("write", "edit") };
+}
+
 export type Verdict = { allow: true } | { allow: false; reason: string } | { ask: ApprovalRequest; pattern?: string };
 
 /** The decision without the question: pure apart from reading `host.mode` and the disk (for symlinks). */
@@ -394,19 +435,11 @@ export function judge(
   input: Record<string, unknown>,
   sys: PathSystem = nativeSystem(),
 ): Verdict {
-  const subject = subjectOf(tool, input);
-  const kind = READ.has(tool) ? "read" : EDIT.has(tool) ? "edit" : EXEC.has(tool) ? "exec" : "other";
-  const command = kind === "exec" && tool !== "ipy_run";
-  const pathy = PATH_TOOLS.has(tool) && typeof input.path === "string";
-  const landed = pathy ? landedSubjects(cwd, input.path as string, sys) : [];
-  const subjects = pathy ? [subject.trim(), ...landed] : subjectsOf(tool, subject);
-  // Names without case: PowerShell and Windows commands, and paths where the file system folds case.
-  const ci = command ? tool === "powershell" || process.platform === "win32" : pathy && sys.fold;
+  const { subject, kind, command, pathy, landed, subjects, ci } = framing(cwd, tool, input, sys);
   // A denial anywhere in the list wins, whatever order the rules are in and however
   // the command or path is dressed up.
   const denied = rules.find((r) => r.action === "deny" && ruleHits(r, tool, subjects, ci));
-  if (denied)
-    return { allow: false, reason: `Refused by a rule in permissions.json (${denied.tool}${denied.pattern ? ` ${denied.pattern}` : ""})${denied.note ? `: ${denied.note}` : "."}` };
+  if (denied) return { allow: false, reason: refusedBy(denied) };
   // Before any allow: plan mode is the user saying "change nothing", and a standing
   // allow rule was written for the other modes.
   if ((kind !== "read" || WRITES_MEMORY.has(tool)) && host.mode === "plan")
@@ -486,7 +519,11 @@ export function policyExtension(host: Host) {
       try {
         if (broken !== undefined && !READ.has(event.toolName))
           return { block: true, reason: `Mnemo's permission gate could not start (${broken}), so it refuses every change until that is fixed.` };
-        verdict = judge(host, loadRules(host.home), grants?.for(ctx.cwd) ?? NO_GRANTS, ctx.cwd, event.toolName, input);
+        // The mode the user picked, within what the managed policy allows (`yolo` may not be one).
+        const managed = loadManaged(host.managedFile);
+        const rules = [...(managed?.rules ?? []), ...loadRules(host.home)];
+        const at = { mode: allowedMode(host.mode, managed), home: host.home, agentDir: host.agentDir };
+        verdict = judge(at, rules, grants?.for(ctx.cwd) ?? NO_GRANTS, ctx.cwd, event.toolName, input);
       } catch (error) {
         return { block: true, reason: `Mnemo's permission gate failed on this call (${error instanceof Error ? error.message : String(error)}), so it is refused.` };
       }
