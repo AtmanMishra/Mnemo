@@ -170,8 +170,14 @@ test("an incremental refresh ends where a cold build does; unchanged bytes are n
 
 const call = (name: string, args: Record<string, unknown>) => fauxAssistantMessage([fauxToolCall(name, args as Parameters<typeof fauxToolCall>[1])], { stopReason: "toolUse" });
 
-async function session(files: Record<string, string>, o: { settings?: SettingsStore; home?: string } = {}) {
-  const cwd = project(files);
+async function session(files: Record<string, string>, o: { settings?: SettingsStore; home?: string; linked?: boolean } = {}) {
+  let cwd = project(files);
+  if (o.linked) {
+    // A second spelling of the project, as Windows 8.3 names and macOS /var give one.
+    const link = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-link-")), "p");
+    fs.symlinkSync(cwd, link, "junction");
+    cwd = link;
+  }
   const e = await mnemoEnv({ cwd, mode: "yolo", settings: o.settings, home: o.home });
   cleanup.push(() => e.close());
   const results = () => e.runtime.session.messages.filter((m) => (m as { role?: string }).role === "toolResult").map((m) => JSON.stringify((m as { content: unknown }).content));
@@ -179,7 +185,7 @@ async function session(files: Record<string, string>, o: { settings?: SettingsSt
 }
 
 test("the four tools answer from the index, and an edit says who calls what it changed", async () => {
-  const { e, results } = await session(app);
+  const { e, results } = await session(app, { linked: true });
   e.faux.setResponses([
     call("code_search", { query: "store put" }),
     call("code_refs", { name: "save", direction: "callers" }),

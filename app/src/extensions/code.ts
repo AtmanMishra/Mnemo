@@ -32,6 +32,12 @@ function realRoot(cwd: string): string {
   }
 }
 
+/** A path the model gave, as the index names it. Both sides are real paths, or Windows
+ * 8.3 names and macOS /private/var make one file look outside the project. */
+function relOf(root: string, cwd: string, file: string): string {
+  return path.relative(root, realRoot(path.resolve(cwd, file))).split(path.sep).join("/");
+}
+
 const where = (d: Def) => `${d.path}:${d.line}`;
 const head = (d: Def) => `${d.kind} ${d.qname}  ${where(d)}${d.endLine > d.line ? `-${d.endLine}` : ""}`;
 
@@ -115,7 +121,7 @@ export function codeExtension(host: Host) {
         }),
         async execute(_id, params, _signal, _update, ctx) {
           const ix = await fresh(ctx.cwd);
-          const rel = params.path ? path.relative(ix.root, path.resolve(ctx.cwd, params.path)).split(path.sep).join("/") : undefined;
+          const rel = params.path ? relOf(ix.root, ctx.cwd, params.path) : undefined;
           if (!params.name) {
             if (!rel) return text("Give a name, or a path for that file's outline.");
             const defs = ix.fileDefs(rel);
@@ -201,7 +207,7 @@ export function codeExtension(host: Host) {
         parameters: Type.Object({ path: Type.Optional(Type.String({ description: "A folder in this project (default: all of it)" })) }),
         async execute(_id, params, _signal, _update, ctx) {
           const ix = await fresh(ctx.cwd);
-          const rel = params.path ? path.relative(ix.root, path.resolve(ctx.cwd, params.path)).split(path.sep).join("/") : "";
+          const rel = params.path ? relOf(ix.root, ctx.cwd, params.path) : "";
           const m = ix.map(rel);
           if (!m.dirs.length) return text(`Nothing indexed under ${rel || "this project"}.`);
           const lines = [`${ix.files()} files indexed`, "", ...m.dirs.slice(0, 30).map((d) => `${d.dir}/  ${d.files} files, ${d.defs} definitions`)];
@@ -219,7 +225,7 @@ export function codeExtension(host: Host) {
       if (typeof file !== "string") return;
       const ix = indexes.get(realRoot(ctx.cwd));
       if (!ix || ix.files() === 0) return;
-      const rel = path.relative(ix.root, path.resolve(ctx.cwd, file)).split(path.sep).join("/");
+      const rel = relOf(ix.root, ctx.cwd, file);
       if (rel.startsWith("..")) return;
       try {
         const before = ix.fileDefs(rel);
