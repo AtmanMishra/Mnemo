@@ -335,6 +335,7 @@ gets a copy one level deeper.
 | `mnemo-policy` | `tool_call` — the only hook that decides: rules, mode, grants, then the approval dialog (§3.6) |
 | `mnemo-plan` | `before_agent_start` (a plan-mode section in the system prompt while the mode is `plan`); `ask_user` (a question in a pick or text dialog; the root session only) |
 | `mnemo-checkpoints` | `tool_call` on `edit`/`write`: keeps the file's bytes under the current turn (rewind) |
+| `mnemo-lsp` | `tool_result` on `edit`/`write` (root session, trusted folder, servers named in `$MNEMO_HOME/lsp.json`): shows the server the new text (`lsp/client.ts`, JSON-RPC over stdio) and appends its errors and warnings to the result; `session_shutdown` stops the servers |
 | `mnemo-shell` | re-registers pi's `bash` with the provider keys taken out of the command's environment |
 | `mnemo-memory` | `before_agent_start` (directive + profiles into the system prompt, recall as a hidden message), `tool_call` (the known-fix guard), `tool_execution_*`, `turn_end`, `agent_end` (verify nudge, then reflection in the background), `session_shutdown`; tools `memory_search`, `session_search`, `memory_remember`, `memory_steer` |
 | `mnemo-kernel` | `ipy_run` (absent when no working Python is found) |
@@ -679,7 +680,7 @@ Mnemo already claims, which a third party must not reuse: the tools `ipy_run`,
 `memory_search`, `session_search`, `memory_remember`, `memory_steer`,
 `spawn_subagent`, `create_skill`, `update_skill` and `bash` (Mnemo re-registers
 pi's, to scrub the environment), and the extension names `mnemo-policy`,
-`mnemo-checkpoints`, `mnemo-shell`, `mnemo-memory`, `mnemo-kernel`, `mnemo-agents`,
+`mnemo-checkpoints`, `mnemo-lsp`, `mnemo-shell`, `mnemo-memory`, `mnemo-kernel`, `mnemo-agents`,
 `mnemo-skills`, `mnemo-escalate`, `mnemo-trace`. What pi does with two extensions
 claiming one tool name is pi's behaviour, not tested here; the last time it was
 measured (on the previous stack) it refused to start the session.

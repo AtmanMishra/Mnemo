@@ -279,6 +279,26 @@ are never started). A server reached over HTTP is off unless its entry in your o
   what they reach is up to them. Nothing is contacted for a server you have not
   configured. Sub-agents get no MCP tools.
 
+## Language servers
+
+Off until you name one in `$MNEMO_HOME/lsp.json` (`{"servers": {"name": {"command": [program,
+args…], "files": {"*.ts": "typescript"}}}}`). After an `edit` or `write` of a file the glob
+claims, Mnemo shows the server the new text and adds its errors and warnings to the tool result,
+so the model sees a type error in the same turn. Nothing is sent anywhere but to that local
+process.
+
+- **A server runs the project's own code** (a TypeScript plugin in `tsconfig`, a Rust build
+  script), so Mnemo starts none in a folder you have not trusted, and a folder's own `lsp.json`
+  is never read. Only servers you named start, and only for the session you talk to: a
+  sub-agent's edits are not checked.
+- The command is a program and its arguments, run without a shell; the program is found on
+  PATH's absolute entries only, never in the folder. It gets the same scrubbed environment as
+  the `bash` tool, so a provider key is not in it. Its log is discarded.
+- A server that does not start, or dies, is switched off for the session with a notice; the
+  edit itself is never held up by it (a result is waited for up to `timeout` seconds, 10 by
+  default). On Windows name the `.exe`, or run an npm-installed server through `node`: a `.cmd`
+  shim is not started without a shell.
+
 ## Agents that talk to agents
 
 Agents can start sub-agents (to depth 3), you can link top-level agents as siblings,
