@@ -41,6 +41,7 @@ import { openSettings } from "../src/runtime/settings.ts";
 import { settingsCommand } from "../src/runtime/settings-menu.ts";
 import { checkMemory, envHints, findProblems } from "../src/runtime/doctor.ts";
 import { chooseModel } from "../src/runtime/model-choice.ts";
+import { printNotice } from "../src/runtime/print-notice.ts";
 import { describePlan, looksLikeMnemoHome, planUninstall, runUninstall } from "../src/runtime/uninstall.ts";
 import { mayOffer, ownConsole, placementProblems, selfInstall, selfInstallOffer } from "../src/runtime/self-install.ts";
 
@@ -585,6 +586,8 @@ async function main(): Promise<number> {
         console.error("mnemo: no model configured — run mnemo and use /login, then /model");
         return 1;
       }
+      const notice = printNotice(cwd, args.mode);
+      if (notice) console.error(notice);
       await session.prompt(args.print);
       const st = session.getSessionStats();
       const spent = host.roster.get(host.node)?.runSpend ?? st.cost;

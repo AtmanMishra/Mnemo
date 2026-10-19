@@ -508,6 +508,19 @@ describe("memory commands", () => {
   }, T);
 });
 
+describe("-p in a folder with unfinished work", () => {
+  test("says where it is working before it writes", async () => {
+    const w = fresh();
+    fs.writeFileSync(path.join(w.project, "wip.txt"), "unfinished");
+    play(() => ({ text: "ok" }));
+    const r = await mnemo(w, ["-p", "hi", "--no-reflect"]);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("uncommitted changes");
+    const plan = await mnemo(w, ["-p", "hi", "--no-reflect", "--plan"]);
+    expect(plan.stderr).not.toContain("uncommitted changes");
+  }, T);
+});
+
 describe("--model", () => {
   test("starts the run on the named model, and an unknown one is a usage error", async () => {
     const w = fresh();
