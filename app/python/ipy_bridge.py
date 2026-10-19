@@ -31,13 +31,25 @@ The kernel namespace persists for the lifetime of this process, so variables,
 imports and definitions survive across calls - exactly like a notebook kernel.
 Messages are handled strictly sequentially in arrival order. The process never
 exits on a user-code exception; only a fatal interpreter error ends it.
+
+Deny rules inside a cell: a run request may carry
+  "guard": {"exec": bool, "read": bool, "write": bool}
+saying which of the cell's own actions a deny rule in permissions.json could stop.
+An audit hook (PEP 578) then asks the host before each of them
+  {"op": "check", "tool": "bash"|"read"|"write", "input": {"command"|"path": ..}}
+  {"op": "check_result", "ok": false, "reason": "..."}
+and a refusal is a PermissionError in the cell. It is a filter, like the gate:
+code written to get around it (ctypes, a process that outlives the cell's view)
+can.
 """
 
 import ast
 import contextlib
 import io
 import json
+import os
 import sys
+import threading
 import traceback
 
 
@@ -116,15 +128,111 @@ class ToolProxy:
         explains why this stdout and this stdin are the right ones."""
         stdout = object.__getattribute__(self, "_stdout")
         stdin = object.__getattribute__(self, "_stdin")
-        stdout.write((json.dumps(request) + "\n").encode("utf-8"))
-        stdout.flush()
-        line = stdin.readline()
+        # One request on the pipe at a time: a guard check from another thread
+        # must not read this call's reply.
+        with _PIPE:
+            stdout.write((json.dumps(request) + "\n").encode("utf-8"))
+            stdout.flush()
+            line = stdin.readline()
         if not line:
             raise ToolError("bridge closed during a tool call")
         try:
             return json.loads(line.decode("utf-8"))
         except Exception as exc:
             raise ToolError(f"unreadable reply: {exc}") from None
+
+
+_PIPE = threading.RLock()
+
+# What a cell does itself, by audit event: the argument that names the command or path.
+_EXEC = {"subprocess.Popen": 1, "os.system": 0, "os.exec": 1, "os.posix_spawn": 1, "os.spawn": 2, "pty.spawn": 0}
+_WRITE = {"os.remove": (0,), "os.rmdir": (0,), "os.rename": (0, 1), "os.truncate": (0,), "os.mkdir": (0,), "os.symlink": (1,), "os.link": (1,), "shutil.rmtree": (0,)}
+_WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
+
+
+def _command(value) -> str:
+    if isinstance(value, (str, bytes, os.PathLike)):
+        return os.fsdecode(value)
+    words = [os.fsdecode(w) if isinstance(w, (str, bytes, os.PathLike)) else str(w) for w in value]
+    if sys.platform == "win32":
+        import subprocess
+
+        return subprocess.list2cmdline(words)
+    import shlex
+
+    return shlex.join(words)
+
+
+def _path(value):
+    if isinstance(value, int) or value is None:
+        return None
+    return os.path.abspath(os.fsdecode(value))
+
+
+def install_guard(proxy):
+    """The audit hook, and the function that arms it for one cell (None to disarm).
+
+    Its state lives in this closure rather than in a module global a cell could
+    reassign. Outside a cell (a thread the cell left running) a guarded action
+    is refused: there is nobody to answer the check."""
+    state = {"guard": None, "running": False}
+    local = threading.local()
+    seen = {}
+
+    def ask(tool, key, value):
+        cached = seen.get((tool, value))
+        if cached is not None:
+            return cached
+        if not state["running"]:
+            return "it ran after its Python cell finished, when Mnemo cannot check it against permissions.json"
+        reply = proxy._rpc({"op": "check", "tool": tool, "input": {key: value}})
+        reason = None if reply.get("ok") else (reply.get("reason") or "refused by permissions.json")
+        seen[(tool, value)] = reason or ""
+        return reason
+
+    def hook(event, args):
+        guard = state["guard"]
+        if guard is None or getattr(local, "busy", False):
+            return
+        if event in _EXEC:
+            if not guard.get("exec"):
+                return
+            checks = [("bash", "command", _command(args[_EXEC[event]]))]
+        elif event == "open":
+            path, mode, flags = (list(args) + [None, None, None])[:3]
+            path = _path(path)
+            if path is None:
+                return
+            writes = (isinstance(mode, str) and any(c in mode for c in "wax+")) or (isinstance(flags, int) and flags & _WRITE_FLAGS)
+            if not guard.get("write" if writes else "read"):
+                return
+            checks = [("write" if writes else "read", "path", path)]
+        elif event in _WRITE:
+            if not guard.get("write"):
+                return
+            checks = [("write", "path", p) for p in (_path(args[i]) for i in _WRITE[event]) if p is not None]
+        else:
+            return
+        local.busy = True
+        try:
+            for tool, key, value in checks:
+                reason = ask(tool, key, value)
+                if reason:
+                    raise PermissionError(f"Mnemo refused {value!r}: {reason}")
+        finally:
+            local.busy = False
+
+    sys.addaudithook(hook)
+
+    def arm(guard):
+        seen.clear()
+        state["guard"] = guard if isinstance(guard, dict) and any(guard.get(k) for k in ("exec", "read", "write")) else None
+        state["running"] = True
+
+    def disarm():
+        state["running"] = False
+
+    return arm, disarm
 
 
 class SeaKernel:
@@ -175,7 +283,7 @@ class SeaKernel:
         return {"ok": True, "result": result_repr, "output": output}
 
 
-def handle(kernel: SeaKernel, request: dict) -> dict:
+def handle(kernel: SeaKernel, request: dict, guard=None) -> dict:
     op = request.get("op", "run")
     response = {"id": request.get("id")}
     if op == "ping":
@@ -185,7 +293,13 @@ def handle(kernel: SeaKernel, request: dict) -> dict:
         response.update(ok=True, result="namespace cleared", output="")
     else:
         code = request.get("code", "")
-        response.update(kernel.run(code))
+        if guard is not None:
+            guard[0](request.get("guard"))
+        try:
+            response.update(kernel.run(code))
+        finally:
+            if guard is not None:
+                guard[1]()
     return response
 
 
@@ -224,6 +338,7 @@ def main() -> None:
     stdin = sys.stdin.buffer
     stdout = sys.stdout.buffer
     kernel = SeaKernel(stdin, stdout)
+    guard = install_guard(kernel.globals["tools"])
 
     # explicit readline() rather than `for line in stdin`: the tools proxy
     # reads replies from this same object mid-call, and one obvious buffer is
@@ -241,7 +356,7 @@ def main() -> None:
             response = {"id": None, "ok": False, "error": "unparseable request line", "output": ""}
         else:
             try:
-                response = handle(kernel, request)
+                response = handle(kernel, request, guard)
             except Exception:
                 response = {
                     "id": request.get("id") if isinstance(request, dict) else None,
