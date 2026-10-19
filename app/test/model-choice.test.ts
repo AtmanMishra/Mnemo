@@ -46,6 +46,15 @@ test("an AWS variable alone does not make Bedrock the default when another provi
   expect(c.model?.provider).toBe("mock");
 });
 
+test("the provider's preferred model is picked over its first one", async () => {
+  const { dir } = await agent({ AWS_PROFILE: "work", OPENCODE_API_KEY: "k" });
+  fs.rmSync(path.join(dir, "models.json"));
+  const rt = await createModelRuntime(dir);
+  expect(rt.getAvailableSnapshot().filter((m) => m.provider === "opencode").length).toBeGreaterThan(1);
+  const c = chooseModel(rt, { agentDir: dir, continuing: false });
+  expect(`${c.model?.provider}/${c.model?.id}`).toBe("opencode/kimi-k2.6");
+});
+
 test("a saved default, a resumed session and Bedrock alone are left to pi", async () => {
   const a = await agent({ AWS_PROFILE: "work" }, { defaultProvider: "amazon-bedrock", defaultModel: "us.anthropic.claude-opus-4-6-v1" });
   expect(chooseModel(a.rt, { agentDir: a.dir, continuing: false })).toEqual({});
