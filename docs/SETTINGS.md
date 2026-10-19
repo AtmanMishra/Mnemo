@@ -67,6 +67,7 @@ much agents may do on their own; what an agent may *touch* is decided by the gat
 | Python cell time | `kernelTimeout` | 120 s | 5–3600 | seconds a Python cell may run when it names no limit |
 | Python cell ceiling | `kernelMaxTimeout` | 600 s | 5–3600 | the longest a Python cell may ask to run |
 | Run budget | `runSpend` | $0 (no limit) | 0–1000 | dollars one prompt may spend, sub-agents included, before Mnemo stops it (0: no limit) |
+| Pass to commands | `passEnv` | none | variable names, comma-separated | variables bash and Python also get, such as GITHUB_TOKEN, SSH_AUTH_SOCK (they get no tokens otherwise; see SECURITY.md) |
 
 ### Agents
 

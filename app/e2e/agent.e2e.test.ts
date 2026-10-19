@@ -209,12 +209,13 @@ describe("permission gate", () => {
 
 describe("secrets", () => {
   const key = "sk-ant-e2e-0123456789abcdef";
-  test("commands the agent runs do not see provider keys", async () => {
-    const w = fresh({ env: { ANTHROPIC_API_KEY: key } });
+  test("commands the agent runs do not see provider keys or forge tokens", async () => {
+    const w = fresh({ env: { ANTHROPIC_API_KEY: key, GITHUB_TOKEN: "ghp_e2e-should-not-leak" } });
     play(steps({ tools: [{ name: "bash", args: { command: "env" } }] }, { text: "ok" }));
     await mnemo(w, ["-p", "print env"]);
     expect(lastToolResult()).toContain("HOME=");
     expect(lastToolResult()).not.toContain(key);
+    expect(lastToolResult()).not.toContain("ghp_e2e-should-not-leak");
   }, T);
 
   test("MNEMO_PASS_ENV hands one back", async () => {

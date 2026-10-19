@@ -334,6 +334,7 @@ gets a copy one level deeper.
 |---|---|
 | `mnemo-policy` | `tool_call` — the only hook that decides: rules, mode, grants, then the approval dialog (§3.6) |
 | `mnemo-hooks` | user and managed hooks (`extensions/hooks.ts`): `tool_call` after the gate (PreToolUse, may only refuse), `tool_result` (PostToolUse, may add a note), `session_start`, `session_shutdown` |
+| `mnemo-plan` | `before_agent_start` (a plan-mode section in the system prompt while the mode is `plan`); `ask_user` (a question in a pick or text dialog; the root session only) |
 | `mnemo-checkpoints` | `tool_call` on `edit`/`write`: keeps the file's bytes under the current turn (rewind) |
 | `mnemo-shell` | re-registers pi's `bash` with the provider keys taken out of the command's environment |
 | `mnemo-memory` | `before_agent_start` (directive + profiles into the system prompt, recall as a hidden message), `tool_call` (the known-fix guard), `tool_execution_*`, `turn_end`, `agent_end` (verify nudge, then reflection in the background), `session_shutdown`; tools `memory_search`, `session_search`, `memory_remember`, `memory_steer` |
@@ -349,10 +350,11 @@ the transcript, the dialog queue and the chrome state, and nothing in `ui/`
 imports pi. That split is what lets a whole turn be tested with a faux model and no
 terminal (`src/runtime/demo.ts`, `app/test/helpers.ts`).
 
-**Provider keys.** `runtime/env.ts` builds the environment of everything the agent
-starts (`childEnv`): Mnemo's own minus the model-provider keys it knows
-(`PROVIDER_KEYS`, pi-ai's list) and the variables `models.json` interpolates for a
-custom provider. `MNEMO_PASS_ENV=NAME,NAME` hands named ones back. It is applied to
+**What children inherit.** `runtime/env.ts` builds the environment of everything the
+agent starts (`childEnv`): an allowlist of Mnemo's own (`BASE`: the names that locate
+things, never ones that grant access), less the variables `models.json` interpolates
+for a custom provider. The `passEnv` setting and `MNEMO_PASS_ENV=NAME,NAME` hand named
+ones back. It is applied to
 `bash` (`mnemo-shell`), the Python kernel and best-of checks. Mnemo itself still
 reads the keys; only children lose them.
 

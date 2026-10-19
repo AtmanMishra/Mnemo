@@ -141,9 +141,11 @@ cd app && bun bin/mnemo.ts --demo
   `$MNEMO_HOME/agent/AGENTS.md` for all projects, go into the system prompt.
 - **MCP servers as tools.** Put servers in `$MNEMO_HOME/agent/mcp.json` (or a
   trusted project's `.pi/mcp.json`) in the `mcpServers` shape other clients use; stdio
-  and HTTP servers both work, and `/mcp` lists them, signs in and reconnects. Their
+  and HTTP servers both work (an HTTP one only with `"allowNetwork": true` in your own
+  file), and `/mcp` lists them, signs in and reconnects. Their
   tools stay out of the prompt until `tool_search` finds them (`"exposure": "direct"`
   declares them up front). In `default` mode each call asks first; "always" covers that tool.
+  A stdio server gets only the safe basics and its own `env`, not your tokens.
 - **Memory for other agents.** `mnemo memory setup claude-code` prints the hooks
   and MCP entry that give Claude Code (or Codex) the same memory; `mnemo memory
   ingest` learns from Claude Code sessions you already have.
@@ -173,8 +175,8 @@ cd app && bun bin/mnemo.ts --demo
   both, and your message returns to the prompt. In a git repository, what shell
   commands and Python cells changed goes back too (files git ignores do not).
 - **Stays out of your keys.** Commands the agent runs (bash, the Python kernel)
-  do not get your model-provider API keys (`MNEMO_PASS_ENV=NAME` hands one
-  back), and the Python kernel has a timeout and a memory cap; see
+  get an allowlisted environment: no model-provider key, `GITHUB_TOKEN`,
+  `NPM_TOKEN` or `AWS_*` (the `passEnv` setting hands one back), and the Python kernel has a timeout and a memory cap; see
   [SECURITY.md](SECURITY.md).
 - **A pixel interface** with Mne the elephant, eleven themes (`/theme`) and a
   sidebar for files, memory, sessions, skills and logs. The spec is

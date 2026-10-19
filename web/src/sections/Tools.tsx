@@ -13,6 +13,7 @@ const TOOLS = [
   { name: "spawn_subagent", group: "agents", d: "Delegate a self-contained task to a sub-agent that works on its own and reports back: read-only for research, full to edit (you still approve). A sub-agent can start sub-agents of its own, to a limited depth." },
   { name: "list_agents", group: "agents", d: "List the agents this one can message: its parent and sub-agents, its linked siblings and its ancestors' siblings, each with its status, task and latest steps." },
   { name: "message_agent", group: "agents", d: "Send a short message to one of them. A running agent reads it after its current step; an idle one wakes up to read it and can answer. With wait, the reply comes back as the tool's result." },
+  { name: "ask_user", group: "plan", d: "Ask you a clarifying question, with choices to pick from or room to type, and wait for the answer. Plan mode asks it before planning." },
   { name: "read · edit · write · bash · grep", group: "files", d: "The coding tools every turn uses, each one through the permission gate." },
 ];
 

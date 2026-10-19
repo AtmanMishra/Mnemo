@@ -1,10 +1,10 @@
 /**
- * pi's bash tool, with the model-provider keys taken out of every command's
- * environment (see runtime/env.ts). Registered under the same name, so it
+ * pi's bash tool, with every command's environment cut down to the allowlist
+ * in runtime/env.ts. Registered under the same name, so it
  * replaces the built-in one and keeps the user's shell settings.
  */
 import { createBashToolDefinition, SettingsManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { childEnv, configuredKeys } from "../runtime/env.ts";
+import { childEnv, configuredKeys, envNames } from "../runtime/env.ts";
 import { projectTrusted } from "../runtime/runtime.ts";
 import type { Host } from "./host.ts";
 
@@ -18,7 +18,7 @@ export function shellExtension(host: Host) {
         tool = createBashToolDefinition(cwd, {
           commandPrefix: settings.getShellCommandPrefix(),
           shellPath: settings.getShellPath(),
-          spawnHook: (spawn) => ({ ...spawn, env: childEnv(spawn.env, configuredKeys(host.agentDir)) }),
+          spawnHook: (spawn) => ({ ...spawn, env: childEnv(spawn.env, configuredKeys(host.agentDir), envNames(host.settings.get().passEnv)) }),
         });
         tools.set(cwd, tool);
       }

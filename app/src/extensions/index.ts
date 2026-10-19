@@ -13,6 +13,7 @@ import { kernelExtension } from "./kernel.ts";
 import { mcpExtensions } from "./mcp.ts";
 import { memoryExtension } from "./memory.ts";
 import { peersExtension } from "./peers.ts";
+import { planExtension } from "./plan.ts";
 import { policyExtension } from "./policy.ts";
 import { shellExtension } from "./shell.ts";
 import { skillsExtension } from "./skills.ts";
@@ -23,6 +24,8 @@ export function mnemoExtensions(host: Host): InlineExtension[] {
     { name: "mnemo-policy", factory: policyExtension(host) },
     // Right after the gate: a hook sees only calls the gate let through, and can still refuse them.
     { name: "mnemo-hooks", factory: hooksExtension(host) },
+    // Before memory, which builds on the rendered system prompt that holds plan mode's section.
+    { name: "mnemo-plan", factory: planExtension(host) },
     { name: "mnemo-checkpoints", factory: checkpointsExtension(host) },
     { name: "mnemo-shell", factory: shellExtension(host) },
     { name: "mnemo-memory", factory: memoryExtension(host) },
