@@ -6,6 +6,7 @@ import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { Host } from "./host.ts";
 import { agentsExtension } from "./agents.ts";
 import { checkpointsExtension } from "./checkpoints.ts";
+import { codeExtension } from "./code.ts";
 import { escalateExtension } from "./escalate.ts";
 import { finalErrorsExtension } from "./final-errors.ts";
 import { kernelExtension } from "./kernel.ts";
@@ -27,6 +28,7 @@ export function mnemoExtensions(host: Host): InlineExtension[] {
     { name: "mnemo-shell", factory: shellExtension(host) },
     { name: "mnemo-memory", factory: memoryExtension(host) },
     { name: "mnemo-kernel", factory: kernelExtension(host) },
+    { name: "mnemo-code", factory: codeExtension(host) },
     { name: "mnemo-agents", factory: agentsExtension(host, mnemoExtensions) },
     { name: "mnemo-peers", factory: peersExtension(host) },
     { name: "mnemo-skills", factory: skillsExtension(host) },

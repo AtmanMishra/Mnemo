@@ -22,7 +22,7 @@ import { RosterError } from "../runtime/roster.ts";
 import { stepLine } from "./peers.ts";
 import { projectTrusted } from "../runtime/runtime.ts";
 
-const READ_ONLY = ["read", "grep", "find", "ls", "memory_search", "spawn_subagent", "list_agents", "message_agent"];
+const READ_ONLY = ["read", "grep", "find", "ls", "code_search", "code_symbol", "code_refs", "code_map", "memory_search", "spawn_subagent", "list_agents", "message_agent"];
 
 export function agentsExtension(host: Host, extensionsFor: (child: Host) => import("@earendil-works/pi-coding-agent").InlineExtension[]) {
   return (pi: ExtensionAPI): void => {

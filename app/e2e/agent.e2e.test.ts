@@ -120,6 +120,13 @@ describe("the tool loop", () => {
     expect(fs.readFileSync(path.join(w.project, "a.ts"), "utf8")).toBe("export const x = 2;\n");
   }, T);
 
+  test("the code index runs from the compiled binary (its grammars are embedded)", async () => {
+    const w = fresh({ files: { "src/store.ts": "export class Store { put(k: string) { return k; } }\n", "src/use.ts": "import { Store } from './store';\nexport function save(s: Store) { s.put('x'); }\n" } });
+    play(steps({ tools: [{ name: "code_refs", args: { name: "Store.put" } }] }, { text: "ok" }));
+    await mnemo(w, ["-p", "who calls put"]);
+    expect(lastToolResult()).toContain("save  src/use.ts:2");
+  }, T);
+
   test("bash runs and its output reaches the model", async () => {
     const w = fresh();
     play(steps({ tools: [{ name: "bash", args: { command: "echo from-the-shell" } }] }, { text: "ok" }));

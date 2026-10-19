@@ -49,3 +49,12 @@ export function sessionSources(home: string, env: Env = process.env): { agent: "
 export function skillsDir(home: string): string {
   return path.join(agentDir(home), "skills");
 }
+
+/**
+ * A project's code index: under the Mnemo home, never in the project, one per real path of
+ * the project (hashed, so the folder name carries no part of the user's paths).
+ */
+export function codeIndexPath(home: string, root: string): string {
+  const id = new Bun.CryptoHasher("sha256").update(root).digest("hex").slice(0, 16);
+  return path.join(home, "index", id, "code.db");
+}

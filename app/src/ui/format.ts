@@ -15,6 +15,10 @@ const TITLES: Record<string, string> = {
   grep: "Search",
   find: "Find",
   ls: "List",
+  code_search: "Code search",
+  code_symbol: "Symbol",
+  code_refs: "References",
+  code_map: "Code map",
 };
 
 function str(v: unknown): string | undefined {
