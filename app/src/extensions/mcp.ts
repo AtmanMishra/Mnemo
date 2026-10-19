@@ -1,7 +1,9 @@
 /**
  * MCP servers as tools: pi's own MCP client (stdio and streamable HTTP, OAuth sign-in, `/mcp`),
  * with the servers read from `$MNEMO_HOME/agent/mcp.json` and, for a folder you trusted, its
- * `.pi/mcp.json`, in the `mcpServers` shape other clients use.
+ * `.pi/mcp.json`, in the `mcpServers` shape other clients use. An HTTP server is the one place
+ * besides the model provider Mnemo connects to on its own, so it needs `"allowNetwork": true`
+ * in your own file.
  *
  * Mnemo has no codemode VM (its Python kernel does that job), so a server's tools default to
  * `deferred`, not pi's `codemode`: they stay out of the prompt until `tool_search` finds them,
@@ -74,14 +76,20 @@ function read(file: string, scope: "global" | "project", servers: Map<string, Mc
       errors.push(`${file}: server "${name}" needs either "command" (stdio) or "url" (streamable HTTP)`);
       continue;
     }
-    // A repository must not choose where one of your provider credentials is sent.
-    if (scope === "project" && value.auth !== undefined) {
-      errors.push(`${file}: server "${name}": auth is only allowed in your own mcp.json`);
+    // Mnemo talks only to your model provider unless you name another place: an HTTP server is
+    // off until its entry in your own mcp.json says so. A repository cannot add one (nor, with
+    // it, choose where one of your provider credentials is sent with `auth`).
+    if (value.url !== undefined && (scope === "project" || value.allowNetwork !== true)) {
+      errors.push(
+        scope === "project"
+          ? `${file}: server "${name}" is reached over the network; only your own mcp.json may add one, with "allowNetwork": true`
+          : `${file}: server "${name}" is reached over the network; add "allowNetwork": true to its entry to allow that`,
+      );
       continue;
     }
-    // Nor hand one of your variables to its server by naming it.
-    if (scope === "project" && [value.env, value.headers].some((m) => isRecord(m) && Object.values(m).some((v) => typeof v === "string" && /\$\{?[A-Za-z_]/.test(v.replaceAll("$$", ""))))) {
-      errors.push(`${file}: server "${name}": env and headers may only name your variables ($NAME) in your own mcp.json`);
+    // A repository must not hand one of your variables to its server by naming it.
+    if (scope === "project" && isRecord(value.env) && Object.values(value.env).some((v) => typeof v === "string" && /\$\{?[A-Za-z_]/.test(v.replaceAll("$$", "")))) {
+      errors.push(`${file}: server "${name}": env may only name your variables ($NAME) in your own mcp.json`);
       continue;
     }
     servers.set(name, { name, config: withExposures(value) as never, source: file, scope });
