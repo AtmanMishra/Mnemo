@@ -9,10 +9,18 @@
  * removes them. Every call goes through the permission gate (extensions/policy.ts).
  *
  * Only the session you talk to connects: sub-agents get no MCP tools.
+ *
+ * A stdio server starts from the allowlisted environment the agent's commands get
+ * (runtime/env.ts) plus the `env` its entry names, not from all of yours: pi's own
+ * transport inherits everything, so Mnemo builds the transports itself.
  */
+import { execSync } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
-import { createMcpExtension, createToolSearchExtension, type InlineExtension, type LoadedMcpConfig, type McpServerEntry } from "@earendil-works/pi-coding-agent";
+import { createMcpExtension, createToolSearchExtension, type InlineExtension, type LoadedMcpConfig, type McpServerEntry, type McpTransportFactory } from "@earendil-works/pi-coding-agent";
+import { StdioTransport, StreamableHttpTransport } from "@earendil-works/pi-mcp";
+import { baseEnv, configuredKeys } from "../runtime/env.ts";
 import type { Host } from "./host.ts";
 
 const NAME = /^[A-Za-z0-9_-]+$/;
@@ -70,6 +78,11 @@ function read(file: string, scope: "global" | "project", servers: Map<string, Mc
       errors.push(`${file}: server "${name}": auth is only allowed in your own mcp.json`);
       continue;
     }
+    // Nor hand one of your variables to its server by naming it.
+    if (scope === "project" && [value.env, value.headers].some((m) => isRecord(m) && Object.values(m).some((v) => typeof v === "string" && /\$\{?[A-Za-z_]/.test(v.replaceAll("$$", ""))))) {
+      errors.push(`${file}: server "${name}": env and headers may only name your variables ($NAME) in your own mcp.json`);
+      continue;
+    }
     servers.set(name, { name, config: withExposures(value) as never, source: file, scope });
   }
 }
@@ -84,10 +97,59 @@ export function loadMcpServers(agentDir: string, cwd: string, projectTrusted: bo
   return { servers: [...servers.values()], autoEnableCodemode: false, errors, ...(projectConfig ? { projectConfig } : {}) };
 }
 
+/** A config value as pi reads it: `!command` is the command's output; `$NAME` and `${NAME}` interpolate; `$$` and `$!` escape. */
+function resolveValue(value: string, what: string): string {
+  if (value.startsWith("!")) {
+    let out: string | undefined;
+    try {
+      out = execSync(value.slice(1), { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim() || undefined;
+    } catch {}
+    if (out === undefined) throw new Error(`Failed to resolve ${what} from shell command: ${value.slice(1)}`);
+    return out;
+  }
+  const missing: string[] = [];
+  const out = value.replace(/\$(?:([$!])|\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/g, (_m, escaped?: string, braced?: string, bare?: string) => {
+    if (escaped) return escaped;
+    const v = process.env[(braced ?? bare)!];
+    if (!v) missing.push((braced ?? bare)!);
+    return v ?? "";
+  });
+  if (missing.length) throw new Error(`Failed to resolve ${what} from environment variable${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`);
+  return out;
+}
+
+function resolveAll(values: Record<string, string> | undefined, what: (key: string) => string): Record<string, string> {
+  return Object.fromEntries(Object.entries(values ?? {}).map(([k, v]) => [k, resolveValue(v, what(k))]));
+}
+
+const expandHome = (p: string): string => (p === "~" ? os.homedir() : p.startsWith("~/") || (process.platform === "win32" && p.startsWith("~\\")) ? path.join(os.homedir(), p.slice(2)) : p);
+
+/** pi's transports, except that a stdio server does not inherit the environment. */
+export function mcpTransport(agentDir: string): McpTransportFactory {
+  return (entry, cwd, authProvider) => {
+    const { config, name } = entry;
+    if ("url" in config) {
+      const headers = config.headers && resolveAll(config.headers, (k) => `MCP server "${name}" header "${k}"`);
+      return new StreamableHttpTransport({ url: config.url, headers, authProvider });
+    }
+    return new StdioTransport({
+      command: expandHome(config.command),
+      args: config.args?.map(expandHome),
+      cwd: path.resolve(cwd, expandHome(config.cwd ?? ".")),
+      env: { ...baseEnv(process.env, configuredKeys(agentDir)), ...resolveAll(config.env, (k) => `MCP server "${name}" env "${k}"`) },
+      inheritEnv: false,
+      stderr: "pipe",
+    });
+  };
+}
+
 export function mcpExtensions(host: Host): InlineExtension[] {
   if (host.depth > 0) return [];
   return [
     { name: "tool-search", factory: createToolSearchExtension() },
-    { name: "mcp", factory: createMcpExtension({ loadConfig: (ctx) => loadMcpServers(host.agentDir, ctx.cwd, ctx.isProjectTrusted()) }) },
+    {
+      name: "mcp",
+      factory: createMcpExtension({ loadConfig: (ctx) => loadMcpServers(host.agentDir, ctx.cwd, ctx.isProjectTrusted()), createTransport: mcpTransport(host.agentDir) }),
+    },
   ];
 }
