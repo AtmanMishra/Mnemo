@@ -14,6 +14,9 @@ const SCENES = [
   { id: "split", tab: "Split view", title: "Up to four agents side by side", body: "ctrl+s splits the screen, alt+l changes the layout, and a sub-agent that starts while its agent is on screen takes a pane of its own." },
   { id: "siblings", tab: "Siblings", title: "Linked agents talk to each other", body: "Link two agents in the hub and they see what the other is doing and send each other messages, marked as another agent's words, never yours. Limits you can see keep it bounded." },
   { id: "themes", tab: "Themes", title: "Eleven palettes, same roles", body: "/theme switches the look and keeps the meaning: one colour for the agent, one for structure, one for anything memory did. Pick one; every scene here follows it." },
+  { id: "code", tab: "Code index", title: "It looks up code instead of guessing", body: "The agent asks an index of your project where something is defined and what calls it, and after an edit it is told what elsewhere calls what changed. Merged on main; ships in the next release. Turn it off with the codeIndex setting.", soon: "next release" },
+  { id: "hooks", tab: "Hooks", title: "Your own check before a command runs", body: "A hook is a command you chose, run before or after a tool call. It can refuse a call but never allow one, and a hook that fails refuses too. Hooks come only from your own hooks.json, never from a project. In an open pull request, not released.", soon: "in review" },
+  { id: "schedule", tab: "Schedules", title: "A prompt on a timer", body: "mnemo schedule runs a prompt on a timer, read-only unless you gave the job actions, and never in yolo mode. Jobs live only in your own folder. In an open pull request, not released.", soon: "in review" },
 ] as const;
 type SceneId = (typeof SCENES)[number]["id"];
 
@@ -149,6 +152,75 @@ function SubAgents() {
   );
 }
 
+function Code() {
+  const { ref, step, replay } = useSequence<HTMLDivElement>(5, 700);
+  return (
+    <div ref={ref} className="sc-log">
+      <L g="▊" c="you">rename getJson to fetchJson</L>
+      {step >= 1 && <L g="●" c="tool">code_refs <i>getJson</i> <em>callers</em></L>}
+      {step >= 1 && (
+        <pre className="sc-diff"><span>getJson is used by:</span><span>{"  "}loadList  src/pages/list.tsx:12</span><span>{"  "}loadItem  src/pages/item.tsx:8</span><span>{"  "}+ 1 call to a getJson the index could not tie to one definition (grep finds them)</span></pre>
+      )}
+      {step >= 2 && <L g="│" c="agent">Two callers, plus one it could not place. I'll check that one with grep.</L>}
+      {step >= 3 && <L g="●" c="tool">edit <i>src/fetch.ts</i> <em>asks you first</em></L>}
+      {step >= 4 && (
+        <L g="◆" c="mem">This edit changed definitions that other code calls (check they still fit): fetchJson ← loadList src/pages/list.tsx:12</L>
+      )}
+      <div className="sc-tools">
+        <span className="mut">code_search · code_symbol · code_refs · code_map</span>
+        <button type="button" onClick={replay}>Run again</button>
+      </div>
+      <p className="sc-note">Matches are exact or marked inferred; calls it cannot tie to one place are counted, not guessed.</p>
+    </div>
+  );
+}
+
+function Hooks() {
+  const { ref, step, replay } = useSequence<HTMLDivElement>(4, 700);
+  const [on, setOn] = useState(true);
+  const flip = () => { setOn((v) => !v); replay(); };
+  return (
+    <div ref={ref} className="sc-log">
+      <div className="sc-tools">
+        <span className="mut">~/.mnemo/hooks.json</span>
+        <button type="button" role="switch" aria-checked={on} onClick={flip}>PreToolUse hook {on ? "on" : "off"}</button>
+      </div>
+      <pre className="sc-diff"><span>{`{ "hooks": { "PreToolUse": [{ "matcher": "bash",`}</span><span>{`    "command": "~/bin/check-command", "timeout": 30 }] } }`}</span></pre>
+      <L g="▊" c="you">clean up the build output</L>
+      {step >= 1 && <L g="●" c="tool">bash <i>rm -rf dist</i></L>}
+      {step >= 2 && <L g="✓" c="ok">the permission gate let it through</L>}
+      {on ? (
+        <>
+          {step >= 3 && <L g="✗" c="bad">hook refused (exit 2): dist is the release folder, use `bun run clean`</L>}
+          {step >= 4 && <L g="│" c="agent">The check says to use `bun run clean`; trying that.</L>}
+        </>
+      ) : (
+        step >= 3 && <L g="●" c="tool">ran <i>rm -rf dist</i> <em>no hook</em></L>
+      )}
+      <p className="sc-note">A hook can refuse a call, never allow one the gate refused. A hook that times out or is missing refuses too.</p>
+    </div>
+  );
+}
+
+function Schedule() {
+  const [actions, setActions] = useState(false);
+  const { ref, step, replay } = useSequence<HTMLDivElement>(3, 700);
+  const flip = () => { setActions((v) => !v); replay(); };
+  return (
+    <div ref={ref} className="sc-log">
+      <div className="sc-tools">
+        <span className="mut">a job that runs every weekday at 09:00</span>
+        <button type="button" role="switch" aria-checked={actions} onClick={flip}>--actions {actions ? "on" : "off"}</button>
+      </div>
+      <L g="▊" c="you">mnemo schedule add "summarise yesterday's failing tests"{actions ? " --actions" : ""}</L>
+      {step >= 1 && <L g="●" c="tool">09:00 · mnemo -p{actions ? "" : " --plan"} <em>child process</em></L>}
+      {step >= 2 && <L g="│" c="agent">{actions ? "Edits and commands still go through the gate and your deny rules; this is never yolo." : "Read-only: it can read and report, and cannot edit or run a command."}</L>}
+      {step >= 3 && <L g="◆" c="mem">log saved, secrets redacted · last 20 runs kept</L>}
+      <p className="sc-note">Nothing starts by itself: <code>mnemo schedule run</code> stays in the foreground.</p>
+    </div>
+  );
+}
+
 const LAYOUTS = ["columns", "rows", "grid", "main + side"] as const;
 const PANES = [
   { id: "#1", t: "api", l: ["▊ add rate limiting", "● edit src/api/client.ts"] },
@@ -267,12 +339,12 @@ export function Showcase() {
             <div className="show-tabs" role="tablist" aria-label="Features" aria-orientation="vertical" onKeyDown={onTabKey}>
               {SCENES.map((s, i) => (
                 <button key={s.id} id={`sc-tab-${s.id}`} type="button" role="tab" aria-selected={s.id === cur} aria-controls="sc-panel" tabIndex={s.id === cur ? 0 : -1} onClick={() => setCur(s.id)}>
-                  <span aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>{s.tab}
+                  <span aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>{s.tab}{"soon" in s ? <em className="sc-soon">{s.soon}</em> : null}
                 </button>
               ))}
             </div>
             <div className="show-copy" aria-live="polite">
-              <h3>{scene.title}</h3>
+              <h3>{scene.title}{"soon" in scene ? <em className="sc-soon">{scene.soon}</em> : null}</h3>
               <p>{scene.body}</p>
             </div>
           </div>
@@ -285,6 +357,9 @@ export function Showcase() {
                 {cur === "sub" && <SubAgents />}
                 {cur === "split" && <SplitView armed={armed} />}
                 {cur === "siblings" && <Siblings />}
+                {cur === "code" && <Code />}
+                {cur === "hooks" && <Hooks />}
+                {cur === "schedule" && <Schedule />}
                 {cur === "themes" && <Themes theme={theme} setTheme={setTheme} />}
               </div>
               <div className="sc-status" aria-hidden="true"><span>default</span><span>{THEMES.find((t) => t[0] === theme)![1]}</span></div>

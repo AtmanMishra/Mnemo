@@ -449,3 +449,5 @@ header.top .bar { pointer-events: auto; position: relative; display: grid; grid-
   .sky, .stage-canvas, .grain, .wipe, #boot, .marquee, .foot-big { display: none !important; }
   html { background: #fff; }
 }
+
+.sc-soon { margin-left: 8px; padding: 1px 6px; border: 1.5px solid currentColor; border-radius: 3px; font-family: var(--pixel); font-size: 10px; font-style: normal; text-transform: uppercase; letter-spacing: .04em; }
