@@ -11,6 +11,24 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+/**
+ * Each provider's model to start on, in the order providers are preferred. pi keeps the same
+ * table but does not export it; a provider missing here still gets its first ready model.
+ */
+const PREFERRED: [provider: string, id: string][] = [
+  ["anthropic", "claude-opus-4-8"],
+  ["openai", "gpt-5.5"],
+  ["google", "gemini-3.1-pro-preview"],
+  ["deepseek", "deepseek-v4-pro"],
+  ["openrouter", "moonshotai/kimi-k2.6"],
+  ["xai", "grok-4.7"],
+  ["mistral", "devstral-medium-latest"],
+  ["groq", "openai/gpt-oss-120b"],
+  ["zai", "glm-5.3"],
+  ["opencode", "kimi-k2.6"],
+  ["opencode-go", "kimi-k3"],
+];
+
 export interface Choice {
   model?: Model<Api>;
   error?: string;
@@ -44,5 +62,10 @@ export function chooseModel(rt: ModelRuntime, o: { flag?: string; agentDir: stri
   if (wanted && rt.hasConfiguredAuth(wanted.provider)) return {};
   const ready = rt.getAvailableSnapshot();
   if (!ready.some((m) => m.provider === "amazon-bedrock")) return {};
-  return { model: ready.find((m) => m.provider !== "amazon-bedrock") };
+  const others = ready.filter((m) => m.provider !== "amazon-bedrock");
+  for (const [provider, id] of PREFERRED) {
+    const m = others.find((m) => m.provider === provider && m.id === id);
+    if (m) return { model: m };
+  }
+  return { model: others[0] };
 }
