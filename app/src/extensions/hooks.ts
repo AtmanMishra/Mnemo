@@ -9,7 +9,7 @@
  * They come from the managed policy's `hooks` (first, and the user cannot remove them) and
  * `$MNEMO_HOME/hooks.json`, in the shape `{"hooks": {"PreToolUse": [{"matcher": "bash",
  * "command": "…", "timeout": 30}]}}`. A folder's own hooks are not read: code from a
- * repository does not run because the repository asked (trusted `.pi/` extensions do that job).
+ * repository does not run because the repository asked (trusted `.agents/` extensions do that job).
  *
  * A hook gets the event as JSON on stdin and the same scrubbed environment as the bash tool.
  * It can refuse, never allow: the gate has already judged the call, and a hook's exit code 0
