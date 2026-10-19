@@ -16,7 +16,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { KernelClient, spawnKernel, type KernelChild } from "../kernel/kernel.ts";
 import bridgeSource from "../../python/ipy_bridge.py" with { type: "text" };
-import { childEnv, configuredKeys } from "../runtime/env.ts";
+import { childEnv, configuredKeys, envNames } from "../runtime/env.ts";
 import { callerSignals } from "./policy.ts";
 import type { Host } from "./host.ts";
 
@@ -53,7 +53,7 @@ export function kernelExtension(host: Host) {
       (client ??= new KernelClient({
         interpreter: python,
         bridgePath: installBridge(host.home),
-        spawn: (i, a) => spawnKernel(i, a, cwd, childEnv(process.env, configuredKeys(host.agentDir))) as unknown as KernelChild,
+        spawn: (i, a) => spawnKernel(i, a, cwd, childEnv(process.env, configuredKeys(host.agentDir), envNames(host.settings.get().passEnv))) as unknown as KernelChild,
         cwd,
       }));
 

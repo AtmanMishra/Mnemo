@@ -135,7 +135,7 @@ export const GROUPS: Group[] = [
     title: "Environment variables",
     rows: [
       ["`MNEMO_HOME`", "where Mnemo keeps its files (default `~/.mnemo`)"],
-      ["`MNEMO_PASS_ENV=NAME,…`", "give named API keys back to commands the agent runs"],
+      ["`MNEMO_PASS_ENV=NAME,…`", "give named variables (an API key, `GITHUB_TOKEN`) to commands the agent runs; they get none otherwise"],
       ["`MNEMO_KERNEL_MEMORY_MB`", "Python kernel memory cap on Linux (default 8192; 0 = none)"],
       ["`MNEMO_MOUSE=0`", "leave the mouse to the terminal"],
       ["`MNEMO_LINKS=0`", "no clickable links"],

@@ -33,6 +33,8 @@ export interface BestOfOptions {
   checkTimeoutMs?: number;
   /** pi's agent folder, for the custom keys models.json names. Default: `<keepDir>/../../agent`, as the controller lays it out. */
   agentDir?: string;
+  /** Variables the check also gets, beyond runtime/env.ts's allowlist (the `passEnv` setting). */
+  passEnv?: string[];
   /** Each candidate's progress, for an interface to draw (candidates are 0-based here). */
   onProgress?: (i: number, state: LaneState, info?: { size?: number; error?: string }) => void;
 }
@@ -165,8 +167,8 @@ export async function bestOf(o: BestOfOptions): Promise<BestOfResult> {
     // The checks run one at a time, once every candidate is done: run side by
     // side they race on shared caches and ports and fail for no fault of the change.
     const candidates: Candidate[] = [];
-    // Without the model keys, models.json's custom ones included, like the agent's own commands.
-    const env = childEnv(process.env, configuredKeys(o.agentDir ?? path.join(o.keepDir, "..", "..", "agent")));
+    // The same environment as the agent's own commands: no model keys, no tokens.
+    const env = childEnv(process.env, configuredKeys(o.agentDir ?? path.join(o.keepDir, "..", "..", "agent")), o.passEnv);
     for (const { cwd, ...c } of done) {
       if (!c.error) o.onProgress?.(c.i - 1, "checking");
       let check = c.patch ? await sh(cwd, o.check, o.checkTimeoutMs ?? 600_000, env) : { ok: false, output: "no change" };
