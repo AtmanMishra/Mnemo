@@ -22,6 +22,7 @@ import { createMcpExtension, createToolSearchExtension, type InlineExtension, ty
 import { StdioTransport, StreamableHttpTransport } from "@earendil-works/pi-mcp";
 import { baseEnv, configuredKeys } from "../runtime/env.ts";
 import type { Host } from "./host.ts";
+import { loadManaged, nameAllowed } from "../policy/managed.ts";
 
 const NAME = /^[A-Za-z0-9_-]+$/;
 const OVERRIDE_KEYS = ["enabled", "exposure", "toolExposure"];
@@ -88,12 +89,20 @@ function read(file: string, scope: "global" | "project", servers: Map<string, Mc
 }
 
 /** Your servers, then a trusted project's, which replace yours of the same name. */
-export function loadMcpServers(agentDir: string, cwd: string, projectTrusted: boolean): LoadedMcpConfig {
+export function loadMcpServers(agentDir: string, cwd: string, projectTrusted: boolean, managedFile?: string): LoadedMcpConfig {
   const servers = new Map<string, McpServerEntry>();
   const errors: string[] = [];
   read(path.join(agentDir, "mcp.json"), "global", servers, errors);
   const projectConfig = projectTrusted ? path.join(cwd, ".pi", "mcp.json") : undefined;
   if (projectConfig) read(projectConfig, "project", servers, errors);
+  // The administrator's list is the last word, whoever's mcp.json named the server.
+  const managed = managedFile === undefined ? undefined : loadManaged(managedFile);
+  const allowed = managed?.error ? [] : managed?.mcpServers;
+  for (const name of servers.keys())
+    if (!nameAllowed(allowed, name)) {
+      servers.delete(name);
+      errors.push(`server "${name}" is not allowed by the managed policy (${managed!.file})`);
+    }
   return { servers: [...servers.values()], autoEnableCodemode: false, errors, ...(projectConfig ? { projectConfig } : {}) };
 }
 

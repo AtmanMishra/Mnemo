@@ -76,9 +76,18 @@ export function kernelExtension(host: Host) {
           try {
             const { kernelTimeout, kernelMaxTimeout } = host.settings.get();
             const seconds = Math.min(kernelMaxTimeout, Math.max(1, params.timeout ?? kernelTimeout));
+            // Deny rules reach what the cell does itself: a command it starts is judged as `bash`,
+            // a file it opens as `read` or `write`. Read once per cell, like the gate per call.
+            const rules = rulesOf(host);
+            const guard = {
+              ...kernelGuard(rules),
+              check: (tool: "bash" | "read" | "write", input: Record<string, unknown>) =>
+                tool === "write" ? (denial(rules, ctx.cwd, "write", input) ?? denial(rules, ctx.cwd, "edit", input)) : denial(rules, ctx.cwd, tool, input),
+            };
             const r = await kernel(ctx.cwd).run(params.code, {
               timeoutMs: seconds * 1000,
               signal,
+              guard,
               // This cell's calls go through this call's context: one shared "current"
               // context let an overlapping call answer another cell's tools.
               dispatch: async (name, args, stopped) => {
