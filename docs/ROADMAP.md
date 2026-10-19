@@ -128,7 +128,8 @@ built-in tools replace Mnemo's own file and shell tools (D2).
   ▢ evidence-gating and `retire_skill` are not.
 - ▣ 2.8 Subcommands: `doctor`, `-p`, `-c`, `--plan`, `--yolo`, `--no-memory`,
   `--demo`, `--dump`. ▢ `consolidate` and `traces` subcommands are not done.
-- ▢ 2.9 *(v0.2)* hooks, schedules, harness engine, `init`, `pr`. ▣ MCP: pi's MCP client
+- ▢ 2.9 *(v0.2)* schedules, harness engine, `init`, `pr`. ▣ hooks (`app/src/extensions/hooks.ts`: PreToolUse,
+  PostToolUse, SessionStart, SessionEnd from `$MNEMO_HOME/hooks.json` and the managed policy). ▣ MCP: pi's MCP client
   (`app/src/extensions/mcp.ts`), tools found by `tool_search`, every call through the gate.
 
 *Verify (stage):* each extension tested against a faux-provider session; the

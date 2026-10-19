@@ -7,6 +7,7 @@ import type { Host } from "./host.ts";
 import { agentsExtension } from "./agents.ts";
 import { checkpointsExtension } from "./checkpoints.ts";
 import { escalateExtension } from "./escalate.ts";
+import { hooksExtension } from "./hooks.ts";
 import { kernelExtension } from "./kernel.ts";
 import { mcpExtensions } from "./mcp.ts";
 import { memoryExtension } from "./memory.ts";
@@ -19,6 +20,8 @@ import { traceExtension } from "./trace.ts";
 export function mnemoExtensions(host: Host): InlineExtension[] {
   return [
     { name: "mnemo-policy", factory: policyExtension(host) },
+    // Right after the gate: a hook sees only calls the gate let through, and can still refuse them.
+    { name: "mnemo-hooks", factory: hooksExtension(host) },
     { name: "mnemo-checkpoints", factory: checkpointsExtension(host) },
     { name: "mnemo-shell", factory: shellExtension(host) },
     { name: "mnemo-memory", factory: memoryExtension(host) },

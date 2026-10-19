@@ -333,6 +333,7 @@ gets a copy one level deeper.
 | extension | what it does |
 |---|---|
 | `mnemo-policy` | `tool_call` — the only hook that decides: rules, mode, grants, then the approval dialog (§3.6) |
+| `mnemo-hooks` | user and managed hooks (`extensions/hooks.ts`): `tool_call` after the gate (PreToolUse, may only refuse), `tool_result` (PostToolUse, may add a note), `session_start`, `session_shutdown` |
 | `mnemo-checkpoints` | `tool_call` on `edit`/`write`: keeps the file's bytes under the current turn (rewind) |
 | `mnemo-shell` | re-registers pi's `bash` with the provider keys taken out of the command's environment |
 | `mnemo-memory` | `before_agent_start` (directive + profiles into the system prompt, recall as a hidden message), `tool_call` (the known-fix guard), `tool_execution_*`, `turn_end`, `agent_end` (verify nudge, then reflection in the background), `session_shutdown`; tools `memory_search`, `session_search`, `memory_remember`, `memory_steer` |
