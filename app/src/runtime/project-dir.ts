@@ -7,8 +7,11 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import { fileURLToPath } from "node:url";
-import { mnemoHome } from "@mnemo/memory";
+
+// Not @mnemo/memory's mnemoHome: this runs before anything else, and the end-to-end suite has no node_modules.
+const mnemoHome = (env: NodeJS.ProcessEnv) => env.MNEMO_HOME?.trim() || path.join(os.homedir(), ".mnemo");
 
 export const PROJECT_DIR = ".agents";
 
