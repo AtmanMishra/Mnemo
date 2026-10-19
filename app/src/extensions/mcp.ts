@@ -1,7 +1,7 @@
 /**
  * MCP servers as tools: pi's own MCP client (stdio and streamable HTTP, OAuth sign-in, `/mcp`),
  * with the servers read from `$MNEMO_HOME/agent/mcp.json` and, for a folder you trusted, its
- * `.pi/mcp.json`, in the `mcpServers` shape other clients use. An HTTP server is the one place
+ * `.agents/mcp.json`, in the `mcpServers` shape other clients use. An HTTP server is the one place
  * besides the model provider Mnemo connects to on its own, so it needs `"allowNetwork": true`
  * in your own file.
  *
@@ -102,7 +102,7 @@ export function loadMcpServers(agentDir: string, cwd: string, projectTrusted: bo
   const servers = new Map<string, McpServerEntry>();
   const errors: string[] = [];
   read(path.join(agentDir, "mcp.json"), "global", servers, errors);
-  const projectConfig = projectTrusted ? path.join(cwd, ".pi", "mcp.json") : undefined;
+  const projectConfig = projectTrusted ? path.join(cwd, ".agents", "mcp.json") : undefined;
   if (projectConfig) read(projectConfig, "project", servers, errors);
   // The administrator's list is the last word, whoever's mcp.json named the server.
   const managed = managedFile === undefined ? undefined : loadManaged(managedFile);

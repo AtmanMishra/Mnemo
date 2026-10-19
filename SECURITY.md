@@ -100,7 +100,7 @@ in a place you can afford to lose: a container, a throwaway checkout.
   them, or `cat /proc/$PPID/environ`: in `default` mode that asks, and no "always"
   grant covers a command that mentions `/proc`, but **in `yolo` and `-p` it runs**
   unless a `deny` rule stops it.
-- **A folder's own `.pi/` extensions, settings, prompts and skills run code and
+- **A folder's own `.agents/` extensions, settings, prompts and skills run code and
   steer the model**, so Mnemo loads them only for a folder you have trusted: it asks
   once at start-up (`a` remembers it), headless runs skip them unless you pass
   `--trust-project`. Do not trust a repository you have not read.
@@ -128,7 +128,7 @@ An administrator can set a policy that the user's own settings and a project can
 widen, in a file only an administrator writes: `/etc/mnemo/managed.json` on Linux,
 `/Library/Application Support/Mnemo/managed.json` on macOS, `%ProgramData%\Mnemo\managed.json`
 on Windows. No variable or flag moves it. Precedence is managed, then the user's
-`permissions.json`, then a folder's `.pi/`.
+`permissions.json`, then a folder's `.agents/`.
 
 ```json
 {
@@ -171,7 +171,7 @@ or run a different program, is not bound by it.
   `mcp.json` is contacted only when its entry says `"allowNetwork": true`; the
   model's tool calls, with their arguments, then go to that address, and
   signing in to it with OAuth talks to its sign-in server. Without that line
-  the server is refused, and a project's `.pi/mcp.json` cannot add one at all.
+  the server is refused, and a project's `.agents/mcp.json` cannot add one at all.
   This is the one connection the agent's own work makes to somewhere other than
   your provider, so it is off until you turn it on per server.
 - Memory is stored locally under `$MNEMO_HOME` (default `~/.mnemo`) in a
@@ -251,7 +251,7 @@ and repositories you trust with all of it.
 
 An MCP server is a program (or a web service) you choose, and its tools do whatever it
 says they do. Mnemo connects only the servers in `$MNEMO_HOME/agent/mcp.json`, plus a
-folder's `.pi/mcp.json` once you have trusted that folder (an untrusted folder's servers
+folder's `.agents/mcp.json` once you have trusted that folder (an untrusted folder's servers
 are never started). A server reached over HTTP is off unless its entry in your own
 `mcp.json` sets `"allowNetwork": true`; a project file cannot add one (so it cannot use
 `"auth"` to send one of your provider credentials anywhere, either).
@@ -269,7 +269,7 @@ are never started). A server reached over HTTP is off unless its entry in your o
   proxies; no model key, `GITHUB_TOKEN`, `AWS_*` or other token) plus exactly what its
   entry's `env` sets. To hand one a token, name it there: `"env": {"GITHUB_TOKEN":
   "$GITHUB_TOKEN"}`. The `passEnv` setting is for commands, not servers. A project's
-  `.pi/mcp.json` may set literal values but not name your variables (`$NAME`), as it may
+  `.agents/mcp.json` may set literal values but not name your variables (`$NAME`), as it may
   not set `auth`. A server still runs as you and can read your files: this keeps
   ambient tokens from reaching it, it does not confine it.
 - **Network.** An HTTP server is reached at the address you configured, and only once
@@ -349,7 +349,7 @@ Since 0.1.7 `/settings` (and `mnemo settings`) change how Mnemo behaves. The ref
   reads or writes the settings, and `config.json` sits in your Mnemo home, outside the project,
   so an edit to it from the agent (a file write or a shell redirect) asks you in `default` and
   `accept-edits` and is refused in `plan`. In `yolo` nothing asks, as for every other file. A
-  project you open cannot set them either: they are read from your home, never from `.pi/` or
+  project you open cannot set them either: they are read from your home, never from `.agents/` or
   the folder.
 - **Key bindings cannot hide a safety key.** `ctrl+c`, `ctrl+d` and `esc` are not rebindable, nor
   are the prompt's line-editing keys, and two actions cannot hold one chord.
