@@ -24,6 +24,7 @@ import { createMcpExtension, createToolSearchExtension, type InlineExtension, ty
 import { StdioTransport, StreamableHttpTransport } from "@earendil-works/pi-mcp";
 import { baseEnv, configuredKeys } from "../runtime/env.ts";
 import type { Host } from "./host.ts";
+import { egress, rulesOf } from "./policy.ts";
 import { loadManaged, nameAllowed } from "../policy/managed.ts";
 
 const NAME = /^[A-Za-z0-9_-]+$/;
@@ -160,13 +161,35 @@ export function mcpTransport(agentDir: string): McpTransportFactory {
   };
 }
 
+/** An HTTP server at an address `net` rules refuse (a deny, cloud metadata) is not connected. */
+export function withoutRefusedHosts(config: LoadedMcpConfig, rules: Parameters<typeof egress>[0]): LoadedMcpConfig {
+  const errors = [...config.errors];
+  const servers = config.servers.filter((s) => {
+    const url = (s.config as { url?: unknown }).url;
+    if (typeof url !== "string") return true;
+    let host: string;
+    try {
+      host = new URL(url).hostname;
+    } catch {
+      return true;
+    }
+    const net = egress(rules, [host]);
+    if (net && "refuse" in net) errors.push(`server "${s.name}": ${net.refuse}`);
+    return !(net && "refuse" in net);
+  });
+  return { ...config, servers, errors };
+}
+
 export function mcpExtensions(host: Host): InlineExtension[] {
   if (host.depth > 0) return [];
   return [
     { name: "tool-search", factory: createToolSearchExtension() },
     {
       name: "mcp",
-      factory: createMcpExtension({ loadConfig: (ctx) => loadMcpServers(host.agentDir, ctx.cwd, ctx.isProjectTrusted(), host.managedFile), createTransport: mcpTransport(host.agentDir) }),
+      factory: createMcpExtension({
+        loadConfig: (ctx) => withoutRefusedHosts(loadMcpServers(host.agentDir, ctx.cwd, ctx.isProjectTrusted(), host.managedFile), rulesOf(host)),
+        createTransport: mcpTransport(host.agentDir),
+      }),
     },
   ];
 }

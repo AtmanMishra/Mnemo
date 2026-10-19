@@ -49,7 +49,9 @@ export interface CellGuard {
   exec: boolean;
   read: boolean;
   write: boolean;
-  check: (tool: "bash" | "read" | "write", input: Record<string, unknown>) => string | undefined;
+  /** Where a cell connects (`socket.connect`, a name it looks up). */
+  net: boolean;
+  check: (tool: "bash" | "read" | "write" | "net", input: Record<string, unknown>) => string | undefined;
 }
 
 export interface KernelResult {
@@ -120,9 +122,9 @@ export class KernelClient {
       }
       const cell = { dispatch: options.dispatch, guard: options.guard, stopped: new AbortController() };
       this.#cell = cell;
-      const { exec = false, read = false, write = false } = options.guard ?? {};
+      const { exec = false, read = false, write = false, net = false } = options.guard ?? {};
       try {
-        return await this.#send(code, options.timeoutMs, options.signal, { exec, read, write });
+        return await this.#send(code, options.timeoutMs, options.signal, { exec, read, write, net });
       } finally {
         // Tool calls the cell left waiting (an approval dialog, say) end with it.
         if (this.#cell === cell) this.#cell = undefined;
@@ -174,7 +176,7 @@ export class KernelClient {
     this.#child = child;
   }
 
-  #send(code: string, timeout?: number, signal?: AbortSignal, guard?: { exec: boolean; read: boolean; write: boolean }): Promise<KernelResult> {
+  #send(code: string, timeout?: number, signal?: AbortSignal, guard?: { exec: boolean; read: boolean; write: boolean; net: boolean }): Promise<KernelResult> {
     const child = this.#child;
     if (!child?.stdin) return Promise.resolve({ ok: false, error: "no interpreter stdin" });
     const id = this.#nextId++;
@@ -262,7 +264,7 @@ export class KernelClient {
       const { tool, input } = parsed as { tool?: unknown; input?: unknown };
       try {
         const guard = this.#cell?.guard;
-        if (guard && (tool === "bash" || tool === "read" || tool === "write") && input && typeof input === "object")
+        if (guard && (tool === "bash" || tool === "read" || tool === "write" || tool === "net") && input && typeof input === "object")
           reason = guard.check(tool, input as Record<string, unknown>);
       } catch {
         /* keeps the refusal */
