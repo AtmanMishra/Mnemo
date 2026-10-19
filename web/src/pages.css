@@ -121,7 +121,7 @@ a.badge { background: var(--sunken); color: var(--cyan); border: 1px solid var(-
 /* Roadmap */
 .rm-lane h2 { display: flex; align-items: center; gap: 12px; }
 .rm-lane .dot { width: 12px; height: 12px; border-radius: 3px; background: var(--faint); flex: none; }
-.rm-building .dot { background: var(--magenta); } .rm-next .dot { background: var(--cyan); }
+.rm-building .dot { background: var(--magenta); } .rm-review .dot { background: var(--mustard); } .rm-unreleased .dot { background: var(--cyan); } .rm-next .dot { background: var(--cyan); }
 .rm-later .dot { background: var(--violet); } .rm-shipped .dot { background: var(--green); } .rm-wont .dot { background: var(--red); }
 .rm-lane .cards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
 
