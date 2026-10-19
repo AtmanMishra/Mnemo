@@ -341,6 +341,7 @@ gets a copy one level deeper.
 | `mnemo-agents` | `spawn_subagent` (absent at the depth cap) |
 | `mnemo-peers` | `list_agents`, `message_agent`; the roster's status, steps and family summary |
 | `mnemo-skills` | `create_skill`, `update_skill` |
+| `mnemo-market` | adds the pinned, intact skill bundles of `mnemo skills` (`app/src/market/`) to the skills pi loads |
 | `mnemo-escalate` | counts failed checks; moves a run to the stronger model (`--escalate`, `MNEMO_ESCALATE_MODEL`) |
 | `mnemo-trace` | one JSON line per tool call and turn |
 

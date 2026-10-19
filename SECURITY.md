@@ -385,6 +385,22 @@ published beside the archive); the attestation is the provenance check.
 it, with the same checksum check and the same limit: the checksum is not
 provenance, so verify the attestation yourself if that matters.
 
+## Skill bundles
+
+`mnemo skills` installs skills other people wrote, and a skill is instructions the model follows,
+so the supply chain is the risk. A bundle is one JSON file of text files (no archive to unpack,
+so no path to escape; names cannot start with a dot, contain `..`, or be absolute) and it is
+pinned by the SHA-256 of its bytes. `install` without `--sha256` only prints the bundle and its
+hash; with it, a different hash installs nothing. A catalog (`--catalog`) holds its own pins.
+Installing writes text into `$MNEMO_HOME/market/<name>/` (folders 0700, files 0600, built
+under an unpredictable staging name and renamed) and records every file's hash in
+`market.lock.json`. Nothing runs at install, and there is no update: to take a new version you
+inspect it, remove the old one and install again. At the start of each session every installed
+skill is re-checked, and one whose files changed, gained a file or turned into a link is left
+out of the session and reported. Mnemo fetches nothing on its own: only an https address you
+type in a `mnemo skills` command (no redirects, metadata addresses refused, 1 MB cap), or a file.
+A pin proves the bytes are the ones you read, not that they are good: read the skill.
+
 ## Uninstalling
 
 `mnemo uninstall` removes the program (`mnemo` and `memsrv` in `$MNEMO_HOME/bin`,

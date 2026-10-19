@@ -60,7 +60,7 @@ Each is a failure that was invisible on the machine it was written on.
 - **No telemetry, and no network calls except to the user's model provider** and to places
   the user names one by one: `mnemo update` and the opt-in update check, an embedding server
   (`MNEMO_EMBED_URL`), and an MCP server over HTTP whose entry in their own `mcp.json` says
-  `"allowNetwork": true`. Nothing in a project can add one. `SECURITY.md` lists them.
+  `"allowNetwork": true`. Nothing in a project can add one. `SECURITY.md` lists them. `mnemo skills` fetches only an https address the user types in that command, pinned by hash.
 
 ## Commits
 
