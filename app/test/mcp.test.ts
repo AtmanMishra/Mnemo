@@ -130,3 +130,36 @@ test("a project's server may not name one of your variables in env or headers", 
   expect(loaded.servers.map((s) => s.name)).toEqual(["c"]);
   expect(loaded.errors.filter((e) => e.includes("may only name your variables"))).toHaveLength(2);
 });
+
+test("an HTTP server connects, with its headers read from your environment", async () => {
+  process.env.MNEMO_TEST_HEADER = "from-your-env";
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      if (req.method !== "POST") return new Response(null, { status: 405 });
+      const msg = (await req.json()) as { id?: number; method: string; params?: { protocolVersion?: string } };
+      if (msg.id === undefined) return new Response(null, { status: 202 });
+      const result =
+        msg.method === "initialize"
+          ? { protocolVersion: msg.params?.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "web", version: "1.0.0" } }
+          : msg.method === "tools/list"
+            ? { tools: [{ name: "header", description: "Echo a request header", inputSchema: { type: "object", properties: {} } }] }
+            : { content: [{ type: "text", text: `header=${req.headers.get("x-test")}` }] };
+      return Response.json({ jsonrpc: "2.0", id: msg.id, result });
+    },
+  });
+  try {
+    const home = homeWith({ web: { url: `http://127.0.0.1:${server.port}/mcp`, exposure: "direct", headers: { "X-Test": "$MNEMO_TEST_HEADER" } } });
+    const e = await mnemoEnv({ home, mode: "yolo" });
+    envs.push(e);
+    e.faux.setResponses([call("mcp__web__header", {}), say("done")]);
+    await e.controller.submit("read the header");
+    await e.idle();
+    const result = e.runtime.session.messages.find((m) => m.role === "toolResult");
+    expect(JSON.stringify(result)).toContain("header=from-your-env");
+  } finally {
+    server.stop(true);
+    delete process.env.MNEMO_TEST_HEADER;
+  }
+}, 30_000);
