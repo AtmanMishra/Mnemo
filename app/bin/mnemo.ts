@@ -39,7 +39,8 @@ import { bestOf, describeBestOf } from "../src/runtime/best-of.ts";
 import { selfCommand } from "../src/runtime/self.ts";
 import { openSettings } from "../src/runtime/settings.ts";
 import { settingsCommand } from "../src/runtime/settings-menu.ts";
-import { checkMemory, findProblems } from "../src/runtime/doctor.ts";
+import { checkMemory, envHints, findProblems } from "../src/runtime/doctor.ts";
+import { chooseModel } from "../src/runtime/model-choice.ts";
 import { describePlan, looksLikeMnemoHome, planUninstall, runUninstall } from "../src/runtime/uninstall.ts";
 import { mayOffer, ownConsole, placementProblems, selfInstall, selfInstallOffer } from "../src/runtime/self-install.ts";
 
@@ -63,6 +64,7 @@ usage
 
 options
   --cwd <dir>              work in another folder
+  --model <provider/id>    use this model for this run (the saved default is untouched; /model changes that)
   --plan                   start in plan mode (read-only)
   --accept-edits           change files in the project without asking (commands still ask)
   --yolo                   ask for nothing (deny rules in permissions.json still hold)
@@ -101,6 +103,7 @@ interface Args {
   bestOf?: number;
   check?: string;
   mode: Mode;
+  model?: string;
   continueRecent: boolean;
   trustProject?: boolean;
   print?: string;
@@ -146,6 +149,7 @@ function parse(argv: string[]): Args {
     else if (v === "--rpc") a.rpc = true;
     else if (v === "-p" || v === "--print") a.print = value(++i, v);
     else if (v === "--cwd") a.cwd = value(++i, v);
+    else if (v === "--model") a.model = value(++i, v);
     else throw new UsageError(`unknown argument ${v} — mnemo --help lists them`);
   }
   return a;
@@ -192,10 +196,15 @@ function silentStdin(): NodeJS.ReadStream {
 async function doctor(home: string, dir: string, fix: boolean): Promise<number> {
   const ok = (b: boolean) => (b ? "✓" : "✗");
   const lines: string[] = [`mnemo ${pkg.version} · bun ${Bun.version} · ${process.platform}-${process.arch}`, `home    ${home}`];
-  const runtime = await startRuntime({ cwd: process.cwd(), agentDir: dir, sessionManager: SessionManager.inMemory(process.cwd()) });
+  // The model a run would start on, chosen the way main() chooses it.
+  const models = await createModelRuntime(dir);
+  const runtime = await startRuntime({ cwd: process.cwd(), agentDir: dir, modelRuntime: models, model: chooseModel(models, { agentDir: dir, continuing: false }).model, sessionManager: SessionManager.inMemory(process.cwd()) });
   const model = runtime.session.model;
   const usable = !!model && runtime.session.modelRuntime.hasConfiguredAuth(model.provider);
   lines.push(`${ok(usable)} model   ${usable ? `${model!.provider}/${model!.id}` : "none — run mnemo, then /login"}`);
+  // AWS credentials come from files and roles Mnemo cannot check without calling Bedrock.
+  if (usable && model!.provider === "amazon-bedrock") lines.push("  note    Bedrock's AWS credentials are not checked here; mnemo -p hi tries them (--model picks another)");
+  for (const h of envHints(process.env)) lines.push(`✗ ${h}`);
   await runtime.dispose();
   const memsrv = findMemsrv(home);
   const memory = memsrv ? await checkMemory(memsrv, journalPath(home), home) : undefined;
@@ -303,6 +312,7 @@ async function runBestOf(args: Args, home: string): Promise<number> {
     ...(args.mode !== "default" ? [`--${args.mode}`] : []),
     ...(args.memory ? [] : ["--no-memory"]),
     ...(args.escalate ? ["--escalate", args.escalate] : []),
+    ...(args.model ? ["--model", args.model] : []),
   ];
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const result = await bestOf({
@@ -504,6 +514,11 @@ async function main(): Promise<number> {
     if (args.dump && args.mode === "default") args.mode = "yolo";
   }
   modelRuntime ??= await createModelRuntime(dir);
+  if (!args.demo) {
+    const choice = chooseModel(modelRuntime, { flag: args.model, agentDir: dir, continuing: args.continueRecent });
+    if (choice.error) return console.error(`mnemo: ${choice.error}`), 2;
+    if (choice.model) injected = { ...injected, model: choice.model };
+  }
   // Not in the demo, whose script expects the mode it was written for. Bypass modes are never a default (see settings.ts).
   if (args.mode === "default" && !args.demo) args.mode = cfg.mode;
   // An administrator's managed policy can rule a mode out (`--yolo`, say); say so rather than pretend.

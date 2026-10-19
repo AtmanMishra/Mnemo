@@ -116,7 +116,7 @@ export const GROUPS: Group[] = [
   {
     id: "cli",
     title: "Command line",
-    after: "Options: `--cwd <dir>`, `--plan`, `--accept-edits`, `--yolo`, `--trust-project`, `--no-memory`, `--no-reflect`, `--no-verify`, `--best-of <n> --check <cmd>`, `--escalate <provider/id>`, `--dump`, `--no-motion`, `--no-boot`, `--inline`, `--intro`, `-v`, `-h`.",
+    after: "Options: `--cwd <dir>`, `--plan`, `--accept-edits`, `--yolo`, `--trust-project`, `--no-memory`, `--no-reflect`, `--no-verify`, `--best-of <n> --check <cmd>`, `--escalate <provider/id>`, `--model <provider/id>`, `--dump`, `--no-motion`, `--no-boot`, `--inline`, `--intro`, `-v`, `-h`.",
     rows: [
       ["`mnemo`", "start in this folder"],
       ["`mnemo -c` / `--continue`", "continue the most recent session here"],

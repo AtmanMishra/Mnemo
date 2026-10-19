@@ -7,6 +7,7 @@ import type { Host } from "./host.ts";
 import { agentsExtension } from "./agents.ts";
 import { checkpointsExtension } from "./checkpoints.ts";
 import { escalateExtension } from "./escalate.ts";
+import { finalErrorsExtension } from "./final-errors.ts";
 import { hooksExtension } from "./hooks.ts";
 import { kernelExtension } from "./kernel.ts";
 import { mcpExtensions } from "./mcp.ts";
@@ -31,6 +32,7 @@ export function mnemoExtensions(host: Host): InlineExtension[] {
     { name: "mnemo-skills", factory: skillsExtension(host) },
     { name: "mnemo-escalate", factory: escalateExtension(host) },
     { name: "mnemo-trace", factory: traceExtension(host) },
+    { name: "mnemo-final-errors", factory: finalErrorsExtension() },
     ...mcpExtensions(host),
   ];
 }
