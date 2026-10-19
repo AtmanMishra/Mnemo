@@ -385,6 +385,21 @@ published beside the archive); the attestation is the provenance check.
 it, with the same checksum check and the same limit: the checksum is not
 provenance, so verify the attestation yourself if that matters.
 
+## Remote view
+
+`/remote` starts a read-only web view of the session, and nothing starts it but you. It
+listens on 127.0.0.1 only, on a random port, behind a random token made for that start
+(`/remote off`, or quitting, ends it). Each request is checked: the `Host` must be the
+loopback address and port it gave out (so a page on another site cannot reach it through DNS
+rebinding), a request naming another `Origin` or `Sec-Fetch-Site` is refused, only GET is served,
+and no CORS header is sent. The token comes in once, in the link, then lives in an HttpOnly,
+SameSite=Strict cookie, and the page has a locked-down content policy and draws text only
+(never HTML). A viewer cannot send anything to the session: no prompt, no answer to an
+approval, and approvals and settings are not shown. What it shows is the transcript the
+terminal shows, with credentials redacted, long output cut, and at most four viewers at once.
+To read it from another device, tunnel the port yourself (`ssh -L`); Mnemo never binds a
+public address. This is a server on your machine, not a call to anyone else's.
+
 ## Uninstalling
 
 `mnemo uninstall` removes the program (`mnemo` and `memsrv` in `$MNEMO_HOME/bin`,

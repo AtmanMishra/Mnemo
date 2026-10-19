@@ -344,6 +344,8 @@ gets a copy one level deeper.
 | `mnemo-escalate` | counts failed checks; moves a run to the stronger model (`--escalate`, `MNEMO_ESCALATE_MODEL`) |
 | `mnemo-trace` | one JSON line per tool call and turn |
 
+`/remote` is `app/src/runtime/remote.ts`, owned by the `Controller`: a loopback-only, token-guarded, read-only view (SECURITY.md).
+
 `Controller` (`runtime/controller.ts`) is the only caller of the session: it owns
 the transcript, the dialog queue and the chrome state, and nothing in `ui/`
 imports pi. That split is what lets a whole turn be tested with a faux model and no
