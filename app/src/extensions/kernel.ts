@@ -17,7 +17,7 @@ import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { KernelClient, spawnKernel, type KernelChild } from "../kernel/kernel.ts";
 import bridgeSource from "../../python/ipy_bridge.py" with { type: "text" };
 import { childEnv, configuredKeys } from "../runtime/env.ts";
-import { callerSignals, denial, kernelGuard, loadRules } from "./policy.ts";
+import { callerSignals, denial, kernelGuard, rulesOf } from "./policy.ts";
 import type { Host } from "./host.ts";
 
 /** Write the bundled bridge where Python can run it; rewrite only when it changed. */
@@ -78,7 +78,7 @@ export function kernelExtension(host: Host) {
             const seconds = Math.min(kernelMaxTimeout, Math.max(1, params.timeout ?? kernelTimeout));
             // Deny rules reach what the cell does itself: a command it starts is judged as `bash`,
             // a file it opens as `read` or `write`. Read once per cell, like the gate per call.
-            const rules = loadRules(host.home);
+            const rules = rulesOf(host);
             const guard = {
               ...kernelGuard(rules),
               check: (tool: "bash" | "read" | "write", input: Record<string, unknown>) =>

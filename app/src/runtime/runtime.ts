@@ -23,6 +23,7 @@ import {
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
+import { enforceModels, loadManaged } from "../policy/managed.ts";
 
 export interface RuntimeOptions {
   cwd: string;
@@ -55,11 +56,13 @@ export function projectTrusted(cwd: string, agentDir: string, override?: boolean
   return new ProjectTrustStore(agentDir).get(cwd) === true;
 }
 
+/** A managed policy's model list holds here, for every request this runtime sends. */
 export async function createModelRuntime(agentDir: string): Promise<ModelRuntime> {
-  return ModelRuntime.create({
+  const runtime = await ModelRuntime.create({
     authPath: path.join(agentDir, "auth.json"),
     modelsPath: path.join(agentDir, "models.json"),
   });
+  return enforceModels(runtime, loadManaged());
 }
 
 /**

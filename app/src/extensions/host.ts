@@ -15,6 +15,7 @@ import { trustedBin } from "../runtime/bin.ts";
 import { Checkpoints } from "../runtime/checkpoints.ts";
 import { Roster, type Access } from "../runtime/roster.ts";
 import { limitsOf, SettingsStore } from "../runtime/settings.ts";
+import { managedPath } from "../policy/managed.ts";
 
 /**
  * How much Mnemo may do without asking.
@@ -40,6 +41,8 @@ export interface HostUi {
 export interface Host {
   home: string;
   agentDir: string;
+  /** The administrator's policy file (policy/managed.ts); its fixed place outside tests. */
+  managedFile: string;
   modelRuntime: ModelRuntime;
   /** Absent when the sidecar is not installed: memory is then simply off. */
   memory?: MemoryService;
@@ -101,6 +104,8 @@ export async function settleBackground(host: Host): Promise<void> {
 export interface HostOptions {
   home: string;
   agentDir: string;
+  /** Tests only: production reads the fixed place, which nothing the user sets can move. */
+  managedFile?: string;
   modelRuntime: ModelRuntime;
   memory?: MemoryService;
   mode?: Mode;
@@ -124,6 +129,7 @@ export function createHost(o: HostOptions): Host {
   return {
     home: o.home,
     agentDir: o.agentDir,
+    managedFile: o.managedFile ?? managedPath(),
     modelRuntime: o.modelRuntime,
     memory: o.memory,
     python:
