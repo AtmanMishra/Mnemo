@@ -91,14 +91,26 @@ export function peersExtension(host: Host) {
       if (m.role === "assistant") roster.spend(me, m.usage?.cost?.total ?? 0);
     });
 
+    // Model calls in this prompt, for `maxTurns`: past it the run is stopped, as at the run budget.
+    let turns = 0;
+    let turnLimitHit = false;
     pi.on("agent_start", async (_e, ctx) => {
       abort = () => ctx.abort();
       streaming = true;
+      turns = 0;
+      turnLimitHit = false;
       roster.setStatus(me, "running");
+    });
+    pi.on("turn_start", async (_e, ctx) => {
+      const limit = roster.limits.maxTurns;
+      if (host.depth !== 0 || limit <= 0 || ++turns <= limit) return;
+      turnLimitHit = true;
+      ctx.abort();
     });
     pi.on("agent_end", async (_e, ctx) => {
       streaming = false;
       if (host.depth === 0) roster.setStatus(me, "idle");
+      if (turnLimitHit) ctx.ui.notify(`Stopped after ${roster.limits.maxTurns} turns in one prompt (/settings maxTurns).`, "warning");
       const budget = roster.limits.runSpend;
       const spent = roster.get(me)?.runSpend ?? 0;
       if (host.depth === 0 && budget > 0 && spent >= budget)

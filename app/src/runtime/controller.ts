@@ -119,7 +119,7 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "theme", description: "the look: Mnemo Night, Dracula, Nord, Gruvbox, Tokyo Night, Catppuccin, Synthwave, Amber CRT, Game Boy, Paper, Solarized" },
   { name: "update", description: "install the latest Mnemo · /update auto on|off: a daily check that only tells you" },
   { name: "settings", description: "change how Mnemo looks and behaves: theme, keys, agent limits, notifications · /settings <name> <value> sets one" },
-  { name: "remote", description: "a read-only web view of this session on this machine: /remote starts it, /remote off stops it" },
+  { name: "remote", description: "a read-only web view of this session on this machine (off until /settings remote is on): /remote starts it, /remote off stops it" },
   { name: "mouse", description: "mouse wheel scrolls the conversation (on) or your terminal selects text (off)" },
   { name: "bestof", description: 'race N attempts at a task, keep the smallest that passes: /bestof 3 "npm test" <task>' },
   { name: "plan", description: "toggle plan mode (read-only)" },
@@ -758,6 +758,10 @@ export class Controller {
         return true;
       }
       case "remote": {
+        if (arg !== "off" && !this.settings.get().remote) {
+          this.transcript.notice("Remote view is off. It is a small web server on this machine, so it stays off until you allow it: /settings remote on", "warn");
+          return true;
+        }
         if (arg === "off") {
           this.remote?.stop();
           this.transcript.notice(this.remote?.running === false ? "Remote view is off." : "Remote view was not running.");

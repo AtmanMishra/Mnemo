@@ -67,9 +67,14 @@ much agents may do on their own; what an agent may *touch* is decided by the gat
 | Python cell time | `kernelTimeout` | 120 s | 5–3600 | seconds a Python cell may run when it names no limit |
 | Python cell ceiling | `kernelMaxTimeout` | 600 s | 5–3600 | the longest a Python cell may ask to run |
 | Code index † | `codeIndex` | on | on · off | index this project's definitions and calls for the code_search, code_symbol, code_refs and code_map tools (`/index off` turns it off for one project; the home folder and folders with more than 10,000 source files are skipped unless you say `/index on`) |
-| Edit impact | `codeImpact` | on | on · off | after an edit, tell the agent which code elsewhere calls what it changed (needs the code index) |
+| Edit impact | `codeImpact` | on | on · off | after an edit that changes a signature, or removes or renames a definition, tell the agent which code elsewhere calls it (needs the code index; a change inside a body says nothing) |
 | Run budget | `runSpend` | $0 (no limit) | 0–1000 | dollars one prompt may spend, sub-agents included, before Mnemo stops it (0: no limit) |
+| Turns per prompt | `maxTurns` | no limit | 0–1000 | model calls one prompt may make before Mnemo stops it (0: no limit) |
+| Auto-compact | `autoCompact` | on | on · off | summarise the conversation by itself when it nears the model's context window (`/compact` does it by hand) |
+| Compact reserve | `compactReserve` | 16384 tokens | 1024–200000 | tokens of the context window left free: compaction starts when less than this remains |
+| Compact keeps | `compactKeep` | 20000 tokens | 1000–200000 | tokens of the most recent conversation kept as they are when it compacts |
 | Pass to commands | `passEnv` | none | variable names, comma-separated | variables bash and Python also get, such as GITHUB_TOKEN, SSH_AUTH_SOCK (they get no tokens otherwise; see SECURITY.md) |
+| Remote view | `remote` | off | on · off | allow `/remote` to start a read-only web view of the session on this machine (127.0.0.1 only, behind a token; `/remote` says how to turn this on while it is off) |
 
 ### Agents
 
@@ -84,6 +89,8 @@ much agents may do on their own; what an agent may *touch* is decided by the gat
 | Message length | `messageChars` | 2000 chars | 100–20000 | characters in one agent-to-agent message |
 | Message rate | `sendsPerMinute` | 30 | 1–300 | messages one agent may send per minute |
 | Held messages | `inbox` | 20 | 1–200 | messages an agent may hold for your next prompt |
+| Sub-agent turns | `subMaxTurns` | 60 turns | 0–1000 | model calls one sub-agent may make before it is stopped and returns what it has (0: no limit) |
+| Sub-agent budget | `subSpend` | no limit | 0–1000 | dollars one sub-agent may spend before it is stopped and returns what it has (0: no limit) |
 
 ### Notifications
 

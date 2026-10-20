@@ -70,3 +70,9 @@ Add an entry to `SCENARIOS` in `scenarios.ts`: projects (a setup function per
 directory), sessions (project + prompts, optional `before` to change the world
 between sessions), and checks that read files, git, the transcript or memory.
 A check returns `true` or a string with the evidence of failure.
+
+## The code index
+
+`bun eval/code-index.ts` measures `code_search`, `code_refs` and the `codeImpact` note against the
+TypeScript compiler and `grep`, with no model and no network. `--sample N` sets how many symbols,
+`--json <file>` keeps the numbers. Results and what they changed: `docs/CODE-INDEX-EVAL.md`.

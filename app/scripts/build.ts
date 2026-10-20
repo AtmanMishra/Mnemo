@@ -7,6 +7,10 @@
  *
  * Ink imports `react-devtools-core` for its optional devtools; nothing installs
  * it, and `--compile` fails on the unresolved import. It is replaced by a stub.
+ *
+ * `splitting` keeps pi, Ink and the rest in chunks that load when bin/mnemo.ts imports them
+ * (see `heavy()` there): one 24 MB bundle took about 400 ms to start whatever the command, and
+ * `--version` or `settings` now take about 30 ms.
  */
 import * as path from "node:path";
 
@@ -28,6 +32,7 @@ const result = await Bun.build({
   entrypoints: [path.join(import.meta.dir, "..", "bin", "mnemo.ts")],
   compile: target ? { outfile, target: target as Bun.Build.CompileTarget } : { outfile },
   plugins: [stubDevtools],
+  splitting: true,
   minify: true,
   sourcemap: "linked",
 });

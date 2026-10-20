@@ -12,7 +12,6 @@ import { Type } from "@earendil-works/pi-ai";
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
-  SettingsManager,
   defineTool,
   SessionManager,
   type ExtensionAPI,
@@ -20,7 +19,7 @@ import {
 import type { Host } from "./host.ts";
 import { RosterError } from "../runtime/roster.ts";
 import { stepLine } from "./peers.ts";
-import { projectTrusted } from "../runtime/runtime.ts";
+import { piSettings, projectTrusted } from "../runtime/runtime.ts";
 
 const READ_ONLY = ["read", "grep", "find", "ls", "code_search", "code_symbol", "code_refs", "code_map", "memory_search", "spawn_subagent", "list_agents", "message_agent"];
 
@@ -79,7 +78,7 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
               cwd: ctx.cwd,
               agentDir: host.agentDir,
               modelRuntime: host.modelRuntime,
-              settingsManager: SettingsManager.create(ctx.cwd, host.agentDir, { projectTrusted: projectTrusted(ctx.cwd, host.agentDir) }),
+              settingsManager: piSettings(ctx.cwd, host.agentDir, projectTrusted(ctx.cwd, host.agentDir), host.settings),
               resourceLoaderOptions: { extensionFactories: extensionsFor(child) },
             });
             ({ session } = await createAgentSessionFromServices({
@@ -90,7 +89,18 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             }));
             await session.bindExtensions({});
             const steps: string[] = [];
+            // A sub-agent that has made its turns or spent its dollars is stopped and returns what it has.
+            let turns = 0;
+            let stoppedBy: string | undefined;
+            const stop = (why: string) => {
+              if (stoppedBy) return;
+              stoppedBy = why;
+              void session?.abort();
+            };
             unsubscribe = session.subscribe((event) => {
+              const { subMaxTurns, subSpend } = host.roster.limits;
+              if (event.type === "turn_start" && subMaxTurns > 0 && ++turns > subMaxTurns) stop(`${subMaxTurns} turns (/settings subMaxTurns)`);
+              if ((event.type === "turn_start" || event.type === "message_end") && subSpend > 0 && (host.roster.get(node.id)?.spent ?? 0) >= subSpend) stop(`$${subSpend.toFixed(2)} (/settings subSpend)`);
               if (event.type === "tool_execution_start") {
                 steps.push(stepLine(event.toolName, (event.args ?? {}) as Record<string, unknown>));
                 onUpdate?.({ content: [{ type: "text", text: steps.slice(-8).join("\n") }], details: { steps: steps.length } });
@@ -102,11 +112,12 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             // A failed model call does not throw out of prompt(): it is the last reply, with an error and no text.
             // Say why, so the parent (and the user) see the cause instead of an empty answer.
             const last = session.messages.filter((m) => m.role === "assistant").at(-1) as { stopReason?: string; errorMessage?: string } | undefined;
-            if (!last || last.stopReason === "error") {
+            if (!stoppedBy && (!last || last.stopReason === "error")) {
               answer = `the sub-agent's model call failed: ${last?.errorMessage?.trim() || "no reply from the model"}`;
               throw new Error(answer);
             }
-            answer = session.getLastAssistantText()?.trim() || "(the sub-agent finished without an answer)";
+            answer = session.getLastAssistantText()?.trim() || (stoppedBy ? "" : "(the sub-agent finished without an answer)");
+            if (stoppedBy) answer = `${answer}${answer ? "\n\n" : ""}[stopped at its limit of ${stoppedBy}; ${answer ? "this is what it had" : "it had nothing to report"}]`;
             outcome = "done";
             return {
               content: [{ type: "text", text: answer }],

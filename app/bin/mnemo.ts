@@ -4,37 +4,28 @@
  * arguments, the terminal, exit codes. Everything else takes what it needs as
  * parameters, so it can be tested without any of these.
  */
-// First: a compiled binary cannot load pi's login flows or Bedrock until this registers them.
-import "../src/runtime/bun-setup.ts";
+// Before anything that reads the environment or pi's project folder as it loads (see sandbox-env.ts, project-dir.ts).
+import "../src/runtime/sandbox-env.ts";
+import "../src/runtime/project-dir.ts";
+import "../src/runtime/pi-env.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { PassThrough } from "node:stream";
-import React from "react";
-import { render } from "ink";
-import { hasTrustRequiringProjectResources, ProjectTrustStore, SessionManager } from "@earendil-works/pi-coding-agent";
 import * as readline from "node:readline/promises";
 import pkg from "../package.json" with { type: "json" };
 import { PROJECT_DIR, strandedPiResources } from "../src/runtime/project-dir.ts";
 import { agentDir, findMemsrv, journalPath, memsrvName, mnemoHome, pointPiAt, skillsDir } from "../src/runtime/paths.ts";
-import { createModelRuntime, startRuntime } from "../src/runtime/runtime.ts";
 import { allowedMode, loadManaged, managedPath } from "../src/policy/managed.ts";
-import { Controller, type Updater } from "../src/runtime/controller.ts";
-import { createDemoProject, createFaux, demoScript, DEMO_PROMPT } from "../src/runtime/demo.ts";
-import { MemoryService } from "@mnemo/memory";
-import { createHost, settleBackground, type Mode } from "../src/extensions/host.ts";
-import { mnemoExtensions } from "../src/extensions/index.ts";
-import { Root } from "../src/ui/Root.tsx";
-import { RpcServer } from "../src/runtime/rpc.ts";
-import { workspaceSource } from "../src/runtime/workspace-source.ts";
-import { runMemoryCommand } from "../src/memory-cli.ts";
+import type { Controller as ControllerType, Updater } from "../src/runtime/controller.ts";
+import type { Mode } from "../src/extensions/host.ts";
+import type { MemoryService as MemoryServiceType } from "@mnemo/memory";
+import type { startRuntime as StartRuntime } from "../src/runtime/runtime.ts";
 import { scheduleCommand } from "../src/schedule/cli.ts";
-import { Fleet } from "../src/runtime/fleet.ts";
-import { Roster } from "../src/runtime/roster.ts";
-import { exitLine } from "../src/ui/ExitCard.tsx";
+import { skillsCommand } from "../src/market/cli.ts";
 import { applyTheme, themePaints, type ThemeName } from "../src/ui/theme.ts";
 import { mouse } from "../src/ui/mouse.ts";
-import { FOCUS_OFF, FOCUS_ON, Notifier } from "../src/ui/notify.ts";
+import { FOCUS_OFF, FOCUS_ON } from "../src/ui/notify.ts";
 import { setLinks } from "../src/ui/link.ts";
 import { clearReplaced, compareVersions, installKind, latestVersion, manualStep, runInstaller, shouldCheck } from "../src/runtime/update.ts";
 import { bestOf, describeBestOf } from "../src/runtime/best-of.ts";
@@ -42,10 +33,66 @@ import { selfCommand } from "../src/runtime/self.ts";
 import { openSettings } from "../src/runtime/settings.ts";
 import { settingsCommand } from "../src/runtime/settings-menu.ts";
 import { checkMemory, envHints, findProblems } from "../src/runtime/doctor.ts";
-import { chooseModel } from "../src/runtime/model-choice.ts";
 import { printNotice } from "../src/runtime/print-notice.ts";
 import { describePlan, looksLikeMnemoHome, planUninstall, runUninstall } from "../src/runtime/uninstall.ts";
 import { mayOffer, ownConsole, placementProblems, selfInstall, selfInstallOffer } from "../src/runtime/self-install.ts";
+
+/**
+ * Everything that loads pi, Ink or the memory client, which is most of the program's startup
+ * (about 400 ms compiled). `--version`, `--help`, `settings`, `update`, `schedule` and the rest
+ * never pay for it; a session, `doctor` and `memory` do, once. bun-setup comes first because a
+ * compiled binary cannot load pi's login flows or Bedrock until it has registered them.
+ */
+async function heavy() {
+  await import("../src/runtime/bun-setup.ts");
+  const [React, ink, pi, memory, runtime, modelChoice, controller, demo, host, extensions, root, rpc, source, memoryCli, fleet, roster, exit, notify] = await Promise.all([
+    import("react"),
+    import("ink"),
+    import("@earendil-works/pi-coding-agent"),
+    import("@mnemo/memory"),
+    import("../src/runtime/runtime.ts"),
+    import("../src/runtime/model-choice.ts"),
+    import("../src/runtime/controller.ts"),
+    import("../src/runtime/demo.ts"),
+    import("../src/extensions/host.ts"),
+    import("../src/extensions/index.ts"),
+    import("../src/ui/Root.tsx"),
+    import("../src/runtime/rpc.ts"),
+    import("../src/runtime/workspace-source.ts"),
+    import("../src/memory-cli.ts"),
+    import("../src/runtime/fleet.ts"),
+    import("../src/runtime/roster.ts"),
+    import("../src/ui/ExitCard.tsx"),
+    import("../src/ui/notify.ts"),
+  ]);
+  return {
+    React: React.default,
+    render: ink.render,
+    hasTrustRequiringProjectResources: pi.hasTrustRequiringProjectResources,
+    ProjectTrustStore: pi.ProjectTrustStore,
+    SessionManager: pi.SessionManager,
+    MemoryService: memory.MemoryService,
+    createModelRuntime: runtime.createModelRuntime,
+    startRuntime: runtime.startRuntime,
+    chooseModel: modelChoice.chooseModel,
+    Controller: controller.Controller,
+    createDemoProject: demo.createDemoProject,
+    createFaux: demo.createFaux,
+    demoScript: demo.demoScript,
+    DEMO_PROMPT: demo.DEMO_PROMPT,
+    createHost: host.createHost,
+    settleBackground: host.settleBackground,
+    mnemoExtensions: extensions.mnemoExtensions,
+    Root: root.Root,
+    RpcServer: rpc.RpcServer,
+    workspaceSource: source.workspaceSource,
+    runMemoryCommand: memoryCli.runMemoryCommand,
+    Fleet: fleet.Fleet,
+    Roster: roster.Roster,
+    exitLine: exit.exitLine,
+    Notifier: notify.Notifier,
+  };
+}
 
 const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
 
@@ -61,6 +108,7 @@ usage
                            credentials and settings · --yes skips the question
   mnemo settings …         every setting: list, get <name>, set <name> <value>, reset [name] (or /settings in a session)
   mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
+  mnemo skills …           install skills from marketplaces, as Claude Code installs plugins (mnemo skills --help)
   mnemo schedule …         run a prompt on a timer, read-only unless you allow actions (mnemo schedule --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
   mnemo --rpc              the session over JSON lines on stdin/stdout, for an editor extension (docs/RPC.md);
@@ -167,6 +215,7 @@ function parse(argv: string[]): Args {
  */
 async function trustDecision(cwd: string, dir: string, args: Args): Promise<boolean | undefined> {
   if (args.trustProject) return true;
+  const { hasTrustRequiringProjectResources, ProjectTrustStore } = await heavy();
   if (!hasTrustRequiringProjectResources(cwd)) return undefined;
   const store = new ProjectTrustStore(dir);
   if (store.get(cwd) !== null) return undefined;
@@ -200,6 +249,7 @@ function silentStdin(): NodeJS.ReadStream {
 async function doctor(home: string, dir: string, fix: boolean): Promise<number> {
   const ok = (b: boolean) => (b ? "✓" : "✗");
   const lines: string[] = [`mnemo ${pkg.version} · bun ${Bun.version} · ${process.platform}-${process.arch}`, `home    ${home}`];
+  const { createModelRuntime, startRuntime, chooseModel, SessionManager, createHost } = await heavy();
   // The model a run would start on, chosen the way main() chooses it.
   const models = await createModelRuntime(dir);
   const runtime = await startRuntime({ cwd: process.cwd(), agentDir: dir, modelRuntime: models, model: chooseModel(models, { agentDir: dir, continuing: false }).model, sessionManager: SessionManager.inMemory(process.cwd()) });
@@ -298,7 +348,7 @@ function writeState(home: string, state: State): void {
 }
 
 /** What the launch sequence counts up: memories, skills, sessions. */
-async function bootStats(memory: MemoryService, runtime: Awaited<ReturnType<typeof startRuntime>>) {
+async function bootStats(memory: MemoryServiceType, runtime: Awaited<ReturnType<typeof StartRuntime>>) {
   const s = await memory.stats().catch(() => undefined);
   if (!s) return undefined;
   return { memories: s.nodes, skills: runtime.session.resourceLoader.getSkills().skills.length, sessions: s.episodes };
@@ -475,10 +525,12 @@ async function main(): Promise<number> {
   if (process.argv[2] === "update") return updateCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "install") return installCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "uninstall") return uninstallCommand(process.argv.slice(3), mnemoHome());
+  if (process.argv[2] === "skills") return skillsCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "schedule") return scheduleCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "memory") {
     const home = mnemoHome();
     pointPiAt(agentDir(home));
+    const { runMemoryCommand } = await heavy();
     return runMemoryCommand(process.argv.slice(3), home, agentDir(home));
   }
   const args = parse(process.argv.slice(2));
@@ -502,6 +554,7 @@ async function main(): Promise<number> {
   const cfg = settings.get();
   args.motion &&= cfg.motion;
   args.boot &&= cfg.bootAnimation;
+  const { React, render, SessionManager, MemoryService, createModelRuntime, startRuntime, chooseModel, Controller, createDemoProject, createFaux, demoScript, DEMO_PROMPT, createHost, settleBackground, mnemoExtensions, Root, RpcServer, workspaceSource, Fleet, Roster, exitLine, Notifier } = await heavy();
 
   let cwd = path.resolve(args.cwd ?? process.cwd());
   let modelRuntime = undefined as Awaited<ReturnType<typeof createModelRuntime>> | undefined;
@@ -551,6 +604,7 @@ async function main(): Promise<number> {
         modelRuntime: runtimeModels,
         continueRecent: first && args.continueRecent,
         trustProject: first ? firstTrust : undefined,
+        settings,
         extensions: mnemoExtensions(host),
         ...(first ? injected : {}),
       });
@@ -646,7 +700,7 @@ async function main(): Promise<number> {
   };
   // Long turns and approvals tell a terminal in the background (see ui/notify.ts).
   const notifier = interactive && cfg.notify && process.env.MNEMO_NOTIFY !== "0" ? new Notifier((t) => process.stdout.write(t), Date.now, () => settings.get().notifyAfter * 1000) : undefined;
-  const watch = (dir: string, c: Controller) => notifier?.watch(path.basename(dir) || dir, c);
+  const watch = (dir: string, c: ControllerType) => notifier?.watch(path.basename(dir) || dir, c);
   // Every agent of this process. The program ends when the last one closes.
   const fleet = new Fleet(
     async (agentCwd, exit) => {
