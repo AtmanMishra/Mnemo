@@ -19,6 +19,7 @@ import { planExtension } from "./plan.ts";
 import { policyExtension } from "./policy.ts";
 import { shellExtension } from "./shell.ts";
 import { skillsExtension } from "./skills.ts";
+import { marketExtension } from "./market.ts";
 import { traceExtension } from "./trace.ts";
 
 export function mnemoExtensions(host: Host): InlineExtension[] {
@@ -37,6 +38,7 @@ export function mnemoExtensions(host: Host): InlineExtension[] {
     { name: "mnemo-agents", factory: agentsExtension(host, mnemoExtensions) },
     { name: "mnemo-peers", factory: peersExtension(host) },
     { name: "mnemo-skills", factory: skillsExtension(host) },
+    { name: "mnemo-market", factory: marketExtension(host) },
     { name: "mnemo-escalate", factory: escalateExtension(host) },
     { name: "mnemo-trace", factory: traceExtension(host) },
     { name: "mnemo-final-errors", factory: finalErrorsExtension() },

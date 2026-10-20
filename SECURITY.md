@@ -196,6 +196,8 @@ and which you cannot remove); a folder's own hooks are never read.
   `PI_SKIP_VERSION_CHECK` before pi loads, and `test/pi-env.test.ts` checks that a `grep` with
   no ripgrep downloads nothing. A sub-agent's `grep` or `find` then reports that `rg` or `fd`
   is missing; install them yourself if you want them.
+- **A skills marketplace, only one you add.** `mnemo skills marketplace add` and `update` run
+  `git clone` of the address you typed (see Skill marketplaces).
 - **An MCP server over HTTP, only one you name.** An HTTP server in your own
   `mcp.json` is contacted only when its entry says `"allowNetwork": true`; the
   model's tool calls, with their arguments, then go to that address, and
@@ -436,7 +438,8 @@ provenance, so verify the attestation yourself if that matters.
 
 ## Remote view
 
-`/remote` starts a read-only web view of the session, and nothing starts it but you. It
+`/remote` starts a read-only web view of the session. It does nothing until you turn on the
+`remote` setting (`/settings remote on`), and then nothing starts it but you. It
 listens on 127.0.0.1 only, on a random port, behind a random token made for that start
 (`/remote off`, or quitting, ends it). Each request is checked: the `Host` must be the
 loopback address and port it gave out (so a page on another site cannot reach it through DNS
@@ -448,6 +451,32 @@ approval, and approvals and settings are not shown. What it shows is the transcr
 terminal shows, with credentials redacted, long output cut, and at most four viewers at once.
 To read it from another device, tunnel the port yourself (`ssh -L`); Mnemo never binds a
 public address. This is a server on your machine, not a call to anyone else's.
+
+## Skill marketplaces
+
+`mnemo skills` installs skills from marketplaces the way Claude Code installs plugins, and a
+skill is instructions the model follows, so what you install is a source of prompt injection you
+chose. Read it first (`mnemo skills show plugin@marketplace`, and the files under
+`~/.mnemo/market/clones/`).
+
+- **The only network use is `git clone` of an address you typed** in `mnemo skills marketplace
+  add` or `update`: `owner/repo` (GitHub) or an `https://` address, one commit deep, with
+  `http`, `ssh`, `file` and passwords in the address refused, the repository's hooks and
+  fsmonitor off, no submodules, and a 2-minute limit. Nothing is fetched at install, at load,
+  or by the agent. A marketplace never updates by itself: `marketplace update` and `skills
+  update` are commands you run.
+- **Nothing from a marketplace runs.** Only a plugin's skills are used (its commands, agents,
+  hooks and servers are ignored), they are copied as plain files (links, devices, `.git` and
+  `node_modules` are skipped; 2 MB per skill), and the folders are 0700 and the files 0600. A
+  skill may ship scripts: the model may ask to run one, and then it goes through the permission
+  gate like any command.
+- **Paths are checked.** A plugin's folder and its `skills` entries must stay inside the
+  marketplace after links are followed; a plugin whose source is another repository is listed
+  as unavailable, not fetched.
+- **A changed skill does not load.** Every file's SHA-256 is recorded at install. At the start of
+  each session each installed skill is re-read, and one whose file changed, gained a file or
+  turned into a link is left out and reported (`mnemo skills verify` says which). This catches
+  tampering after install; it does not tell you the skill was good to begin with.
 
 ## Scheduled runs
 
