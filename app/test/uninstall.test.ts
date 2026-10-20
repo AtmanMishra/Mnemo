@@ -66,7 +66,7 @@ test("a folder that is not plainly Mnemo's is never deleted whole", () => {
 test.skipIf(process.platform === "win32")("the CLI: without a terminal it asks for --yes; with it, --deep deletes the data", () => {
   const { home } = installed();
   const run = (...args: string[]) =>
-    Bun.spawnSync(["bun", path.join(import.meta.dir, "..", "bin", "mnemo.ts"), "uninstall", ...args], { env: { ...process.env, MNEMO_HOME: home }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    Bun.spawnSync(["bun", path.join(import.meta.dir, "..", "bin", "mnemo.ts"), "uninstall", ...args], { env: { ...process.env, MNEMO_HOME: home, PI_PACKAGE_DIR: "" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
   const refused = run("--deep");
   expect(refused.exitCode).toBe(2);
   expect(refused.stderr.toString()).toContain("add --yes");
@@ -104,4 +104,12 @@ test("Windows: a running binary is moved out of the install, so the install and 
   }
   expect(fs.existsSync(home)).toBe(false);
   expect(fs.readdirSync(tmp).filter((f) => /^mnemo(\.exe)?\.[a-z0-9]+\.old$/.test(f))).toHaveLength(1);
+});
+
+test("a home that mnemo itself has run in is still plainly Mnemo's, so --deep can delete it", () => {
+  // v0.1.9 put pi-package beside the rest, the installer refused its own --deep, and nothing else caught it.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-run-"));
+  const r = Bun.spawnSync([process.execPath, path.join(import.meta.dir, "..", "bin", "mnemo.ts"), "doctor"], { env: { ...process.env, MNEMO_HOME: home, PI_PACKAGE_DIR: "" }, stdout: "pipe", stderr: "pipe" });
+  expect(fs.readdirSync(home).length).toBeGreaterThan(0);
+  expect(looksLikeMnemoHome(home, os.tmpdir() + "-nothome"), `doctor left ${fs.readdirSync(home)} (exit ${r.exitCode})`).toBe(true);
 });
