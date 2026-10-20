@@ -47,6 +47,31 @@ export const AREA_LABEL: Record<Area, string> = {
 
 export const RELEASES: Release[] = [
   {
+    version: "0.1.9",
+    date: "2026-10-20",
+    headline: "Hooks, scheduled runs, a code index, language-server diagnostics, skills from marketplaces, a remote view, and egress, environment and managed-policy controls.",
+    changes: [
+      { kind: "added", area: "tools", text: "Hooks", detail: "Your commands run before and after tool calls, prompts and sessions. A hook can stop a call; it cannot approve one the gate refuses." },
+      { kind: "added", area: "agents", text: "mnemo schedule", detail: "Run a prompt on a timer. A scheduled run is read-only unless the job says it may act, and its logs are redacted." },
+      { kind: "added", area: "tools", text: "A code index", detail: "code_* tools over a per-project index (tree-sitter, embedded in the binary) for TypeScript, JavaScript, Python, Rust and Go. Calls are tied to a definition only when the code says which one. It can be switched off per project." },
+      { kind: "added", area: "tools", text: "Language-server diagnostics after an edit", detail: "The result of an edit shows the compiler's errors, so the agent sees them at once." },
+      { kind: "added", area: "tools", text: "Skills from marketplaces", detail: "mnemo skills installs a plugin's skills from owner/repo, an https git address or a folder. Nothing runs on install, and a skill whose files changed after install does not load." },
+      { kind: "added", area: "interface", text: "/remote", detail: "A read-only view of the session on this machine only, with a token for each start. Off until the remote setting allows it." },
+      { kind: "added", area: "interface", text: "Plan mode can ask", detail: "Plan mode tells the model it is planning, and an ask_user tool puts a question to you." },
+      { kind: "added", area: "interface", text: "--model, and settings for limits and compaction", detail: "maxTurns, subMaxTurns, subSpend, autoCompact, compactReserve and compactKeep." },
+      { kind: "changed", area: "install", text: "Faster start", detail: "Every command used to take about 400 ms because one bundle held everything; pi, Ink and the memory client now load only for a session." },
+      { kind: "changed", area: "tools", text: "A folder's resources live in .agents/", detail: "Skills, hooks and extensions are read from .agents/ instead of pi's .pi/." },
+      { kind: "security", area: "safety", text: "An allowlisted environment", detail: "Commands and MCP stdio servers get an allowlist, not your whole environment. MCP over HTTP stays off unless the server's entry says allowNetwork." },
+      { kind: "security", area: "safety", text: "Egress rules", detail: "net rules test the host of a command, a Python cell and an MCP HTTP server; cloud metadata addresses are refused in any spelling unless a rule allows them." },
+      { kind: "security", area: "safety", text: "A managed policy", detail: "An administrator's file that user and project settings cannot widen: models, tools, MCP servers and a mode ceiling. A broken file fails closed." },
+      { kind: "security", area: "safety", text: "Deny rules hold inside the Python tool", detail: "An audit hook asks before a cell starts a process or opens, removes or renames a file. It is a filter, not a sandbox." },
+      { kind: "security", area: "safety", text: "No network habits of pi's", detail: "No ripgrep or fd download, no model catalog, no attribution headers: Mnemo calls only your provider and the places you name." },
+    ],
+    known: [
+      "The gate filters; it is not a sandbox.",
+    ],
+  },
+  {
     version: "0.1.8",
     date: "2026-10-18",
     headline: "A VS Code extension on a new mnemo --rpc mode, MCP servers as tools, a wider /rewind, a per-prompt budget and a round of security fixes.",
