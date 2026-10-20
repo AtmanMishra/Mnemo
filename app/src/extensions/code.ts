@@ -146,7 +146,7 @@ export function codeExtension(host: Host) {
     const drop = (root: string) => {
       close(root);
       try {
-        fs.rmSync(path.dirname(codeIndexPath(host.home, root)), { recursive: true, force: true });
+        fs.rmSync(path.dirname(codeIndexPath(host.home, root)), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
       } catch {
         // another agent on this project still has it open (Windows): it goes with the next /index off
       }
