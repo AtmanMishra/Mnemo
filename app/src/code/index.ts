@@ -201,16 +201,23 @@ export class CodeIndex {
     const insDef = this.db.prepare("INSERT INTO defs (path, qname, name, kind, parent, line, end_line, signature, exported, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     const insFts = this.db.prepare("INSERT INTO defs_fts (rowid, words, signature, path) VALUES (?, ?, ?, ?)");
     const insRef = this.db.prepare("INSERT INTO refs (path, src, kind, name, recv, member, line) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    this.db.transaction(() => {
-      this.forget(rel);
-      this.db.run("INSERT OR REPLACE INTO files VALUES (?, ?, ?, ?, ?)", [rel, st.size, st.mtimeMs, hash, lang]);
-      for (const d of found.definitions) {
-        const signature = redact(d.signature);
-        const r = insDef.run(rel, d.qname, d.name, d.kind, d.parent, d.line, d.endLine, signature, d.exported ? 1 : 0, d.hash);
-        insFts.run(r.lastInsertRowid, `${words(d.qname)} ${d.name.toLowerCase()}`, signature, words(rel));
-      }
-      for (const x of found.references) insRef.run(rel, x.from, x.kind, x.name, x.recvType, x.member ? 1 : 0, x.line);
-    })();
+    try {
+      this.db.transaction(() => {
+        this.forget(rel);
+        this.db.run("INSERT OR REPLACE INTO files VALUES (?, ?, ?, ?, ?)", [rel, st.size, st.mtimeMs, hash, lang]);
+        for (const d of found.definitions) {
+          const signature = redact(d.signature);
+          const r = insDef.run(rel, d.qname, d.name, d.kind, d.parent, d.line, d.endLine, signature, d.exported ? 1 : 0, d.hash);
+          insFts.run(r.lastInsertRowid, `${words(d.qname)} ${d.name.toLowerCase()}`, signature, words(rel));
+        }
+        for (const x of found.references) insRef.run(rel, x.from, x.kind, x.name, x.recvType, x.member ? 1 : 0, x.line);
+      })();
+    } finally {
+      // A statement left unfinalized keeps the database file open after close(), and Windows will not delete an open file.
+      insDef.finalize();
+      insFts.finalize();
+      insRef.finalize();
+    }
     return true;
   }
 
@@ -260,15 +267,16 @@ export class CodeIndex {
       .query("SELECT d.*, bm25(defs_fts, 10.0, 2.0, 1.0) AS rank FROM defs_fts JOIN defs d ON d.id = defs_fts.rowid WHERE defs_fts MATCH ? ORDER BY rank LIMIT ?")
       .all(match, k * 5) as (Record<string, unknown> & { rank: number })[];
     const uses = this.db.prepare("SELECT count(*) AS n FROM refs WHERE name = ? AND kind != 'import'");
-    return rows
-      .map((r) => {
+    const ranked = rows.map((r) => {
         const d = rowDef(r);
         const n = (uses.get(d.name) as { n: number }).n;
         // bm25 is negative, lower is better; a used, exported definition is the likelier answer.
         // Asking for a name by its name finds that definition first.
         const named = d.name.toLowerCase() === query.trim().toLowerCase() || d.qname.toLowerCase() === query.trim().toLowerCase();
         return { d, score: -r.rank + 0.4 * Math.log1p(n) + (d.exported ? 0.3 : 0) + (named ? 100 : 0) };
-      })
+      });
+    uses.finalize();
+    return ranked
       .sort((a, b) => b.score - a.score)
       .slice(0, k)
       .map((s) => s.d);
