@@ -60,6 +60,8 @@ export interface RefreshResult {
   read: number;
   removed: number;
   files: number;
+  /** Set, and nothing read, when the project has more source files than `maxFiles`. */
+  tooMany?: number;
 }
 
 export interface CodeIndexOptions {
@@ -67,6 +69,8 @@ export interface CodeIndexOptions {
   exclude?: (rel: string) => boolean;
   /** The project's files, relative with `/`; tests inject them, the default asks git. */
   list?: (root: string) => string[];
+  /** More source files than this and a refresh reads none: the folder is likely not one project. */
+  maxFiles?: number;
 }
 
 const CALLABLE: SymbolKind[] = ["function", "method", "class", "struct", "enum", "type", "interface", "trait"];
@@ -88,6 +92,7 @@ export class CodeIndex {
   private readonly db: Database;
   private readonly exclude: (rel: string) => boolean;
   private readonly list: (root: string) => string[];
+  private readonly maxFiles: number;
   /** Files each file imports, rebuilt after a refresh changes anything. */
   private importsOf?: Map<string, Set<string>>;
 
@@ -95,6 +100,7 @@ export class CodeIndex {
     this.root = root;
     this.exclude = o.exclude ?? (() => false);
     this.list = o.list ?? listFiles;
+    this.maxFiles = o.maxFiles ?? Number.POSITIVE_INFINITY;
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     this.db = new Database(file);
     try {
@@ -132,6 +138,7 @@ export class CodeIndex {
       (this.db.query("SELECT path, size, mtime, hash FROM files").all() as { path: string; size: number; mtime: number; hash: string }[]).map((r) => [r.path, r]),
     );
     const wanted = this.list(this.root).filter((f) => langOf(f) && !this.exclude(f));
+    if (wanted.length > this.maxFiles) return { read: 0, removed: 0, files: 0, tooMany: wanted.length };
     const seen = new Set<string>();
     let read = 0;
     let ps: Awaited<ReturnType<typeof parsers>> | undefined;

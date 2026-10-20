@@ -9,9 +9,14 @@
  * checks like `read`'s does.
  *
  * Nothing is indexed until the agent first asks: opening Mnemo in a large folder costs
- * nothing until a code question is asked there.
+ * nothing until a code question is asked there. Even then, a folder that is likely not one
+ * project (the home folder, one holding it, a drive's root, or more than MAX_FILES source
+ * files) is not indexed unless the user says so with `/index on`; `/index off` turns the
+ * index off for one project and deletes it. The choice is kept per project under the Mnemo
+ * home, never in the project.
  */
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -23,6 +28,7 @@ import { denial, rulesOf, secretPath } from "./policy.ts";
 
 const SOURCE_LINES = 80;
 const IMPACT_LINES = 8;
+const MAX_FILES = 10_000;
 
 function realRoot(cwd: string): string {
   try {
@@ -30,6 +36,33 @@ function realRoot(cwd: string): string {
   } catch {
     return path.resolve(cwd);
   }
+}
+
+type Choice = "on" | "off";
+const choicesFile = (home: string) => path.join(home, "index", "projects.json");
+
+/** The user's `/index on|off` per project, by real path. */
+export function indexChoices(home: string): Record<string, Choice> {
+  try {
+    return JSON.parse(fs.readFileSync(choicesFile(home), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function setIndexChoice(home: string, root: string, choice: Choice): void {
+  const file = choicesFile(home);
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, `${JSON.stringify({ ...indexChoices(home), [root]: choice }, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** Why a folder is likely not one project: the user's home, a folder holding it, or a drive's root. */
+export function unlikelyProject(root: string, userHome: string): string | undefined {
+  if (path.dirname(root) === root) return "it is the root of a drive";
+  const rel = path.relative(root, userHome);
+  if (rel === "") return "it is your home folder";
+  if (!rel.startsWith("..") && !path.isAbsolute(rel)) return "it holds your home folder";
+  return undefined;
 }
 
 /** A path the model gave, as the index names it. Both sides are real paths, or Windows
@@ -66,21 +99,45 @@ export function codeExtension(host: Host) {
     const indexes = new Map<string, CodeIndex>();
     const sys = nativeSystem();
 
-    const indexFor = (cwd: string): CodeIndex => {
-      const root = realRoot(cwd);
+    const indexFor = (root: string, maxFiles?: number): CodeIndex => {
       let ix = indexes.get(root);
       if (!ix) {
         const rules = rulesOf(host);
         ix = new CodeIndex(codeIndexPath(host.home, root), root, {
           exclude: (rel) => secretPath(host, root, rel, sys) || denial(rules, root, "read", { path: rel }, sys) !== undefined,
+          maxFiles,
         });
         indexes.set(root, ix);
       }
       return ix;
     };
-    const fresh = async (cwd: string): Promise<CodeIndex> => {
-      const ix = indexFor(cwd);
-      await ix.refresh();
+    const close = (root: string) => {
+      indexes.get(root)?.close();
+      indexes.delete(root);
+    };
+    const drop = (root: string) => {
+      close(root);
+      try {
+        fs.rmSync(path.dirname(codeIndexPath(host.home, root)), { recursive: true, force: true });
+      } catch {
+        // another agent on this project still has it open (Windows): it goes with the next /index off
+      }
+    };
+    const elsewise = "Use grep, find and read instead";
+    /** The index for this project, brought up to date, or why there is none. */
+    const fresh = async (cwd: string): Promise<CodeIndex | string> => {
+      const root = realRoot(cwd);
+      const choice = indexChoices(host.home)[root];
+      if (choice === "off") return `The code index is off for this project (the user turned it off with /index off). ${elsewise}.`;
+      const why = choice === "on" ? undefined : unlikelyProject(root, realRoot(os.homedir()));
+      const anyway = "If it is one, the user can index it anyway with /index on.";
+      if (why) return `Not indexing ${root}: ${why}, so it is likely not one project. ${elsewise}. ${anyway}`;
+      const ix = indexFor(root, choice === "on" ? undefined : MAX_FILES);
+      const r = await ix.refresh();
+      if (r.tooMany) {
+        drop(root);
+        return `Not indexing ${root}: it has ${r.tooMany} source files (more than ${MAX_FILES}), so it is likely not one project. ${elsewise}. ${anyway}`;
+      }
       return ix;
     };
     const text = (body: string, details: Record<string, unknown> = {}) => ({ content: [{ type: "text" as const, text: body }], details });
@@ -100,6 +157,7 @@ export function codeExtension(host: Host) {
         }),
         async execute(_id, params, _signal, _update, ctx) {
           const ix = await fresh(ctx.cwd);
+          if (typeof ix === "string") return text(ix);
           const hits = ix.search(params.query, Math.min(Math.max(params.k ?? 10, 1), 50));
           if (!hits.length) return text(`Nothing in the index matches "${params.query}" (${ix.files()} files indexed). Try other words, or grep.`);
           return text(hits.map((d) => `${head(d)}\n    ${d.signature}`).join("\n"), { hits: hits.length });
@@ -121,6 +179,7 @@ export function codeExtension(host: Host) {
         }),
         async execute(_id, params, _signal, _update, ctx) {
           const ix = await fresh(ctx.cwd);
+          if (typeof ix === "string") return text(ix);
           const rel = params.path ? relOf(ix.root, ctx.cwd, params.path) : undefined;
           if (!params.name) {
             if (!rel) return text("Give a name, or a path for that file's outline.");
@@ -160,6 +219,7 @@ export function codeExtension(host: Host) {
         }),
         async execute(_id, params, _signal, _update, ctx) {
           const ix = await fresh(ctx.cwd);
+          if (typeof ix === "string") return text(ix);
           const roots = ix.lookup(params.name).slice(0, 3);
           if (!roots.length) return notFound(ix, params.name);
           const depth = Math.min(Math.max(Math.trunc(params.depth ?? 1), 1), 3);
@@ -207,6 +267,7 @@ export function codeExtension(host: Host) {
         parameters: Type.Object({ path: Type.Optional(Type.String({ description: "A folder in this project (default: all of it)" })) }),
         async execute(_id, params, _signal, _update, ctx) {
           const ix = await fresh(ctx.cwd);
+          if (typeof ix === "string") return text(ix);
           const rel = params.path ? relOf(ix.root, ctx.cwd, params.path) : "";
           const m = ix.map(rel);
           if (!m.dirs.length) return text(`Nothing indexed under ${rel || "this project"}.`);
@@ -223,8 +284,9 @@ export function codeExtension(host: Host) {
       if ((event.toolName !== "edit" && event.toolName !== "write") || event.isError || !host.settings.get().codeImpact) return;
       const file = event.input.path;
       if (typeof file !== "string") return;
-      const ix = indexes.get(realRoot(ctx.cwd));
-      if (!ix || ix.files() === 0) return;
+      const root = realRoot(ctx.cwd);
+      const ix = indexes.get(root);
+      if (!ix || ix.files() === 0 || indexChoices(host.home)[root] === "off") return;
       const rel = relOf(ix.root, ctx.cwd, file);
       if (rel.startsWith("..")) return;
       try {
@@ -242,6 +304,44 @@ export function codeExtension(host: Host) {
       } catch {
         return;
       }
+    });
+
+    pi.registerCommand("index", {
+      description: "the code index for this project: /index on · /index off (deletes it) · /index alone says which",
+      handler: async (args, ctx) => {
+        const root = realRoot(ctx.cwd);
+        const arg = args.trim();
+        if (arg === "on" || arg === "off") {
+          setIndexChoice(host.home, root, arg);
+          if (arg === "off") drop(root);
+          else close(root); // reopened without the size limit
+          ctx.ui.notify(
+            arg === "on"
+              ? `Code index on for ${root}. It is built the first time the agent asks a code question here.`
+              : `Code index off for ${root}, and its index deleted. The agent uses grep, find and read here; /index on turns it back on.`,
+            "info",
+          );
+          return;
+        }
+        if (arg) {
+          ctx.ui.notify("Usage: /index · /index on · /index off", "warning");
+          return;
+        }
+        const choice = indexChoices(host.home)[root];
+        const why = unlikelyProject(root, realRoot(os.homedir()));
+        const n = indexes.get(root)?.files();
+        const files = n ? `${n} file${n === 1 ? "" : "s"} indexed` : undefined;
+        ctx.ui.notify(
+          choice === "off"
+            ? `Code index off for ${root} (/index on turns it on).`
+            : choice === "on"
+              ? `Code index on for ${root}${files ? `: ${files}` : ""}.`
+              : why
+                ? `Code index not used in ${root}: ${why}. /index on indexes it anyway.`
+                : `Code index on for ${root}${files ? `: ${files}` : ", built when the agent first asks a code question"}. /index off turns it off here; a folder with more than ${MAX_FILES} source files is left alone unless you say /index on.`,
+          "info",
+        );
+      },
     });
 
     pi.on("session_shutdown", async () => {

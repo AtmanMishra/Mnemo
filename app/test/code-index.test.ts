@@ -11,7 +11,9 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 import { extract, typeName } from "../src/code/extract.ts";
 import { CodeIndex, resolveImport, words } from "../src/code/index.ts";
 import { parsers } from "../src/code/languages.ts";
+import { indexChoices, unlikelyProject } from "../src/extensions/code.ts";
 import { judge } from "../src/extensions/policy.ts";
+import { codeIndexPath } from "../src/runtime/paths.ts";
 import { defaults, SettingsStore } from "../src/runtime/settings.ts";
 import { mnemoEnv } from "./helpers.ts";
 
@@ -218,6 +220,52 @@ test("files a read may not see are never indexed: credentials and paths a deny r
   expect(out).toContain("visibleThing");
   expect(out).not.toContain("leakedSecretLoader");
   expect(out).not.toContain("hiddenKeyMaker");
+});
+
+test("a folder that is likely not one project is not indexed: home, what holds it, a drive's root, too many files", async () => {
+  const home = path.join(path.parse(os.tmpdir()).root, "users", "me");
+  expect(unlikelyProject(home, home)).toBe("it is your home folder");
+  expect(unlikelyProject(path.dirname(home), home)).toBe("it holds your home folder");
+  expect(unlikelyProject(path.parse(home).root, home)).toBe("it is the root of a drive");
+  expect(unlikelyProject(path.join(home, "code", "app"), home)).toBeUndefined();
+  expect(unlikelyProject(path.join(path.dirname(home), "other"), home)).toBeUndefined();
+  const root = project({ "a.ts": "export function a() {}\n", "b.ts": "export function b() {}\n", "c.py": "def c():\n    pass\n", "notes.md": "# not code\n" });
+  const ix = new CodeIndex(path.join(fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-ix-")), "code.db"), root, { list: walk, maxFiles: 2 });
+  cleanup.push(() => ix.close());
+  expect(await ix.refresh()).toEqual({ read: 0, removed: 0, files: 0, tooMany: 3 });
+  expect(ix.files()).toBe(0);
+});
+
+test("/index off turns the index off for this project and deletes it; /index on brings it back", async () => {
+  const { e, cwd, results } = await session({ "a.ts": "export function alpha() {}\n" });
+  const notices = () => e.controller.transcript.snapshot().committed.flatMap((b) => (b.kind === "notice" ? [b.text] : []));
+  const root = fs.realpathSync.native(cwd);
+  const db = codeIndexPath(e.home, root);
+  e.faux.setResponses([call("code_search", { query: "alpha" }), fauxAssistantMessage(fauxText("done"))]);
+  await e.controller.submit("find alpha");
+  await e.idle();
+  expect(results()[0]).toContain("function alpha");
+  expect(fs.existsSync(db)).toBe(true);
+
+  await e.controller.submit("/index off");
+  expect(notices().at(-1)).toContain("Code index off");
+  expect(indexChoices(e.home)[root]).toBe("off");
+  expect(fs.existsSync(path.dirname(db))).toBe(false);
+  e.faux.setResponses([call("code_search", { query: "alpha" }), fauxAssistantMessage(fauxText("done"))]);
+  await e.controller.submit("find alpha again");
+  await e.idle();
+  expect(results()[1]).toContain("off for this project");
+  expect(fs.existsSync(path.dirname(db))).toBe(false);
+  await e.controller.submit("/index");
+  expect(notices().at(-1)).toContain("Code index off for");
+
+  await e.controller.submit("/index on");
+  e.faux.setResponses([call("code_search", { query: "alpha" }), fauxAssistantMessage(fauxText("done"))]);
+  await e.controller.submit("and again");
+  await e.idle();
+  expect(results()[2]).toContain("function alpha");
+  await e.controller.submit("/index");
+  expect(notices().at(-1)).toContain(": 1 file indexed");
 });
 
 test("off in the settings, there are no code tools", async () => {

@@ -394,7 +394,11 @@ are `code_search` (BM25 over names and signatures, nudged towards used, exported
 depth 3) and `code_map`. All four are read tools to the gate; the index leaves out every file a read
 would be refused (credentials, deny rules) and stores no file bodies. Nothing is indexed until the
 agent first asks; after that, each edit is followed by the callers elsewhere of the definitions it
-changed. The plan this is the first slice of (the text index, memory anchors, ranking by the graph) is
+changed. A folder that is likely not one project (the home folder, a folder holding it, a drive's
+root, or more than 10,000 source files) is not indexed: the tools say so and point the agent at grep.
+`/index off` turns the index off for one project and deletes it, `/index on` indexes a folder the
+guard left alone, and `/index` says which; the choice is kept in `~/.mnemo/index/projects.json`,
+never in the project. The plan this is the first slice of (the text index, memory anchors, ranking by the graph) is
 in the project's architecture document.
 
 `session_search` is a different question from `memory_search`: memory keeps what

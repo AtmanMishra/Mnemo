@@ -134,7 +134,7 @@ export const DEFS: Record<SettingKey, Def> = {
   escalateAfter: int("Behaviour", "Escalate after", "failed checks in one run before escalating", 2, 1, 10, "checks"),
   kernelTimeout: int("Behaviour", "Python cell time", "seconds a Python cell may run when it names no limit", 120, 5, 3600, "s"),
   kernelMaxTimeout: int("Behaviour", "Python cell ceiling", "the longest a Python cell may ask to run", 600, 5, 3600, "s"),
-  codeIndex: bool("Behaviour", "Code index", "index this project's definitions and calls for the code_search, code_symbol, code_refs and code_map tools", true, true),
+  codeIndex: bool("Behaviour", "Code index", "index this project's definitions and calls for the code_search, code_symbol, code_refs and code_map tools (/index off turns it off for one project)", true, true),
   codeImpact: bool("Behaviour", "Edit impact", "after an edit, tell the agent which code elsewhere calls what it changed (needs the code index)", true),
   runSpend: { group: "Behaviour", label: "Run budget", help: "dollars one prompt may spend, sub-agents included, before Mnemo stops it (0: no limit)", kind: "number", default: 0, min: 0, max: 1000, unit: "$" },
   passEnv: { group: "Behaviour", label: "Pass to commands", help: "variables bash and Python also get, comma-separated, such as GITHUB_TOKEN, SSH_AUTH_SOCK (they get no tokens otherwise)", kind: "text", default: "" },
