@@ -351,6 +351,8 @@ gets a copy one level deeper.
 | `mnemo-escalate` | counts failed checks; moves a run to the stronger model (`--escalate`, `MNEMO_ESCALATE_MODEL`) |
 | `mnemo-trace` | one JSON line per tool call and turn |
 
+`/remote` is `app/src/runtime/remote.ts`, owned by the `Controller`: a loopback-only, token-guarded, read-only view (SECURITY.md).
+
 Scheduled runs are not an extension: `app/src/schedule/` (`cron`, `store`, `run`, `cli`) starts `mnemo -p` children from `mnemo schedule`; see SECURITY.md.
 
 `Controller` (`runtime/controller.ts`) is the only caller of the session: it owns
