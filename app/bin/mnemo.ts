@@ -7,6 +7,7 @@
 // Before anything that reads the environment or pi's project folder as it loads (see sandbox-env.ts, project-dir.ts).
 import "../src/runtime/sandbox-env.ts";
 import "../src/runtime/project-dir.ts";
+import "../src/runtime/pi-env.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";

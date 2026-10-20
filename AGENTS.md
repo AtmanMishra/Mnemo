@@ -60,7 +60,7 @@ Each is a failure that was invisible on the machine it was written on.
 - **No telemetry, and no network calls except to the user's model provider** and to places
   the user names one by one: `mnemo update` and the opt-in update check, an embedding server
   (`MNEMO_EMBED_URL`), and an MCP server over HTTP whose entry in their own `mcp.json` says
-  `"allowNetwork": true`. Nothing in a project can add one. `SECURITY.md` lists them. `/remote` is a server, not a call out: loopback only, started by the user, token-guarded.
+  `"allowNetwork": true`. Nothing in a project can add one. `SECURITY.md` lists them. `/remote` is a server, not a call out: loopback only, started by the user, token-guarded. pi's own downloads and attribution headers are switched off in `src/runtime/pi-env.ts`; a new pi upgrade can add another, so re-read its `fetch` calls when bumping it.
 
 ## Commits
 

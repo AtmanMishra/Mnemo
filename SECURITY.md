@@ -189,6 +189,13 @@ and which you cannot remove); a folder's own hooks are never read.
   (`mnemo update --auto on` or `MNEMO_AUTO_UPDATE=1`), which reads
   `github.com/AtmanMishra/Mnemo/releases/latest` once a day and sends nothing
   about you.
+- **pi's own network habits are switched off.** Mnemo runs on pi, which would otherwise
+  download ripgrep and fd from GitHub when `grep` or `find` cannot find them, may refresh a model
+  catalog from pi.dev, and marks requests to OpenRouter, NVIDIA and Cloudflare as coming from
+  "pi". `app/src/runtime/pi-env.ts` sets `PI_OFFLINE`, `PI_TELEMETRY=0` and
+  `PI_SKIP_VERSION_CHECK` before pi loads, and `test/pi-env.test.ts` checks that a `grep` with
+  no ripgrep downloads nothing. A sub-agent's `grep` or `find` then reports that `rg` or `fd`
+  is missing; install them yourself if you want them.
 - **An MCP server over HTTP, only one you name.** An HTTP server in your own
   `mcp.json` is contacted only when its entry says `"allowNetwork": true`; the
   model's tool calls, with their arguments, then go to that address, and
