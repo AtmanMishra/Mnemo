@@ -28,6 +28,8 @@ import { denial, rulesOf, secretPath } from "./policy.ts";
 
 const SOURCE_LINES = 80;
 const IMPACT_LINES = 8;
+const IMPACT_PER_DEFINITION = 3;
+const GUESS_LINES = 5;
 const MAX_FILES = 10_000;
 
 function realRoot(cwd: string): string {
@@ -91,6 +93,32 @@ function edgeLine(e: Edge, side: "from" | "to"): string {
   const name = d ? d.qname : "(top level)";
   const verb = e.kind === "call" ? "" : ` ${e.kind}`;
   return `${name}${verb}  ${e.path}:${e.line}${e.confidence === "inferred" ? "  (inferred: the only definition of that name)" : ""}`;
+}
+
+/**
+ * After `rel` was edited: re-read it, and name the code elsewhere that calls a definition whose
+ * signature the edit changed or that it removed or renamed. Undefined when nothing outside the
+ * file can be affected. Only links the index is sure of (`exact`) count: eval/code-index.ts
+ * measured the guessed ones as wrong about nine times in ten. A change inside a body that leaves
+ * the signature alone says nothing, because no caller can break on it.
+ */
+export async function impactNote(ix: CodeIndex, rel: string): Promise<string | undefined> {
+  const before = ix.fileDefs(rel).filter((d) => d.kind !== "module");
+  // Callers are read first: once the file is re-read, a definition that is gone has no row left to tie them to.
+  const used = new Map(before.map((d) => [d.id, ix.callers(d).edges.filter((e) => e.path !== rel && e.confidence === "exact")]));
+  await ix.refreshFile(rel);
+  const after = new Map(ix.fileDefs(rel).map((d) => [d.qname, d]));
+  const lines: string[] = [];
+  let definitions = 0;
+  for (const b of before) {
+    const edges = used.get(b.id) ?? [];
+    const a = after.get(b.qname);
+    if (!edges.length || (a && a.signature === b.signature)) continue;
+    if (++definitions > 5) break;
+    for (const e of edges.slice(0, IMPACT_PER_DEFINITION)) if (lines.length < IMPACT_LINES) lines.push(`  ${b.qname}${a ? "" : " (gone or renamed)"} ← ${edgeLine(e, "from")}`);
+  }
+  if (!lines.length) return undefined;
+  return `\n\nThis edit changed the signature of, or removed, definitions that other code calls (check they still fit):\n${lines.join("\n")}`;
 }
 
 export function codeExtension(host: Host) {
@@ -242,9 +270,17 @@ export function codeExtension(host: Host) {
                   if (d === 1 && r.untied.length) out.push(`${indent}not in this project or not tied: ${r.untied.slice(0, 20).join(", ")}`);
                 } else {
                   const r = ix.callers(def);
-                  for (const e of r.edges) {
+                  const sure = r.edges.filter((e) => e.confidence === "exact");
+                  const guessed = r.edges.filter((e) => e.confidence === "inferred");
+                  for (const e of sure) {
                     out.push(`${indent}${edgeLine(e, "from")}`);
                     if (e.from && !seen.has(e.from.id)) next.push(e.from), seen.add(e.from.id);
+                  }
+                  // Same name, receiver or import not shown: eval/code-index.ts found these right about one time in eight.
+                  if (d === 1 && guessed.length) {
+                    out.push(`${indent}possible (same name, not confirmed; ${guessed.length}):`);
+                    for (const e of guessed.slice(0, GUESS_LINES)) out.push(`${indent}  ${edgeLine(e, "from").replace(/\s+\(inferred[^)]*\)$/, "")}`);
+                    if (guessed.length > GUESS_LINES) out.push(`${indent}  … ${guessed.length - GUESS_LINES} more (grep ${def.name} finds them)`);
                   }
                   if (r.untied) out.push(`${indent}+ ${r.untied} call${r.untied === 1 ? "" : "s"} to a ${def.name} the index could not tie to one definition (grep finds them)`);
                 }
@@ -290,17 +326,8 @@ export function codeExtension(host: Host) {
       const rel = relOf(ix.root, ctx.cwd, file);
       if (rel.startsWith("..")) return;
       try {
-        const before = ix.fileDefs(rel);
-        await ix.refreshFile(rel);
-        const after = new Map(ix.fileDefs(rel).map((d) => [d.qname, d]));
-        // Changed in place; a definition that is gone has nothing left to tie its callers to.
-        const changed = before.map((b) => after.get(b.qname)).filter((a, i): a is Def => a !== undefined && a.hash !== before[i]!.hash && a.kind !== "module");
-        const lines: string[] = [];
-        for (const d of changed.slice(0, 5))
-          for (const e of ix.callers(d).edges) if (e.path !== rel && lines.length < IMPACT_LINES) lines.push(`  ${d.qname} ← ${edgeLine(e, "from")}`);
-        if (!lines.length) return;
-        const note = `\n\nThis edit changed definitions that other code calls (check they still fit):\n${lines.join("\n")}`;
-        return { content: [...event.content, { type: "text" as const, text: note }] };
+        const note = await impactNote(ix, rel);
+        return note ? { content: [...event.content, { type: "text" as const, text: note }] } : undefined;
       } catch {
         return;
       }

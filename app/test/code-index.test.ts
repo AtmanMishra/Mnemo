@@ -11,7 +11,7 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 import { extract, typeName } from "../src/code/extract.ts";
 import { CodeIndex, resolveImport, words } from "../src/code/index.ts";
 import { parsers } from "../src/code/languages.ts";
-import { indexChoices, unlikelyProject } from "../src/extensions/code.ts";
+import { impactNote, indexChoices, unlikelyProject } from "../src/extensions/code.ts";
 import { judge } from "../src/extensions/policy.ts";
 import { codeIndexPath } from "../src/runtime/paths.ts";
 import { defaults, SettingsStore } from "../src/runtime/settings.ts";
@@ -186,7 +186,7 @@ async function session(files: Record<string, string>, o: { settings?: SettingsSt
   return { e, cwd, results };
 }
 
-test("the four tools answer from the index, and an edit says who calls what it changed", async () => {
+test("the four tools answer from the index, and an edit that changes a signature says who calls it", async () => {
   const { e, results } = await session(app, { linked: true });
   e.faux.setResponses([
     call("code_search", { query: "store put" }),
@@ -194,16 +194,55 @@ test("the four tools answer from the index, and an edit says who calls what it c
     call("code_symbol", { path: "src/store.ts" }),
     call("code_map", {}),
     call("edit", { path: "src/store.ts", edits: [{ oldText: "s.put('x');", newText: "s.put('y');" }] }),
+    call("edit", { path: "src/store.ts", edits: [{ oldText: "save(s: Store)", newText: "save(s: Store, n: number)" }] }),
     fauxAssistantMessage(fauxText("done")),
   ]);
   await e.controller.submit("look around");
   await e.idle();
-  const [search, refs, outline, map, edit] = results();
+  const [search, refs, outline, map, body, edit] = results();
+  // A change inside a body cannot break a caller: no note.
+  expect(body).not.toContain("This edit changed");
   expect(search).toContain("method Store.put  src/store.ts:1");
   expect(refs).toContain("main  src/use.ts:2");
   expect(outline).toContain("1: class Store\\n  1: put(k: string)");
   expect(map).toContain("files indexed");
   expect(edit).toContain("save ← main  src/use.ts:2");
+});
+
+test("impact: a changed signature, a rename and a removal name their callers; a body change and a guessed link do not", async () => {
+  const root = project({
+    "src/a.ts": "export function keep(x: number) { return x; }\nexport function gone(x: number) { return x; }\nexport function swap(x: number) { return x; }\n",
+    "src/b.ts": "import { keep, gone, swap } from './a';\nexport function user() { keep(1); gone(2); swap(3); }\n",
+    // `put` here is a guess (a receiver of unknown type, one method of that name): never part of a note.
+    "src/c.ts": "export class Box { put(k: string) { return k; } }\nexport function guess(x: any) { x.put('y'); }\n",
+  });
+  const ix = indexOf(root);
+  await ix.refresh();
+  // Body only.
+  fs.writeFileSync(path.join(root, "src/a.ts"), fs.readFileSync(path.join(root, "src/a.ts"), "utf8").replace("export function keep(x: number) { return x; }", "export function keep(x: number) { return x + 1; }"));
+  expect(await impactNote(ix, "src/a.ts")).toBeUndefined();
+  // New parameter, one removal, one rename.
+  fs.writeFileSync(path.join(root, "src/a.ts"), "export function keep(x: number, y: number) { return x + y; }\nexport function swapped(x: number) { return x; }\n");
+  const note = (await impactNote(ix, "src/a.ts"))!;
+  expect(note).toContain("keep ← user  src/b.ts:2");
+  expect(note).toContain("gone (gone or renamed) ← user  src/b.ts:2");
+  expect(note).toContain("swap (gone or renamed) ← user  src/b.ts:2");
+  // Editing the class with the guessed caller: nothing to say.
+  fs.writeFileSync(path.join(root, "src/c.ts"), "export class Box { put(k: string, v: string) { return k + v; } }\nexport function guess(x: any) { x.put('y'); }\n");
+  expect(await impactNote(ix, "src/c.ts")).toBeUndefined();
+});
+
+test("a name asked for by its name comes first; code_refs lists guessed callers apart from confirmed ones", async () => {
+  const ix = indexOf(project(app));
+  await ix.refresh();
+  expect(ix.search("save", 5)[0]!.qname).toBe("save");
+  expect(ix.search("Store.put", 5)[0]!.qname).toBe("Store.put");
+  const { e, results } = await session(app, { linked: true });
+  e.faux.setResponses([call("code_refs", { name: "Other.put", direction: "callers" }), fauxAssistantMessage(fauxText("done"))]);
+  await e.controller.submit("who calls it");
+  await e.idle();
+  // x.put('y') in call.ts: a receiver of unknown type and two `put` methods, so it is counted, not offered as a user.
+  expect(results()[0]).not.toContain("src/call.ts:1  (inferred");
 });
 
 test("files a read may not see are never indexed: credentials and paths a deny rule covers", async () => {
@@ -282,4 +321,16 @@ test("the gate: code tools are reads, plan mode included, and a path to credenti
   for (const tool of ["code_search", "code_refs", "code_symbol", "code_map"]) expect(judge({ mode: "plan" }, [], noGrants, "/p", tool, { name: "x" })).toEqual({ allow: true });
   const v = judge({ mode: "default" }, [], noGrants, "/p", "code_symbol", { path: path.join(os.homedir(), ".ssh", "id_rsa") });
   expect(v).toMatchObject({ allow: false });
+});
+
+test("code_refs puts a link it only guessed under 'possible', apart from the confirmed ones", async () => {
+  const { e, results } = await session({
+    "src/c.ts": "export class Box { put(k: string) { return k; } }\nexport function typed(b: Box) { b.put('a'); }\nexport function guess(x) { x.put('y'); }\n",
+  }, { linked: true });
+  e.faux.setResponses([call("code_refs", { name: "Box.put", direction: "callers" }), fauxAssistantMessage(fauxText("done"))]);
+  await e.controller.submit("who calls it");
+  await e.idle();
+  const out = results()[0]!;
+  expect(out).toContain("typed  src/c.ts:2");
+  expect(out).toContain("possible (same name, not confirmed; 1):\\n    guess  src/c.ts:3");
 });

@@ -265,7 +265,9 @@ export class CodeIndex {
         const d = rowDef(r);
         const n = (uses.get(d.name) as { n: number }).n;
         // bm25 is negative, lower is better; a used, exported definition is the likelier answer.
-        return { d, score: -r.rank + 0.4 * Math.log1p(n) + (d.exported ? 0.3 : 0) };
+        // Asking for a name by its name finds that definition first.
+        const named = d.name.toLowerCase() === query.trim().toLowerCase() || d.qname.toLowerCase() === query.trim().toLowerCase();
+        return { d, score: -r.rank + 0.4 * Math.log1p(n) + (d.exported ? 0.3 : 0) + (named ? 100 : 0) };
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, k)

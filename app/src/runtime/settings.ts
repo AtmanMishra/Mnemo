@@ -142,7 +142,7 @@ export const DEFS: Record<SettingKey, Def> = {
   kernelTimeout: int("Behaviour", "Python cell time", "seconds a Python cell may run when it names no limit", 120, 5, 3600, "s"),
   kernelMaxTimeout: int("Behaviour", "Python cell ceiling", "the longest a Python cell may ask to run", 600, 5, 3600, "s"),
   codeIndex: bool("Behaviour", "Code index", "index this project's definitions and calls for the code_search, code_symbol, code_refs and code_map tools (/index off turns it off for one project)", true, true),
-  codeImpact: bool("Behaviour", "Edit impact", "after an edit, tell the agent which code elsewhere calls what it changed (needs the code index)", true),
+  codeImpact: bool("Behaviour", "Edit impact", "after an edit that changes a signature, or removes or renames a definition, tell the agent which code elsewhere calls it (needs the code index; a change inside a body says nothing)", true),
   runSpend: { group: "Behaviour", label: "Run budget", help: "dollars one prompt may spend, sub-agents included, before Mnemo stops it (0: no limit)", kind: "number", default: 0, min: 0, max: 1000, unit: "$" },
   maxTurns: int("Behaviour", "Turns per prompt", "model calls one prompt may make before Mnemo stops it (0: no limit)", 0, 0, 1000, "turns"),
   autoCompact: bool("Behaviour", "Auto-compact", "summarise the conversation by itself when it nears the model's context window (/compact does it by hand)", true),
