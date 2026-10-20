@@ -58,6 +58,15 @@ export const HOME_ENTRIES = [
   "skill-history",
   // the journal's place before it moved into memory/
   "journal.jsonl",
+  // added since: pi's package folder, the code index, skill marketplaces, scheduled runs, hooks, language servers, settings
+  "pi-package",
+  "index",
+  "market",
+  "schedules",
+  "schedules.json",
+  "hooks.json",
+  "lsp.json",
+  "config.json",
 ];
 
 /**

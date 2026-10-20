@@ -176,7 +176,7 @@ mnemo_home() {
   for e in "$1"/* "$1"/.[!.]*; do
     [ -e "$e" ] || continue
     case "${e##*/}" in
-      state.json* | agent | memory | bin | logs | kernel | best-of | permissions.json | grants.json | skill-history | journal.jsonl) found=1 ;;
+      state.json* | agent | memory | bin | logs | kernel | best-of | permissions.json | grants.json | skill-history | journal.jsonl | pi-package | index | market | schedules | schedules.json | hooks.json | lsp.json | config.json) found=1 ;;
       .*) ;;
       *) return 1 ;;
     esac
