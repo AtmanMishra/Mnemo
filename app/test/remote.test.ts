@@ -10,6 +10,7 @@ afterEach(async () => {
 async function setup() {
   const env = await mnemoEnv();
   closers.push(() => env.close());
+  env.controller.settings.set("remote", true);
   await env.controller.submit("/remote");
   const link = /http:\/\/127\.0\.0\.1:\d+\/\?t=[0-9a-f]{64}/.exec(texts(env.controller).join("\n"))?.[0];
   if (!link) throw new Error(`no link in ${texts(env.controller).join("|")}`);
@@ -109,4 +110,13 @@ test("/remote off stops the server, and a new start has a new token", async () =
   expect(links.length).toBe(2);
   expect(links[1]).not.toBe(`?t=${token}`);
   expect(link).toContain(token);
+});
+
+test("/remote does nothing until the remote setting is on, and says how to turn it on", async () => {
+  const env = await mnemoEnv();
+  closers.push(() => env.close());
+  await env.controller.submit("/remote");
+  const said = texts(env.controller).join("\n");
+  expect(said).toContain("/settings remote on");
+  expect(said).not.toMatch(/127\.0\.0\.1:\d+/);
 });

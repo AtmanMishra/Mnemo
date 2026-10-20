@@ -40,10 +40,13 @@ describe("compiled binary", () => {
     expect(await run(false)).toBe("missing");
   }, 120_000);
 
-  test("the entry point imports bun-setup before anything else", () => {
+  test("the entry point loads pi only through heavy(), which runs bun-setup first", () => {
     const entry = fs.readFileSync(path.join(app, "bin", "mnemo.ts"), "utf8");
-    const first = entry.match(/^import .*$/m)?.[0];
-    expect(first).toBe('import "../src/runtime/bun-setup.ts";');
+    // Nothing that loads pi, Ink or the memory client is imported statically: a command that needs none must not pay for them.
+    for (const m of ["@earendil-works/pi-coding-agent", "@mnemo/memory", "ink", "react"]) expect(entry).not.toMatch(new RegExp(`^import (?!type )[^;]*from "${m}";`, "m"));
+    expect(entry).toMatch(/async function heavy\(\) \{\n  await import\("\.\.\/src\/runtime\/bun-setup\.ts"\);/);
+    // The two modules that must run before any import that reads the environment are the first imports.
+    expect(entry.match(/^import "[^"]+";$/gm)?.slice(0, 3)).toEqual(['import "../src/runtime/sandbox-env.ts";', 'import "../src/runtime/project-dir.ts";', 'import "../src/runtime/pi-env.ts";']);
   });
 });
 

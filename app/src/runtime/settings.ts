@@ -65,7 +65,12 @@ export interface Settings extends Record<KeyAction, string> {
   codeIndex: boolean;
   codeImpact: boolean;
   runSpend: number;
+  maxTurns: number;
+  autoCompact: boolean;
+  compactReserve: number;
+  compactKeep: number;
   passEnv: string;
+  remote: boolean;
   // Agents
   maxDepth: number;
   maxChildren: number;
@@ -76,6 +81,8 @@ export interface Settings extends Record<KeyAction, string> {
   messageChars: number;
   sendsPerMinute: number;
   inbox: number;
+  subMaxTurns: number;
+  subSpend: number;
   // Notifications and updates
   notify: boolean;
   notifyAfter: number;
@@ -137,7 +144,13 @@ export const DEFS: Record<SettingKey, Def> = {
   codeIndex: bool("Behaviour", "Code index", "index this project's definitions and calls for the code_search, code_symbol, code_refs and code_map tools (/index off turns it off for one project)", true, true),
   codeImpact: bool("Behaviour", "Edit impact", "after an edit, tell the agent which code elsewhere calls what it changed (needs the code index)", true),
   runSpend: { group: "Behaviour", label: "Run budget", help: "dollars one prompt may spend, sub-agents included, before Mnemo stops it (0: no limit)", kind: "number", default: 0, min: 0, max: 1000, unit: "$" },
+  maxTurns: int("Behaviour", "Turns per prompt", "model calls one prompt may make before Mnemo stops it (0: no limit)", 0, 0, 1000, "turns"),
+  autoCompact: bool("Behaviour", "Auto-compact", "summarise the conversation by itself when it nears the model's context window (/compact does it by hand)", true),
+  compactReserve: int("Behaviour", "Compact reserve", "tokens of the context window left free: compaction starts when less than this remains", 16384, 1024, 200000, "tokens"),
+  compactKeep: int("Behaviour", "Compact keeps", "tokens of the most recent conversation kept as they are when it compacts", 20000, 1000, 200000, "tokens"),
   passEnv: { group: "Behaviour", label: "Pass to commands", help: "variables bash and Python also get, comma-separated, such as GITHUB_TOKEN, SSH_AUTH_SOCK (they get no tokens otherwise)", kind: "text", default: "" },
+
+  remote: bool("Behaviour", "Remote view", "allow /remote to start a read-only web view of the session on this machine (127.0.0.1 only, behind a token; off until you turn this on)", false),
 
   maxDepth: int("Agents", "Sub-agent depth", "how deep sub-agents nest (0: none; raising it reaches conversations opened after)", 3, 0, 6),
   maxChildren: int("Agents", "Sub-agents per agent", "live sub-agents one agent may have", 4, 1, 16),
@@ -148,6 +161,8 @@ export const DEFS: Record<SettingKey, Def> = {
   messageChars: int("Agents", "Message length", "characters in one agent-to-agent message", 2000, 100, 20000, "chars"),
   sendsPerMinute: int("Agents", "Message rate", "messages one agent may send per minute", 30, 1, 300),
   inbox: int("Agents", "Held messages", "messages an agent may hold for your next prompt", 20, 1, 200),
+  subMaxTurns: int("Agents", "Sub-agent turns", "model calls one sub-agent may make before it is stopped and returns what it has (0: no limit)", 60, 0, 1000, "turns"),
+  subSpend: { group: "Agents", label: "Sub-agent budget", help: "dollars one sub-agent may spend before it is stopped and returns what it has (0: no limit)", kind: "number", default: 0, min: 0, max: 1000, unit: "$" },
 
   notify: bool("Notifications", "Desktop notice", "tell the terminal when a long turn ends or Mnemo asks, while it is in the background (MNEMO_NOTIFY=0 overrides)", true, true),
   notifyAfter: int("Notifications", "Notify after", "a turn must run this long to notify", 20, 0, 3600, "s"),
@@ -178,7 +193,12 @@ export function defaults(): Settings {
 
 /** The roster's caps, from the settings that name them. */
 export function limitsOf(s: Settings): Partial<Limits> {
-  return { maxDepth: s.maxDepth, maxChildren: s.maxChildren, maxLive: s.maxLive, hops: s.hops, wakeSpend: s.wakeSpend, runSpend: s.runSpend, messageChars: s.messageChars, sendsPerWindow: s.sendsPerMinute, inbox: s.inbox };
+  return { maxDepth: s.maxDepth, maxChildren: s.maxChildren, maxLive: s.maxLive, hops: s.hops, wakeSpend: s.wakeSpend, runSpend: s.runSpend, messageChars: s.messageChars, sendsPerWindow: s.sendsPerMinute, inbox: s.inbox, maxTurns: s.maxTurns, subMaxTurns: s.subMaxTurns, subSpend: s.subSpend };
+}
+
+/** What pi's compaction should do, from the settings. */
+export function compactionOf(s: Settings): { compaction: { enabled: boolean; reserveTokens: number; keepRecentTokens: number } } {
+  return { compaction: { enabled: s.autoCompact, reserveTokens: s.compactReserve, keepRecentTokens: s.compactKeep } };
 }
 
 export const isKey = (k: string): k is SettingKey => Object.hasOwn(DEFS, k);
@@ -304,6 +324,8 @@ export function showValue(key: SettingKey, value: Settings[SettingKey]): string 
   if (def.kind === "bool") return value ? "on" : "off";
   if (def.kind === "text") return value === "" ? "none" : String(value);
   if (key === "wakeSpend") return `$${(value as number).toFixed(2)}`;
+  if (key === "subSpend") return value === 0 ? "no limit" : `$${(value as number).toFixed(2)}`;
+  if ((key === "maxTurns" || key === "subMaxTurns") && value === 0) return "no limit";
   return def.unit && def.kind !== "chord" ? `${value} ${def.unit}` : String(value);
 }
 

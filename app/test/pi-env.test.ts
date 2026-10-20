@@ -25,7 +25,7 @@ test("grep without ripgrep on PATH says so and downloads nothing", async () => {
   globalThis.fetch = ((url: unknown) => {
     calls.push(String(url));
     throw new Error("no network in this test");
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
   process.env.PATH = empty;
   process.env.MNEMO_HOME = path.join(empty, "home");
   try {

@@ -24,6 +24,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
 import { enforceModels, loadManaged } from "../policy/managed.ts";
+import { compactionOf, type Settings } from "./settings.ts";
 
 export interface RuntimeOptions {
   cwd: string;
@@ -42,6 +43,25 @@ export interface RuntimeOptions {
    * Left out, a folder that carries any is trusted only if the user said so earlier.
    */
   trustProject?: boolean;
+  /** The user's settings, read each time a conversation opens: auto-compaction follows them (settings.ts, `compactionOf`). */
+  settings?: { get(): Settings };
+}
+
+/**
+ * pi's settings for `cwd`, with the user's compaction choices over them. They are read at each
+ * check, not copied at the start, so `/settings autoCompact off` applies to the conversation
+ * already open. (`applyOverrides` is not enough: pi rebuilds its settings when it reloads.)
+ */
+export function piSettings(cwd: string, agentDir: string, trusted: boolean, mnemo?: { get(): Settings }): SettingsManager {
+  const manager = SettingsManager.create(cwd, agentDir, { projectTrusted: trusted });
+  if (mnemo) {
+    const now = () => compactionOf(mnemo.get()).compaction;
+    manager.getCompactionEnabled = () => now().enabled;
+    manager.getCompactionReserveTokens = () => now().reserveTokens;
+    manager.getCompactionKeepRecentTokens = () => now().keepRecentTokens;
+    manager.getCompactionSettings = () => now();
+  }
+  return manager;
 }
 
 /**
@@ -95,7 +115,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<AgentSessio
       cwd,
       agentDir: options.agentDir,
       modelRuntime,
-      settingsManager: SettingsManager.create(cwd, options.agentDir, { projectTrusted: projectTrusted(cwd, options.agentDir, options.trustProject) }),
+      settingsManager: piSettings(cwd, options.agentDir, projectTrusted(cwd, options.agentDir, options.trustProject), options.settings),
       // First, so extensions that build on the rendered prompt (memory recall) see the section it sets.
       resourceLoaderOptions: { extensionFactories: [piDocs, ...(options.extensions ?? [])] },
     });

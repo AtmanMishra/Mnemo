@@ -601,6 +601,7 @@ async function main(): Promise<number> {
         modelRuntime: runtimeModels,
         continueRecent: first && args.continueRecent,
         trustProject: first ? firstTrust : undefined,
+        settings,
         extensions: mnemoExtensions(host),
         ...(first ? injected : {}),
       });

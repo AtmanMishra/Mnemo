@@ -57,6 +57,7 @@ export async function mnemoEnv(o: EnvOptions = {}) {
     model: faux.getModel(),
     sessionManager: o.persistent ? undefined : SessionManager.inMemory(cwd),
     extensions: mnemoExtensions(host),
+    settings: o.settings,
   });
   const controller = new Controller(runtime, { exit: () => {}, host, updater: o.updater });
   await controller.bind();

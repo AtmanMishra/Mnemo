@@ -55,6 +55,12 @@ export const LIMITS = {
    * the run is stopped. 0 is no limit.
    */
   runSpend: 0,
+  /** Model calls one prompt of a root may make before it is stopped. 0 is no limit. */
+  maxTurns: 0,
+  /** Model calls one sub-agent may make before it is stopped (it returns what it has). 0 is no limit. */
+  subMaxTurns: 60,
+  /** Dollars one sub-agent may spend before it is stopped. 0 is no limit. */
+  subSpend: 0,
   /** Step lines and events kept. */
   steps: 20,
   events: 300,
@@ -91,6 +97,8 @@ export interface RosterNode {
   wakeSpend: number;
   /** Dollars spent since its user last prompted, whoever started the turn (see `LIMITS.runSpend`). */
   runSpend: number;
+  /** Dollars this node's own model calls cost (a sub-agent's `subSpend` is held against it). */
+  spent: number;
 }
 
 export type RosterEvent =
@@ -359,6 +367,8 @@ export class Roster implements RosterView {
    */
   spend(id: number, usd: number): void {
     if (!(usd > 0)) return;
+    const own = this.nodes.get(id);
+    if (own) own.spent += usd;
     let root = this.nodes.get(id);
     while (root && root.parent !== undefined) root = this.nodes.get(root.parent);
     if (!root) return;
@@ -494,7 +504,7 @@ export class Roster implements RosterView {
 
   // ── internals ────────────────────────────────────────────────────────────
   private make(o: Pick<RosterNode, "kind" | "label" | "task" | "depth" | "access" | "status"> & Partial<RosterNode>): RosterNode {
-    const node: RosterNode = { steps: [], stepCount: 0, startedAt: this.now(), pending: 0, hops: 0, woken: false, wakeSpend: 0, runSpend: 0, ...o, id: this.nextNode++ };
+    const node: RosterNode = { steps: [], stepCount: 0, startedAt: this.now(), pending: 0, hops: 0, woken: false, wakeSpend: 0, runSpend: 0, spent: 0, ...o, id: this.nextNode++ };
     this.nodes.set(node.id, node);
     this.labels.set(node.id, node.label);
     return node;
