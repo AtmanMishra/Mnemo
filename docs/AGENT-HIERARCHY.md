@@ -123,6 +123,16 @@ the parent may lower each, never raise it past the setting (except where the set
 `list_agents`, the agents page, the pane and the playground show
 `demo-model · 12/60 turns · $0.03`.
 
+**Agent profiles**: a profile is a saved sub-agent, one Markdown file per name in
+`~/.mnemo/agent/agents/` or a trusted folder's `.agents/agents/` (yours win on a name both
+have). Its frontmatter sets `description` (required), `model`, `thinking`, `access`, `tools`,
+`maxTurns`, `budget`, `maxTokens` and `contextTokens`; its body becomes the sub-agent's
+instructions, in its system prompt. `spawn_subagent(profile: "reviewer", task)` starts one;
+what the parent also sets wins over the profile, and your sub-agent settings cap both. An
+agent that can start sub-agents sees the profiles' names and descriptions in its system
+prompt; with none saved, nothing is added. A `tools` list narrows what the access allows,
+and the team tools (`list_agents`, `message_agent`, `task_update`) always stay.
+
 **Saved sub-agents**: a saved conversation keeps each sub-agent's transcript in
 `<session>/sub/` and a `<session>.state.json` with every agent it started (see
 `docs/MNEMO-INTERNALS.md` §1). The live roster keeps the last 40 ended sub-agents per

@@ -25,6 +25,7 @@ import { SUB_CONTEXT_MIN, THINKING_CHOICES, type Settings } from "../runtime/set
 import { loadManaged, nameAllowed } from "../policy/managed.ts";
 import { loadHooks, subagentHooks } from "./hooks.ts";
 import { subDirOf } from "../runtime/session-files.ts";
+import { loadProfiles, profileTools } from "../runtime/profiles.ts";
 
 /** What a parent asked for one sub-agent, beside its brief. */
 export interface SpawnAsk {
@@ -124,6 +125,15 @@ const READ_ONLY = ["read", "grep", "find", "ls", "code_search", "code_symbol", "
 
 export function agentsExtension(host: Host, extensionsFor: (child: Host) => import("@earendil-works/pi-coding-agent").InlineExtension[]) {
   return (pi: ExtensionAPI): void => {
+    // A profiled sub-agent's instructions, and the profiles a parent can start: in the system prompt, as the user's or a trusted project's.
+    pi.on("before_agent_start", (event, ctx) => {
+      if (host.profile) event.systemPromptOptions.sections.profile = `You are working as the "${host.profile.name}" agent. Its instructions:\n\n${host.profile.body}`;
+      if (host.depth >= host.roster.limits.maxDepth || !pi.getActiveTools().includes("spawn_subagent")) return;
+      const { profiles } = loadProfiles(host.home, ctx.cwd, ctx.isProjectTrusted());
+      if (profiles.size)
+        event.systemPromptOptions.sections.agent_profiles =
+          "Saved sub-agent profiles (spawn_subagent with profile: name):\n" + [...profiles.values()].map((p) => `- ${p.name}: ${p.description}`).join("\n");
+    });
     if (host.depth >= host.roster.limits.maxDepth) return;
     // Read once per session, as the hooks extension does.
     const { hooks } = loadHooks(host);
@@ -138,6 +148,7 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
           "Model and limits default to the user's settings; you may lower them (a cheaper model or a smaller budget for a simple task), never raise them past the user's.",
         parameters: Type.Object({
           task: Type.String({ description: "The complete brief" }),
+          profile: Type.Optional(Type.String({ description: "A saved profile's name: its model, tools, limits and instructions; what you set here overrides it" })),
           name: Type.Optional(Type.String({ description: "A short name for it, e.g. 'auth researcher'" })),
           access: Type.Optional(Type.Union([Type.Literal("read-only"), Type.Literal("full")])),
           model: Type.Optional(Type.String({ description: "provider/id" })),
@@ -149,9 +160,19 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
         }),
         async execute(_id, params, signal, onUpdate, ctx) {
           if (!ctx.model) throw new Error("no model is selected");
-          const access = params.access === "full" ? "full" : "read-only";
+          let profile;
+          if (params.profile) {
+            const { profiles } = loadProfiles(host.home, ctx.cwd, ctx.isProjectTrusted());
+            profile = profiles.get(params.profile.trim());
+            if (!profile) throw new Error(`no profile ${params.profile}${profiles.size ? `; there are ${[...profiles.keys()].join(", ")}` : ""}`);
+          }
+          // What the parent set wins over the profile; both are asks the user's settings cap.
+          const given = Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined));
+          const ask = { ...profile, ...given };
+          const access = ask.access === "full" ? "full" : "read-only";
+          const label = params.name ?? profile?.name ?? "";
           const resolved = resolveSpawn({
-            ask: params,
+            ask,
             settings: host.settings.get(),
             limits: host.roster.limits,
             parent: ctx.model,
@@ -166,7 +187,7 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
           const refused = await subagentHooks(
             hooks,
             "SubagentStart",
-            { parent: host.node, depth: host.depth + 1, name: params.name ?? "", task: params.task, access, model: modelName, thinking: plan.thinking, caps: plan.caps, cwd: ctx.cwd },
+            { parent: host.node, depth: host.depth + 1, name: label, task: params.task, access, model: modelName, thinking: plan.thinking, caps: plan.caps, profile: profile?.name, cwd: ctx.cwd },
             ctx.cwd,
             host.agentDir,
           );
@@ -176,7 +197,7 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
           const subDir = host.depth === 0 ? (rootFile ? subDirOf(rootFile) : undefined) : host.subDir;
           let node;
           try {
-            node = host.roster.addSub(host.node, { label: params.name ?? "", task: params.task, access, model: modelName, thinking: plan.thinking, caps: plan.caps });
+            node = host.roster.addSub(host.node, { label, task: params.task, access, model: modelName, thinking: plan.thinking, caps: plan.caps });
           } catch (e) {
             if (e instanceof RosterError) throw new Error(e.message);
             throw e;
@@ -191,6 +212,7 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             episode: undefined,
             parentEpisode: host.episode,
             subDir,
+            profile: profile && { name: profile.name, body: profile.body },
           };
           // The mode is the user's, and they can change it while the child works:
           // a copy taken at spawn time kept a child in yolo after a switch to plan.
@@ -219,7 +241,7 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
               sessionManager: subDir ? SessionManager.create(ctx.cwd, subDir, { parentSession: rootFile ?? undefined }) : SessionManager.inMemory(ctx.cwd),
               model: plan.model,
               thinkingLevel: plan.thinking as never,
-              tools: access === "full" ? undefined : READ_ONLY,
+              tools: profile ? profileTools(profile, access === "full" ? undefined : READ_ONLY) : access === "full" ? undefined : READ_ONLY,
             }));
             await session.bindExtensions({});
             const file = session.sessionManager.getSessionFile();
@@ -261,7 +283,7 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             answer = session.getLastAssistantText()?.trim() || (stoppedBy ? "" : "(the sub-agent finished without an answer)");
             if (stoppedBy) answer = `${answer}${answer ? "\n\n" : ""}[stopped at its limit of ${stoppedBy}; ${answer ? "this is what it had" : "it had nothing to report"}]`;
             outcome = "done";
-            const ran = `[ran on ${plan.model.provider}/${plan.model.id}, thinking ${session.thinkingLevel}${plan.notes.length ? `; ${plan.notes.join("; ")}` : ""}]`;
+            const ran = `[ran${profile ? ` as profile ${profile.name}` : ""} on ${plan.model.provider}/${plan.model.id}, thinking ${session.thinkingLevel}${plan.notes.length ? `; ${plan.notes.join("; ")}` : ""}]`;
             return {
               content: [{ type: "text", text: `${answer}\n\n${ran}` }],
               details: { steps: steps.length, cost: session.getSessionStats().cost, node: node.id, model: `${plan.model.provider}/${plan.model.id}` },

@@ -89,6 +89,8 @@ export interface Host {
   parentEpisode?: number;
   /** For a sub-agent: where the transcripts of its tree are saved (the root session's `sub/` folder); unset when that session is not saved. */
   subDir?: string;
+  /** For a sub-agent started from a profile: its name and instructions (runtime/profiles.ts). */
+  profile?: { name: string; body: string };
 }
 
 /** Run something after the fact without letting it fail the turn, and keep track of it. */
