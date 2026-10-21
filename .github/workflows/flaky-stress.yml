@@ -51,6 +51,13 @@ jobs:
       - name: step timings, workspace folder
         shell: bash
         run: bun .github/flaky-diag/sessions-diag.ts "$GITHUB_WORKSPACE/.." 60
+      - name: temp folder on the fast disk, as ci.yml does
+        shell: bash
+        run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: step timings, temp folder after the move
+        run: bun .github/flaky-diag/sessions-diag.ts "" 60
       - name: memory package tests, 30 times
         working-directory: packages/memory
         shell: bash
