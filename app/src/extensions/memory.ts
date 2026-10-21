@@ -3,12 +3,13 @@
  * `MemorySession` from @mnemo/memory, which holds the loop itself (and is
  * what other agents attach to). This file owns only what is pi's: the tools'
  * schemas, the event shapes, the model call for reflection, the approval
- * dialog for saving a skill, and running reflection in the background.
+ * dialogs for saving a skill or a team run's lesson, and running reflection in the background.
  */
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describeSessionHits, MemorySession, SessionIndex, textOf, type Reflector } from "@mnemo/memory";
 import { sessionIndexPath, sessionSources, skillsDir } from "../runtime/paths.ts";
+import { boardOf } from "../runtime/team.ts";
 import { inBackground, type Host } from "./host.ts";
 
 export { describeHit, DIRECTIVE, profileBlock, recallMessage } from "@mnemo/memory";
@@ -49,6 +50,17 @@ export function memoryExtension(host: Host) {
             subject: offer.file,
             preview: offer.body.split("\n").map((text) => ({ text: `+ ${text}`, tone: "add" as const })),
             reason: offer.reason,
+          });
+          return answer.kind !== "no";
+        },
+        // A team run's lesson, kept only if the user says so: it is recalled into every later session.
+        approveLesson: async (lesson) => {
+          if (!host.ui) return false;
+          const answer = await host.ui.approve({
+            tool: "Save team lesson",
+            subject: lesson.cue,
+            preview: [{ text: `+ ${lesson.lesson}`, tone: "add" as const }],
+            reason: `${lesson.evidence ? `${lesson.evidence} ` : ""}(${lesson.confidence} confidence; kept in this project's memory, recalled at the start of later sessions)`,
           });
           return answer.kind !== "no";
         },
@@ -197,7 +209,8 @@ export function memoryExtension(host: Host) {
       }
       held = [];
       if (ctx.model) reflectWith = { model: ctx.model, sessionId: ctx.sessionManager.getSessionId() };
-      const run = { messages, signals: host.signals.splice(0) };
+      const runId = host.roster.get(host.node)?.run;
+      const run = { messages, signals: host.signals.splice(0), team: runId ? boardOf(host.roster, host.home).record(runId) : "" };
       inBackground(host, () => s.end(run));
     });
 

@@ -178,6 +178,15 @@ start of each turn, and with each peer message, an agent is shown what the other
 run did since it last looked, as data. `/task` shows the plan and where the files are; old
 run folders go after `keepSubTranscripts` days.
 
+**A team's lesson**: when a team run ends, the reflection that follows every run also reads
+its `TASK.md` and the last 30 lines of `LOG.md`, and may return one lesson about how the
+agents worked together (how to split the work, whom to hand what, what to check before a
+step is done), with when it applies, the evidence and a confidence. A guess is dropped; for
+the rest you are asked ("Save team lesson"). An accepted lesson is a project fact,
+`team lesson (<when it applies>)`, so every later session in the project starts with it; a
+later lesson for the same case replaces it. A run one agent did alone is reflected on as
+before, with nothing added to the prompt.
+
 ## Not yet
 
 User-typed messages into the tree from the playground (it stays supervise-only).

@@ -72,6 +72,8 @@ export interface DigestInput {
   signals: readonly string[];
   /** Skills the agent read and followed in this run, as they stood. */
   skills?: readonly { name: string; body: string }[];
+  /** A team run's TASK.md and the end of its LOG.md, when more than one agent worked on it. */
+  team?: string;
 }
 
 /** One run, condensed and grounded. Bounded so a long run costs a bounded call. */
@@ -100,8 +102,11 @@ export function digest(d: DigestInput, max = 9000): string {
   const all = parts.join("\n");
   const run = all.length > max ? `${all.slice(0, max)}\n…` : all;
   // Skills have their own allowance after the run: a long run must not crowd out what a patch needs.
-  if (!d.skills?.length) return run;
-  return [run, "", "SKILLS FOLLOWED (as they stood):", ...d.skills.slice(0, 3).map((s) => `--- ${s.name}\n${clip(s.body, 1500)}`)].join("\n");
+  const out = [run];
+  if (d.skills?.length) out.push("", "SKILLS FOLLOWED (as they stood):", ...d.skills.slice(0, 3).map((s) => `--- ${s.name}\n${clip(s.body, 1500)}`));
+  // So does the team's record: how the agents split and handed off the work is what a lesson is about.
+  if (d.team?.trim()) out.push("", "TEAM RUN (TASK.md and the end of LOG.md, as the agents wrote them):", clip(d.team.trim(), 3000));
+  return out.join("\n");
 }
 
 export const REFLECT_PROMPT = `You maintain the long-term memory of Mnemo, a coding agent. Read one run of a session and return JSON only.
@@ -130,6 +135,13 @@ skill — propose one ONLY if the run demonstrated a multi-step procedure (3+ st
   A skill listed under SKILLS FOLLOWED that proved wrong or incomplete in this run — a step failed and something else worked, or the user corrected it — is returned under its own name with "patch": true, a "reason" (what went wrong), and the complete corrected instructions: lessons, not a log of this run. Patch only on such evidence; a skill that worked is left alone.
 Use empty lists when there is nothing. Output the JSON object and nothing else.`;
 
+/** Added to the prompt only for a team run, so a run one agent did costs nothing more. */
+export const TEAM_LESSON_PROMPT = `
+
+This run was a team: several agents shared it (see TEAM RUN). Also return
+  "lesson": null | {"cue": "...", "lesson": "...", "evidence": "...", "confidence": "low"|"medium"|"high"}
+lesson — at most ONE thing about how the agents worked together that the next team run in this project should do differently or again: how to split the work, whom to hand what, what to check before calling a step done. "cue": when it applies, in a few words ("splitting a refactor", "a flaky test suite"). "evidence": what in TEAM RUN or the transcript shows it (a step that was redone, a hand-off that lost something, a check that caught a bug). Not a fact about the codebase (that is facts), not this task's specifics. null unless the run clearly shows it.`;
+
 export interface LearnedFact {
   scope: "project" | "user";
   key: string;
@@ -156,11 +168,20 @@ export interface SkillProposal {
   reason?: string;
 }
 
+/** How a team should work next time, as one run showed it. Saved only if the user accepts it. */
+export interface TeamLesson {
+  cue: string;
+  lesson: string;
+  evidence: string;
+  confidence: "low" | "medium" | "high";
+}
+
 export interface Reflection {
   facts: LearnedFact[];
   episode?: EpisodeRecord;
   fixes: { problem: string; fix: string }[];
   skill?: SkillProposal;
+  lesson?: TeamLesson;
 }
 
 const str = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(0, n) : "");
@@ -217,12 +238,23 @@ export function parseReflection(answer: string): Reflection {
           reason: str(k.reason, 300),
         }
       : undefined;
-  return { facts, episode, fixes, skill };
+  const l = raw.lesson as Record<string, unknown> | null | undefined;
+  const confidences = ["low", "medium", "high"] as const;
+  const lesson: TeamLesson | undefined =
+    l && str(l.cue, 80) && str(l.lesson, 400)
+      ? {
+          cue: str(l.cue, 80).toLowerCase(),
+          lesson: str(l.lesson, 400),
+          evidence: str(l.evidence, 400),
+          confidence: confidences.includes(l.confidence as (typeof confidences)[number]) ? (l.confidence as TeamLesson["confidence"]) : "low",
+        }
+      : undefined;
+  return { facts, episode, fixes, skill, lesson };
 }
 
 /** Is this run worth a reflection call? Small talk and one-line answers are not. */
 export function worthReflecting(d: DigestInput): boolean {
-  if (d.signals.length || d.tools.length >= 2) return true;
+  if (d.signals.length || d.tools.length >= 2 || d.team?.trim()) return true;
   const userText = d.messages
     .filter((m) => (m as Msg).role === "user")
     .map((m) => textOf((m as Msg).content))

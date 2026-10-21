@@ -299,7 +299,11 @@ transcript).
   (a fix joins its failure's marker when it shares two distinctive words with it,
   otherwise it is a pitfall of its own) and at most one skill. A skill is saved
   when the user asked for it or the same procedure was seen in a second session,
-  and only after an approval dialog that shows the file. Everything written passes
+  and only after an approval dialog that shows the file. A team run (`RunEnd.team`: its
+  `TASK.md` and the end of `LOG.md`) adds that record to the digest and
+  `TEAM_LESSON_PROMPT` to the prompt; its one lesson (cue, lesson, evidence,
+  confidence) is offered through `approveLesson` unless its confidence is low, and an
+  accepted one is the project fact `team lesson (<cue>)`. Everything written passes
   `redact` and `unsafeMemory`, which refuses text that tries to steer the agent,
   smuggle a secret out or hide characters (memory is injected into later prompts,
   of every attached agent, so a fact is a standing instruction).
