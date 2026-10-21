@@ -17,8 +17,8 @@ import { PixelArt } from "./components/PixelArt.tsx";
 import { outcomeColor, Strip } from "./components/Strip.tsx";
 import { mne, mneMini, pixelText } from "./pixel.ts";
 import { palette, ground } from "./theme.ts";
-import type { RosterSnapshot } from "../runtime/roster.ts";
-import { linkedRoots, relation, statusStyle, treeOf } from "./tree.ts";
+import { usage, type RosterSnapshot } from "../runtime/roster.ts";
+import { linkedRoots, relation, runLine, statusStyle, treeOf } from "./tree.ts";
 
 export interface AgentState {
   kind: "idle" | "working" | "waiting";
@@ -85,6 +85,8 @@ export interface HubProps {
   onUnlink?: (id: number) => void;
   onFamily?: (id: number) => void;
   onPlayground?: () => void;
+  /** Stop the run an agent is in: every agent it set going. */
+  onStopRun?: (id: number) => void;
 }
 
 const CARD_H = 7;
@@ -94,7 +96,7 @@ function rootNode(roster: RosterSnapshot | undefined, a: Agent) {
   return roster?.nodes.find((n) => n.kind === "root" && n.agentId === a.id);
 }
 
-function Card({ a, n, s, on, inSplit, width, rel, linking }: { a: Agent; n: number; s: AgentState | undefined; on: boolean; inSplit: boolean; width: number; rel: string; linking: boolean }) {
+function Card({ a, n, s, on, inSplit, width, rel, linking }: { a: Agent; n: string; s: AgentState | undefined; on: boolean; inSplit: boolean; width: number; rel: string; linking: boolean }) {
   const inner = width - 4;
   const tint = s?.kind === "waiting" ? palette.amber : s?.kind === "working" ? palette.magenta : palette.hide;
   return (
@@ -148,6 +150,8 @@ export function Hub(p: HubProps): React.ReactElement {
   const [linking, setLinking] = useState<number | undefined>(undefined);
   /** x on an agent that is working or waiting: it closes on a second x. */
   const [closing, setClosing] = useState<number | undefined>(undefined);
+  /** r on an agent in a run: the run stops on a second r. */
+  const [stopping, setStopping] = useState<number | undefined>(undefined);
   const at = Math.min(sel, Math.max(0, count - 1));
   const onAgent = at < p.agents.length ? p.agents[at] : undefined;
   const onProject = at >= p.agents.length ? projects[at - p.agents.length] : undefined;
@@ -158,6 +162,7 @@ export function Hub(p: HubProps): React.ReactElement {
       // ctrl+n / ctrl+s / ctrl+x are the shell's; only the bare letters are the hub's.
       const bare = !key.ctrl && !key.meta;
       if (closing !== undefined && input !== "x") setClosing(undefined);
+      if (stopping !== undefined && input !== "r") setStopping(undefined);
       if (key.escape) return setLinking(undefined);
       if (key.leftArrow) return setSel(Math.max(0, at - 1));
       if (key.rightArrow) return setSel(Math.min(count - 1, at + 1));
@@ -178,6 +183,11 @@ export function Hub(p: HubProps): React.ReactElement {
       if (bare && input === "u") return p.onUnlink?.(onAgent.id);
       if (bare && input === "f") return p.onFamily?.(onAgent.id);
       if (bare && input === "s") return p.onSplit(onAgent.id);
+      if (bare && input === "r" && p.onStopRun) {
+        if (stopping !== onAgent.id) return setStopping(onAgent.id);
+        setStopping(undefined);
+        return p.onStopRun(onAgent.id);
+      }
       if (bare && input === "x") {
         const busy = (p.states.get(onAgent.id)?.kind ?? "idle") !== "idle";
         if (busy && closing !== onAgent.id) return setClosing(onAgent.id);
@@ -209,11 +219,14 @@ export function Hub(p: HubProps): React.ReactElement {
   const familyLines = selRoot && p.roster ? [selRoot, ...linkedRoots(p.roster, selRoot.id)].flatMap((r) => treeOf(p.roster!.nodes, r.id)) : [];
   const worthShowing = familyLines.length > 1;
   const famRows = worthShowing ? Math.min(familyLines.length + 1, Math.max(0, Math.min(9, roomForProjects))) : 0;
+  const selRun = selRoot && p.roster ? runLine(p.roster, selRoot) : "";
   const keys =
-    closing !== undefined && closing === onAgent?.id
+    stopping !== undefined && stopping === onAgent?.id
+      ? `r again stops ${selRun ? selRun.split(":")[0] : "its run"}: every agent it set going · any other key keeps it`
+      : closing !== undefined && closing === onAgent?.id
       ? `${p.states.get(closing)?.kind === "waiting" ? "it is waiting on you" : "it is still working"} · x again to close it · any other key keeps it`
       : p.width >= 100
-      ? "←→↑↓ choose · enter open · s split in/out · ^s view split · f family · l link · u unlink · p playground · x close · n new · ^g back"
+      ? "←→↑↓ choose · enter open · s split in/out · ^s view split · f family · l link · u unlink · p playground · r stop run · x close · n new · ^g back"
       : p.width >= 60
         ? "↑↓ choose · enter open · s split · l link · p play · x close · n new · ^g back"
         : "enter open · n new · ^g back";
@@ -246,7 +259,7 @@ export function Hub(p: HubProps): React.ReactElement {
       <Box flexDirection="row" flexWrap="wrap" marginTop={1}>
         {p.agents.map((a, i) =>
           i >= shownFrom && i < shownTo ? (
-            <Card key={a.id} a={a} n={i + 1} s={p.states.get(a.id)} on={i === at} inSplit={p.split.includes(a.id)} width={cardW} rel={rootNode(p.roster, a) ? relation(p.roster!, rootNode(p.roster, a)!.id) : ""} linking={linking === a.id} />
+            <Card key={a.id} a={a} n={rootNode(p.roster, a) ? `#${rootNode(p.roster, a)!.id}` : String(i + 1)} s={p.states.get(a.id)} on={i === at} inSplit={p.split.includes(a.id)} width={cardW} rel={rootNode(p.roster, a) ? relation(p.roster!, rootNode(p.roster, a)!.id) : ""} linking={linking === a.id} />
           ) : null,
         )}
         {shownTo === slots ? (
@@ -257,18 +270,19 @@ export function Hub(p: HubProps): React.ReactElement {
       </Box>
       {famRows > 1 ? (
         <Box flexDirection="column" marginTop={1}>
-          <Text color={palette.faint}>{`FAMILY OF ${onAgent!.name.toUpperCase()}`}</Text>
+          <Text color={palette.faint}>{`FAMILY OF ${onAgent!.name.toUpperCase()}${selRun ? `  ·  ${selRun}` : ""}  ·  @N in a prompt talks to #N`}</Text>
           {familyLines.slice(0, famRows - 1).map(({ node, prefix }) => {
             const st = statusStyle(node.status);
             return (
               <Text key={node.id} wrap="truncate-end">
                 <Text color={palette.faint}>{prefix}</Text>
                 <Text color={st.tone}>{st.glyph} </Text>
+                <Text color={palette.faint}>{`#${node.id} `}</Text>
                 <Text color={node.kind === "root" ? palette.text : palette.dim} bold={node.kind === "root"}>
                   {clip(node.label, 28)}
                 </Text>
                 <Text color={palette.faint}>{node.task ? `  ${clip(node.task.replace(/\s+/g, " "), Math.max(10, p.width - prefix.length - 40))}` : ""}</Text>
-                <Text color={palette.dim}>{node.kind === "sub" && node.stepCount ? `  ${node.stepCount} step${node.stepCount === 1 ? "" : "s"}` : ""}</Text>
+                <Text color={palette.dim}>{node.kind === "sub" ? `  ${usage(node) || (node.stepCount ? `${node.stepCount} step${node.stepCount === 1 ? "" : "s"}` : "")}` : ""}</Text>
               </Text>
             );
           })}

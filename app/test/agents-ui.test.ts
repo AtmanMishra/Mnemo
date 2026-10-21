@@ -67,8 +67,8 @@ test("the agents page shows each agent's sub-agents under it, and what is linked
     expect(f).toContain("⇄ beta"); // the card says alpha is linked with beta
     expect(f).toContain("⑂ 2 sub-agents"); // and has two sub-agents, running
     expect(f).toContain("FAMILY OF ALPHA");
-    expect(f).toContain("└─ ● mapper"); // the tree under it …
-    expect(f).toContain("   └─ ● reader"); // … two levels deep
+    expect(f).toContain("└─ ● #3 mapper"); // the tree under it, each with the number @N reaches …
+    expect(f).toContain("   └─ ● #4 reader"); // … two levels deep
   });
   r.unmount();
 });
@@ -338,4 +338,66 @@ test("two linked projects are linked again when both are open in a later run, un
   // Unlinking is remembered too.
   second.unlink(a2.id);
   expect(saved).toEqual([]);
+});
+
+test("the agents page, a sub-agent's pane and the playground show its model, turns and spend", async () => {
+  const { fleet, roster } = await fleetOf(["alpha"]);
+  const [a] = fleet.snapshot().agents;
+  const kid = roster.addSub(a!.host.node, { label: "cheap", task: "summarise", access: "read-only", model: "mnemo-demo/demo-strong", caps: { turns: 60, spend: 0.5, maxTokens: 4000, context: 50_000 } });
+  roster.turn(kid.id);
+  roster.spend(kid.id, 0.03);
+  const r = render(React.createElement(Shell, { fleet, motion: false, initial: { screen: "hub" } }));
+  size(r, 160, 50);
+  await waitFor(() => expect(r.lastFrame()).toContain("cheap  summarise  demo-strong · 1/60 turns · $0.03/$0.50"));
+  r.stdin.write(KEY.ctrlY);
+  await waitFor(() => expect(r.lastFrame()).toContain("PLAYGROUND"));
+  r.stdin.write(KEY.down);
+  await waitFor(() => expect(r.lastFrame()).toContain("cheap · sub-agent, depth 1 · running · read-only · demo-strong · 1/60"));
+  r.stdin.write(KEY.ctrlY);
+  r.stdin.write(KEY.ctrlS);
+  await waitFor(() => expect(r.lastFrame()).toContain("sub-agent · depth 1"));
+  expect(r.lastFrame()).toContain("demo-strong · 1/60 turns · $0.03/$0.50");
+  r.unmount();
+});
+
+test("typing @ at the start of the prompt offers the agents by number, and @N sends to that agent", async () => {
+  const { fleet, roster } = await fleetOf(["alpha", "beta"]);
+  const [, b] = fleet.snapshot().agents;
+  const r = render(React.createElement(Shell, { fleet, motion: false }));
+  size(r, 140, 40);
+  await waitFor(() => expect(r.lastFrame()).toContain("Ask anything"));
+  r.stdin.write("@");
+  await waitFor(() => expect(r.lastFrame()).toContain(`#${b!.host.node} beta`));
+  expect(r.lastFrame()).toContain("your words, as a prompt");
+  r.stdin.write(`${b!.host.node}`);
+  await tick();
+  r.stdin.write("\t"); // accept: the prompt now reads "@2 "
+  r.stdin.write("hello beta");
+  await tick();
+  expect(r.lastFrame()).toContain(`@${b!.host.node} hello beta`);
+  r.unmount();
+  expect(roster.get(b!.host.node)).toBeDefined();
+});
+
+test("r twice on the agents page stops the run the agent is in, and the playground's feed says so", async () => {
+  const { fleet, roster } = await fleetOf(["alpha"]);
+  const [a] = fleet.snapshot().agents;
+  roster.userTurn(a!.host.node, "do the big job");
+  const kid = roster.addSub(a!.host.node, { label: "worker", task: "part one", access: "read-only" });
+  let stops = 0;
+  roster.attach(kid.id, { deliver: () => {}, stop: () => void stops++ });
+  const r = render(React.createElement(Shell, { fleet, motion: false, initial: { screen: "hub" } }));
+  size(r, 160, 50);
+  await waitFor(() => expect(r.lastFrame()).toContain("run r1: 2 agents · 0/40 messages"));
+  r.stdin.write("r");
+  await waitFor(() => expect(r.lastFrame()).toContain("r again stops run r1"));
+  expect(roster.get(kid.id)!.status).toBe("running"); // one r alone does nothing
+  r.stdin.write("r");
+  await waitFor(() => expect(roster.get(kid.id)!.status).toBe("stopped"));
+  expect(stops).toBe(1);
+  expect(roster.snapshot().runs.get("r1")!.stopped).toBe(true);
+  r.stdin.write(KEY.ctrlY);
+  await waitFor(() => expect(r.lastFrame()).toContain("■ you stopped run r1 (1 working)"));
+  expect(r.lastFrame()).toContain("▸ you started run r1 at alpha");
+  r.unmount();
 });

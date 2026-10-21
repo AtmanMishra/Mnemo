@@ -423,8 +423,14 @@ flowchart TB
   siblings, and nobody else. Links come back when both projects are open again.
 - **Messages are data.** A message is framed as another model's text; it grants no permission and
   the receiver's gate decides every edit and command exactly as before.
-- **Bounded.** A message wakes an idle agent, but a chain stops after 12 messages in a row and woken
-  turns may spend $0.50 between your prompts. Depth 3, 4 live children per agent and 16 per
+- **Teams.** Every agent has a number (`#2` on its card and in every tree). Type `@2 …` at the start
+  of a prompt (or `/tell 2 …`) to say something to agent #2 as yourself. One prompt of yours is a
+  **run**: the agents it sets going share it, so 1 can ask 2, 2 can ask 3 and 4 at once
+  (`message_agent` takes up to 4 recipients), and the answers come back up the chain. `r r` on the
+  agents page stops a whole run.
+- **Bounded.** A message wakes an idle agent, but a chain stops after 12 messages in a row, a run
+  after 40 messages, woken turns may spend $0.50 per agent and $1.00 per run between your prompts,
+  and an agent cannot message back past the one that asked it. Depth 3, 4 live children per agent and 16 per
   conversation. All of these are [settings](#configuration) with fixed ceilings.
 - **Watch and steer.** `ctrl+g` the hub draws the tree; `ctrl+s` splits up to four agents (layouts
   with `alt+l`) and you can type to a running sub-agent in its pane; `ctrl+y` is the playground, a
@@ -482,7 +488,8 @@ folder.
 ### Hooks
 
 A hook is a command you choose that Mnemo runs at a fixed point: `PreToolUse`, `PostToolUse`,
-`SessionStart` and `SessionEnd`. They come from `~/.mnemo/hooks.json` (and an administrator's
+`SessionStart`, `SessionEnd`, `SubagentStart` (with the sub-agent's model and limits; it can refuse
+the sub-agent like a `PreToolUse` hook refuses a call) and `SubagentStop` (with how it ended). They come from `~/.mnemo/hooks.json` (and an administrator's
 managed policy, which runs first).
 
 ```json

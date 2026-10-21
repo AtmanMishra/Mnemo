@@ -114,6 +114,36 @@ agent is not woken again until you prompt it. The agents page shows `$ woken tur
 The playground's **conversation view** (`c`) shows the selected agent's messages with
 one other as a thread; `tab` moves to its next partner.
 
+**Sub-agent model and limits**: `/settings` → Agents sets the model
+(`subModel`, empty for the parent's), the models a parent may choose (`subModels`), the
+thinking level, output tokens, context, turns and budget. `spawn_subagent` takes
+`model`, `thinking`, `maxTokens`, `contextTokens`, `maxTurns` and `budget` for one task:
+the parent may lower each, never raise it past the setting (except where the setting is
+"no limit"). The tool result names the model it ran on and anything that was capped;
+`list_agents`, the agents page, the pane and the playground show
+`demo-model · 12/60 turns · $0.03`.
+
+**Saved sub-agents**: a saved conversation keeps each sub-agent's transcript in
+`<session>/sub/` and a `<session>.state.json` with every agent it started (see
+`docs/MNEMO-INTERNALS.md` §1). The live roster keeps the last 40 ended sub-agents per
+conversation; older ones are only in the state file. Hooks `SubagentStart` and
+`SubagentStop` let you log or refuse delegation.
+
+**Runs, numbers and `@N`**: every agent shows its number (`#2`) on its card, in the
+trees and in its pane. `@2 …` at the start of a prompt (a picker offers the agents when you
+type `@`), or `/tell 2 …`, is your words to agent #2: a top-level agent gets them as its
+prompt (after what it is doing, if busy), a running sub-agent after its current step. One
+prompt of yours starts a **run** (`r1`, `r2`…) with your words as its goal; agents woken by a
+message, and sub-agents, join the run of what reached them, and the goal travels in every
+peer message as quoted context. A run is capped as one unit: `runMessages` (40 messages),
+`runWakeSpend` ($1.00 for all turns messages start), and `fanOut` (4 recipients per
+message), on top of the per-agent bounds. The **ping-pong guard** refuses a message to an
+agent earlier in the chain that asked the sender nothing (one answer per message read;
+a parent and its own sub-agent may always talk). **Queue or steer**: a busy agent reads a
+message when it finishes what it is doing, an `urgent` one (or one its sender waits on)
+after its current step. `r` twice on the agents page stops every agent working in the
+selected agent's run, and nothing in that run can send again.
+
 ## Not yet
 
 User-typed messages into the tree from the playground (it stays supervise-only).

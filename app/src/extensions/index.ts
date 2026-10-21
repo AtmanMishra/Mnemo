@@ -19,6 +19,7 @@ import { planExtension } from "./plan.ts";
 import { policyExtension } from "./policy.ts";
 import { shellExtension } from "./shell.ts";
 import { skillsExtension } from "./skills.ts";
+import { stateExtension } from "./state.ts";
 import { marketExtension } from "./market.ts";
 import { traceExtension } from "./trace.ts";
 
@@ -37,6 +38,8 @@ export function mnemoExtensions(host: Host): InlineExtension[] {
     { name: "mnemo-code", factory: codeExtension(host) },
     { name: "mnemo-agents", factory: agentsExtension(host, mnemoExtensions) },
     { name: "mnemo-peers", factory: peersExtension(host) },
+    // After peers, which sets the root idle when a run ends: the file then says so.
+    { name: "mnemo-state", factory: stateExtension(host) },
     { name: "mnemo-skills", factory: skillsExtension(host) },
     { name: "mnemo-market", factory: marketExtension(host) },
     { name: "mnemo-escalate", factory: escalateExtension(host) },

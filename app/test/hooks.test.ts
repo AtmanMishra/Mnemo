@@ -98,8 +98,49 @@ test("the administrator's hooks come first, and a malformed hook is reported, no
   expect(hooks.PreToolUse.map((h) => h.command)).toEqual(["audit", "mine"]);
   expect(errors.join("\n")).toContain('needs "command"');
   expect(errors.join("\n")).toContain('unknown hook event "Whenever"');
-  const into: Hooks = { PreToolUse: [], PostToolUse: [], SessionStart: [], SessionEnd: [] };
+  const into: Hooks = { PreToolUse: [], PostToolUse: [], SessionStart: [], SessionEnd: [], SubagentStart: [], SubagentStop: [] };
   const errs: string[] = [];
   parseHooks([], "x", into, errs);
   expect(errs).toHaveLength(1);
+});
+
+const say = (t: string) => fauxAssistantMessage(fauxText(t));
+const spawn = (args: Record<string, unknown>) => fauxAssistantMessage([fauxToolCall("spawn_subagent", args as Parameters<typeof fauxToolCall>[1])], { stopReason: "toolUse" });
+
+test("a SubagentStart hook sees the model and limits and can refuse the sub-agent; SubagentStop sees how it ended", async () => {
+  const home = tmp("mnemo-home-");
+  const log = path.join(home, "LOG");
+  const record = `require("fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify(event) + "\\n");`;
+  withHooks(home, {
+    SubagentStart: [{ command: script(home, "start", `${record} if (event.name === "forbidden") { console.error("no delegation of that"); process.exit(2) }`) }],
+    SubagentStop: [{ command: script(home, "stop", record) }],
+  });
+  const e = await mnemoEnv({ home, mode: "yolo" });
+  envs.push(e);
+  e.faux.setResponses([spawn({ task: "look", name: "allowed", maxTurns: 5 }), say("looked"), spawn({ task: "look", name: "forbidden" }), say("done")]);
+  await e.controller.submit("delegate twice");
+  await e.idle();
+  const events = fs.readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  expect(events.map((x) => [x.event, x.name])).toEqual([
+    ["SubagentStart", "allowed"],
+    ["SubagentStop", "allowed"],
+    ["SubagentStart", "forbidden"],
+  ]);
+  expect(events[0]).toMatchObject({ model: "mnemo-demo/demo-model", depth: 1, access: "read-only", caps: { turns: 5 } });
+  expect(events[1]).toMatchObject({ status: "done", answer: "looked", turns: 1 });
+  // The refused one never started: no node, and the parent read why.
+  expect(e.host.roster.snapshot().nodes.filter((n) => n.kind === "sub").map((n) => n.label)).toEqual(["allowed"]);
+  expect(toolResults(e)).toContain("A hook refused this sub-agent: no delegation of that");
+});
+
+test("a SubagentStart hook that fails refuses the sub-agent, as a check that did not run passed nothing", async () => {
+  const home = tmp("mnemo-home-");
+  withHooks(home, { SubagentStart: [{ command: script(home, "broken", "process.exit(3)") }] });
+  const e = await mnemoEnv({ home, mode: "yolo" });
+  envs.push(e);
+  e.faux.setResponses([spawn({ task: "look", name: "kid" }), say("could not")]);
+  await e.controller.submit("delegate");
+  await e.idle();
+  expect(e.host.roster.snapshot().nodes.filter((n) => n.kind === "sub")).toHaveLength(0);
+  expect(toolResults(e)).toContain("failed (exit 3)");
 });
