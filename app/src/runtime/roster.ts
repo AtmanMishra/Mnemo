@@ -99,6 +99,31 @@ export interface RosterNode {
   runSpend: number;
   /** Dollars this node's own model calls cost (a sub-agent's `subSpend` is held against it). */
   spent: number;
+  /** Model calls this node made (a sub-agent's are held against `caps.turns`). */
+  turns: number;
+  /** For a sub-agent: the model it runs on (`provider/id`), its thinking level and its limits. */
+  model?: string;
+  thinking?: string;
+  caps?: SubCaps;
+}
+
+/** What one sub-agent may use. 0 for `turns` or `spend` is no limit. */
+export interface SubCaps {
+  turns: number;
+  spend: number;
+  /** Output tokens per model call. */
+  maxTokens: number;
+  /** Context it keeps before it compacts. */
+  context: number;
+}
+
+/** `demo-model · 3/60 turns · $0.03`: what a sub-agent runs on and how much of its limits it used. */
+export function usage(n: Pick<RosterNode, "model" | "turns" | "spent" | "caps">): string {
+  if (!n.model) return "";
+  const id = n.model.slice(n.model.indexOf("/") + 1);
+  const turns = n.caps?.turns ? `${n.turns}/${n.caps.turns} turns` : `${n.turns} turn${n.turns === 1 ? "" : "s"}`;
+  const spent = n.caps?.spend ? `$${n.spent.toFixed(2)}/$${n.caps.spend.toFixed(2)}` : `$${n.spent.toFixed(2)}`;
+  return `${id} · ${turns} · ${spent}`;
 }
 
 export type RosterEvent =
@@ -302,7 +327,7 @@ export class Roster implements RosterView {
 
   // ── sub-agents ───────────────────────────────────────────────────────────
   /** Register a sub-agent of `parent`, or throw a `RosterError` the model can read. */
-  addSub(parent: number, o: { label: string; task: string; access: Access }): RosterNode {
+  addSub(parent: number, o: { label: string; task: string; access: Access; model?: string; thinking?: string; caps?: SubCaps }): RosterNode {
     const p = this.nodes.get(parent);
     if (!p) throw new RosterError("the agent that asked is no longer running");
     if (isEnded(p.status)) throw new RosterError("this agent has already finished");
@@ -320,6 +345,9 @@ export class Roster implements RosterView {
       task: clean(o.task, 400),
       depth: p.depth + 1,
       access: o.access,
+      model: o.model,
+      thinking: o.thinking,
+      caps: o.caps,
       status: "running",
       // Started by a chain of messages, it continues that chain.
       hops: p.hops,
@@ -401,6 +429,14 @@ export class Roster implements RosterView {
     this.step(id, `✎ you: ${body.split("\n")[0]}`);
     this.event({ at: this.now(), kind: "told", node: id, text: body });
     return { ok: true };
+  }
+
+  /** The node made a model call. */
+  turn(id: number): void {
+    const n = this.nodes.get(id);
+    if (!n) return;
+    n.turns++;
+    this.changed();
   }
 
   setTask(id: number, task: string): void {
@@ -504,7 +540,7 @@ export class Roster implements RosterView {
 
   // ── internals ────────────────────────────────────────────────────────────
   private make(o: Pick<RosterNode, "kind" | "label" | "task" | "depth" | "access" | "status"> & Partial<RosterNode>): RosterNode {
-    const node: RosterNode = { steps: [], stepCount: 0, startedAt: this.now(), pending: 0, hops: 0, woken: false, wakeSpend: 0, runSpend: 0, spent: 0, ...o, id: this.nextNode++ };
+    const node: RosterNode = { steps: [], stepCount: 0, startedAt: this.now(), pending: 0, hops: 0, woken: false, wakeSpend: 0, runSpend: 0, spent: 0, turns: 0, ...o, id: this.nextNode++ };
     this.nodes.set(node.id, node);
     this.labels.set(node.id, node.label);
     return node;
@@ -518,7 +554,7 @@ export class Roster implements RosterView {
   private build(): RosterSnapshot {
     return {
       version: this.version,
-      nodes: [...this.nodes.values()].map((n) => ({ ...n, steps: [...n.steps] })),
+      nodes: [...this.nodes.values()].map((n) => ({ ...n, steps: [...n.steps], caps: n.caps && { ...n.caps } })),
       groups: new Map(this.group),
       events: this.events,
       labels: new Map(this.labels),

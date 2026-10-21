@@ -27,7 +27,7 @@ every open dialog resolves as "no". Only the oldest dialog can be answered, an a
 | `chrome` | `footer` (`model`, `thinking`, `contextPercent`, `cost`, `cwd`, `branch`, `mode`, `memory`), `statuses`, `activity` |
 | `dialog` | `dialog`: `{id, kind: "approval", tool, subject, preview[], always?, reason?}`, `{id, kind: "select", title, choices[], initial?}`, `{id, kind: "confirm", title, message}` or `{id, kind: "text", title, placeholder?, initial?, secret?}` |
 | `dialogClosed` | `id` |
-| `roster` | `nodes` (the agent tree: `id`, `parent`, `label`, `task`, `status`, `access`, `steps`, `answer`…), `self` |
+| `roster` | `nodes` (the agent tree: `id`, `parent`, `label`, `task`, `status`, `access`, `steps`, `answer`, and for a sub-agent `model`, `turns`, `spent`, `caps`…), `self` |
 | `settings` | `values`; `defs` (`groups`, `items` with `key`, `group`, `label`, `help`, `kind`, `default`, `min`, `max`, `options`, `restart`) in the first one |
 | `result` | `id`, `ok`, `value?`, `error?`: the answer to a command that carried an `id` |
 | `error` | `message`: a refusal of a command sent without an `id`, or unparseable input |
