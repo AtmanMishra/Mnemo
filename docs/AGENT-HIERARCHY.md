@@ -144,6 +144,16 @@ message when it finishes what it is doing, an `urgent` one (or one its sender wa
 after its current step. `r` twice on the agents page stops every agent working in the
 selected agent's run, and nothing in that run can send again.
 
+**A team's plan and log**: once a run has a second agent, or an agent adds a step, it gets
+`$MNEMO_HOME/runs/<when>-<pid>-<run>/` with `TASK.md` (your goal, copied by the program;
+numbered steps, each with an owner, a status and a one-line result; decisions and open
+questions, each signed) and `LOG.md` (one line per tool call, message, spawn and ending,
+written by the program). Agents change the plan only with `task_update`: a step another
+agent claimed cannot be taken over, and only its owner marks it done or blocked. At the
+start of each turn, and with each peer message, an agent is shown what the others in its
+run did since it last looked, as data. `/task` shows the plan and where the files are; old
+run folders go after `keepSubTranscripts` days.
+
 ## Not yet
 
 User-typed messages into the tree from the playground (it stays supervise-only).

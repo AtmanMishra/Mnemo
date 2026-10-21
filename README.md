@@ -427,7 +427,9 @@ flowchart TB
   of a prompt (or `/tell 2 …`) to say something to agent #2 as yourself. One prompt of yours is a
   **run**: the agents it sets going share it, so 1 can ask 2, 2 can ask 3 and 4 at once
   (`message_agent` takes up to 4 recipients), and the answers come back up the chain. `r r` on the
-  agents page stops a whole run.
+  agents page stops a whole run. A run with more than one agent shares a plan and a log
+  (`TASK.md`, `LOG.md` in the Mnemo home; `/task` shows them): agents claim steps with
+  `task_update` and each turn starts with what the others did.
 - **Bounded.** A message wakes an idle agent, but a chain stops after 12 messages in a row, a run
   after 40 messages, woken turns may spend $0.50 per agent and $1.00 per run between your prompts,
   and an agent cannot message back past the one that asked it. Depth 3, 4 live children per agent and 16 per
