@@ -746,6 +746,13 @@ async function main(): Promise<number> {
   const layout = interactive && !args.inline ? "workspace" : "inline";
   const onboard = interactive && !args.demo && (args.intro || !state.onboarded);
   const stats = memory ? await bootStats(memory, runtime) : undefined;
+  // Ink turns raw mode on in an effect, after the first frame is on screen. A key pressed in
+  // between (esc on the intro) would meet a cooked terminal: echoed as ^[ and, on macOS, lost.
+  // Raw from before the first frame, the key waits in the terminal until Ink reads it.
+  if (interactive) {
+    process.stdin.setRawMode(true);
+    process.on("exit", () => process.stdin.setRawMode(false));
+  }
   instance = render(
     React.createElement(Root, {
       controller,
