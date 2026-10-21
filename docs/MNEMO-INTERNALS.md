@@ -515,6 +515,14 @@ is `urgent` or waited on (`now`, `steer`). `stopRun` stops its running members. 
 (`pi.sendUserMessage`, which passes `input` and so starts that agent's own run) or a
 sub-agent's `tell`.
 
+**Profiles.** `runtime/profiles.ts` reads `<name>.md` from `agent/agents/` in the home and,
+when `ctx.isProjectTrusted()`, the project's `.agents/agents/` (`needsTrust` in runtime.ts adds
+that folder to what makes a project ask for trust). `spawn_subagent` merges the profile under
+the parent's own params and passes the result to `resolveSpawn` as the ask, so the profile is
+capped like a parent; `profileTools` narrows the child's tool list. The body reaches the child
+through `Host.profile`, as a `profile` system prompt section set in `before_agent_start`; the
+list of profiles is an `agent_profiles` section, only for an agent that has `spawn_subagent`.
+
 **Teams.** `runtime/team.ts` keeps one `TaskBoard` per roster (`boardOf`), keyed by run id.
 A run gets files (`$MNEMO_HOME/runs/<when>-<pid>-<run>/TASK.md`, written whole by rename,
 and `LOG.md`, appended) once it has a second member or any plan; lines logged before that

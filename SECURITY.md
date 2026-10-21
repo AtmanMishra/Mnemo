@@ -100,7 +100,7 @@ in a place you can afford to lose: a container, a throwaway checkout.
   them, or `cat /proc/$PPID/environ`: in `default` mode that asks, and no "always"
   grant covers a command that mentions `/proc`, but **in `yolo` and `-p` it runs**
   unless a `deny` rule stops it.
-- **A folder's own `.agents/` extensions, settings, prompts and skills run code and
+- **A folder's own `.agents/` extensions, settings, prompts, skills and agent profiles run code and
   steer the model**, so Mnemo loads them only for a folder you have trusted: it asks
   once at start-up (`a` remembers it), headless runs skip them unless you pass
   `--trust-project`. Do not trust a repository you have not read.
@@ -384,6 +384,10 @@ What that does and does not allow:
   with `task_update`, which never rewrites another agent's step; LOG.md is written by the
   program. What agents wrote is cleaned and redacted before it is written, and an agent sees
   it as a hidden or framed message labelled data, never in the system prompt.
+- **An agent profile asks, as a parent does.** A profile (`~/.mnemo/agent/agents/<name>.md`, or a
+  trusted folder's `.agents/agents/`) sets a sub-agent's model, tools, limits and instructions,
+  all within your sub-agent settings and its access; a tool list only narrows what the access
+  allows. Yours win over a folder's of the same name, so a cloned repository cannot replace one.
 - **A parent agent can only tighten what its sub-agent may use.** Your sub-agent settings
   (model, thinking, output tokens, context, turns, budget) are the ceiling; a parent may
   ask for less for one task, never more (a number above yours is capped and it is told
