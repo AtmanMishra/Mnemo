@@ -114,6 +114,15 @@ agent is not woken again until you prompt it. The agents page shows `$ woken tur
 The playground's **conversation view** (`c`) shows the selected agent's messages with
 one other as a thread; `tab` moves to its next partner.
 
+**Sub-agent model and limits**: `/settings` → Agents sets the model
+(`subModel`, empty for the parent's), the models a parent may choose (`subModels`), the
+thinking level, output tokens, context, turns and budget. `spawn_subagent` takes
+`model`, `thinking`, `maxTokens`, `contextTokens`, `maxTurns` and `budget` for one task:
+the parent may lower each, never raise it past the setting (except where the setting is
+"no limit"). The tool result names the model it ran on and anything that was capped;
+`list_agents`, the agents page, the pane and the playground show
+`demo-model · 12/60 turns · $0.03`.
+
 ## Not yet
 
 User-typed messages into the tree from the playground (it stays supervise-only).

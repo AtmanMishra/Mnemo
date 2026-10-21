@@ -366,6 +366,11 @@ What that does and does not allow:
   live children, 16 live sub-agents per conversation); these numbers are the defaults, and
   the settings can change them within fixed ceilings (see Settings below); a sub-agent never has more access
   than its parent.
+- **A parent agent can only tighten what its sub-agent may use.** Your sub-agent settings
+  (model, thinking, output tokens, context, turns, budget) are the ceiling; a parent may
+  ask for less for one task, never more (a number above yours is capped and it is told
+  so). It may pick another model only one that has credentials, matches your `subModels`
+  when you set it, and passes the managed `models` list.
 - **What agents write is cleaned and redacted** (control and bidirectional-override
   characters removed, credential shapes redacted) before it is stored, shown on the
   agents page or the playground, or delivered, so an agent cannot repaint your
