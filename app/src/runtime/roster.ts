@@ -61,6 +61,11 @@ export const LIMITS = {
   subMaxTurns: 60,
   /** Dollars one sub-agent may spend before it is stopped. 0 is no limit. */
   subSpend: 0,
+  /**
+   * Ended sub-agents one conversation keeps in the live roster; older ones leave it (their
+   * record stays in the session's state file), so a long session does not grow without end.
+   */
+  keepEnded: 40,
   /** Step lines and events kept. */
   steps: 20,
   events: 300,
@@ -105,6 +110,8 @@ export interface RosterNode {
   model?: string;
   thinking?: string;
   caps?: SubCaps;
+  /** Where its transcript is saved, when its session is saved. */
+  transcript?: string;
 }
 
 /** What one sub-agent may use. 0 for `turns` or `spend` is no limit. */
@@ -366,7 +373,34 @@ export class Roster implements RosterView {
     this.sent.delete(id);
     if (answer !== undefined) n.answer = clean(answer, 1500);
     this.handles.delete(id);
+    this.archive(id);
     this.event({ at: this.now(), kind: status, node: id });
+  }
+
+  /** Past `keepEnded` ended sub-agents under a root, the oldest whole ended subtrees leave the live roster. */
+  private archive(id: number): void {
+    const root = this.rootOf(id);
+    if (!root) return;
+    const all = this.descendants(root.id);
+    let ended = all.filter((n) => isEnded(n.status)).length;
+    const oldest = all.filter((n) => isEnded(n.status) && n.id !== id).sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0));
+    for (const n of oldest) {
+      if (ended <= this.limits.keepEnded) break;
+      if (!this.nodes.has(n.id)) continue;
+      const tree = [n, ...this.descendants(n.id)];
+      if (tree.some((d) => !isEnded(d.status))) continue;
+      for (const d of tree) {
+        this.nodes.delete(d.id);
+        ended--;
+      }
+    }
+  }
+
+  setTranscript(id: number, file: string): void {
+    const n = this.nodes.get(id);
+    if (!n) return;
+    n.transcript = file;
+    this.changed();
   }
 
   setStatus(id: number, status: NodeStatus): void {

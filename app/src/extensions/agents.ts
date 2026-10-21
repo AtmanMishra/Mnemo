@@ -23,6 +23,8 @@ import { stepLine } from "./peers.ts";
 import { piSettings, projectTrusted } from "../runtime/runtime.ts";
 import { SUB_CONTEXT_MIN, THINKING_CHOICES, type Settings } from "../runtime/settings.ts";
 import { loadManaged, nameAllowed } from "../policy/managed.ts";
+import { loadHooks, subagentHooks } from "./hooks.ts";
+import { subDirOf } from "../runtime/session-files.ts";
 
 /** What a parent asked for one sub-agent, beside its brief. */
 export interface SpawnAsk {
@@ -123,6 +125,8 @@ const READ_ONLY = ["read", "grep", "find", "ls", "code_search", "code_symbol", "
 export function agentsExtension(host: Host, extensionsFor: (child: Host) => import("@earendil-works/pi-coding-agent").InlineExtension[]) {
   return (pi: ExtensionAPI): void => {
     if (host.depth >= host.roster.limits.maxDepth) return;
+    // Read once per session, as the hooks extension does.
+    const { hooks } = loadHooks(host);
     pi.registerTool(
       defineTool({
         name: "spawn_subagent",
@@ -158,9 +162,21 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
           });
           if (!resolved.ok) throw new Error(resolved.reason);
           const { plan } = resolved;
+          const modelName = `${plan.model.provider}/${plan.model.id}`;
+          const refused = await subagentHooks(
+            hooks,
+            "SubagentStart",
+            { parent: host.node, depth: host.depth + 1, name: params.name ?? "", task: params.task, access, model: modelName, thinking: plan.thinking, caps: plan.caps, cwd: ctx.cwd },
+            ctx.cwd,
+            host.agentDir,
+          );
+          if (refused) throw new Error(`A hook refused this sub-agent: ${refused}`);
+          // Every transcript of a tree goes in its root session's folder, flat, whatever the depth.
+          const rootFile = host.depth === 0 ? ctx.sessionManager.getSessionFile() : undefined;
+          const subDir = host.depth === 0 ? (rootFile ? subDirOf(rootFile) : undefined) : host.subDir;
           let node;
           try {
-            node = host.roster.addSub(host.node, { label: params.name ?? "", task: params.task, access, model: `${plan.model.provider}/${plan.model.id}`, thinking: plan.thinking, caps: plan.caps });
+            node = host.roster.addSub(host.node, { label: params.name ?? "", task: params.task, access, model: modelName, thinking: plan.thinking, caps: plan.caps });
           } catch (e) {
             if (e instanceof RosterError) throw new Error(e.message);
             throw e;
@@ -174,6 +190,7 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             signals: host.signals,
             episode: undefined,
             parentEpisode: host.episode,
+            subDir,
           };
           // The mode is the user's, and they can change it while the child works:
           // a copy taken at spawn time kept a child in yolo after a switch to plan.
@@ -199,12 +216,14 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             });
             ({ session } = await createAgentSessionFromServices({
               services,
-              sessionManager: SessionManager.inMemory(ctx.cwd),
+              sessionManager: subDir ? SessionManager.create(ctx.cwd, subDir, { parentSession: rootFile ?? undefined }) : SessionManager.inMemory(ctx.cwd),
               model: plan.model,
               thinkingLevel: plan.thinking as never,
               tools: access === "full" ? undefined : READ_ONLY,
             }));
             await session.bindExtensions({});
+            const file = session.sessionManager.getSessionFile();
+            if (subDir && file) host.roster.setTranscript(node.id, file);
             const steps: string[] = [];
             // A sub-agent that has made its turns or spent its dollars is stopped and returns what it has.
             let turns = 0;
@@ -253,6 +272,14 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             // A tree that was stopped keeps "stopped"; finish ignores a node that already ended.
             host.roster.finish(node.id, signal?.aborted ? "stopped" : outcome, answer);
             session?.dispose();
+            const ended = host.roster.get(node.id);
+            await subagentHooks(
+              hooks,
+              "SubagentStop",
+              { agent: node.id, parent: host.node, depth: host.depth + 1, name: node.label, status: ended?.status ?? outcome, answer: (answer ?? "").slice(0, 2000), model: modelName, turns: ended?.turns ?? 0, spent: ended?.spent ?? 0, transcript: ended?.transcript, cwd: ctx.cwd },
+              ctx.cwd,
+              host.agentDir,
+            );
           }
         },
       }),

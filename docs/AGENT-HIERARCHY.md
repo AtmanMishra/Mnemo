@@ -123,6 +123,12 @@ the parent may lower each, never raise it past the setting (except where the set
 `list_agents`, the agents page, the pane and the playground show
 `demo-model · 12/60 turns · $0.03`.
 
+**Saved sub-agents**: a saved conversation keeps each sub-agent's transcript in
+`<session>/sub/` and a `<session>.state.json` with every agent it started (see
+`docs/MNEMO-INTERNALS.md` §1). The live roster keeps the last 40 ended sub-agents per
+conversation; older ones are only in the state file. Hooks `SubagentStart` and
+`SubagentStop` let you log or refuse delegation.
+
 ## Not yet
 
 User-typed messages into the tree from the playground (it stays supervise-only).

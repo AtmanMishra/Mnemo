@@ -482,7 +482,8 @@ folder.
 ### Hooks
 
 A hook is a command you choose that Mnemo runs at a fixed point: `PreToolUse`, `PostToolUse`,
-`SessionStart` and `SessionEnd`. They come from `~/.mnemo/hooks.json` (and an administrator's
+`SessionStart`, `SessionEnd`, `SubagentStart` (with the sub-agent's model and limits; it can refuse
+the sub-agent like a `PreToolUse` hook refuses a call) and `SubagentStop` (with how it ended). They come from `~/.mnemo/hooks.json` (and an administrator's
 managed policy, which runs first).
 
 ```json

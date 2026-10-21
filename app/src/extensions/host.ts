@@ -87,6 +87,8 @@ export interface Host {
   episode?: number;
   /** For a sub-agent: the episode of the session that spawned it. */
   parentEpisode?: number;
+  /** For a sub-agent: where the transcripts of its tree are saved (the root session's `sub/` folder); unset when that session is not saved. */
+  subDir?: string;
 }
 
 /** Run something after the fact without letting it fail the turn, and keep track of it. */
