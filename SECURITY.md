@@ -384,6 +384,11 @@ What that does and does not allow:
   with `task_update`, which never rewrites another agent's step; LOG.md is written by the
   program. What agents wrote is cleaned and redacted before it is written, and an agent sees
   it as a hidden or framed message labelled data, never in the system prompt.
+- **A race is approved like a command, every time.** An agent's `race` runs a check command and
+  has 2 to 4 sub-agents work unattended in git worktrees of your project, then applies the
+  smallest passing change here. The gate asks before each race (no "always"), plan mode refuses
+  it, and deny rules still hold inside the attempts; a worktree is a copy of your files, not a
+  sandbox, so an attempt's commands can reach what yours can, as with `/bestof`.
 - **An agent profile asks, as a parent does.** A profile (`~/.mnemo/agent/agents/<name>.md`, or a
   trusted folder's `.agents/agents/`) sets a sub-agent's model, tools, limits and instructions,
   all within your sub-agent settings and its access; a tool list only narrows what the access
