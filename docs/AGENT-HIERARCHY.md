@@ -139,6 +139,14 @@ failed) reaches the parent as a message from it, framed like any peer message an
 the run's caps; an idle parent is woken by it. A sub-agent that finishes stops the background
 sub-agents it started, since they could no longer report to it; `r r` stops a whole run.
 
+**Races**: an agent with full access can call `race(task, check, n, models?)`: 2 to 4
+sub-agents attempt the same task, each in its own git worktree, then the check runs in each
+and the smallest change that passes is applied (the `/bestof` machinery, with in-process
+sub-agents instead of headless runs). The gate asks you before every race, showing the check
+and the task, and never offers "always"; plan mode refuses it. Once you approve, the attempts
+work unattended in their copies (as `/bestof` candidates do), your deny rules still hold, and
+each attempt is a sub-agent with your sub-agent limits. `models` gives attempts different models.
+
 **Saved sub-agents**: a saved conversation keeps each sub-agent's transcript in
 `<session>/sub/` and a `<session>.state.json` with every agent it started (see
 `docs/MNEMO-INTERNALS.md` §1). The live roster keeps the last 40 ended sub-agents per
