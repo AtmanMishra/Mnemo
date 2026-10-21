@@ -339,3 +339,23 @@ test("two linked projects are linked again when both are open in a later run, un
   second.unlink(a2.id);
   expect(saved).toEqual([]);
 });
+
+test("the agents page, a sub-agent's pane and the playground show its model, turns and spend", async () => {
+  const { fleet, roster } = await fleetOf(["alpha"]);
+  const [a] = fleet.snapshot().agents;
+  const kid = roster.addSub(a!.host.node, { label: "cheap", task: "summarise", access: "read-only", model: "mnemo-demo/demo-strong", caps: { turns: 60, spend: 0.5, maxTokens: 4000, context: 50_000 } });
+  roster.turn(kid.id);
+  roster.spend(kid.id, 0.03);
+  const r = render(React.createElement(Shell, { fleet, motion: false, initial: { screen: "hub" } }));
+  size(r, 160, 50);
+  await waitFor(() => expect(r.lastFrame()).toContain("cheap  summarise  demo-strong · 1/60 turns · $0.03/$0.50"));
+  r.stdin.write(KEY.ctrlY);
+  await waitFor(() => expect(r.lastFrame()).toContain("PLAYGROUND"));
+  r.stdin.write(KEY.down);
+  await waitFor(() => expect(r.lastFrame()).toContain("cheap · sub-agent, depth 1 · running · read-only · demo-strong · 1/60"));
+  r.stdin.write(KEY.ctrlY);
+  r.stdin.write(KEY.ctrlS);
+  await waitFor(() => expect(r.lastFrame()).toContain("sub-agent · depth 1"));
+  expect(r.lastFrame()).toContain("demo-strong · 1/60 turns · $0.03/$0.50");
+  r.unmount();
+});

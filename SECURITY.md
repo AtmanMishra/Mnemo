@@ -156,7 +156,9 @@ or run a different program, is not bound by it.
 ## Hooks
 
 A hook is a command you choose that Mnemo runs at a fixed point: `PreToolUse` (after the
-gate let a call through, before it runs), `PostToolUse`, `SessionStart` and `SessionEnd`.
+gate let a call through, before it runs), `PostToolUse`, `SessionStart`, `SessionEnd`,
+`SubagentStart` (which can refuse a sub-agent, and refuses it when it fails, like `PreToolUse`)
+and `SubagentStop`.
 They come from `$MNEMO_HOME/hooks.json` and the managed policy's `hooks` (which run first,
 and which you cannot remove); a folder's own hooks are never read.
 
@@ -216,6 +218,11 @@ and which you cannot remove); a folder's own hooks are never read.
   on: that key is for the model, and memsrv is started without it. The address
   must be `https://` (or local), and is read from the real environment or
   `$MNEMO_HOME/.env`, never from the folder you are working in.
+- Conversations are saved locally under `$MNEMO_HOME/agent/sessions/`, and since sub-agent
+  transcripts are kept too, so are a saved conversation's sub-agents (`<session>/sub/`, as
+  the conversation itself is written: not redacted). Sub-agent transcripts are removed after
+  `keepSubTranscripts` days (30; 0 keeps them). The `<session>.state.json` beside each holds
+  only what the roster already cleaned and redacted, mode 0600.
 
 ## Credentials
 
@@ -366,6 +373,11 @@ What that does and does not allow:
   live children, 16 live sub-agents per conversation); these numbers are the defaults, and
   the settings can change them within fixed ceilings (see Settings below); a sub-agent never has more access
   than its parent.
+- **A parent agent can only tighten what its sub-agent may use.** Your sub-agent settings
+  (model, thinking, output tokens, context, turns, budget) are the ceiling; a parent may
+  ask for less for one task, never more (a number above yours is capped and it is told
+  so). It may pick another model only one that has credentials, matches your `subModels`
+  when you set it, and passes the managed `models` list.
 - **What agents write is cleaned and redacted** (control and bidirectional-override
   characters removed, credential shapes redacted) before it is stored, shown on the
   agents page or the playground, or delivered, so an agent cannot repaint your
