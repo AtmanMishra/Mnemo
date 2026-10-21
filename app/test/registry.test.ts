@@ -177,9 +177,9 @@ describe("store", () => {
 });
 
 describe("publisher", () => {
-  function setup(o: { describe?: ConstructorParameters<typeof Publisher>[0]["describe"]; throttleMs?: number } = {}) {
+  function setup(o: { describe?: ConstructorParameters<typeof Publisher>[0]["describe"]; throttleMs?: number; now?: () => number } = {}) {
     const h = home();
-    const roster = new Roster();
+    const roster = new Roster(o.now);
     const root = roster.addRoot("api");
     const pub = new Publisher({ home: h, kind: "interactive", version: "test", roster, throttleMs: o.throttleMs ?? 10, heartbeatMs: 60_000, describe: o.describe ?? (() => ({ cwd: "/work/api", model: "p/m", mode: "default" })) });
     cleanups.push(() => pub.close());
@@ -263,7 +263,8 @@ describe("publisher", () => {
   });
 
   test("a long session keeps its live agents and only the newest finished ones", () => {
-    const { roster, root, pub, read } = setup();
+    // One clock tick for all of them, as on a fast machine: the newest is told apart by its number.
+    const { roster, root, pub, read } = setup({ now: () => NOW });
     for (let i = 0; i < 70; i++) {
       const s = roster.addSub(root.id, { label: `s${i}`, task: "", access: "full" });
       roster.finish(s.id, "done", `answer ${i}`);

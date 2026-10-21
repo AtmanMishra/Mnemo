@@ -102,7 +102,7 @@ export class Publisher {
         if (a.status === "idle" || a.status === "running") Object.assign(a, { status: a.kind === "root" ? "closed" : "stopped", endedAt: a.endedAt ?? this.endedAt, waiting: undefined });
     const ended = (a: AgentEntry) => a.status !== "idle" && a.status !== "running";
     const keep = agents.filter((a) => !ended(a)).length;
-    const trimmed = [...agents.filter((a) => !ended(a)), ...agents.filter(ended).sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0)).slice(0, Math.max(0, MAX_AGENTS - keep))];
+    const trimmed = [...agents.filter((a) => !ended(a)), ...agents.filter(ended).sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0) || b.node - a.node).slice(0, Math.max(0, MAX_AGENTS - keep))];
     // What was trimmed is not kept for the next write either.
     for (const id of [...this.gone.keys()]) if (!trimmed.includes(this.gone.get(id)!)) this.gone.delete(id);
     return { v: 1, tag, pid: process.pid, kind: this.o.kind, version: this.o.version, startedAt: this.startedAt, heartbeat: t, endedAt: this.endedAt, agents: trimmed.sort((a, b) => a.node - b.node) };
