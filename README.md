@@ -432,7 +432,8 @@ flowchart TB
   `task_update` and each turn starts with what the others did.
 - **Profiles.** Save a sub-agent you use often as `~/.mnemo/agent/agents/reviewer.md` (model,
   tools, limits and instructions in one file, like Claude Code's agent files); agents start it
-  with `spawn_subagent(profile: "reviewer")`, always within your sub-agent settings.
+  with `spawn_subagent(profile: "reviewer")`, always within your sub-agent settings. With
+  `background: true` a parent starts one and goes on; the answer arrives as a message.
 - **Bounded.** A message wakes an idle agent, but a chain stops after 12 messages in a row, a run
   after 40 messages, woken turns may spend $0.50 per agent and $1.00 per run between your prompts,
   and an agent cannot message back past the one that asked it. Depth 3, 4 live children per agent and 16 per

@@ -17,15 +17,15 @@ import {
   SessionManager,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import type { Host } from "./host.ts";
-import { RosterError, type Limits, type SubCaps } from "../runtime/roster.ts";
+import { inBackground, type Host } from "./host.ts";
+import { isEnded, RosterError, type Limits, type SubCaps } from "../runtime/roster.ts";
 import { stepLine } from "./peers.ts";
 import { piSettings, projectTrusted } from "../runtime/runtime.ts";
 import { SUB_CONTEXT_MIN, THINKING_CHOICES, type Settings } from "../runtime/settings.ts";
 import { loadManaged, nameAllowed } from "../policy/managed.ts";
 import { loadHooks, subagentHooks } from "./hooks.ts";
 import { subDirOf } from "../runtime/session-files.ts";
-import { loadProfiles, profileTools } from "../runtime/profiles.ts";
+import { loadProfiles, profileTools, type Profile } from "../runtime/profiles.ts";
 
 /** What a parent asked for one sub-agent, beside its brief. */
 export interface SpawnAsk {
@@ -157,10 +157,11 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
           contextTokens: Type.Optional(Type.Number({ description: "Context it keeps before compacting" })),
           maxTurns: Type.Optional(Type.Number({ description: "Model calls before it stops and returns what it has" })),
           budget: Type.Optional(Type.Number({ description: "Dollars before it stops and returns what it has" })),
+          background: Type.Optional(Type.Boolean({ description: "Return at once and get its answer later as a message, so you can go on meanwhile" })),
         }),
         async execute(_id, params, signal, onUpdate, ctx) {
           if (!ctx.model) throw new Error("no model is selected");
-          let profile;
+          let profile: Profile | undefined;
           if (params.profile) {
             const { profiles } = loadProfiles(host.home, ctx.cwd, ctx.isProjectTrusted());
             profile = profiles.get(params.profile.trim());
@@ -202,6 +203,8 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             if (e instanceof RosterError) throw new Error(e.message);
             throw e;
           }
+          // The child's whole life; in the background its answer comes back as a message from it.
+          const work = async (signal: AbortSignal | undefined, onUpdate: ((u: { content: { type: "text"; text: string }[]; details: { steps: number } }) => void) | undefined) => {
           const child: Host = {
             ...host,
             depth: host.depth + 1,
@@ -228,6 +231,8 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
           const onAbort = () => void session?.abort();
           let outcome: "done" | "failed" = "failed";
           let answer: string | undefined;
+          let ran = "";
+          let failure: string | undefined;
           try {
             const services = await createAgentSessionServices({
               cwd: ctx.cwd,
@@ -272,6 +277,8 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             });
             signal?.addEventListener("abort", onAbort);
             if (signal?.aborted) onAbort();
+            // Stopped while it was being set up (a background one, from the agents page): it never starts.
+            if (isEnded(host.roster.get(node.id)?.status ?? "stopped")) throw new Error("stopped before it started");
             await session.prompt(params.task);
             // A failed model call does not throw out of prompt(): it is the last reply, with an error and no text.
             // Say why, so the parent (and the user) see the cause instead of an empty answer.
@@ -283,16 +290,28 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             answer = session.getLastAssistantText()?.trim() || (stoppedBy ? "" : "(the sub-agent finished without an answer)");
             if (stoppedBy) answer = `${answer}${answer ? "\n\n" : ""}[stopped at its limit of ${stoppedBy}; ${answer ? "this is what it had" : "it had nothing to report"}]`;
             outcome = "done";
-            const ran = `[ran${profile ? ` as profile ${profile.name}` : ""} on ${plan.model.provider}/${plan.model.id}, thinking ${session.thinkingLevel}${plan.notes.length ? `; ${plan.notes.join("; ")}` : ""}]`;
+            ran = `[ran${profile ? ` as profile ${profile.name}` : ""} on ${plan.model.provider}/${plan.model.id}, thinking ${session.thinkingLevel}${plan.notes.length ? `; ${plan.notes.join("; ")}` : ""}]`;
             return {
-              content: [{ type: "text", text: `${answer}\n\n${ran}` }],
+              content: [{ type: "text" as const, text: `${answer}\n\n${ran}` }],
               details: { steps: steps.length, cost: session.getSessionStats().cost, node: node.id, model: `${plan.model.provider}/${plan.model.id}` },
             };
+          } catch (e) {
+            failure = e instanceof Error ? e.message : String(e);
+            throw e;
           } finally {
             signal?.removeEventListener("abort", onAbort);
             unsubscribe();
+            // Sent while it still runs (an ended agent sends nothing); a stopped one has nothing to say.
+            if (params.background && host.roster.get(node.id)?.status === "running") {
+              const max = host.roster.limits.messageChars;
+              const said =
+                outcome === "done" ? `[background result]\n\n${answer}\n\n${ran}` : `[background sub-agent failed: ${failure ?? answer ?? "no reason given"}]`;
+              host.roster.send(node.id, host.node, said.length > max ? `${said.slice(0, max - 1)}…` : said);
+            }
             // A tree that was stopped keeps "stopped"; finish ignores a node that already ended.
             host.roster.finish(node.id, signal?.aborted ? "stopped" : outcome, answer);
+            // Its own background sub-agents could no longer report to it.
+            for (const c of host.roster.children(node.id)) if (!isEnded(c.status)) host.roster.stopTree(c.id);
             session?.dispose();
             const ended = host.roster.get(node.id);
             await subagentHooks(
@@ -303,6 +322,13 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
               host.agentDir,
             );
           }
+          };
+          if (!params.background) return work(signal, onUpdate);
+          inBackground(host, () => work(undefined, undefined));
+          return {
+            content: [{ type: "text", text: `Started #${node.id} "${node.label}" in the background. Its answer will reach you as a message from #${node.id}; go on meanwhile, and do not wait or poll for it.` }],
+            details: { steps: 0, cost: 0, node: node.id, model: modelName, background: true },
+          };
         },
       }),
     );
