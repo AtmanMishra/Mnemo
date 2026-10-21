@@ -523,6 +523,13 @@ capped like a parent; `profileTools` narrows the child's tool list. The body rea
 through `Host.profile`, as a `profile` system prompt section set in `before_agent_start`; the
 list of profiles is an `agent_profiles` section, only for an agent that has `spawn_subagent`.
 
+**Background spawns.** With `background: true`, `spawn_subagent` runs the child's whole life
+(`work`) through `inBackground` and returns the node id. Before `finish`, while the child still
+runs, it sends `[background result]` (or the failure) with `Roster.send` from the child to the
+parent, so the run's caps, the frame and waking all apply as for any message. After `finish`,
+any still-running children of the node are stopped with `stopTree`, and a node stopped while
+its session was being set up never prompts.
+
 **Teams.** `runtime/team.ts` keeps one `TaskBoard` per roster (`boardOf`), keyed by run id.
 A run gets files (`$MNEMO_HOME/runs/<when>-<pid>-<run>/TASK.md`, written whole by rename,
 and `LOG.md`, appended) once it has a second member or any plan; lines logged before that
