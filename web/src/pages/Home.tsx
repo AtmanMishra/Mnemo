@@ -4,6 +4,7 @@ import { Split } from "../Split";
 import { Seal } from "../Seal";
 import { GraphPlay } from "../GraphPlay";
 import { Showcase } from "../sections/Showcase";
+import { Highlights } from "../sections/Highlights";
 import { REPO, VERSION } from "../site";
 
 const MARQUEE = ["An elephant never forgets", "Neither does your agent", "Bring your own model", "Memory stays on your machine", "No telemetry", "Open source"];
@@ -110,6 +111,8 @@ export function Home() {
           <p className="fine" data-reveal="">Small samples on DeepSeek v4.1 Flash; read the direction, not the decimals. <a href="/features#measured">What we measured</a>.</p>
         </div>
       </section>
+
+      <Highlights />
 
       <section className="cards-sec" aria-labelledby="cards-h">
         <div className="wrap">
