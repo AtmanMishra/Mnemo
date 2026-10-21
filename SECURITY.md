@@ -373,6 +373,11 @@ What that does and does not allow:
   live children, 16 live sub-agents per conversation); these numbers are the defaults, and
   the settings can change them within fixed ceilings (see Settings below); a sub-agent never has more access
   than its parent.
+- **A run is bounded as a whole**: 40 messages and $1.00 of woken turns for everything one prompt
+  of yours sets going, at most 4 recipients per message, and an agent cannot message back past
+  the one that asked it (the ping-pong guard). `r r` on the agents page stops a run. Only what
+  you type carries your authority: `@N` and `/tell` are yours; an `@N` inside another agent's
+  message is text, and the run's goal reaches other agents only as quoted context.
 - **A parent agent can only tighten what its sub-agent may use.** Your sub-agent settings
   (model, thinking, output tokens, context, turns, budget) are the ceiling; a parent may
   ask for less for one task, never more (a number above yours is capped and it is told
