@@ -355,6 +355,8 @@ gets a copy one level deeper.
 
 Scheduled runs are not an extension: `app/src/schedule/` (`cron`, `store`, `run`, `cli`) starts `mnemo -p` children from `mnemo schedule`; see SECURITY.md.
 
+Background memory work is `app/src/background/` (`store`, `run`, `feed`, `cli`). With the `background` setting on, every open Mnemo looks every 30 seconds (`watchBackground`): it shows results that landed in `$MNEMO_HOME/background/events.jsonl` in the conversations of their project, and starts `mnemo background run` when a task is due and nobody holds `background/run.lock`. The run (`runBackground`, composed with the real sidecar and model in `memory-cli.ts`) ingests Claude Code sessions, and reports what tidy (recent projects from pi's session list) and curate would change, each finding once. `extensions/background.ts` gives a root conversation the results for its project since its last turn as a hidden `mnemo-background` message.
+
 `Controller` (`runtime/controller.ts`) is the only caller of the session: it owns
 the transcript, the dialog queue and the chrome state, and nothing in `ui/`
 imports pi. That split is what lets a whole turn be tested with a faux model and no

@@ -5,6 +5,7 @@
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { Host } from "./host.ts";
 import { agentsExtension } from "./agents.ts";
+import { backgroundExtension } from "./background.ts";
 import { checkpointsExtension } from "./checkpoints.ts";
 import { codeExtension } from "./code.ts";
 import { escalateExtension } from "./escalate.ts";
@@ -33,6 +34,7 @@ export function mnemoExtensions(host: Host): InlineExtension[] {
     { name: "mnemo-lsp", factory: lspExtension(host) },
     { name: "mnemo-shell", factory: shellExtension(host) },
     { name: "mnemo-memory", factory: memoryExtension(host) },
+    { name: "mnemo-background", factory: backgroundExtension(host) },
     { name: "mnemo-kernel", factory: kernelExtension(host) },
     { name: "mnemo-code", factory: codeExtension(host) },
     { name: "mnemo-agents", factory: agentsExtension(host, mnemoExtensions) },

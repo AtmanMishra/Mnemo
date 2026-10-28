@@ -75,6 +75,9 @@ much agents may do on their own; what an agent may *touch* is decided by the gat
 | Compact keeps | `compactKeep` | 20000 tokens | 1000–200000 | tokens of the most recent conversation kept as they are when it compacts |
 | Pass to commands | `passEnv` | none | variable names, comma-separated | variables bash and Python also get, such as GITHUB_TOKEN, SSH_AUTH_SOCK (they get no tokens otherwise; see SECURITY.md) |
 | Remote view | `remote` | off | on · off | allow `/remote` to start a read-only web view of the session on this machine (127.0.0.1 only, behind a token; `/remote` says how to turn this on while it is off) |
+| Background memory work | `background` | off | on · off | while Mnemo is open, learn from new Claude Code sessions and check memory and skills for clutter, then tell open conversations what changed (learning costs model calls; tidy and curate only report). `mnemo background` shows what ran |
+| Background interval | `backgroundEvery` | 60 min | 10–1440 | minutes between runs of each background task |
+| Background model | `backgroundModel` | none | provider/model-id, or empty | the model background learning reflects with; empty: `$MNEMO_MEMORY_MODEL`, then the default model |
 
 ### Agents
 

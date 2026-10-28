@@ -378,6 +378,7 @@ The web page [How it works](https://mnemo.atmanmishra.dev/how-it-works) draws it
 | `mnemo memory status` | what memory holds and what has been ingested |
 | `mnemo memory tidy [--apply]` | find duplicates, facts about files that are gone, and what was marked wrong; `--apply` retires them |
 | `mnemo memory curate [--apply]` | skills by last use: stale after 30 days, archived after 90 |
+| `mnemo background` | ingest, tidy and curate on a timer while Mnemo is open, each result told to the open conversations of its project; off until `mnemo settings set background on` (tidy and curate only report) |
 | `--no-memory` · `--no-reflect` | run without memory, or without learning after the run |
 
 > [!TIP]

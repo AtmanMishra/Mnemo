@@ -55,6 +55,7 @@ export {
 } from "./session.ts";
 export { renderSkill, skillPath, writeSkill, type SkillScope } from "./skills.ts";
 export {
+  acquireLock,
   claudeCodeSessions,
   ingestClaudeCode,
   parseClaudeCode,
