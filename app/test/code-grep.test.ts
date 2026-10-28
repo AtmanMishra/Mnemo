@@ -26,7 +26,8 @@ function project(files: Record<string, string | Buffer>): string {
     fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
     fs.writeFileSync(path.join(dir, rel), body);
   }
-  return fs.realpathSync(dir);
+  // The long name on Windows (C:\Users\RUNNER~1 is not the folder the index names), as Mnemo resolves a project.
+  return fs.realpathSync.native(dir);
 }
 
 function walk(root: string, dir = root): string[] {
