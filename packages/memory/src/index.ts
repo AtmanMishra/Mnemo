@@ -17,6 +17,9 @@ export { redact } from "./redact.ts";
 export { applyTidy, pathsIn, planTidy, sameMeaning, type TidyItem } from "./tidy.ts";
 export {
   digest,
+  LESSON_KEY,
+  LESSON_PROMPT,
+  LESSON_VOTES_PROMPT,
   parseReflection,
   recoveries,
   REFLECT_PROMPT,
@@ -35,6 +38,7 @@ export {
   projectLabel,
   memsrvEnv,
   spawnMemsrv,
+  BENCH_MARGIN,
   USER_LABEL,
   type EdgeKind,
   type Hit,

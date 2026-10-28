@@ -128,9 +128,31 @@ another does not, such as "edit with the edit tool, not here-documents".
 A revert keeps the current state as a version first, so it can itself be reverted. It removes
 surface files the version did not have, except ones too large to have been kept.
 
+## Lessons: the playbook
+
+A lesson is one thing about how to work in a project that the next run should do differently or
+again, with when it applies ("changing the parser: run the grammar tests before the full suite").
+The reflection after a run may offer one when the run clearly shows it, such as a step that failed
+and what worked instead, or something you had to correct. A guess is dropped and you decide on the
+rest. A kept lesson is the project fact `lesson (<cue>)` (`team lesson (<cue>)` after a team run)
+and is in the prompt of every later session in the project.
+
+When the project holds lessons, the reflection also says which of them helped this run (it
+avoided the mistake one warns of) or hurt it (following one caused a failure, or you corrected
+what it said). Each vote is counted in memory. A lesson whose hurt votes reach its helped votes
+plus two is **benched**: left out of the prompt, still in memory.
+
+```
+mnemo evolve lessons            this project's lessons with helped and hurt counts; benched ones marked
+```
+
+The votes are a model's judgement of one run, as in ACE, the study this follows. A replay of
+held-out cards with and without a lesson is the measured check, and that comes with `mnemo
+improve`.
+
 ## Where this goes
 
-This is phases E0, E1 and E3 (versions and revert) of the evolve plan. Next: lessons as an
-itemised playbook with helped/hurt counts (E2), a canary that reverts a change automatically when
-runs on it get worse, and `mnemo improve` (E4), which will accept a change only when it beats a
+This is phases E0 to E3 of the evolve plan: records, task cards and replay, the playbook and notes
+per model, and versions with revert. Next: a canary that reverts a change automatically when runs
+on it get worse, and `mnemo improve` (E4), which will accept a change only when it beats a
 same-budget race on held-out cards.

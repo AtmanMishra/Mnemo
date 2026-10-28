@@ -8,10 +8,11 @@
  *   history  kept versions of your profiles, skills and model notes, and how runs went on each
  *   diff     what changed between two versions
  *   revert   put them back to a version
+ *   lessons  this project's kept lessons with the helped and hurt votes runs gave them
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { projectIdentity } from "@mnemo/memory";
+import { BENCH_MARGIN, findMemsrv, journalPath, LESSON_KEY, MemoryService, projectIdentity } from "@mnemo/memory";
 import { readCards, removeCard, splitOf, writeCard, type Split, type TaskCard } from "./cards.ts";
 import { evolveDir, projectSlug, readAllOutcomes, readOutcomes } from "./outcome.ts";
 import { replayCard, type Arm, type AttemptRunner, type ReplayResult } from "./replay.ts";
@@ -34,6 +35,7 @@ export const EVOLVE_USAGE = `usage: mnemo evolve <command> [--cwd <dir>]
   history [--json]                      versions of your profiles, skills and model notes, with how runs went on each
   diff <version> [<version>]            files changed from one version to another (default: to now)
   revert <version>                      put profiles, skills and model notes back as they were (itself revertible)
+  lessons [--json]                      this project's lessons, with how often runs said each helped or hurt
 
 Records, cards and replays stay in $MNEMO_HOME/evolve; nothing leaves this machine.
 Recording is the "Record outcomes" setting (mnemo settings set recordOutcomes false turns it off).`;
@@ -140,6 +142,30 @@ export async function evolveCommand(argv: string[], home: string, io: Io = { out
     }
     io.out("\n* in force now. mnemo evolve diff <version> shows what changed since; mnemo evolve revert <version> puts it back.");
     return 0;
+  }
+
+  if (cmd === "lessons") {
+    const memsrv = findMemsrv(home);
+    if (!memsrv) return io.err("mnemo evolve lessons: memsrv was not found (mnemo doctor says where it looks)"), 1;
+    const memory = new MemoryService(memsrv, journalPath(home));
+    try {
+      const facts = (await memory.profile("project", project.id)).filter((f) => LESSON_KEY.test(f.key));
+      const votes = await memory.lessonVotes(project.id);
+      const rows = facts.map((f) => {
+        const v = votes.get(f.key) ?? { helped: 0, hurt: 0 };
+        return { key: f.key, lesson: f.value, ...v, benched: v.hurt >= v.helped + BENCH_MARGIN };
+      });
+      if (opt.has("--json")) {
+        for (const r of rows) io.out(JSON.stringify(r));
+        return 0;
+      }
+      if (!rows.length) return io.out(`no lessons kept for ${project.name} yet. A run that shows one offers it, and you decide.`), 0;
+      for (const r of rows) io.out(`${r.benched ? "benched " : ""}${r.key}  helped ${r.helped} · hurt ${r.hurt}\n    ${r.lesson}`);
+      if (rows.some((r) => r.benched)) io.out(`\nbenched: hurt runs at least ${BENCH_MARGIN} more times than it helped, so it is left out of the prompt (still in memory).`);
+      return 0;
+    } finally {
+      memory.stop();
+    }
   }
 
   if (cmd === "diff" || cmd === "revert") {
