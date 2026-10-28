@@ -1,7 +1,7 @@
 /**
  * `mnemo memory …` — memory for other coding agents.
  *
- *   ingest    learn from Claude Code's saved sessions (once each)
+ *   ingest    learn from Claude Code's, Codex's and opencode's saved sessions (once each)
  *   hook      Claude Code's hooks: context at session start and per prompt,
  *             and (async, on Stop) learning from the run that just ended
  *   mcp       memory as an MCP server (stdio) for Codex, Cursor, opencode …
@@ -23,6 +23,8 @@ import {
   findMemsrv,
   applyTidy,
   ingestClaudeCode,
+  ingestCodex,
+  ingestOpencode,
   planTidy,
   journalPath,
   MemoryService,
@@ -41,7 +43,7 @@ export const MEMORY_USAGE = `mnemo memory — memory for any coding agent
 usage
   mnemo memory setup claude-code   print the hooks and MCP entry that attach memory to Claude Code
   mnemo memory setup codex         print the MCP entry for Codex (~/.codex/config.toml)
-  mnemo memory ingest [options]    learn from Claude Code's sessions (~/.claude/projects)
+  mnemo memory ingest [options]    learn from Claude Code's, Codex's and opencode's saved sessions
   mnemo memory hook                a Claude Code hook (event JSON on stdin); never fails the agent
   mnemo memory mcp [--cwd <dir>]   memory as an MCP server on stdio
   mnemo memory curate [--apply]    skills by last use: stale after 30 days, archived after 90
@@ -53,8 +55,11 @@ usage
 ingest options
   --model <provider/id>    the model that reflects on each run (default: $MNEMO_MEMORY_MODEL,
                            then Mnemo's default model); a cheap one is enough
+  --agent <name>           only claude-code (~/.claude/projects), codex (~/.codex/sessions)
+                           or opencode (~/.local/share/opencode/opencode.db); default all three
   --under <dir>            only sessions whose folder is inside <dir>
-  --from <dir>             read sessions from <dir> instead of ~/.claude/projects
+  --from <path>            read that agent's sessions from <path> instead (claude-code when
+                           --agent is not given)
   --skills                 save the skills a session asked to remember (default: candidates only)
   --min-tools <n>          skip runs with fewer tool calls (default 1)`;
 
@@ -221,25 +226,36 @@ export async function runMemoryCommand(argv: string[], home: string, agentDir: s
       return 0;
     }
     if (command === "ingest") {
+      const from = option(rest, "--from");
+      const only = option(rest, "--agent") ?? (from === undefined ? undefined : "claude-code");
+      const agents = { "claude-code": ingestClaudeCode, codex: ingestCodex, opencode: ingestOpencode };
+      if (only !== undefined && !(only in agents)) return err.write(`mnemo memory ingest: --agent is claude-code, codex or opencode\n`), 1;
       const modelRuntime = await createModelRuntime(agentDir);
       const model = resolveModel(modelRuntime, agentDir, option(rest, "--model") ?? process.env.MNEMO_MEMORY_MODEL);
-      const report = await ingestClaudeCode({
-        memory,
-        home,
-        userSkillsDir: skillsDir(home),
-        reflect: modelReflector(modelRuntime, model),
-        projectsDir: option(rest, "--from"),
-        under: option(rest, "--under"),
-        minTools: Number(option(rest, "--min-tools") ?? 1),
-        approveSkill: rest.includes("--skills") ? async () => true : undefined,
-        progress: (s, runs) => out.write(`· ${redact(s.cwd)}  ${runs} run${runs === 1 ? "" : "s"}  (${s.model ?? "unknown model"})\n`),
-        notify: (_id, note) => {
-          if (note.kind === "learned") for (const item of note.items) out.write(`    learned  ${redact(item)}\n`);
-          else if (note.kind === "skill") out.write(`    ${note.text}\n`);
-          else if (note.kind === "failed") err.write(`    ${redact(note.text)}\n`);
-        },
-      });
-      out.write(`\n${report.sessions} session(s), ${report.runs} run(s) learned · ${report.unchanged} unchanged · ${report.active} still in use\n`);
+      const total = { sessions: 0, runs: 0, unchanged: 0, active: 0 };
+      for (const [agent, ingest] of Object.entries(agents)) {
+        if (only !== undefined && agent !== only) continue;
+        const report = await ingest({
+          memory,
+          home,
+          userSkillsDir: skillsDir(home),
+          reflect: modelReflector(modelRuntime, model),
+          projectsDir: from,
+          codexDir: from,
+          opencodeDb: from,
+          under: option(rest, "--under"),
+          minTools: Number(option(rest, "--min-tools") ?? 1),
+          approveSkill: rest.includes("--skills") ? async () => true : undefined,
+          progress: (s, runs) => out.write(`· ${agent}  ${redact(s.cwd)}  ${runs} run${runs === 1 ? "" : "s"}  (${s.model ?? "unknown model"})\n`),
+          notify: (_id, note) => {
+            if (note.kind === "learned") for (const item of note.items) out.write(`    learned  ${redact(item)}\n`);
+            else if (note.kind === "skill") out.write(`    ${note.text}\n`);
+            else if (note.kind === "failed") err.write(`    ${redact(note.text)}\n`);
+          },
+        });
+        for (const k of Object.keys(total) as (keyof typeof total)[]) total[k] += report[k];
+      }
+      out.write(`\n${total.sessions} session(s), ${total.runs} run(s) learned · ${total.unchanged} unchanged · ${total.active} still in use\n`);
       return 0;
     }
     err.write(`mnemo memory: unknown command ${command}\n${MEMORY_USAGE}\n`);
