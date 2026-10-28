@@ -17,6 +17,8 @@ import { evolveCommand } from "../src/evolve/cli.ts";
 import { appendOutcome, checkPassed, failureSignature, mutates, isCorrection, outcomesFile, readOutcomes, RunTracker, type OutcomeRecord } from "../src/evolve/outcome.ts";
 import { replayCard, scratchHome, type AttemptRunner } from "../src/evolve/replay.ts";
 import { renderScorecard, score } from "../src/evolve/scorecard.ts";
+import { diffSurface, findVersion, readSurface, revertTo, snapshot, surfaceHash, versions } from "../src/evolve/surface.ts";
+import { agentDir } from "../src/runtime/paths.ts";
 import { SettingsStore } from "../src/runtime/settings.ts";
 import { MEMSRV, mnemoEnv } from "./helpers.ts";
 
@@ -278,6 +280,9 @@ test("a session's checked run is recorded and becomes a card with its test file"
   expect(r!.files).toEqual(["tests/run.sh", "value.txt"]);
   expect(r!.turns).toBe(4);
   expect(r!.card).toBeDefined();
+  // The version of profiles, skills and model notes in force is named, and kept.
+  expect(r!.surface).toBe(surfaceHash(readSurface(e.home)));
+  expect(versions(e.home).map((v) => v.id)).toContain(r!.surface!);
   const [card] = readCards(e.home, r!.project.id);
   expect(card!.id).toBe(r!.card!);
   expect(card!.tests).toEqual([{ path: "tests/run.sh", content: "grep -q 42 value.txt\n" }]);
@@ -565,11 +570,14 @@ test("scratchHome copies only what shapes an attempt", () => {
   fs.mkdirSync(path.join(home, "agent", "sessions"), { recursive: true });
   fs.writeFileSync(path.join(home, "agent", "sessions", "s.jsonl"), "{}");
   fs.writeFileSync(path.join(home, "agent", "models.json"), "{}");
+  fs.mkdirSync(path.join(home, "agent", "models"), { recursive: true });
+  fs.writeFileSync(path.join(home, "agent", "models", "m.md"), "notes");
   fs.mkdirSync(path.join(home, "evolve", "outcomes"), { recursive: true });
   fs.writeFileSync(path.join(home, "evolve", "outcomes", "x.jsonl"), "{}");
   const s = scratchHome(home, "memory");
   cleanup.push(() => fs.rmSync(s, { recursive: true, force: true }));
   expect(fs.existsSync(path.join(s, "agent", "models.json"))).toBe(true);
+  expect(fs.readFileSync(path.join(s, "agent", "models", "m.md"), "utf8")).toBe("notes");
   expect(fs.existsSync(path.join(s, "agent", "sessions"))).toBe(false);
   expect(fs.existsSync(path.join(s, "evolve"))).toBe(false);
 });
@@ -632,4 +640,131 @@ test("mnemo evolve stats prints the scorecard and --json the numbers", async () 
   const j = io();
   expect(await evolveCommand(["stats", "--cwd", cwd, "--json"], home, j.io)).toBe(0);
   expect(JSON.parse(j.out[0]!)).toMatchObject({ runs: 3, passed: 3 });
+});
+
+// ── the versioned surface (E3) ───────────────────────────────────────────────
+
+function surfaceHome(files: Record<string, string> = {}) {
+  const home = tmp("mnemo-surface-");
+  const put = (rel: string, body: string) => {
+    const f = path.join(agentDir(home), rel);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, body);
+  };
+  for (const [rel, body] of Object.entries(files)) put(rel, body);
+  return { home, put, read: (rel: string) => fs.readFileSync(path.join(agentDir(home), rel), "utf8"), has: (rel: string) => fs.existsSync(path.join(agentDir(home), rel)) };
+}
+
+test("the surface is profiles, skills and model notes only; the same files are the same version", () => {
+  const s = surfaceHome({ "agents/reviewer.md": "review\n", "skills/deploy/SKILL.md": "deploy\n", "models/deepseek.md": "terse\n", "settings.json": "{}", "auth.json": "{}", "skills/.git/HEAD": "x", "sessions/a.jsonl": "{}" });
+  expect([...readSurface(s.home).keys()].sort()).toEqual(["agents/reviewer.md", "models/deepseek.md", "skills/deploy/SKILL.md"]);
+  const a = snapshot(s.home, "first");
+  expect(snapshot(s.home, "again")).toBe(a);
+  expect(versions(s.home)).toHaveLength(1);
+  expect(versions(s.home)[0]!.reason).toBe("first");
+  // Not on the surface: changing it is not a new version.
+  s.put("settings.json", '{"x":1}');
+  expect(snapshot(s.home, "settings changed")).toBe(a);
+  s.put("agents/reviewer.md", "review harder\n");
+  const b = snapshot(s.home, "edited");
+  expect(b).not.toBe(a);
+  expect(versions(s.home).map((v) => v.id)).toEqual([a, b]);
+  // Versions are private to this user.
+  const kept = path.join(s.home, "evolve", "surface", a, "files", "agents", "reviewer.md");
+  expect(fs.readFileSync(kept, "utf8")).toBe("review\n");
+  expect(fs.statSync(kept).mode & 0o077).toBe(0);
+});
+
+test("a diff names added, removed and changed files, to another version or to now", () => {
+  const s = surfaceHome({ "agents/a.md": "a\n", "skills/x/SKILL.md": "x\n" });
+  const v1 = snapshot(s.home, "v1");
+  s.put("agents/a.md", "a2\n");
+  fs.rmSync(path.join(agentDir(s.home), "skills/x/SKILL.md"));
+  s.put("models/m.md", "m\n");
+  expect(diffSurface(s.home, v1)).toEqual({ added: ["models/m.md"], removed: ["skills/x/SKILL.md"], changed: ["agents/a.md"] });
+  const v2 = snapshot(s.home, "v2");
+  expect(diffSurface(s.home, v1, v2)).toEqual(diffSurface(s.home, v1));
+  expect(diffSurface(s.home, v2)).toEqual({ added: [], removed: [], changed: [] });
+});
+
+test("a revert puts the files back, keeps what it replaced, and can itself be reverted", () => {
+  const s = surfaceHome({ "agents/a.md": "good\n", "skills/x/SKILL.md": "x\n" });
+  const good = snapshot(s.home, "good");
+  s.put("agents/a.md", "worse\n");
+  s.put("skills/y/SKILL.md", "new skill\n");
+  fs.rmSync(path.join(agentDir(s.home), "skills/x/SKILL.md"));
+  const { kept, diff } = revertTo(s.home, good);
+  expect(s.read("agents/a.md")).toBe("good\n");
+  expect(s.read("skills/x/SKILL.md")).toBe("x\n");
+  expect(s.has("skills/y/SKILL.md")).toBe(false);
+  expect(diff).toEqual({ added: ["skills/x/SKILL.md"], removed: ["skills/y/SKILL.md"], changed: ["agents/a.md"] });
+  expect(surfaceHash(readSurface(s.home))).toBe(good);
+  // Undo the revert.
+  revertTo(s.home, kept);
+  expect(s.read("agents/a.md")).toBe("worse\n");
+  expect(s.read("skills/y/SKILL.md")).toBe("new skill\n");
+  expect(s.has("skills/x/SKILL.md")).toBe(false);
+});
+
+test("a file too large to keep, and dot-files, are left alone by a revert", () => {
+  const s = surfaceHome({ "agents/a.md": "a\n" });
+  const v1 = snapshot(s.home, "v1");
+  s.put("skills/big/data.bin", "x".repeat(300 * 1024));
+  s.put("skills/.cache", "c");
+  s.put("agents/a.md", "b\n");
+  revertTo(s.home, v1);
+  expect(s.read("agents/a.md")).toBe("a\n");
+  expect(s.has("skills/big/data.bin")).toBe(true);
+  expect(s.has("skills/.cache")).toBe(true);
+});
+
+test("a version is found by a unique prefix only", () => {
+  const s = surfaceHome({ "agents/a.md": "a\n" });
+  const v1 = snapshot(s.home, "v1");
+  s.put("agents/a.md", "b\n");
+  const v2 = snapshot(s.home, "v2");
+  expect(findVersion(s.home, v1)!.id).toBe(v1);
+  expect(findVersion(s.home, v2.slice(0, 6))!.id).toBe(v2);
+  expect(findVersion(s.home, "")).toBeUndefined();
+  expect(findVersion(s.home, "zzzz")).toBeUndefined();
+});
+
+test("a half-written version is skipped and does not block keeping it again", () => {
+  const s = surfaceHome({ "agents/a.md": "a\n" });
+  const id = surfaceHash(readSurface(s.home));
+  fs.mkdirSync(path.join(s.home, "evolve", "surface", id, "files"), { recursive: true });
+  expect(versions(s.home)).toHaveLength(0);
+  // The directory exists without version.json: the rename fails, the id is still returned.
+  expect(snapshot(s.home, "again")).toBe(id);
+});
+
+test("mnemo evolve history, diff and revert", async () => {
+  const s = surfaceHome({ "agents/a.md": "good\n" });
+  const good = snapshot(s.home, "seen at run start");
+  const cwd = repo();
+  const { projectIdentity } = await import("@mnemo/memory");
+  const p = projectIdentity(cwd);
+  for (const verdict of ["passed", "passed", "failed"] as const) appendOutcome(s.home, rec({ project: { id: p.id, name: p.name, root: p.root }, verdict, surface: good }));
+  s.put("agents/a.md", "worse\n");
+
+  const h = io();
+  expect(await evolveCommand(["history", "--cwd", cwd], s.home, h.io)).toBe(0);
+  const text = h.out.join("\n");
+  expect(text).toContain(`  ${good}`);
+  expect(text).toContain("3 runs, 2/3 edits checked and passed");
+  // History keeps the files as they are now, which are in force.
+  const now = surfaceHash(readSurface(s.home));
+  expect(text).toContain(`* ${now}`);
+
+  const d = io();
+  expect(await evolveCommand(["diff", good.slice(0, 5)], s.home, d.io)).toBe(0);
+  expect(d.out).toEqual(["  ~ agents/a.md"]);
+
+  const r = io();
+  expect(await evolveCommand(["revert", good], s.home, r.io)).toBe(0);
+  expect(s.read("agents/a.md")).toBe("good\n");
+  expect(r.out.at(-1)).toBe(`back to ${good}. To undo: mnemo evolve revert ${now}`);
+
+  for (const argv of [["diff"], ["revert"], ["revert", good, now], ["diff", "a", "b", "c"]]) expect(await evolveCommand(argv, s.home, io().io)).toBe(2);
+  expect(await evolveCommand(["revert", "nope"], s.home, io().io)).toBe(1);
 });

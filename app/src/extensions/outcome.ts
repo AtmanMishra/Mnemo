@@ -14,6 +14,7 @@ import { projectIdentity, textOf } from "@mnemo/memory";
 import { SAFE_GIT, trustedBin } from "../runtime/bin.ts";
 import { cardFor, writeCard } from "../evolve/cards.ts";
 import { appendOutcome, RunTracker } from "../evolve/outcome.ts";
+import { snapshot } from "../evolve/surface.ts";
 import type { Host } from "./host.ts";
 
 function gitRun(cwd: string, args: string[], env?: Record<string, string>) {
@@ -55,6 +56,7 @@ export function outcomeExtension(host: Host) {
     let run: RunTracker | undefined;
     let runs = 0;
     let escalationsAtStart = 0;
+    let surface: string | undefined;
     const args = new Map<string, Record<string, unknown>>();
 
     pi.on("before_agent_start", async (event, ctx) => {
@@ -63,6 +65,11 @@ export function outcomeExtension(host: Host) {
       if (!host.settings.get().recordOutcomes) return;
       run = new RunTracker(event.prompt ?? "", gitState(ctx.cwd));
       escalationsAtStart = host.escalations.length;
+      try {
+        surface = snapshot(host.home, "seen at run start");
+      } catch {
+        surface = undefined;
+      }
     });
 
     pi.on("tool_execution_start", async (event) => {
@@ -100,6 +107,7 @@ export function outcomeExtension(host: Host) {
           escalated: host.escalations.length > escalationsAtStart,
           changed: changes?.files,
         });
+        record.surface = surface;
         const card = cardFor(record, followUp, changes?.patch);
         if (card) {
           writeCard(host.home, card);

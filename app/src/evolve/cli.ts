@@ -5,6 +5,9 @@
  *   tasks    the task cards made from checked runs, and which are held out
  *   replay   run cards again with the card's own check as the judge
  *   forget   delete a card
+ *   history  kept versions of your profiles, skills and model notes, and how runs went on each
+ *   diff     what changed between two versions
+ *   revert   put them back to a version
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -13,6 +16,7 @@ import { readCards, removeCard, splitOf, writeCard, type Split, type TaskCard } 
 import { evolveDir, projectSlug, readAllOutcomes, readOutcomes } from "./outcome.ts";
 import { replayCard, type Arm, type AttemptRunner, type ReplayResult } from "./replay.ts";
 import { renderScorecard, score } from "./scorecard.ts";
+import { diffSurface, findVersion, revertTo, snapshot, versions, type SurfaceDiff } from "./surface.ts";
 
 export const EVOLVE_USAGE = `usage: mnemo evolve <command> [--cwd <dir>]
 
@@ -27,6 +31,9 @@ export const EVOLVE_USAGE = `usage: mnemo evolve <command> [--cwd <dir>]
       --timeout <minutes>               per attempt (default 15)
       --json                            one result per line
   forget <card id>                      delete a task card
+  history [--json]                      versions of your profiles, skills and model notes, with how runs went on each
+  diff <version> [<version>]            files changed from one version to another (default: to now)
+  revert <version>                      put profiles, skills and model notes back as they were (itself revertible)
 
 Records, cards and replays stay in $MNEMO_HOME/evolve; nothing leaves this machine.
 Recording is the "Record outcomes" setting (mnemo settings set recordOutcomes false turns it off).`;
@@ -112,6 +119,48 @@ export async function evolveCommand(argv: string[], home: string, io: Io = { out
     if (!id) return io.err("usage: mnemo evolve forget <card id>"), 2;
     if (!removeCard(home, project.id, id)) return io.err(`mnemo evolve: no card ${id} in ${project.name}`), 1;
     io.out(`deleted card ${id}`);
+    return 0;
+  }
+
+  if (cmd === "history") {
+    const now = snapshot(home, "seen by mnemo evolve history");
+    const runs = readAllOutcomes(home);
+    const rows = versions(home).map((v) => {
+      const rs = runs.filter((r) => r.surface === v.id);
+      const edits = rs.filter((r) => r.files.length > 0).length;
+      return { ...v, current: v.id === now, runs: rs.length, edits, passed: rs.filter((r) => r.verdict === "passed").length };
+    });
+    if (opt.has("--json")) {
+      for (const r of rows) io.out(JSON.stringify(r));
+      return 0;
+    }
+    for (const r of rows) {
+      const how = r.runs ? `${r.runs} run${r.runs > 1 ? "s" : ""}, ${r.passed}/${r.edits} edits checked and passed` : "no runs";
+      io.out(`${r.current ? "*" : " "} ${r.id}  ${r.at.slice(0, 16).replace("T", " ")}  ${r.files.length} file${r.files.length === 1 ? "" : "s"} · ${how} · ${r.reason}`);
+    }
+    io.out("\n* in force now. mnemo evolve diff <version> shows what changed since; mnemo evolve revert <version> puts it back.");
+    return 0;
+  }
+
+  if (cmd === "diff" || cmd === "revert") {
+    const ids = pos.slice(1);
+    if (ids.length < 1 || ids.length > (cmd === "diff" ? 2 : 1)) return io.err(`usage: mnemo evolve ${cmd === "diff" ? "diff <version> [<version>]" : "revert <version>"}`), 2;
+    const found = ids.map((id) => findVersion(home, id));
+    const missing = ids.filter((_, i) => !found[i]);
+    if (missing.length) return io.err(`mnemo evolve: no single version starts with ${missing.join(", ")} (mnemo evolve history lists them)`), 1;
+    const show = (d: SurfaceDiff) => {
+      for (const f of d.added) io.out(`  + ${f}`);
+      for (const f of d.removed) io.out(`  - ${f}`);
+      for (const f of d.changed) io.out(`  ~ ${f}`);
+      if (!d.added.length && !d.removed.length && !d.changed.length) io.out("  no changes");
+    };
+    if (cmd === "diff") {
+      show(diffSurface(home, found[0]!.id, found[1]?.id));
+      return 0;
+    }
+    const { kept, diff } = revertTo(home, found[0]!.id);
+    show(diff);
+    io.out(`back to ${found[0]!.id}. To undo: mnemo evolve revert ${kept}`);
     return 0;
   }
 

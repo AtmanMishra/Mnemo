@@ -3,7 +3,7 @@
  *
  * Each attempt starts from the card's commit in a fresh git worktree and runs
  * `mnemo -p` there with a scratch Mnemo home: a copy of your settings, keys,
- * skills and agent profiles, plus a copy of your memory journal in the
+ * skills, agent profiles and model notes, plus a copy of your memory journal in the
  * "memory" arm (none in "no-memory"). Whatever the attempt learns or records
  * stays in the scratch home, so your own memory and scorecard are untouched.
  * When it is done, the card's test files are put back over whatever the
@@ -76,7 +76,7 @@ export interface ReplayResult {
   checkOutput: string;
 }
 
-/** A scratch home with copies of what shapes an attempt: settings, keys, skills, profiles and (memory arm) the journal. */
+/** A scratch home with copies of what shapes an attempt: settings, keys, skills, profiles, model notes and (memory arm) the journal. */
 export function scratchHome(home: string, arm: Arm): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-replay-home-"));
   fs.chmodSync(dir, 0o700);
@@ -90,6 +90,7 @@ export function scratchHome(home: string, arm: Arm): string {
   for (const f of ["auth.json", "models.json", "settings.json"]) copy(path.join("agent", f));
   copy(path.join("agent", "skills"));
   copy(path.join("agent", "agents"));
+  copy(path.join("agent", "models"));
   if (arm === "memory") {
     const journal = journalPath(home);
     if (fs.existsSync(journal)) {

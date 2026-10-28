@@ -61,6 +61,8 @@ export interface OutcomeRecord {
   ms: number;
   /** The task card this run became (evolve/cards.ts). */
   card?: string;
+  /** The version of your profiles, skills and model notes in force (evolve/surface.ts). */
+  surface?: string;
 }
 
 const REFUSAL = /declined this call|Refused by a rule|Plan mode is read-only|The user doesn't want to proceed/;

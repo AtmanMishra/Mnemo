@@ -13,6 +13,7 @@ import { hooksExtension } from "./hooks.ts";
 import { kernelExtension } from "./kernel.ts";
 import { lspExtension } from "./lsp.ts";
 import { mcpExtensions } from "./mcp.ts";
+import { modelNotesExtension } from "./model-notes.ts";
 import { outcomeExtension } from "./outcome.ts";
 import { memoryExtension } from "./memory.ts";
 import { peersExtension } from "./peers.ts";
@@ -32,6 +33,7 @@ export function mnemoExtensions(host: Host): InlineExtension[] {
     { name: "mnemo-hooks", factory: hooksExtension(host) },
     // Before memory, which builds on the rendered system prompt that holds plan mode's section.
     { name: "mnemo-plan", factory: planExtension(host) },
+    { name: "mnemo-model-notes", factory: modelNotesExtension(host) },
     { name: "mnemo-checkpoints", factory: checkpointsExtension(host) },
     { name: "mnemo-lsp", factory: lspExtension(host) },
     { name: "mnemo-shell", factory: shellExtension(host) },
