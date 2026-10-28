@@ -1,6 +1,7 @@
 /**
  * The code index as tools: `code_search`, `code_symbol`, `code_refs`, `code_map`, and a line
- * after each edit naming the code elsewhere that calls what the edit changed.
+ * after each edit naming the code elsewhere that calls what the edit changed. `grep`, where it
+ * is active and ripgrep is not installed, reads only the files the text index says can match.
  *
  * All four are read tools to the gate: they run without asking, plan mode included, because
  * the index is written under the Mnemo home and never in the project. They read no more than
@@ -19,8 +20,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createGrepToolDefinition, DEFAULT_MAX_BYTES, defineTool, formatSize, truncateHead, type ExtensionAPI, type GrepToolInput } from "@earendil-works/pi-coding-agent";
 import { CodeIndex, type Def, type Edge } from "../code/index.ts";
+import { compile, globMatch, grepLines, requiredGrams, type GrepFile } from "../code/text.ts";
 import { nativeSystem } from "../policy/paths.ts";
 import { codeIndexPath } from "../runtime/paths.ts";
 import type { Host } from "./host.ts";
@@ -121,6 +123,63 @@ export async function impactNote(ix: CodeIndex, rel: string): Promise<string | u
   return `\n\nThis edit changed the signature of, or removed, definitions that other code calls (check they still fit):\n${lines.join("\n")}`;
 }
 
+/**
+ * grep from the text index: the files holding every trigram the pattern needs, matched here.
+ * Undefined when the index cannot answer for certain (a path outside the project, or one it
+ * holds no text file under), and pi's grep should.
+ */
+export function indexedGrep(ix: CodeIndex, re: RegExp, p: GrepToolInput, cwd: string, signal?: AbortSignal) {
+  const target = path.resolve(cwd, p.path || ".");
+  let dir: boolean;
+  try {
+    dir = fs.statSync(target).isDirectory();
+  } catch {
+    return undefined;
+  }
+  const rel = relOf(ix.root, cwd, target);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return undefined;
+  const prefix = rel === "" ? "" : `${rel}/`;
+  const all = ix.textFiles();
+  const under = dir ? all.filter((f) => f.startsWith(prefix)) : all.filter((f) => f === rel);
+  // A folder or file the index holds nothing of (ignored by git, binary): ripgrep decides.
+  if (!under.length) return undefined;
+  const wanted = new Set(under);
+  const candidates = ix.textFiles(requiredGrams(p.pattern, p.literal)).filter((f) => wanted.has(f));
+  function* files(): Generator<GrepFile> {
+    for (const f of candidates) {
+      const shown = dir ? f.slice(prefix.length) : path.posix.basename(f);
+      if (p.glob && !globMatch(p.glob, shown)) continue;
+      let text: string;
+      try {
+        text = fs.readFileSync(path.join(ix.root, f), "utf8");
+      } catch {
+        continue;
+      }
+      yield { shown, text };
+    }
+  }
+  const limit = Math.max(1, p.limit ?? 100);
+  const r = grepLines(files(), re, { context: p.context, limit, signal });
+  const details: Record<string, unknown> = { index: { read: candidates.length, of: under.length } };
+  if (!r.matches) return { content: [{ type: "text" as const, text: "No matches found" }], details };
+  const truncation = truncateHead(r.lines.join("\n"), { maxLines: Number.MAX_SAFE_INTEGER });
+  const notices: string[] = [];
+  if (r.limitReached) {
+    notices.push(`${limit} matches limit reached. Use limit=${limit * 2} for more, or refine pattern`);
+    details.matchLimitReached = limit;
+  }
+  if (truncation.truncated) {
+    notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+    details.truncation = truncation;
+  }
+  if (r.linesTruncated) {
+    notices.push("Some lines truncated to 500 chars. Use read tool to see full lines");
+    details.linesTruncated = true;
+  }
+  const text = truncation.content + (notices.length ? `\n\n[${notices.join(". ")}]` : "");
+  return { content: [{ type: "text" as const, text }], details };
+}
+
 export function codeExtension(host: Host) {
   return (pi: ExtensionAPI): void => {
     if (!host.settings.get().codeIndex) return;
@@ -152,8 +211,8 @@ export function codeExtension(host: Host) {
       }
     };
     const elsewise = "Use grep, find and read instead";
-    /** The index for this project, brought up to date, or why there is none. */
-    const fresh = async (cwd: string): Promise<CodeIndex | string> => {
+    /** The index for this project, brought up to date (its text index for grep), or why there is none. */
+    const fresh = async (cwd: string, part: "code" | "text" = "code"): Promise<CodeIndex | string> => {
       const root = realRoot(cwd);
       const choice = indexChoices(host.home)[root];
       if (choice === "off") return `The code index is off for this project (the user turned it off with /index off). ${elsewise}.`;
@@ -161,7 +220,7 @@ export function codeExtension(host: Host) {
       const anyway = "If it is one, the user can index it anyway with /index on.";
       if (why) return `Not indexing ${root}: ${why}, so it is likely not one project. ${elsewise}. ${anyway}`;
       const ix = indexFor(root, choice === "on" ? undefined : MAX_FILES);
-      const r = await ix.refresh();
+      const r = part === "text" ? await ix.refreshText() : await ix.refresh();
       if (r.tooMany) {
         drop(root);
         return `Not indexing ${root}: it has ${r.tooMany} source files (more than ${MAX_FILES}), so it is likely not one project. ${elsewise}. ${anyway}`;
@@ -313,6 +372,28 @@ export function codeExtension(host: Host) {
         },
       }),
     );
+
+    // grep without ripgrep. pi's grep needs rg, and Mnemo stops pi downloading it (pi-env.ts),
+    // so where rg is not installed (the usual case on Windows and macOS) grep is answered from
+    // the text index: only the files that can match are read. Where rg is installed it is used,
+    // because it is as fast (eval/grep-index.ts) and reads every pattern. Not active by default:
+    // it replaces grep where grep was named (read-only sub-agents), and adds no tool elsewhere.
+    const rg = createGrepToolDefinition(process.cwd());
+    pi.registerTool({
+      ...rg,
+      defaultActive: false,
+      async execute(id, params, signal, update, ctx) {
+        if (Bun.which("rg", { PATH: process.env.PATH ?? "" })) return rg.execute(id, params, signal, update, ctx);
+        const re = compile(params.pattern, params);
+        if (!re)
+          throw new Error(
+            "This pattern uses syntax only ripgrep reads (a POSIX class, an inline flag, \\p{…}, \\A or \\z), and ripgrep is not installed. Write it without that syntax.",
+          );
+        const ix = await fresh(ctx.cwd, "text");
+        // No index here (off, or not one project) or a path it does not cover: pi's grep says rg is missing.
+        return (typeof ix !== "string" && indexedGrep(ix, re, params, ctx.cwd, signal)) || rg.execute(id, params, signal, update, ctx);
+      },
+    });
 
     // After an edit: what calls the definitions it changed, from elsewhere. Only once the
     // index exists, so a project nobody asked a code question in is never indexed for this.
