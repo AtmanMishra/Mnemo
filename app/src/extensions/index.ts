@@ -13,6 +13,7 @@ import { hooksExtension } from "./hooks.ts";
 import { kernelExtension } from "./kernel.ts";
 import { lspExtension } from "./lsp.ts";
 import { mcpExtensions } from "./mcp.ts";
+import { outcomeExtension } from "./outcome.ts";
 import { memoryExtension } from "./memory.ts";
 import { peersExtension } from "./peers.ts";
 import { planExtension } from "./plan.ts";
@@ -35,6 +36,8 @@ export function mnemoExtensions(host: Host): InlineExtension[] {
     { name: "mnemo-lsp", factory: lspExtension(host) },
     { name: "mnemo-shell", factory: shellExtension(host) },
     { name: "mnemo-memory", factory: memoryExtension(host) },
+    // After memory, which says whether a run that ended goes back to verify.
+    { name: "mnemo-outcome", factory: outcomeExtension(host) },
     { name: "mnemo-kernel", factory: kernelExtension(host) },
     { name: "mnemo-code", factory: codeExtension(host) },
     { name: "mnemo-agents", factory: agentsExtension(host, mnemoExtensions) },

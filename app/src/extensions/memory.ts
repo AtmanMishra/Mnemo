@@ -202,6 +202,7 @@ export function memoryExtension(host: Host) {
       const messages = [...held, ...event.messages];
       // Changed code and checked nothing: back once, to verify, before it is called done.
       const nudge = host.verify && host.settings.get().verify && host.depth === 0 && last.stopReason !== "error" ? await s.verifyNudge() : undefined;
+      host.verifying = !!nudge;
       if (nudge) {
         held = messages;
         pi.sendMessage({ customType: "mnemo-verify", content: nudge, display: true }, { triggerTurn: true });

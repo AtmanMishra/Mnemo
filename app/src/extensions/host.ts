@@ -83,6 +83,8 @@ export interface Host {
    * clears them after each run: they are the user's own words about how to work.
    */
   signals: string[];
+  /** Set while a run that ended is sent back once to run a check: it is still the same run. */
+  verifying?: boolean;
   /** The episode this session is recording, once there is one. */
   episode?: number;
   /** For a sub-agent: the episode of the session that spawned it. */

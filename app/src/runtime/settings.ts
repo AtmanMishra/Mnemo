@@ -59,6 +59,7 @@ export interface Settings extends Record<KeyAction, string> {
   // Behaviour
   mode: (typeof MODE_CHOICES)[number];
   reflect: boolean;
+  recordOutcomes: boolean;
   verify: boolean;
   escalateModel: string;
   escalateAfter: number;
@@ -147,6 +148,7 @@ export const DEFS: Record<SettingKey, Def> = {
 
   mode: { group: "Behaviour", label: "Default mode", help: "how much Mnemo may do without asking (bypass modes are never a default)", kind: "enum", default: "default", options: MODE_CHOICES, restart: true },
   reflect: bool("Behaviour", "Learn after runs", "write durable facts to memory after each run (--no-reflect overrides)", true),
+  recordOutcomes: bool("Behaviour", "Record outcomes", "keep a local record of each run's checks, cost and turns, and replayable copies of checked runs (mnemo evolve)", true),
   verify: bool("Behaviour", "Check changed code", "send a run that changed code back to run a check (--no-verify overrides)", true),
   escalateModel: { group: "Behaviour", label: "Escalation model", help: "provider/id to finish a run on after failed checks; empty for none", kind: "text", default: "" },
   escalateAfter: int("Behaviour", "Escalate after", "failed checks in one run before escalating", 2, 1, 10, "checks"),
