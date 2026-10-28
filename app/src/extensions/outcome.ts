@@ -45,7 +45,7 @@ export function gitChanges(root: string, head: string): { files: string[]; patch
 
 function real(p: string): string {
   try {
-    return fs.realpathSync(p);
+    return fs.realpathSync.native(p);
   } catch {
     return path.resolve(p);
   }
@@ -103,8 +103,8 @@ export function outcomeExtension(host: Host) {
       const followUp = runs++ > 0;
       try {
         const project = projectIdentity(ctx.cwd);
-        // One spelling of each path (macOS's /var is /private/var), so the folder the run
-        // worked in is found inside its project.
+        // One spelling of each path (macOS's /var is /private/var, a Windows 8.3 short name is
+        // its long name), so the folder the run worked in is found inside its project.
         const root = real(project.root);
         const cwd = real(ctx.cwd);
         // From a clean start, git knows every file the run changed, however it changed them.

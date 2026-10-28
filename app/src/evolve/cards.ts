@@ -73,10 +73,11 @@ export function replayableCheck(command: string, root: string, sub: string): { c
     .replace(/\s*\|\|\s*(true|:)\s*$/, "")
     .replace(/\s*(2>&1\s*)?\|\s*(tail|head)(\s+-n)?(\s+-?\d+)?\s*$/, "")
     .trim();
-  // The check may name the folder by another spelling than the root (macOS's /var for /private/var).
+  // The check may name the folder by another spelling than the root (macOS's /var for
+  // /private/var, a Windows 8.3 short name); the native call resolves both.
   const real = (p: string) => {
     try {
-      return fs.realpathSync(p);
+      return fs.realpathSync.native(p);
     } catch {
       return path.resolve(p);
     }
