@@ -43,6 +43,14 @@ export function gitChanges(root: string, head: string): { files: string[]; patch
   }
 }
 
+function real(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
 /** HEAD and whether the tree is clean, or undefined outside git. */
 export function gitState(cwd: string): { head: string; clean: boolean } | undefined {
   const head = gitRun(cwd, ["rev-parse", "--verify", "HEAD"]);
@@ -95,11 +103,15 @@ export function outcomeExtension(host: Host) {
       const followUp = runs++ > 0;
       try {
         const project = projectIdentity(ctx.cwd);
+        // One spelling of each path (macOS's /var is /private/var), so the folder the run
+        // worked in is found inside its project.
+        const root = real(project.root);
+        const cwd = real(ctx.cwd);
         // From a clean start, git knows every file the run changed, however it changed them.
-        const changes = r.git?.clean ? gitChanges(project.root, r.git.head) : undefined;
+        const changes = r.git?.clean ? gitChanges(root, r.git.head) : undefined;
         const record = r.finish({
-          project: { id: project.id, name: project.name, root: project.root },
-          cwd: ctx.cwd,
+          project: { id: project.id, name: project.name, root },
+          cwd,
           session: ctx.sessionManager.getSessionId(),
           model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
           messages: [...r.held, ...event.messages],

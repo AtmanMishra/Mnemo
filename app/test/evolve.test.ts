@@ -299,14 +299,17 @@ test("a session's checked run is recorded and becomes a card with its test file"
   expect(readCards(e.home, r!.project.id)).toHaveLength(1);
 });
 
+/** A path as bash on Windows takes it. */
+const sh = (p: string) => p.replaceAll("\\", "/");
+
 test("a run that edits through the shell and hides the check's exit status is still read right", async () => {
   // What a real model did: a here-document edit, then `cd <root> && check; echo "exit=$?"`.
   const cwd = repo({ "value.txt": "1\n" });
   const e = await session({ cwd });
   e.faux.setResponses([
-    bash(`cd ${cwd} && cat > value.txt <<'EOF'\n42\nEOF`),
+    bash(`cd ${sh(cwd)} && cat > value.txt <<'EOF'\n42\nEOF`),
     bash(`mkdir -p tests && printf 'grep -qx 42 value.txt\\n' > tests/run.sh`),
-    bash(`cd ${cwd} && sh tests/run.sh; echo "exit=$?"`),
+    bash(`cd ${sh(cwd)} && sh tests/run.sh; echo "exit=$?"`),
     say("done"),
   ]);
   await e.controller.submit("make value.txt say 42 and add a check script");
@@ -672,7 +675,7 @@ test("the surface is profiles, skills and model notes only; the same files are t
   // Versions are private to this user.
   const kept = path.join(s.home, "evolve", "surface", a, "files", "agents", "reviewer.md");
   expect(fs.readFileSync(kept, "utf8")).toBe("review\n");
-  expect(fs.statSync(kept).mode & 0o077).toBe(0);
+  if (process.platform !== "win32") expect(fs.statSync(kept).mode & 0o077).toBe(0);
 });
 
 test("a diff names added, removed and changed files, to another version or to now", () => {

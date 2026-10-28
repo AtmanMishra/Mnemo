@@ -73,7 +73,15 @@ export function replayableCheck(command: string, root: string, sub: string): { c
     .replace(/\s*\|\|\s*(true|:)\s*$/, "")
     .replace(/\s*(2>&1\s*)?\|\s*(tail|head)(\s+-n)?(\s+-?\d+)?\s*$/, "")
     .trim();
-  const rel = path.relative(root, dir);
+  // The check may name the folder by another spelling than the root (macOS's /var for /private/var).
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const rel = path.relative(real(root), real(dir));
   if (rel.startsWith("..") || path.isAbsolute(rel) || !c) return undefined;
   return { check: c, sub: rel.split(path.sep).join("/") };
 }
