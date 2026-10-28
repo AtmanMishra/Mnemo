@@ -25,9 +25,14 @@ import type { Host } from "./host.ts";
 import { hostsIn, isMetadata, normalHost } from "../policy/egress.ts";
 import { allowedMode, loadManaged } from "../policy/managed.ts";
 
-const READ = new Set(["read", "grep", "find", "ls", "code_search", "code_symbol", "code_refs", "code_map", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent", "task_update", "tool_search", "ask_user"]);
+const READ = new Set(["read", "grep", "find", "ls", "code_search", "code_symbol", "code_refs", "code_map", "memory_search", "memory_remember", "memory_steer", "spawn_subagent", "list_agents", "message_agent", "task_update", "tool_search", "ask_user", "thread_start", "thread_list", "thread_steer", "thread_stop"]);
 /** Read-class tools that still write to memory: plan mode is "change nothing", memory included. */
 const WRITES_MEMORY = new Set(["memory_remember", "memory_steer"]);
+/**
+ * An Opera thread is a sub-agent whose every edit and command its own gate decides, as for
+ * spawn_subagent; but starting one adds a worktree and a branch to a repository, so plan mode refuses it.
+ */
+const ADDS_WORKTREE = new Set(["thread_start"]);
 const EDIT = new Set(["edit", "write", "create_skill", "update_skill"]);
 /** A race runs its check command, and its attempts work unattended in copies of the project. */
 const EXEC = new Set(["bash", "powershell", "ipy_run", "race"]);
@@ -477,7 +482,7 @@ export function judge(
   if (net && "refuse" in net) return { allow: false, reason: net.refuse };
   // Before any allow: plan mode is the user saying "change nothing", and a standing
   // allow rule was written for the other modes.
-  if ((kind !== "read" || WRITES_MEMORY.has(tool)) && host.mode === "plan")
+  if ((kind !== "read" || WRITES_MEMORY.has(tool) || ADDS_WORKTREE.has(tool)) && host.mode === "plan")
     return { allow: false, reason: "Plan mode is read-only: describe the change instead of making it. The user can leave plan mode with shift+tab." };
   // First match among allow and ask. An allow for a path is tested only where the
   // path lands, so `src/*` is not an allow for `src/../../etc/x`.

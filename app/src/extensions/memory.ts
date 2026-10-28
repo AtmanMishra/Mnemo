@@ -35,7 +35,8 @@ export function memoryExtension(host: Host) {
     const sessionFor = (cwd: string, model?: string): MemorySession => {
       session ??= new MemorySession({
         memory: mem,
-        cwd,
+        // An Opera's threads share the Opera's memory, whichever repository they work in.
+        cwd: host.memoryCwd ?? cwd,
         userSkillsDir: skillsDir(host.home),
         source: { agent: "mnemo", model },
         parentEpisode: host.parentEpisode,

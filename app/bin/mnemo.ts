@@ -23,6 +23,8 @@ import type { MemoryService as MemoryServiceType } from "@mnemo/memory";
 import type { startRuntime as StartRuntime } from "../src/runtime/runtime.ts";
 import { scheduleCommand } from "../src/schedule/cli.ts";
 import { skillsCommand } from "../src/market/cli.ts";
+import { operaCommand, type OperaLaunch } from "../src/opera/cli.ts";
+import { readOpera } from "../src/opera/store.ts";
 import { applyTheme, themePaints, type ThemeName } from "../src/ui/theme.ts";
 import { mouse } from "../src/ui/mouse.ts";
 import { FOCUS_OFF, FOCUS_ON } from "../src/ui/notify.ts";
@@ -109,6 +111,7 @@ usage
   mnemo settings …         every setting: list, get <name>, set <name> <value>, reset [name] (or /settings in a session)
   mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
   mnemo skills …           install skills from marketplaces, as Claude Code installs plugins (mnemo skills --help)
+  mnemo opera …            one conductor over several repositories, threads in worktrees (mnemo opera --help)
   mnemo schedule …         run a prompt on a timer, read-only unless you allow actions (mnemo schedule --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
   mnemo --rpc              the session over JSON lines on stdin/stdout, for an editor extension (docs/RPC.md);
@@ -161,6 +164,8 @@ interface Args {
   print?: string;
   rpc?: boolean;
   cwd?: string;
+  /** `mnemo opera <name>`: the first agent conducts this Opera. */
+  opera?: string;
 }
 
 /** A mistake in the command line: exits 2, like the subcommands' usage errors. */
@@ -533,7 +538,16 @@ async function main(): Promise<number> {
     const { runMemoryCommand } = await heavy();
     return runMemoryCommand(process.argv.slice(3), home, agentDir(home));
   }
-  const args = parse(process.argv.slice(2));
+  let argv = process.argv.slice(2);
+  let opera: OperaLaunch | undefined;
+  if (argv[0] === "opera") {
+    const r = operaCommand(argv.slice(1), mnemoHome());
+    if (typeof r === "number") return r;
+    opera = r;
+    argv = r.rest;
+  }
+  const args = parse(argv);
+  if (opera) Object.assign(args, { cwd: opera.dir, opera: opera.name });
   if (args.help) return console.log(USAGE), 0;
   if (args.version) return console.log(pkg.version), 0;
   if (mayOffer(process.argv.slice(2), process.stdin.isTTY === true && process.stdout.isTTY === true, process.env)) {
@@ -596,7 +610,7 @@ async function main(): Promise<number> {
   const roster = new Roster();
   /** One agent's host and pi session in `agentCwd`; the first gets --continue and the demo's injections. */
   const makeAgent = async (agentCwd: string, first = false) => {
-    const host = createHost({ roster, home, agentDir: dir, modelRuntime: runtimeModels, memory, mode: args.mode, settings, reflect: args.reflect, verify: args.verify, escalate: args.escalate });
+    const host = createHost({ roster, home, agentDir: dir, modelRuntime: runtimeModels, memory, mode: args.mode, settings, reflect: args.reflect, verify: args.verify, escalate: args.escalate, opera: first && args.opera ? readOpera(home, args.opera) : undefined });
     try {
       const runtime = await startRuntime({
         cwd: agentCwd,

@@ -16,6 +16,7 @@ import { mnemoExtensions } from "../src/extensions/index.ts";
 import type { Roster } from "../src/runtime/roster.ts";
 import type { SettingsStore } from "../src/runtime/settings.ts";
 import { findMemsrv } from "../src/runtime/paths.ts";
+import type { OperaConfig } from "../src/opera/store.ts";
 
 export const MEMSRV = findMemsrv("/nonexistent");
 
@@ -41,6 +42,8 @@ export interface EnvOptions {
   settings?: SettingsStore;
   /** What /update talks to (see update.test.ts). */
   updater?: Updater;
+  /** The root conducts this Opera (see opera.test.ts); give `home` and `cwd` its home and folder. */
+  opera?: OperaConfig;
 }
 
 export async function mnemoEnv(o: EnvOptions = {}) {
@@ -51,7 +54,7 @@ export async function mnemoEnv(o: EnvOptions = {}) {
   const cwd = o.cwd ?? createDemoProject();
   const { modelRuntime, faux } = await createFaux(agentDir, { strong: !!o.escalate || !!o.strong });
   const memory = o.memory && MEMSRV ? new MemoryService(MEMSRV, path.join(home, "memory", "journal.jsonl")) : undefined;
-  const host = createHost({ home, agentDir, modelRuntime, memory, mode: o.mode, reflect: o.reflect ?? false, verify: o.verify ?? false, escalate: o.escalate, roster: o.roster, label: o.label, settings: o.settings });
+  const host = createHost({ home, agentDir, modelRuntime, memory, mode: o.mode, reflect: o.reflect ?? false, verify: o.verify ?? false, escalate: o.escalate, roster: o.roster, label: o.label, settings: o.settings, opera: o.opera });
   const runtime = await startRuntime({
     cwd,
     agentDir,
