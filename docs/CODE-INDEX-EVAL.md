@@ -75,3 +75,27 @@ reads the callers before the file is re-read, so a removed function still has th
 
 `codeIndex` and `codeImpact` stay on: after the fixes both are cheap, lazy, and mostly right. Re-run
 the eval before changing the extractor or the ranking, and put the numbers in the pull request.
+
+## Ranking by the call graph
+
+Measured 2026-10-28, `bun eval/code-index.ts --sample 900` (every declaration; app/src, 207 files),
+before and after on the same tree. `code_search` used to nudge a result by how many references
+carry its *name*, which says nothing when several definitions share one (`get`, `run`, `load`). It
+now uses each definition's PageRank over the calls the index can tie (exact or inferred), so a
+definition much of the project reaches, directly or through what calls it, beats one a test calls.
+
+| | by name: first / top 3 / top 10 | from words: first / top 3 / top 10 |
+|---|---|---|
+| name count (before), all 907 | 87% / 99% / 100% | 18% / 33% / 48% |
+| PageRank (after), all 907 | **90%** / 99% / 100% | 19% / 32% / **50%** |
+| name count (before), 150 | 89% / 99% / 100% | 17% / 29% / 43% |
+| PageRank (after), 150 | **91%** / 99% / 100% | 17% / 27% / **45%** |
+
+Also tried, on the same tree: in-degree instead of PageRank (88%, words 51% top 10), and PageRank
+added to the name count (88 to 89%). PageRank alone was best by name and level from words; the
+weight (0.4 × log of the rank, the average definition is 1) is the old one, not tuned.
+
+Cost: built in memory after a refresh, about 50 ms here and 3.8 s on `microsoft/vscode` (14,876
+source files, 1.6 million calls; the first version took 218 s, with one query per call). Because it
+only nudges, it is kept until 2% of the files (at least 20) have changed, so an edit does not pay
+for it again; a definition newer than the ranks counts as average.

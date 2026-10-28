@@ -95,6 +95,12 @@ export class CodeIndex {
   private readonly maxFiles: number;
   /** Files each file imports, rebuilt after a refresh changes anything. */
   private importsOf?: Map<string, Set<string>>;
+  /**
+   * Each definition's rank in the call graph, and how many files changed since it was made. A
+   * rank only nudges search, so it is made again once 2% of the files (at least 20) changed,
+   * not after every edit: on 15,000 files it takes about 4 s.
+   */
+  private rankOf?: { ranks: Map<number, number>; changed: number };
 
   constructor(file: string, root: string, o: CodeIndexOptions = {}) {
     this.root = root;
@@ -162,7 +168,7 @@ export class CodeIndex {
         this.forget(rel);
         removed++;
       }
-    if (read || removed) this.importsOf = undefined;
+    if (read || removed) this.changed(read + removed);
     return { read, removed, files: seen.size };
   }
 
@@ -175,11 +181,16 @@ export class CodeIndex {
       st = fs.statSync(path.join(this.root, rel));
     } catch {
       this.forget(rel);
-      this.importsOf = undefined;
+      this.changed(1);
       return;
     }
     if (!st.isFile() || st.size > MAX_BYTES) return;
-    if (this.readFile(rel, st, await parsers())) this.importsOf = undefined;
+    if (this.readFile(rel, st, await parsers())) this.changed(1);
+  }
+
+  private changed(files: number): void {
+    this.importsOf = undefined;
+    if (this.rankOf && (this.rankOf.changed += files) > Math.max(20, this.files() / 50)) this.rankOf = undefined;
   }
 
   /** Parse and store one file; false when its bytes had not changed. */
@@ -258,7 +269,7 @@ export class CodeIndex {
     return last === name ? byName : byName.filter((d) => d.qname.endsWith(name));
   }
 
-  /** Definitions ranked for plain words or identifiers: BM25, nudged towards what is used. */
+  /** Definitions ranked for plain words or identifiers: BM25, nudged towards what the call graph says is central. */
   search(query: string, k = 10): Def[] {
     const terms = [...new Set(words(query).split(" ").filter(Boolean))];
     if (!terms.length) return [];
@@ -266,20 +277,70 @@ export class CodeIndex {
     const rows = this.db
       .query("SELECT d.*, bm25(defs_fts, 10.0, 2.0, 1.0) AS rank FROM defs_fts JOIN defs d ON d.id = defs_fts.rowid WHERE defs_fts MATCH ? ORDER BY rank LIMIT ?")
       .all(match, k * 5) as (Record<string, unknown> & { rank: number })[];
-    const uses = this.db.prepare("SELECT count(*) AS n FROM refs WHERE name = ? AND kind != 'import'");
+    const rank = this.ranks();
     const ranked = rows.map((r) => {
         const d = rowDef(r);
-        const n = (uses.get(d.name) as { n: number }).n;
-        // bm25 is negative, lower is better; a used, exported definition is the likelier answer.
+        // bm25 is negative, lower is better; a definition much of the project reaches, and an
+        // exported one, is the likelier answer (rank 1 is the average definition: log 0).
         // Asking for a name by its name finds that definition first.
         const named = d.name.toLowerCase() === query.trim().toLowerCase() || d.qname.toLowerCase() === query.trim().toLowerCase();
-        return { d, score: -r.rank + 0.4 * Math.log1p(n) + (d.exported ? 0.3 : 0) + (named ? 100 : 0) };
+        return { d, score: -r.rank + 0.4 * Math.log(rank.get(d.id) ?? 1) + (d.exported ? 0.3 : 0) + (named ? 100 : 0) };
       });
-    uses.finalize();
     return ranked
       .sort((a, b) => b.score - a.score)
       .slice(0, k)
       .map((s) => s.d);
+  }
+
+  /**
+   * PageRank over the calls the index can tie (exact or inferred), scaled so the average
+   * definition is 1: what much of the project reaches, directly or through what calls it, ranks
+   * above what one test calls. Built from memory (no query per call), and kept while few files
+   * have changed (`rankOf`); a definition newer than the ranks is average.
+   */
+  ranks(): Map<number, number> {
+    if (this.rankOf) return this.rankOf.ranks;
+    const imports = this.imports();
+    const all = this.defs("");
+    const owner = new Map(all.map((d) => [`${d.path}#${d.qname}`, d.id]));
+    const byName = new Map<string, Def[]>();
+    for (const d of all)
+      if (CALLABLE.includes(d.kind)) {
+        const k = `${familyOf(langOf(d.path)!)} ${d.name}`;
+        const list = byName.get(k);
+        if (list) list.push(d);
+        else byName.set(k, [d]);
+      }
+    const named = new Map([...byName].map(([k, defs]) => [k, group(defs)]));
+    // Calls as edges between positions in `all`, then thirty rounds of PageRank over arrays.
+    const at = new Map(all.map((d, i) => [d.id, i]));
+    const from: number[] = [];
+    const to: number[] = [];
+    for (const r of this.db.query("SELECT * FROM refs WHERE kind = 'call' AND src != ''").all() as RefRow[]) {
+      const src = owner.get(`${r.path}#${r.src}`);
+      const cands = named.get(`${familyOf(langOf(r.path)!)} ${r.name}`);
+      if (src === undefined || !cands) continue;
+      for (const t of this.tie(r, imports, cands))
+        if (t.def.id !== src) {
+          from.push(at.get(src)!);
+          to.push(at.get(t.def.id)!);
+        }
+    }
+    const n = all.length || 1;
+    const outDegree = new Float64Array(n);
+    for (const f of from) outDegree[f]!++;
+    const damping = 0.85;
+    let pr = new Float64Array(n).fill(1 / n);
+    for (let round = 0; round < 30; round++) {
+      let dangling = 0;
+      for (let i = 0; i < n; i++) if (!outDegree[i]) dangling += pr[i]!;
+      const next = new Float64Array(n).fill((1 - damping + damping * dangling) / n);
+      for (let e = 0; e < from.length; e++) next[to[e]!]! += (damping * pr[from[e]!]!) / outDegree[from[e]!]!;
+      pr = next;
+    }
+    const ranks = new Map(all.map((d, i) => [d.id, pr[i]! * n]));
+    this.rankOf = { ranks, changed: 0 };
+    return ranks;
   }
 
   /** Who calls `to` (and, for a type, who extends or implements it). */
@@ -333,27 +394,29 @@ export class CodeIndex {
   }
 
   /** The definitions a call means, when the code says which; empty when it does not. */
-  private tie(r: RefRow, imports: Map<string, Set<string>>): { def: Def; confidence: Confidence }[] {
-    const family = familyOf(langOf(r.path)!);
-    const cands = this.defs(`WHERE name = ? AND kind IN (${CALLABLE.map(() => "?").join(",")})`, [r.name, ...CALLABLE]).filter(
-      (d) => familyOf(langOf(d.path)!) === family,
-    );
-    if (!cands.length) return [];
+  private tie(r: RefRow, imports: Map<string, Set<string>>, named?: Named): { def: Def; confidence: Confidence }[] {
+    const g =
+      named ??
+      group(
+        this.defs(`WHERE name = ? AND kind IN (${CALLABLE.map(() => "?").join(",")})`, [r.name, ...CALLABLE]).filter(
+          (d) => familyOf(langOf(d.path)!) === familyOf(langOf(r.path)!),
+        ),
+      );
     if (r.member) {
       if (r.recv) {
-        const typed = cands.filter((d) => d.parent === r.recv || d.parent.endsWith(`.${r.recv}`));
+        const typed = (g.byParent.get(lastPart(r.recv)) ?? []).filter((d) => d.parent === r.recv || d.parent.endsWith(`.${r.recv}`));
         return typed.map((def) => ({ def, confidence: "exact" as const }));
       }
-      const methods = cands.filter((d) => d.kind === "method");
-      return methods.length === 1 ? [{ def: methods[0]!, confidence: "inferred" }] : [];
+      return g.methods.length === 1 ? [{ def: g.methods[0]!, confidence: "inferred" }] : [];
     }
-    const plain = cands.filter((d) => d.kind !== "method");
-    const local = plain.filter((d) => d.path === r.path);
-    if (local.length) return local.map((def) => ({ def, confidence: "exact" as const }));
-    const imported = plain.filter((d) => imports.get(r.path)?.has(d.path));
+    const local = g.byPath.get(r.path);
+    if (local) return local.map((def) => ({ def, confidence: "exact" as const }));
+    const from = imports.get(r.path);
+    const imported = from ? g.plain.filter((d) => from.has(d.path)) : [];
     if (imported.length) return imported.map((def) => ({ def, confidence: "exact" as const }));
-    return plain.length === 1 ? [{ def: plain[0]!, confidence: "inferred" }] : [];
+    return g.plain.length === 1 ? [{ def: g.plain[0]!, confidence: "inferred" }] : [];
   }
+
 
   /** Each file's imports, resolved to files in the index where the language allows. */
   private imports(): Map<string, Set<string>> {
@@ -396,6 +459,37 @@ export class CodeIndex {
     ).map((h) => ({ def: this.def(h.id)!, uses: h.uses }));
     return { dirs: [...dirs].map(([dir, e]) => ({ dir, ...e })).sort((a, b) => b.defs - a.defs), hubs };
   }
+}
+
+/** The definitions of one name in one language family, as `tie` reads them. */
+interface Named {
+  methods: Def[];
+  /** Everything with a parent, by the parent's last part (`Cache` for `a.Cache`). */
+  byParent: Map<string, Def[]>;
+  /** What is not a method. */
+  plain: Def[];
+  /** What is not a method, by file. */
+  byPath: Map<string, Def[]>;
+}
+
+const lastPart = (name: string) => name.slice(name.lastIndexOf(".") + 1);
+
+function group(defs: Def[]): Named {
+  const g: Named = { methods: [], byParent: new Map(), plain: [], byPath: new Map() };
+  const add = (m: Map<string, Def[]>, k: string, d: Def) => {
+    const list = m.get(k);
+    if (list) list.push(d);
+    else m.set(k, [d]);
+  };
+  for (const d of defs) {
+    if (d.parent) add(g.byParent, lastPart(d.parent), d);
+    if (d.kind === "method") g.methods.push(d);
+    else {
+      g.plain.push(d);
+      add(g.byPath, d.path, d);
+    }
+  }
+  return g;
 }
 
 function rowDef(r: Record<string, unknown>): Def {
