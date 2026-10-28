@@ -23,6 +23,7 @@ import type { MemoryService as MemoryServiceType } from "@mnemo/memory";
 import type { startRuntime as StartRuntime } from "../src/runtime/runtime.ts";
 import { scheduleCommand } from "../src/schedule/cli.ts";
 import { skillsCommand } from "../src/market/cli.ts";
+import { projectSkillsWarning } from "../src/market/scan.ts";
 import { applyTheme, themePaints, type ThemeName } from "../src/ui/theme.ts";
 import { mouse } from "../src/ui/mouse.ts";
 import { FOCUS_OFF, FOCUS_ON } from "../src/ui/notify.ts";
@@ -221,13 +222,14 @@ async function trustDecision(cwd: string, dir: string, args: Args): Promise<bool
   if (store.get(cwd) !== null) return undefined;
   const found = [".agents/extensions", ".agents/settings.json", ".agents/mcp.json", ".agents/skills", ".agents/prompts", ".agents/themes"].filter((f) => fs.existsSync(path.join(cwd, f)));
   const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true && args.print === undefined && !args.dump;
+  const warning = found.includes(".agents/skills") ? projectSkillsWarning(cwd) : undefined;
   if (!interactive) {
-    console.error(`mnemo: not loading this folder's ${found.join(", ") || "project resources"} (not trusted; --trust-project allows it)`);
+    console.error(`mnemo: not loading this folder's ${found.join(", ") || "project resources"} (not trusted; --trust-project allows it)${warning ? `. ${warning}` : ""}`);
     return undefined;
   }
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
   try {
-    const answer = (await rl.question(`This folder ships its own ${found.join(", ")}.\nExtensions run as code with your permissions, before any approval, and the rest steers the model.\nLoad them? [y] this time · [a] always for this folder · [N] no: `)).trim().toLowerCase();
+    const answer = (await rl.question(`This folder ships its own ${found.join(", ")}.\nExtensions run as code with your permissions, before any approval, and the rest steers the model.\n${warning ? `${warning}\n` : ""}Load them? [y] this time · [a] always for this folder · [N] no: `)).trim().toLowerCase();
     if (answer === "a") {
       store.set(cwd, true);
       return true;
