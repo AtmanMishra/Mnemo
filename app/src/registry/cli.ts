@@ -3,11 +3,13 @@
  * (store.ts) with no model and no sidecar; and the few things another terminal may ask of one
  * (inbox.ts). Runs from any folder.
  */
+import * as fs from "node:fs";
 import * as os from "node:os";
 import { nextRun } from "../schedule/run.ts";
 import { loadJobs } from "../schedule/store.ts";
 import { awaitAck, sendRequest, type Op } from "./inbox.ts";
 import { senderName } from "./join.ts";
+import { classify, findSaved, interruptedIn, type Saved, type SessionLike } from "./saved.ts";
 import { prune, readAll, shownStatus, validTag, type AgentEntry, type AgentStatus, type ProcView, type ReadOptions } from "./store.ts";
 
 export const AGENTS_USAGE = `mnemo agents — every Mnemo agent on this machine, in every project
@@ -22,11 +24,16 @@ usage
   mnemo agents steer <ref> <text>   your words, read by a running agent after its current step
   mnemo agents stop <ref>           stop its turn; a sub-agent stops with everything it started
   mnemo agents clear                forget finished and lost agents
+  mnemo agents saved                every saved conversation in every project from the last week
+                                    (--all: every one), open, interrupted or saved
+  mnemo agents resume <ref|id>      continue a conversation in this terminal, in its own folder;
+                                    a sub-agent's ref continues the conversation that started it
 
 <ref> is the first column (k3f9.2: process k3f9, agent 2), or a name only one live agent has.
 A process tag alone (k3f9) means its first conversation. Your words start a turn under that
 terminal's mode and permission gate; approvals are answered only in the terminal that asks.
-Lost means the process died without saying so (a crash, a closed terminal).`;
+Lost means the process died without saying so (a crash, a closed terminal); its conversation
+shows as interrupted under saved, and resume continues it.`;
 
 /** An agent with where it lives. */
 export interface Row {
@@ -179,6 +186,39 @@ export interface CliIo {
   /** How long `tell`/`steer`/`stop` wait for the process to answer. */
   ackMs?: number;
   read?: ReadOptions;
+  /** Every saved session (pi's `SessionManager.listAll`). */
+  sessions?: () => Promise<SessionLike[]>;
+  /** Runs Mnemo again with `args` in this terminal; its exit code. */
+  launch?: (args: string[]) => Promise<number>;
+}
+
+async function listSessions(): Promise<SessionLike[]> {
+  const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+  return SessionManager.listAll();
+}
+
+async function launchSelf(args: string[]): Promise<number> {
+  const { selfCommand } = await import("../runtime/self.ts");
+  return Bun.spawn([...selfCommand(), ...args], { stdio: ["inherit", "inherit", "inherit"] }).exited;
+}
+
+const WEEK_MS = 7 * 24 * 60 * 60_000;
+
+export function renderSaved(saved: Saved[], o: { width?: number; now?: number } = {}): string {
+  const now = o.now ?? Date.now();
+  const w = Math.max(60, o.width ?? 100);
+  if (!saved.length) return "No saved conversations (--all shows older ones).";
+  const col = (t: string, n: number) => `${pad(t, n - 1)} `;
+  const stateOf = (s: Saved) => (s.ref ? `${s.state} ${s.ref}` : s.state);
+  const stateW = Math.max(6, ...saved.map((s) => stateOf(s).length)) + 1;
+  const dirW = Math.min(28, Math.max(8, ...saved.map((s) => tilde(s.cwd).length)) + 1);
+  const lines = [`${col("ID", 10)}${col("STATE", stateW)}${col("WHEN", 6)}${col("FOLDER", dirW)}TITLE`];
+  for (const s of saved) {
+    const title = `${s.title}${s.subs ? ` (+${s.subs} sub-agent${s.subs === 1 ? "" : "s"})` : ""}`;
+    lines.push(`${col(s.id.slice(0, 8), 10)}${col(stateOf(s), stateW)}${col(ago(now - s.modified), 6)}${col(tilde(s.cwd), dirW)}${clip(title, w - 16 - stateW - dirW)}`);
+  }
+  if (saved.some((s) => s.state === "interrupted")) lines.push("", "interrupted: its process died mid-conversation. mnemo agents resume <id> continues it.");
+  return lines.join("\n");
 }
 
 const defaultIo = (): CliIo => ({ out: (s) => console.log(s), err: (s) => console.error(s), width: process.stdout.columns, cwd: process.cwd() });
@@ -236,6 +276,23 @@ export async function agentsCommand(argv: string[], home: string, io: CliIo = de
     io.out(renderShow(r, list, now()));
     return 0;
   }
+  if (sub === "saved") {
+    if (rest.length) return fail("saved takes no arguments", 2);
+    const saved = classify(await (io.sessions ?? listSessions)(), readAll(home, io.read)).filter((x) => all || now() - x.modified < WEEK_MS);
+    if (flags.has("--json")) return io.out(JSON.stringify(saved, null, 2)), 0;
+    io.out(renderSaved(saved, { width: io.width, now: now() }));
+    return 0;
+  }
+  if (sub === "resume") {
+    if (rest.length !== 1) return fail("resume needs one <ref> or session id", 2);
+    const views = readAll(home, io.read);
+    const hit = findSaved(classify(await (io.sessions ?? listSessions)(), views), views, rest[0]!);
+    if (typeof hit === "string") return fail(hit);
+    // Two processes writing one session file would interleave it: reach the open one instead.
+    if (hit.state === "open") return fail(`that conversation is open in another terminal (${hit.ref}); mnemo agents tell ${hit.ref} "…" reaches it`);
+    if (!fs.statSync(hit.cwd, { throwIfNoEntry: false })?.isDirectory()) return fail(`its folder ${hit.cwd} is not there any more`);
+    return (io.launch ?? launchSelf)(["--cwd", hit.cwd, "--session", hit.file]);
+  }
   if (sub === "tell" || sub === "steer" || sub === "stop") {
     const op: Op = sub;
     const [ref, ...words] = rest;
@@ -271,4 +328,16 @@ export async function agentsCommand(argv: string[], home: string, io: CliIo = de
  */
 export function elsewhere(home: string, self: string | undefined, o: ReadOptions = {}): Row[] {
   return rows(readAll(home, o), { now: o.now }).filter((r) => r.view.rec.tag !== self && (r.view.state === "live" ? !ENDED.has(r.status) : r.status === "lost"));
+}
+
+/** Conversations in `cwd` cut off by a dead process in the last day, other than the one being continued. */
+export async function interruptedHere(home: string, cwd: string, current?: string, sessions: () => Promise<SessionLike[]> = listSessions): Promise<Saved[]> {
+  try {
+    const views = readAll(home);
+    // Reading every session file is the slow part: only when a dead process left a conversation behind.
+    if (!views.some((v) => v.state === "lost" && v.rec.agents.some((a) => a.kind === "root" && a.session && shownStatus(a, v.state) === "lost"))) return [];
+    return interruptedIn(classify(await sessions(), views), cwd).filter((s) => s.file !== current);
+  } catch {
+    return [];
+  }
 }

@@ -143,6 +143,15 @@ do. Plain files are the source of truth, written whole (rename into place), fold
 - **The hub** lists other processes' live agents (and what was lost in the last hour) under
   *Elsewhere*, read every 2 seconds while the hub shows. It is read-only there.
 - `MNEMO_REGISTRY=0` keeps a process out of the registry (it is neither listed nor reachable).
+- **Saved conversations** (`registry/saved.ts`): `mnemo agents saved` reads every session pi saved
+  for Mnemo, in every project (`SessionManager.listAll`), against the records: **open** (a live
+  process has it), **interrupted** (its process was lost mid-conversation) or **saved**, with the
+  count of sub-agent transcripts kept beside it. `mnemo agents resume <ref|id>` runs
+  `mnemo --cwd <its folder> --session <its file>` in this terminal; a sub-agent's ref continues the
+  conversation that started it, and an open one is refused (two writers would interleave the file:
+  `tell` reaches it instead). An interactive Mnemo started in a folder where a conversation was
+  interrupted says so once, with the command that continues it. Interrupted is known for as long
+  as the record is kept (a day); after that the conversation is listed as saved.
 
 ## Not yet
 

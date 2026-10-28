@@ -513,11 +513,14 @@ mnemo agents                          # what runs now in every terminal and proj
 mnemo agents show k3f9.2              # one agent: task, steps, model, mode, answer, transcript
 mnemo agents tell k3f9.2 "also check the error path"
 mnemo agents stop k3f9                # stop that terminal's turn
+mnemo agents saved                    # every saved conversation in every project: open, interrupted or saved
+mnemo agents resume 019a3f            # continue one here, in its own folder (a registry ref works too)
 ```
 
 Each Mnemo process (a terminal, `-p`, `--rpc`, a scheduled run) keeps a file in
 `~/.mnemo/registry/`, so any terminal sees the rest; the hub lists them under *Elsewhere*. One that
-crashed shows as **lost**. Your words start a turn under that terminal's mode and gate, and its
+crashed shows as **lost**, its conversation as **interrupted**, and the next Mnemo started in that
+folder says so; `resume` continues it. Your words start a turn under that terminal's mode and gate, and its
 approvals are answered only there. It is all files: no socket, no server, nothing leaves the machine.
 `MNEMO_REGISTRY=0` keeps a process out.
 
