@@ -170,7 +170,7 @@ export function peersExtension(host: Host) {
         parameters: Type.Object({
           to: Type.Number({ description: "The agent's id from list_agents" }),
           text: Type.String({ description: "What to say" }),
-          wait: Type.Optional(Type.Boolean({ description: "Wait for its reply (up to ${host.settings.get().replyWait} seconds) and get it as this tool's result: use it to ask a question you need answered before going on" })),
+          wait: Type.Optional(Type.Boolean({ description: "Wait for the reply (up to the user's reply wait) and get it as this tool's result: use it to ask a question you need answered before going on" })),
         }),
         async execute(_id, params, signal) {
           const to = Number(params.to);
