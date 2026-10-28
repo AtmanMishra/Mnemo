@@ -16,7 +16,8 @@ import { judge } from "../src/extensions/policy.ts";
 import { Roster } from "../src/runtime/roster.ts";
 import { mnemoEnv } from "./helpers.ts";
 
-const tmp = (p: string) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), p)));
+// The native real path: on Windows it spells out 8.3 names (RUNNER~1), as the code under test does.
+const tmp = (p: string) => fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), p)));
 const sh = (cwd: string, ...a: string[]) => {
   const r = Bun.spawnSync(["git", ...a], { cwd, stdout: "pipe", stderr: "pipe" });
   if (r.exitCode !== 0) throw new Error(`git ${a.join(" ")}: ${r.stderr.toString()}`);
@@ -107,7 +108,7 @@ test("a clone lands in the Opera's repos/, is untrusted unless the user says so,
   const r = addRepo(home, "o", "https://example.com/team/web.git", { runner });
   expect(seen).toHaveLength(1);
   expect(r).toMatchObject({ name: "web", kind: "clone", url: "https://example.com/team/web.git", trusted: false });
-  expect(r.path).toBe(fs.realpathSync(path.join(operaDir(home, "o"), "repos", "web")));
+  expect(r.path).toBe(fs.realpathSync.native(path.join(operaDir(home, "o"), "repos", "web")));
   // A clone carrying .agents/ resources is not trusted because it carries them.
   fs.mkdirSync(path.join(r.path, ".agents", "extensions"), { recursive: true });
   expect(repoTrusted(r, path.join(home, "agent"))).toBe(false);
@@ -158,7 +159,7 @@ test("a thread's worktree is a new branch from HEAD; the user's checkout and its
   const c = new Conductor(home, readOpera(home, "o"), roster, root, { agentDir: path.join(home, "agent") });
   const p = c.prepare("api", "Fix the login!");
   expect(p.branch).toBe("opera/o/api-fix-the-login");
-  expect(p.dir).toBe(fs.realpathSync(path.join(operaDir(home, "o"), "worktrees", "api-fix-the-login")));
+  expect(p.dir).toBe(fs.realpathSync.native(path.join(operaDir(home, "o"), "worktrees", "api-fix-the-login")));
   expect(fs.existsSync(path.join(p.dir, "README.md"))).toBe(true);
   expect(fs.existsSync(path.join(p.dir, "wip.txt"))).toBe(false);
   expect(sh(r, "branch", "--show-current").trim()).not.toBe(p.branch);
@@ -337,7 +338,7 @@ test("the conductor starts a thread in a worktree; it works there, its actions a
   const started = toolOutput(e, "thread_start")[0]!;
   expect(started.status).toBe("done");
   expect(started.output).toMatch(/^Thread #\d+ "fix" started in api, on branch opera\/o\/api-fix \(worktree .*api-fix\)/);
-  const tree = fs.realpathSync(path.join(operaDir(home, "o"), "worktrees", "api-fix"));
+  const tree = fs.realpathSync.native(path.join(operaDir(home, "o"), "worktrees", "api-fix"));
   // The thread wrote in its worktree, not in the user's checkout.
   expect(fs.readFileSync(path.join(tree, "fix.txt"), "utf8")).toBe("fixed\n");
   expect(fs.existsSync(path.join(r, "fix.txt"))).toBe(false);
