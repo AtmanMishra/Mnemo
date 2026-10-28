@@ -401,6 +401,16 @@ guard left alone, and `/index` says which; the choice is kept in `~/.mnemo/index
 never in the project. The plan this is the first slice of (the text index, memory anchors, ranking by the graph) is
 in the project's architecture document.
 
+**Memories pinned to definitions.** `memory_remember` takes an optional `code` (`Cache.get`, or
+`src/cache.ts#Cache.get` when the name is not unique). The code index resolves it to one definition and
+the value is kept with a tag at its end, `[code: src/cache.ts#Cache.get@<hash of its text>]`
+(`packages/memory/src/anchor.ts`), so the journal, its history and every agent reading memory carry it
+with no schema change. Before each run Mnemo asks the code index, brought up to date, whether each pinned
+definition is as it was: the fact reads as `(about Cache.get in src/cache.ts)`, or with `which has
+changed since this was written: check it still holds`, or `which no longer exists there`, in the profile
+block, recall and `memory_search`. The profile block is made again only when that verdict changes. An
+agent without the code index (hooks, MCP) shows what the fact is about and no verdict.
+
 `session_search` is a different question from `memory_search`: memory keeps what
 was *learned*, this keeps the record — every message and command of Mnemo's and
 Claude Code's sessions in one SQLite FTS5 index (BM25), refreshed before each
