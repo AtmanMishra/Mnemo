@@ -200,6 +200,8 @@ and which you cannot remove); a folder's own hooks are never read.
   is missing; install them yourself if you want them.
 - **A skills marketplace, only one you add.** `mnemo skills marketplace add` and `update` run
   `git clone` of the address you typed (see Skill marketplaces).
+- **An Opera repository, only one you attach.** `mnemo opera add <name> <https-url>` runs
+  `git clone` of the address you typed (see Opera).
 - **An MCP server over HTTP, only one you name.** An HTTP server in your own
   `mcp.json` is contacted only when its entry says `"allowNetwork": true`; the
   model's tool calls, with their arguments, then go to that address, and
@@ -531,6 +533,44 @@ chose. Read it first (`mnemo skills show plugin@marketplace`, and the files unde
   each session each installed skill is re-read, and one whose file changed, gained a file or
   turned into a link is left out and reported (`mnemo skills verify` says which). This catches
   tampering after install; it does not tell you the skill was good to begin with.
+
+## Opera
+
+`mnemo opera <name>` starts a conductor that hands work to threads across several repositories
+(`docs/OPERA.md`). A thread is a background sub-agent, so everything in *Agents that talk to agents*
+holds for it; on top:
+
+- **Only you attach, clone or trust a repository**, with `mnemo opera add`. No tool can, and
+  `opera.json` (0600 in `~/.mnemo/opera/<name>/`) is written only by `mnemo opera`; an entry in
+  it that is not what that command writes (a relative path, an odd name) is dropped when read.
+- **The clone is the only network use**: `owner/repo` (GitHub) or an `https://` address you typed,
+  with `http`, `ssh`, `file`, `ext::` and passwords in the address refused, the repository's hooks
+  and fsmonitor off, no submodules, no system or global git config (so no credential helper:
+  clone a private repository yourself and attach the folder) and a 10-minute limit. It is the
+  whole history, so threads can branch from it. Nothing is fetched by the conductor or a thread.
+- **A clone is untrusted** unless you add it with `--trust`: its `.agents/` extensions, settings,
+  skills and profiles do not load in its threads. A folder of yours is trusted in its threads as
+  you trusted it in a session there.
+- **Your checkout is not touched.** Each thread works in a new git worktree under
+  `~/.mnemo/opera/<name>/worktrees/`, on a new branch `opera/<name>/<thread>`, from the
+  repository's HEAD. Starting a thread adds that worktree and branch, so plan mode refuses
+  `thread_start`. A thread that fails to start leaves neither behind. Threads never push or merge
+  unless you ask. The worktree is the thread's project folder for the gate (accept-edits frees
+  edits there only), but the gate filters, it is not a sandbox: an approved command can reach
+  outside it.
+- **Approvals stay yours.** Threads are never unattended: every edit and command a thread makes is
+  asked in the conductor's terminal under your mode, and deny rules hold. `thread_steer` is a peer
+  message from the conductor (data, no authority), within the run's message caps.
+- **Budgets.** Each thread has your sub-agent limits (the conductor may lower them, never raise
+  them). All threads of an Opera, and the sub-agents they start, share its budget ($5 unless you
+  set another with `--budget`; 0 is no limit): crossing it stops every thread, and no thread
+  starts until you raise it (`mnemo opera budget`). The conductor's own turns are your prompts and
+  count against `runSpend`, not the Opera's budget.
+- **LOG.md is the program's record**, 0600, one line per tool call, message, start and ending,
+  cleaned of control characters and redacted. The conductor reads it as data.
+- **Memory is shared**: every thread recalls and stores in the Opera's own project memory, not in
+  its repository's. A fact one thread learns from hostile text in one repository reaches the
+  others; the risk is that of *Memory is input the model trusts*.
 
 ## Scheduled runs
 

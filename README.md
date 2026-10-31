@@ -285,6 +285,7 @@ uses credentials it finds in your environment (`ANTHROPIC_API_KEY`,
 | `mnemo settings …` | list, get, set and reset [settings](#configuration) from a shell |
 | `mnemo memory …` | memory for [other agents](#memory-for-other-agents), plus `status`, `tidy`, `curate` |
 | `mnemo schedule …` <sup>**`main`**</sup> | run a prompt on a timer ([more](#scheduled-runs)) |
+| `mnemo opera …` <sup>**`main`**</sup> | one conductor over several repositories; its threads each work in their own worktree ([docs/OPERA.md](docs/OPERA.md)) |
 | `mnemo agents …` <sup>**`main`**</sup> | every agent running on this machine, in any project, and what each is doing; tell, steer or stop one from any terminal ([more](#every-agent-on-this-machine)) |
 | `mnemo skills …` <sup>**`main`**</sup> | add a skills marketplace and install its skills, as Claude Code does with plugins: `mnemo skills marketplace add anthropics/skills`, `mnemo skills install document-skills@anthropic-agent-skills` |
 | `mnemo --rpc` | the session as JSON lines, for an [editor](#in-your-editor) |

@@ -31,6 +31,7 @@ import { subDirOf } from "../runtime/session-files.ts";
 import { bestOf, describeBestOf } from "../runtime/best-of.ts";
 import { envNames } from "../runtime/env.ts";
 import { loadProfiles, profileTools, type Profile } from "../runtime/profiles.ts";
+import { conductorTools } from "./opera.ts";
 
 /** What a parent asked for one sub-agent, beside its brief. */
 export interface SpawnAsk {
@@ -66,7 +67,7 @@ const SPAWN = Type.Object({
     budget: Type.Optional(Type.Number({ description: "Dollars before it stops and returns what it has" })),
     background: Type.Optional(Type.Boolean({ description: "Return at once and get its answer later as a message, so you can go on meanwhile" })),
   });
-type SpawnParams = Static<typeof SPAWN>;
+export type SpawnParams = Static<typeof SPAWN>;
 const name = (m: { provider: string; id: string }) => `${m.provider}/${m.id}`;
 
 /**
@@ -219,11 +220,15 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
         }),
       );
 
+    // An Opera's conductor starts its threads with the same machinery, each in its own worktree.
+    if (host.opera && host.depth === 0) conductorTools(pi, host, host.opera, spawnOne);
+
     /**
      * Start one sub-agent and, unless it runs in the background, wait for its answer. `where` runs
-     * it in another folder (a race's worktree) and, for a race the user approved, unattended there.
+     * it in another folder (a race's worktree, an Opera thread's) and, for a race the user approved,
+     * unattended there; `trusted` says whether that folder's own resources may load.
      */
-    async function spawnOne(params: SpawnParams, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext, where?: { cwd: string; unattended: boolean }) {
+    async function spawnOne(params: SpawnParams, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext, where?: { cwd: string; unattended: boolean; trusted?: boolean }) {
       const cwd = where?.cwd ?? ctx.cwd;
       if (!ctx.model) throw new Error("no model is selected");
       let profile: Profile | undefined;
@@ -303,7 +308,7 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
             cwd: cwd,
             agentDir: host.agentDir,
             modelRuntime: host.modelRuntime,
-            settingsManager: piSettings(cwd, host.agentDir, projectTrusted(cwd, host.agentDir), host.settings),
+            settingsManager: piSettings(cwd, host.agentDir, projectTrusted(cwd, host.agentDir, where?.trusted), host.settings),
             resourceLoaderOptions: { extensionFactories: extensionsFor(child) },
           });
           ({ session } = await createAgentSessionFromServices({
