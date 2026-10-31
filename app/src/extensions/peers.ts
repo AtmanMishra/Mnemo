@@ -13,6 +13,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Host } from "./host.ts";
 import { clean, isEnded, usage, type Delivery, type PeerMessage, type RosterNode } from "../runtime/roster.ts";
+import { boardOf } from "../runtime/team.ts";
 
 /** One line per child step, for the parent's live view and the roster. */
 export function stepLine(name: string, args: Record<string, unknown>): string {
@@ -75,8 +76,10 @@ export function peersExtension(host: Host) {
           return true;
         }
         try {
+          // A turn a message starts skips before_agent_start, so what the team did comes with it.
+          const team = boardOf(roster, host.home).digest(me);
           pi.sendMessage(
-            { customType: "mnemo-peer", content: frame(m), display: true, details: { from: m.from, label: m.fromLabel, text: m.text } },
+            { customType: "mnemo-peer", content: team ? `${frame(m)}\n\n${team}` : frame(m), display: true, details: { from: m.from, label: m.fromLabel, text: m.text } },
             how === "now" ? { deliverAs: "steer" } : how === "queued" ? { deliverAs: "followUp" } : how === "woken" ? { triggerTurn: true, deliverAs: "followUp" } : { deliverAs: "nextTurn" },
           );
         } catch {
