@@ -11,8 +11,8 @@
  */
 import React, { useState, useSyncExternalStore } from "react";
 import { Box, Text, useInput } from "ink";
-import type { RosterEvent, RosterNode, RosterSnapshot, RosterView } from "../runtime/roster.ts";
-import { linkedRoots, statusStyle, treeOf } from "./tree.ts";
+import { usage, type RosterEvent, type RosterNode, type RosterSnapshot, type RosterView } from "../runtime/roster.ts";
+import { linkedRoots, runLine, statusStyle, treeOf } from "./tree.ts";
 import { palette } from "./theme.ts";
 
 export interface PlaygroundProps {
@@ -45,7 +45,7 @@ export function feedLine(e: RosterEvent, labels: ReadonlyMap<number, string>): {
       return { text: `■ ${name(e.node)} stopped`, tone: palette.amber };
     case "message":
       return {
-        text: `✉ ${name(e.from)} → ${name(e.to)}${e.delivery === "woken" ? " (woke it)" : e.delivery === "held" ? " (held for its user)" : ""}: ${e.text.replace(/\s+/g, " ")}`,
+        text: `✉ ${name(e.from)} → ${name(e.to)}${e.delivery === "woken" ? " (woke it)" : e.delivery === "held" ? " (held for its user)" : e.delivery === "queued" ? " (queued)" : ""}: ${e.text.replace(/\s+/g, " ")}`,
         tone: e.delivery === "held" ? palette.amber : palette.text,
       };
     case "link":
@@ -58,6 +58,12 @@ export function feedLine(e: RosterEvent, labels: ReadonlyMap<number, string>): {
       return { text: `$ ${name(e.node)} spent $${e.spent.toFixed(2)} on turns messages started: stopped, and woken by none until you prompt it`, tone: palette.amber };
     case "budget":
       return { text: `$ ${name(e.node)} reached its run budget at $${e.spent.toFixed(2)}: stopped`, tone: palette.amber };
+    case "run":
+      return { text: `▸ you started run ${e.run} at ${name(e.node)}`, tone: palette.dim };
+    case "run-capped":
+      return { text: `$ run ${e.run} spent $${e.spent.toFixed(2)} on turns messages started: ${name(e.node)} stopped, and no one is woken until you prompt`, tone: palette.amber };
+    case "run-stopped":
+      return { text: `■ you stopped run ${e.run} (${e.agents} working)`, tone: palette.amber };
   }
 }
 
@@ -159,7 +165,9 @@ export function Playground(p: PlaygroundProps): React.ReactElement {
   const detail: string[] = [];
   if (chosen) {
     const links = chosen.kind === "root" ? linkedRoots(snap, chosen.id).map((n) => n.label) : [];
-    detail.push(`${chosen.label} · ${chosen.kind === "root" ? "top-level" : `sub-agent, depth ${chosen.depth}`} · ${chosen.status}${chosen.kind === "sub" ? ` · ${chosen.access}` : ""}${links.length ? ` · ⇄ ${links.join(", ")}` : ""}`);
+    detail.push(`${chosen.label} · ${chosen.kind === "root" ? "top-level" : `sub-agent, depth ${chosen.depth}`} · ${chosen.status}${chosen.kind === "sub" ? ` · ${chosen.access}` : ""}${chosen.model ? ` · ${usage(chosen)}` : ""}${links.length ? ` · ⇄ ${links.join(", ")}` : ""}`);
+    const inRun = runLine(snap, chosen);
+    if (inRun) detail.push(inRun);
     if (chosen.task) detail.push(`${chosen.kind === "root" ? "last prompt" : "task"}: ${chosen.task.replace(/\s+/g, " ")}`);
     for (const s of chosen.steps.slice(-2)) detail.push(`  ${s}`);
     if (chosen.answer) detail.push(`answer: ${chosen.answer.replace(/\s+/g, " ")}`);
@@ -185,6 +193,7 @@ export function Playground(p: PlaygroundProps): React.ReactElement {
               <Text key={node.id} backgroundColor={on ? palette.selectBg : undefined} wrap="truncate-end">
                 <Text color={palette.faint}>{prefix}</Text>
                 <Text color={st.tone}>{st.glyph} </Text>
+                <Text color={palette.faint}>{`#${node.id} `}</Text>
                 <Text color={on ? palette.text : node.kind === "root" ? palette.text : palette.dim} bold={node.kind === "root"}>
                   {clip(node.label, 24)}
                 </Text>

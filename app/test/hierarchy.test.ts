@@ -2,6 +2,7 @@
 import { test, expect, afterEach } from "bun:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { LIMITS, Roster } from "../src/runtime/roster.ts";
+import { SettingsStore } from "../src/runtime/settings.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { mnemoEnv, nextDialog } from "./helpers.ts";
@@ -56,7 +57,7 @@ test("a sub-agent starts a sub-agent of its own, and the roster records the tree
   expect(nodes[1]!.answer).toBe("modules mapped: fetch");
   expect(nodes[1]!.stepCount).toBeGreaterThan(0); // its delegation is a step
   expect(toolOutput(e, "spawn_subagent")[0]).toMatchObject({ status: "done" });
-  expect(roster.snapshot().events.map((x) => x.kind)).toEqual(["root", "spawn", "spawn", "done", "done"]);
+  expect(roster.snapshot().events.map((x) => x.kind)).toEqual(["root", "run", "spawn", "spawn", "done", "done"]);
 });
 
 test("a sub-agent whose model call fails says why, instead of finishing without an answer", async () => {
@@ -388,4 +389,49 @@ test("a woken turn that spends past the allowance is stopped", async () => {
   await settle(roster, a, b);
   expect(roster.snapshot().events.some((x) => x.kind === "capped" && x.node === b.host.node)).toBe(true);
   expect(assistantTexts(b)).not.toContain("still going");
+});
+
+test("message_agent's description names no number from /settings, and a lowered message length holds at once", async () => {
+  const settings = new SettingsStore();
+  const roster = new Roster();
+  const a = await env({ mode: "yolo", roster, label: "alpha", settings });
+  const b = await env({ mode: "yolo", roster, label: "beta", settings });
+  roster.link(a.host.node, b.host.node);
+  const tool = a.runtime.session.getAllTools().find((t) => t.name === "message_agent")!;
+  const described = JSON.stringify(tool);
+  // A description is read once: a number in it would go stale, and a template in a plain string reached the model as is.
+  expect(described).not.toContain("${");
+  expect(described).not.toMatch(/\d{2,} (characters|seconds)/);
+  await a.controller.submit("/settings set messageChars 100");
+  a.faux.setResponses([call("message_agent", { to: b.host.node, text: "x".repeat(150) }), say("too long")]);
+  await a.controller.submit("tell beta a lot");
+  await a.idle();
+  expect(toolOutput(a, "message_agent")[0]!.output).toContain("over 100 characters");
+});
+
+test("two waits on one agent in the same step each get a reply, in the order they were asked", async () => {
+  const settings = new SettingsStore();
+  settings.set("replyWait", 10);
+  const roster = new Roster();
+  const a = await env({ mode: "yolo", roster, label: "alpha", settings });
+  const b = await env({ mode: "yolo", roster, label: "beta", settings });
+  roster.link(a.host.node, b.host.node);
+  a.faux.setResponses([
+    fauxAssistantMessage(
+      [fauxToolCall("message_agent", { to: b.host.node, text: "first question?", wait: true }), fauxToolCall("message_agent", { to: b.host.node, text: "second question?", wait: true })],
+      { stopReason: "toolUse" },
+    ),
+    say("got both"),
+  ]);
+  b.faux.setResponses([call("message_agent", { to: a.host.node, text: "answer one" }), call("message_agent", { to: a.host.node, text: "answer two" }), say("answered")]);
+  const started = Date.now();
+  await a.controller.submit("ask beta twice");
+  await settle(roster, a, b);
+  const outs = toolOutput(a, "message_agent").map((t) => t.output);
+  expect(outs).toHaveLength(2);
+  expect(outs[0]).toContain("answer one");
+  expect(outs[1]).toContain("answer two");
+  // Neither wait timed out (one used to overwrite the other and sit out the whole reply wait).
+  expect(Date.now() - started).toBeLessThan(8000);
+  expect(peerMessages(a)).toHaveLength(0);
 });

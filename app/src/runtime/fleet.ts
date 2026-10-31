@@ -167,6 +167,13 @@ export class Fleet {
     return ok;
   }
 
+  /** Stop everything the agent's current run set going (the user's, from the agents page). */
+  stopRun(id: number): { run: string; agents: number } | undefined {
+    const x = this.agents.find((n) => n.id === id);
+    const run = x && x.host.roster.get(x.host.node)?.run;
+    return run ? { run, agents: x.host.roster.stopRun(run) } : undefined;
+  }
+
   /** Take an agent out of its sibling group. */
   unlink(id: number): boolean {
     const x = this.agents.find((n) => n.id === id);

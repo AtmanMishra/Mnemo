@@ -31,6 +31,8 @@ export interface EnvOptions {
   persistent?: boolean;
   /** `provider/id` to escalate to; registers a second faux model, `mnemo-demo/demo-strong`. */
   escalate?: string;
+  /** Register the second faux model, `mnemo-demo/demo-strong`, without escalating to it. */
+  strong?: boolean;
   /** Share a roster with other envs: agents of one process (sub-agents, sibling links). */
   roster?: Roster;
   /** The root's name in the roster. */
@@ -47,7 +49,7 @@ export async function mnemoEnv(o: EnvOptions = {}) {
   fs.mkdirSync(agentDir, { recursive: true });
   process.env.PI_CODING_AGENT_DIR = agentDir;
   const cwd = o.cwd ?? createDemoProject();
-  const { modelRuntime, faux } = await createFaux(agentDir, { strong: !!o.escalate });
+  const { modelRuntime, faux } = await createFaux(agentDir, { strong: !!o.escalate || !!o.strong });
   const memory = o.memory && MEMSRV ? new MemoryService(MEMSRV, path.join(home, "memory", "journal.jsonl")) : undefined;
   const host = createHost({ home, agentDir, modelRuntime, memory, mode: o.mode, reflect: o.reflect ?? false, verify: o.verify ?? false, escalate: o.escalate, roster: o.roster, label: o.label, settings: o.settings });
   const runtime = await startRuntime({
