@@ -143,6 +143,21 @@ export function renderList(all: Row[], jobs: QueuedJob[], o: { width?: number; n
   return lines.join("\n");
 }
 
+/** `12/60 turns · $0.03/$0.50 · 8,000 output tokens · 64,000 context`: a sub-agent's use of its limits. */
+function limits(a: AgentEntry): string | undefined {
+  const c = a.caps;
+  if (!c) return undefined;
+  const turns = a.turns ?? 0;
+  return [
+    c.turns ? `${turns}/${c.turns} turns` : `${turns} turn${turns === 1 ? "" : "s"}`,
+    c.spend ? `$${a.spent.toFixed(2)}/$${c.spend.toFixed(2)}` : "",
+    c.maxTokens ? `${c.maxTokens.toLocaleString("en-US")} output tokens` : "",
+    c.context ? `${c.context.toLocaleString("en-US")} context` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 export function renderShow(r: Row, all: Row[], now = Date.now()): string {
   const a = r.agent;
   const rec = r.view.rec;
@@ -153,7 +168,8 @@ export function renderShow(r: Row, all: Row[], now = Date.now()): string {
   out.push(`${r.ref}  ${a.label}  ${a.kind === "root" ? "(conversation)" : `(sub-agent of ${parent ? `${parent.ref} ${parent.agent.label}` : `#${a.parent}`}, depth ${a.depth}${a.access === "read-only" ? ", read-only" : ""})`}`);
   line("status", [r.status, a.waiting && !ENDED.has(r.status) ? `waiting for you: ${a.waiting}` : "", `${a.stepCount} step${a.stepCount === 1 ? "" : "s"}`, a.spent > 0 ? `$${a.spent.toFixed(4)}` : "", `started ${ago(now - a.startedAt)} ago`, a.endedAt ? `ended ${ago(now - a.endedAt)} ago` : ""].filter(Boolean).join(" · "));
   line("folder", tilde(a.cwd));
-  line("model", a.model);
+  line("model", a.model && a.thinking ? `${a.model} · thinking ${a.thinking}` : a.model);
+  line("limits", limits(a));
   line("mode", a.mode);
   line("held", a.pending ? `${a.pending} message${a.pending === 1 ? "" : "s"} for its user's next prompt` : undefined);
   line("task", a.task ? oneLine(a.task) : undefined);

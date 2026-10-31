@@ -118,7 +118,8 @@ one other as a thread; `tab` moves to its next partner.
 
 The roster is one process's. The **registry** shows them all: every Mnemo process, in any
 project, writes `$MNEMO_HOME/registry/procs/<tag>.json` (its conversations and sub-agents with
-status, task, last steps, folder, model, mode, spend, an approval waiting) when its roster changes
+status, task, last steps, folder, model, mode, spend, an approval waiting; for a sub-agent
+its own model, thinking level and limits with the turns used, which `mnemo agents show` prints) when its roster changes
 and every 5 seconds as a heartbeat. Interactive sessions, `--rpc`, `-p` and so scheduled runs all
 do. Plain files are the source of truth, written whole (rename into place), folders 0700 and files
 0600; there is no database to drift or to lock on Windows.
