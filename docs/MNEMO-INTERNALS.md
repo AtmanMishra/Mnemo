@@ -404,7 +404,7 @@ every query first stats the project's files and re-parses only those whose bytes
 describes the code as it is now. References are tied to definitions at query time: `exact` (same file,
 an imported file, a typed receiver) or `inferred` (the only definition of that name in the language
 family); anything else is counted and never guessed, and no call crosses a language family. The tools
-are `code_search` (BM25 over names and signatures, nudged towards used, exported definitions),
+are `code_search` (BM25 over names and signatures, nudged towards exported definitions and those the call graph ranks high, by PageRank),
 `code_symbol` (a definition with its source, or a file's outline), `code_refs` (callers or callees, to
 depth 3) and `code_map`. All four are read tools to the gate; the index leaves out every file a read
 would be refused (credentials, deny rules) and stores no file bodies. Nothing is indexed until the
