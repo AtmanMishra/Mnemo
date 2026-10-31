@@ -365,6 +365,8 @@ gets a copy one level deeper.
 
 `/remote` is `app/src/runtime/remote.ts`, owned by the `Controller`: a loopback-only, token-guarded, read-only view (SECURITY.md).
 
+The agent registry is not an extension either: `app/src/registry/` (`store`, `publisher`, `inbox`, `controls`, `join`, `cli`) writes one file per process under `$MNEMO_HOME/registry/procs/` from the roster, reads requests from `inbox/<tag>/` and answers them through the roster and the `Controller`; `mnemo agents` and the hub's *Elsewhere* read it. See docs/AGENT-HIERARCHY.md and SECURITY.md.
+
 Scheduled runs are not an extension: `app/src/schedule/` (`cron`, `store`, `run`, `cli`) starts `mnemo -p` children from `mnemo schedule`; see SECURITY.md.
 
 `Controller` (`runtime/controller.ts`) is the only caller of the session: it owns
