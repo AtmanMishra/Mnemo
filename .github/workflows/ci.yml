@@ -68,6 +68,16 @@ jobs:
     steps:
       # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # Tests make their scratch folders under os.tmpdir(). On Windows that is the C: disk, which
+      # is throttled: the session index steps measured up to 20x slower there than on D: (an open
+      # 120 ms against 7 ms, a synced write 400 ms against 10 ms), enough to stall a test past
+      # its timeout now and then. RUNNER_TEMP is on D:.
+      - name: temp folder on the fast disk
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       # oven-sh/setup-bun v2.2.0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:

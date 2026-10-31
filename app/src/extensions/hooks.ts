@@ -5,6 +5,8 @@
  *   PostToolUse   after a call: may add a line the model reads with its result
  *   SessionStart  when a session starts (and each sub-agent's)
  *   SessionEnd    when it ends
+ *   SubagentStart before a sub-agent starts, with its model and limits: may refuse it
+ *   SubagentStop  after a sub-agent ended, with its outcome, answer and spend
  *
  * They come from the managed policy's `hooks` (first, and the user cannot remove them) and
  * `$MNEMO_HOME/hooks.json`, in the shape `{"hooks": {"PreToolUse": [{"matcher": "bash",
@@ -28,7 +30,7 @@ import { loadManaged } from "../policy/managed.ts";
 import { globMatch } from "./policy.ts";
 import type { Host } from "./host.ts";
 
-export const EVENTS = ["PreToolUse", "PostToolUse", "SessionStart", "SessionEnd"] as const;
+export const EVENTS = ["PreToolUse", "PostToolUse", "SessionStart", "SessionEnd", "SubagentStart", "SubagentStop"] as const;
 export type HookEvent = (typeof EVENTS)[number];
 
 export interface Hook {
@@ -44,7 +46,7 @@ export interface Hook {
 
 export type Hooks = Record<HookEvent, Hook[]>;
 
-const none = (): Hooks => ({ PreToolUse: [], PostToolUse: [], SessionStart: [], SessionEnd: [] });
+const none = (): Hooks => ({ PreToolUse: [], PostToolUse: [], SessionStart: [], SessionEnd: [], SubagentStart: [], SubagentStop: [] });
 
 /** Valid hooks of one `{"hooks": …}` value; what is wrong goes to `errors`. */
 export function parseHooks(value: unknown, source: string, into: Hooks, errors: string[]): void {
@@ -155,6 +157,19 @@ export function blockOf(hook: Hook, run: HookRun, failClosed: boolean): string |
   }
   if (!failClosed) return undefined;
   return `the hook ${label(hook)} (${hook.source}) failed (${run.error ?? `exit ${run.code}`}), so the call is refused${run.stderr.trim() ? `: ${run.stderr.trim()}` : ""}`;
+}
+
+/**
+ * Run the SubagentStart hooks (the first refusal wins; a hook that fails refuses, as for
+ * PreToolUse) or the SubagentStop ones (they cannot change what happened).
+ */
+export async function subagentHooks(hooks: Hooks, event: "SubagentStart" | "SubagentStop", payload: Record<string, unknown>, cwd: string, agentDir: string): Promise<string | undefined> {
+  for (const h of hooks[event]) {
+    const run = await runHook(h, { event, ...payload }, cwd, agentDir);
+    const reason = event === "SubagentStart" ? blockOf(h, run, true) : undefined;
+    if (reason) return reason;
+  }
+  return undefined;
 }
 
 export function hooksExtension(host: Host) {

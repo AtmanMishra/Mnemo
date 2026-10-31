@@ -161,17 +161,17 @@ test("messages are bounded: size, rate, and what an idle node will hold", () => 
   expect(r.get(b)!.pending).toBe(LIMITS.inbox);
   r.userTurn(b);
   expect(r.get(b)!.pending).toBe(0);
-  // Running agents read as they go, so they hold nothing; the rate limit is what bounds them.
+  // Running agents read as they go (when done, or after this step if urgent), so they hold nothing; the rate limit is what bounds them.
   r.get(a)!.hops = 0;
   r.setStatus(b, "running");
   let sent = LIMITS.inbox;
   while (sent < LIMITS.sendsPerWindow) {
-    expect(r.send(a, b, "go")).toEqual({ ok: true, delivery: "now" });
+    expect(r.send(a, b, "go", { urgent: sent % 2 === 0 })).toEqual({ ok: true, delivery: sent % 2 === 0 ? "now" : "queued" });
     sent++;
   }
   expect(r.send(a, b, "too fast")).toMatchObject({ ok: false, reason: expect.stringContaining("too fast") });
   clock.t += LIMITS.rateWindowMs + 1;
-  expect(r.send(a, b, "again")).toEqual({ ok: true, delivery: "now" });
+  expect(r.send(a, b, "again")).toEqual({ ok: true, delivery: "queued" });
 });
 
 test("a message wakes an idle agent, and a chain of messages stops at a bound until a user speaks", () => {
@@ -195,12 +195,12 @@ test("a message wakes an idle agent, and a chain of messages stops at a bound un
   expect(r.send(from, to, "still going")).toEqual({ ok: true, delivery: "held", held: "chain" });
   // A user prompts: what that agent sends starts a new chain.
   r.userTurn(from);
-  expect(r.send(from, to, "fresh")).toEqual({ ok: true, delivery: "now" });
+  expect(r.send(from, to, "fresh")).toEqual({ ok: true, delivery: "queued" });
   expect(r.get(to)!.hops).toBe(LIMITS.hops - 1); // it keeps the longer chain it is already in
   // A sub-agent started by an agent deep in a chain continues that chain: one more message, then held.
   const s1 = sub(to, "helper");
   expect(r.get(s1)!.hops).toBe(LIMITS.hops - 1);
-  expect(r.send(s1, to, "done")).toEqual({ ok: true, delivery: "now" });
+  expect(r.send(s1, to, "done")).toEqual({ ok: true, delivery: "queued" });
   // A sub-agent has no user to hold a message for, so past the bound it is refused instead.
   expect(r.send(to, s1, "thanks")).toMatchObject({ ok: false, reason: expect.stringContaining("report to your user") });
 });
@@ -315,4 +315,57 @@ test("a run budget stops the prompt that crosses it, sub-agents' calls included,
   r.setLimits({ runSpend: 0 });
   r.spend(a, 50);
   expect(stops).toEqual([a]);
+});
+
+test("runs: a user's words start one, sub-agents and woken agents join it, and only the newest are remembered", () => {
+  const { r, root, sub, inbox } = world();
+  const a = root("A");
+  const b = root("B");
+  r.link(a, b);
+  r.userTurn(a, "ship the release");
+  const kid = sub(a, "kid");
+  expect(r.get(kid)!.run).toBe("r1");
+  expect(r.send(kid, b, "can you check CI?")).toEqual({ ok: true, delivery: "woken" });
+  expect(r.get(b)).toMatchObject({ run: "r1", path: [kid], owes: [kid] });
+  expect(inbox.get(b)![0]).toMatchObject({ run: "r1", goal: "ship the release" });
+  expect(r.run("r1")).toMatchObject({ members: [a, kid, b], messages: 1, by: a });
+  // A prompt without words (the old call) changes no run; with words it starts a new one.
+  r.userTurn(a);
+  expect(r.get(a)!.run).toBe("r1");
+  for (let i = 0; i < LIMITS.runs + 5; i++) r.userTurn(a, `prompt ${i}`);
+  expect(r.snapshot().runs.size).toBe(LIMITS.runs);
+  expect(r.run("r1")).toBeUndefined();
+});
+
+test("the ping-pong guard lets a parent and its own sub-agent always talk, and one answer per message read", () => {
+  const { r, root, sub } = world();
+  const a = root("A");
+  const b = root("B");
+  r.link(a, b);
+  r.userTurn(a, "go");
+  expect(r.send(a, b, "q1")).toMatchObject({ ok: true });
+  const helper = sub(b, "helper"); // inherits b's path [a]
+  // The helper never heard from A: reaching back up the chain to it is refused…
+  expect(r.send(helper, a, "hi A")).toMatchObject({ ok: false, reason: expect.stringContaining("earlier in this chain") });
+  // …but it can always talk to its parent, and its parent to it.
+  r.setStatus(b, "running");
+  expect(r.send(helper, b, "found it")).toMatchObject({ ok: true });
+  expect(r.send(b, helper, "thanks")).toMatchObject({ ok: true });
+  // B read one message from A: it may answer once, then A is earlier in the chain again.
+  expect(r.send(b, a, "answer")).toMatchObject({ ok: true });
+  expect(r.send(b, a, "and more")).toMatchObject({ ok: false, reason: expect.stringContaining("asked you nothing") });
+});
+
+test("@N to a top-level agent needs its prompt handle; to a sub-agent it is a tell", () => {
+  const { r, root, sub, told } = world();
+  const a = root("A");
+  const kid = sub(a, "kid");
+  expect(r.tellUser(a, "hello")).toMatchObject({ ok: false, reason: expect.stringContaining("cannot be reached") });
+  expect(r.tellUser(kid, "look here")).toEqual({ ok: true, label: "kid" });
+  expect(told.get(kid)).toEqual(["look here"]);
+  expect(r.tellUser(999, "x")).toMatchObject({ ok: false, reason: expect.stringContaining("no agent #999") });
+  let prompted = "";
+  r.attach(a, { deliver: () => {}, stop: () => {}, prompt: (t) => ((prompted = t), true) });
+  expect(r.tellUser(a, "  do it  ")).toEqual({ ok: true, label: "A" });
+  expect(prompted).toBe("do it");
 });

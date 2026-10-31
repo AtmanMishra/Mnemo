@@ -6,7 +6,7 @@
  */
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
-import { isEnded, type RosterNode } from "../runtime/roster.ts";
+import { isEnded, usage, type RosterNode } from "../runtime/roster.ts";
 import { statusStyle, treeOf } from "./tree.ts";
 import { palette } from "./theme.ts";
 import { useSettings } from "./settings-context.ts";
@@ -22,6 +22,7 @@ export function NodePane({
   height,
   focused,
   onTell,
+  run,
 }: {
   node: RosterNode;
   nodes: readonly RosterNode[];
@@ -30,6 +31,8 @@ export function NodePane({
   focused: boolean;
   /** Send what you typed to the sub-agent. */
   onTell?: (text: string) => TellResult;
+  /** The run it is in, as a line (`runLine`). */
+  run?: string;
 }): React.ReactElement {
   const prefs = useSettings();
   const [draft, setDraft] = useState("");
@@ -57,6 +60,8 @@ export function NodePane({
     for (let i = 0, n = 0; i < words.length && n < max; i += width - 2, n++) lines.push({ text: words.slice(i, i + width - 2), tone });
   };
   wrap("task: ", node.task, palette.dim, 4);
+  if (node.model) lines.push({ text: usage(node), tone: palette.faint });
+  if (run) lines.push({ text: run, tone: palette.faint });
   lines.push({ text: node.stepCount ? `steps (${node.stepCount})` : "no steps yet", tone: palette.faint });
   for (const s of node.steps.slice(-6)) lines.push({ text: `  ${s}`, tone: palette.dim });
   if (node.answer) wrap("answer: ", node.answer, palette.text, 6);
@@ -74,7 +79,7 @@ export function NodePane({
         <Text bold color={focused ? palette.text : palette.dim}>
           {clip(node.label, Math.max(4, width - 24))}
         </Text>
-        <Text color={palette.faint}>{`  sub-agent · depth ${node.depth} · ${node.access} · ${node.status}`}</Text>
+        <Text color={palette.faint}>{`  #${node.id} sub-agent · depth ${node.depth} · ${node.access} · ${node.status}`}</Text>
       </Text>
       {lines.slice(0, room).map((l, i) => (
         <Text key={i} color={l.tone} wrap="truncate-end">

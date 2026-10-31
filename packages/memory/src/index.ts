@@ -6,6 +6,7 @@
  * same session (hooks, an MCP server, or a transcript replayed after the
  * fact). Nothing here prints; everything returns text or notes.
  */
+export { anchorKey, anchorsIn, anchorTag, showValue, splitAnchor, type Anchor, type AnchorCheck, type AnchorState } from "./anchor.ts";
 export { MemoryClient, type MemoryChild } from "./client.ts";
 export { Credit } from "./credit.ts";
 export { describeNode, summarizeMemory, type MemoryNode, type MemorySummary } from "./panel.ts";

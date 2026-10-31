@@ -75,3 +75,47 @@ reads the callers before the file is re-read, so a removed function still has th
 
 `codeIndex` and `codeImpact` stay on: after the fixes both are cheap, lazy, and mostly right. Re-run
 the eval before changing the extractor or the ranking, and put the numbers in the pull request.
+
+## grep behind the text index
+
+`cd app && bun eval/grep-index.ts [repo]`. The code index also keeps a trigram index of every text
+file (SQLite FTS5, contentless: which three-character sequences a file holds, never its text). A
+`grep` call reads only the files holding every trigram the pattern needs, and matches them line by
+line in JavaScript. pi's grep needs ripgrep, and Mnemo sets `PI_OFFLINE`, so pi no longer
+downloads it: a read-only sub-agent's grep failed wherever rg was not installed. Now grep uses
+ripgrep when it is installed and the text index when it is not.
+
+Measured 2026-10-28 on a Linux container, warm cache. "Indexed" and "all files" are a call as the
+agent makes one (100 matches at most); rg is given the same file list and finds every match.
+
+**Mnemo** (517 text files; built in 0.8 s, 6.8 MB; freshness check 4 ms per call)
+
+| pattern | candidates | indexed | all files | rg |
+|---|---|---|---|---|
+| `parseConfig` | 47 | 4 ms | 13 ms | 7 ms |
+| `settings\.get\(\)` | 19 | 1 ms | 10 ms | 7 ms |
+| `zzqxv_never_there` | 1 | 0 ms | 9 ms | 6 ms |
+
+**VS Code** (`microsoft/vscode`, 19,664 text files; built in 33 s, 45 MB; freshness check 109 ms per call)
+
+| pattern | candidates | indexed | all files | rg |
+|---|---|---|---|---|
+| `parseConfig` | 1,451 | 190 ms | 578 ms | 83 ms |
+| `settings\.get\(\)` | 573 | 106 ms | 547 ms | 77 ms |
+| `zzqxv_never_there` | 0 | 8 ms | 540 ms | 88 ms |
+| `TODO\|FIXME` | 1,205 | 24 ms | 53 ms | 92 ms |
+| `import .* from` | 14,283 | 18 ms | 1 ms | 303 ms |
+
+The lines matched ripgrep's for all 8 patterns in both repositories: every line of rg's, and no
+other, or (where the output passes 50 KB and is cut, as pi's grep cuts it) only lines of rg's.
+
+What it says: against reading every file, a rare name is 3 to 70 times faster. Against ripgrep,
+which searches in parallel, it is not faster on a large repository once the freshness check (git's
+file list and a stat of each file, about 110 ms at 20,000 files) is counted; it is about level, and
+the first grep in a large repository pays the build (33 s at 20,000 files; later calls re-read only
+changed files). Hence the decision: ripgrep when it is installed, the index only when it is not,
+which is the usual case on Windows and macOS. Common patterns stop at 100 matches either way.
+
+Not shown: a pattern ripgrep reads and JavaScript reads differently (POSIX classes, inline flags
+other than a leading `(?i)`, `\p{…}`, `\A`, `\z`) is passed to ripgrep, or refused with the reason
+when it is not installed. Trigrams use ASCII only, so a non-ASCII literal narrows nothing.
