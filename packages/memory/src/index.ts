@@ -12,7 +12,7 @@ export { Credit } from "./credit.ts";
 export { describeNode, summarizeMemory, type MemoryNode, type MemorySummary } from "./panel.ts";
 export { findMemsrv, journalPath, memsrvName, mnemoHome } from "./paths.ts";
 export { normalizeRemote, projectIdentity, type ProjectIdentity } from "./project.ts";
-export { describeHit, DIRECTIVE, hitLine, profileBlock, recallMessage } from "./recall.ts";
+export { describeHit, DIRECTIVE, directiveFor, hitLine, profileBlock, recallMessage } from "./recall.ts";
 export { readMemory, type MemoryReader } from "./read.ts";
 export { redact } from "./redact.ts";
 export { applyTidy, pathsIn, planTidy, sameMeaning, type TidyItem } from "./tidy.ts";

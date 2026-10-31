@@ -18,12 +18,17 @@ export const PLAN_SECTION =
   "(scope, an interface, a library, what to keep), ask with ask_user before you plan, one question at a time and only where a guess " +
   "could be wrong. Then give the plan: the files to change, the steps in order and how each will be checked. Do not try to make the change.";
 
+/** For an agent without ask_user (a sub-agent): nobody to ask, so its assumptions go in the plan. */
+export const PLAN_SECTION_NO_ASK =
+  "Plan mode is on: you can read and search, and every change is refused. Where the request leaves a choice that changes the plan, " +
+  "make the likeliest assumption and state it. Then give the plan: the files to change, the steps in order and how each will be checked. Do not try to make the change.";
+
 const OTHER = "Something else (type it)";
 
 export function planExtension(host: Host) {
   return (pi: ExtensionAPI): void => {
     pi.on("before_agent_start", (event) => {
-      if (host.mode === "plan") event.systemPromptOptions.sections.plan = PLAN_SECTION;
+      if (host.mode === "plan") event.systemPromptOptions.sections.plan = pi.getActiveTools().includes("ask_user") ? PLAN_SECTION : PLAN_SECTION_NO_ASK;
     });
     if (host.depth > 0) return;
     pi.registerTool(

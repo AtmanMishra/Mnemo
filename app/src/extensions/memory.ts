@@ -182,7 +182,8 @@ export function memoryExtension(host: Host) {
         description: "Tell memory that something it supplied was wrong or that an approach failed, so it is trusted less next time.",
         parameters: Type.Object({ failure: Type.String({ description: "What went wrong and why" }) }),
         async execute(_id, params, _signal, _update, ctx) {
-          await sessionFor(ctx.cwd).steer(params.failure);
+          const recorded = await sessionFor(ctx.cwd).steer(params.failure);
+          if (!recorded) throw new Error("memory could not record this (it is not reachable, or no run is in progress)");
           return { content: [{ type: "text", text: "Recorded." }], details: {} };
         },
       }),
@@ -191,12 +192,12 @@ export function memoryExtension(host: Host) {
     pi.on("before_agent_start", async (event, ctx) => {
       try {
         const s = sessionFor(ctx.cwd, ctx.model?.id);
-        const r = await s.recall(event.prompt);
+        const r = await s.recall(event.prompt, pi.getActiveTools());
         host.episode = s.episode;
-        return {
-          systemPrompt: event.systemPrompt + r.system,
-          ...(r.message ? { message: { customType: "mnemo-recall", content: r.message, display: false } } : {}),
-        };
+        // A section, not a returned systemPrompt: that would be a forced prompt, and every section an
+        // extension loaded after this one sets would be dropped from it.
+        event.systemPromptOptions.sections.memory = r.system.trim();
+        return r.message ? { message: { customType: "mnemo-recall", content: r.message, display: false } } : undefined;
       } catch {
         return undefined;
       }

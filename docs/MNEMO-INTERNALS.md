@@ -349,12 +349,13 @@ gets a copy one level deeper.
 |---|---|
 | `mnemo-policy` | `tool_call` — the only hook that decides: rules, mode, grants, then the approval dialog (§3.6) |
 | `mnemo-hooks` | user and managed hooks (`extensions/hooks.ts`): `tool_call` after the gate (PreToolUse, may only refuse), `tool_result` (PostToolUse, may add a note), `session_start`, `session_shutdown` |
-| `mnemo-plan` | `before_agent_start` (a plan-mode section in the system prompt while the mode is `plan`); `ask_user` (a question in a pick or text dialog; the root session only) |
+| `mnemo-plan` | `before_agent_start` (a plan-mode section in the system prompt while the mode is `plan`; without `ask_user`, it says to state assumptions instead); `ask_user` (a question in a pick or text dialog; the root session only) |
+| `mnemo-role` | `before_agent_start`, sub-agents only: a `subagent` section (the brief is from agent #N, the last message is the answer, nobody to ask, and read-only when it is) and the installed binary's `docs` section |
 | `mnemo-guide` | `before_agent_start`: a line in the tool list for each active Mnemo tool, and a `working` section saying when to use them unasked (code index before grep, `code_refs` before changing a signature, `memory_search` before exploring, `memory_steer` on a wrong approach, skills, sub-agents for broad reading); only the tools the agent has are named |
 | `mnemo-checkpoints` | `tool_call` on `edit`/`write`: keeps the file's bytes under the current turn (rewind) |
 | `mnemo-lsp` | `tool_result` on `edit`/`write` (root session, trusted folder, servers named in `$MNEMO_HOME/lsp.json`): shows the server the new text (`lsp/client.ts`, JSON-RPC over stdio) and appends its errors and warnings to the result; `session_shutdown` stops the servers |
 | `mnemo-shell` | re-registers pi's `bash` with the provider keys taken out of the command's environment |
-| `mnemo-memory` | `before_agent_start` (directive + profiles into the system prompt, recall as a hidden message), `tool_call` (the known-fix guard), `tool_execution_*`, `turn_end`, `agent_end` (verify nudge, then reflection in the background), `session_shutdown`; tools `memory_search`, `session_search`, `memory_remember`, `memory_steer` |
+| `mnemo-memory` | `before_agent_start` (directive + profiles as the `memory` section of the system prompt, naming only the memory tools the agent has; recall as a hidden message), `tool_call` (the known-fix guard), `tool_execution_*`, `turn_end`, `agent_end` (verify nudge, then reflection in the background), `session_shutdown`; tools `memory_search`, `session_search`, `memory_remember`, `memory_steer` |
 | `mnemo-kernel` | `ipy_run` (absent when no working Python is found) |
 | `mnemo-agents` | `spawn_subagent` (absent at the depth cap) |
 | `mnemo-peers` | `list_agents`, `message_agent`; the roster's status, steps and family summary |
