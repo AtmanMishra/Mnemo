@@ -35,6 +35,7 @@ import { useSettings } from "./settings-context.ts";
 import { defaultLayout, fitsPanes, LAYOUT_LABEL, layoutsFor, nextLayout, SPLIT_MAX, splitRects, type SplitLayout } from "./layout.ts";
 import { Toasts, useToasts } from "./Toasts.tsx";
 import { ExitCard } from "./ExitCard.tsx";
+import type { Row } from "../registry/cli.ts";
 
 export type Screen = "agent" | "split" | "hub" | "playground";
 
@@ -43,6 +44,27 @@ export interface ShellProps {
   motion: boolean;
   /** Where to start (tests and snapshots). */
   initial?: { screen?: Screen; picker?: boolean };
+  /** Agents of other Mnemo processes (the registry), for the hub; read every few seconds while it shows. */
+  elsewhere?: () => readonly Row[];
+}
+
+/** What `read` returns, re-read every `ms` while `on`. */
+function usePolled<T>(read: (() => T) | undefined, on: boolean, ms: number): T | undefined {
+  const [value, setValue] = useState<T | undefined>(undefined);
+  useEffect(() => {
+    if (!read || !on) return;
+    const load = () => {
+      try {
+        setValue(read());
+      } catch {
+        /* an unreadable registry shows nothing */
+      }
+    };
+    load();
+    const t = setInterval(load, ms);
+    return () => clearInterval(t);
+  }, [read, on, ms]);
+  return value;
 }
 
 /** What a shell with no agent reads from (never shown: it has no agents). */
@@ -128,7 +150,7 @@ function FleetBar({
   );
 }
 
-export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElement {
+export function Shell({ fleet, motion, initial, elsewhere }: ShellProps): React.ReactElement {
   const snap = useSyncExternalStore(fleet.subscribe, fleet.snapshot);
   // A theme change re-draws everything; light themes paint their own ground.
   const theme = useSyncExternalStore(subscribeTheme, themeName);
@@ -146,6 +168,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   /** The layout a split opens in: the one chosen in settings if it fits this many panes, else by terminal width. */
   const startLayout = (n: number): SplitLayout => (prefs.splitLayout !== "auto" && layoutsFor(n).includes(prefs.splitLayout) ? prefs.splitLayout : defaultLayout(n, columns));
   const [screen, setScreen] = useState<Screen>(initial?.screen ?? "agent");
+  const others = usePolled(elsewhere, screen === "hub", 2000);
   const [activeId, setActiveId] = useState<number | undefined>(agents[0]?.id);
   const [splitKeys, setSplitKeys] = useState<string[]>([]);
   const [layoutChoice, setLayoutChoice] = useState<SplitLayout | undefined>();
@@ -297,6 +320,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
             active={!picker}
             split={splitAgents}
             roster={tree}
+            elsewhere={others}
             onOpen={(id) => go(id, "agent")}
             onSplit={(id) => {
               // The agent you are in is always in the split, so taking it out would do nothing.
