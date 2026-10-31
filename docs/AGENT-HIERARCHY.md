@@ -133,6 +133,12 @@ agent that can start sub-agents sees the profiles' names and descriptions in its
 prompt; with none saved, nothing is added. A `tools` list narrows what the access allows,
 and the team tools (`list_agents`, `message_agent`, `task_update`) always stay.
 
+**Background sub-agents**: `spawn_subagent(background: true)` returns at once with the new
+agent's number, and the parent goes on. When the sub-agent finishes, its answer (or why it
+failed) reaches the parent as a message from it, framed like any peer message and counted in
+the run's caps; an idle parent is woken by it. A sub-agent that finishes stops the background
+sub-agents it started, since they could no longer report to it; `r r` stops a whole run.
+
 **Saved sub-agents**: a saved conversation keeps each sub-agent's transcript in
 `<session>/sub/` and a `<session>.state.json` with every agent it started (see
 `docs/MNEMO-INTERNALS.md` §1). The live roster keeps the last 40 ended sub-agents per
