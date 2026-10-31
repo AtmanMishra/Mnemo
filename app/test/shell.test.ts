@@ -115,15 +115,16 @@ test("ctrl+p lists open and recent projects; enter on an open one switches to it
   const r = render(React.createElement(Shell, { fleet, motion: false }));
   await wait();
   r.stdin.write(KEY.ctrlP);
-  await wait();
-  expect(r.lastFrame()).toContain("projects");
+  await waitFor(() => expect(r.lastFrame()).toContain("projects"));
   r.stdin.write("bet");
   await wait();
   fleet.snapshot().agents[1]!.controller.transcript.notice("arrived at beta");
   r.stdin.write(KEY.enter);
-  await wait(150);
-  expect(r.lastFrame()).not.toContain("type a name");
-  expect(r.lastFrame()).toContain("arrived at beta");
+  // A slow runner repaints late: wait for the switch rather than a fixed time.
+  await waitFor(() => {
+    expect(r.lastFrame()).not.toContain("type a name");
+    expect(r.lastFrame()).toContain("arrived at beta");
+  });
   expect(fleet.snapshot().agents).toHaveLength(2);
   r.unmount();
 });

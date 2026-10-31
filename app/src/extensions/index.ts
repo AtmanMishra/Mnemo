@@ -16,6 +16,7 @@ import { mcpExtensions } from "./mcp.ts";
 import { modelNotesExtension } from "./model-notes.ts";
 import { outcomeExtension } from "./outcome.ts";
 import { memoryExtension } from "./memory.ts";
+import { operaExtension } from "./opera.ts";
 import { peersExtension } from "./peers.ts";
 import { planExtension } from "./plan.ts";
 import { policyExtension } from "./policy.ts";
@@ -37,6 +38,8 @@ export function mnemoExtensions(host: Host): InlineExtension[] {
     { name: "mnemo-checkpoints", factory: checkpointsExtension(host) },
     { name: "mnemo-lsp", factory: lspExtension(host) },
     { name: "mnemo-shell", factory: shellExtension(host) },
+    // Before memory, whose system prompt is final: a section set after it would be dropped.
+    { name: "mnemo-opera", factory: operaExtension(host) },
     { name: "mnemo-memory", factory: memoryExtension(host) },
     // After memory, which says whether a run that ended goes back to verify.
     { name: "mnemo-outcome", factory: outcomeExtension(host) },

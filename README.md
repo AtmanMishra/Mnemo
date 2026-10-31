@@ -285,6 +285,8 @@ uses credentials it finds in your environment (`ANTHROPIC_API_KEY`,
 | `mnemo settings …` | list, get, set and reset [settings](#configuration) from a shell |
 | `mnemo memory …` | memory for [other agents](#memory-for-other-agents), plus `status`, `tidy`, `curate` |
 | `mnemo schedule …` <sup>**`main`**</sup> | run a prompt on a timer ([more](#scheduled-runs)) |
+| `mnemo opera …` <sup>**`main`**</sup> | one conductor over several repositories; its threads each work in their own worktree ([docs/OPERA.md](docs/OPERA.md)) |
+| `mnemo agents …` <sup>**`main`**</sup> | every agent running on this machine, in any project, and what each is doing; tell, steer or stop one from any terminal ([more](#every-agent-on-this-machine)) |
 | `mnemo skills …` <sup>**`main`**</sup> | add a skills marketplace and install its skills, as Claude Code does with plugins: `mnemo skills marketplace add anthropics/skills`, `mnemo skills install document-skills@anthropic-agent-skills` |
 | `mnemo --rpc` | the session as JSON lines, for an [editor](#in-your-editor) |
 | `mnemo update` · `mnemo uninstall` | [update](#install) and [remove](#install) |
@@ -519,6 +521,21 @@ A run is `mnemo -p` in a child process, so the gate, the managed policy and your
 **A job is read-only (`--plan`) unless it was added with `--actions`**, and `--actions` never means
 `yolo`: deny rules still hold. Give an acting job a budget first (`mnemo settings runSpend 0.50`).
 Each run has a timeout and a redacted log; `mnemo schedule list`, `logs` and `run` do the rest.
+
+### Every agent on this machine
+
+```bash
+mnemo agents                          # what runs now in every terminal and project, and what finished
+mnemo agents show k3f9.2              # one agent: task, steps, model, mode, answer, transcript
+mnemo agents tell k3f9.2 "also check the error path"
+mnemo agents stop k3f9                # stop that terminal's turn
+```
+
+Each Mnemo process (a terminal, `-p`, `--rpc`, a scheduled run) keeps a file in
+`~/.mnemo/registry/`, so any terminal sees the rest; the hub lists them under *Elsewhere*. One that
+crashed shows as **lost**. Your words start a turn under that terminal's mode and gate, and its
+approvals are answered only there. It is all files: no socket, no server, nothing leaves the machine.
+`MNEMO_REGISTRY=0` keeps a process out.
 
 ### Language-server diagnostics
 

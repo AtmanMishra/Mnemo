@@ -23,6 +23,10 @@ import type { MemoryService as MemoryServiceType } from "@mnemo/memory";
 import type { startRuntime as StartRuntime } from "../src/runtime/runtime.ts";
 import { scheduleCommand } from "../src/schedule/cli.ts";
 import { skillsCommand } from "../src/market/cli.ts";
+import { operaCommand, type OperaLaunch } from "../src/opera/cli.ts";
+import { readOpera } from "../src/opera/store.ts";
+import { agentsCommand, elsewhere } from "../src/registry/cli.ts";
+import { joinRegistry, memberOf, type Joined } from "../src/registry/join.ts";
 import { applyTheme, themePaints, type ThemeName } from "../src/ui/theme.ts";
 import { mouse } from "../src/ui/mouse.ts";
 import { FOCUS_OFF, FOCUS_ON } from "../src/ui/notify.ts";
@@ -109,8 +113,10 @@ usage
   mnemo settings …         every setting: list, get <name>, set <name> <value>, reset [name] (or /settings in a session)
   mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
   mnemo skills …           install skills from marketplaces, as Claude Code installs plugins (mnemo skills --help)
+  mnemo opera …            one conductor over several repositories, threads in worktrees (mnemo opera --help)
   mnemo schedule …         run a prompt on a timer, read-only unless you allow actions (mnemo schedule --help)
   mnemo evolve …           how runs went (stats), replayable checked runs (tasks, replay) (mnemo evolve --help)
+  mnemo agents …           every agent running on this machine, in any project; tell, steer or stop one (mnemo agents --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
   mnemo --rpc              the session over JSON lines on stdin/stdout, for an editor extension (docs/RPC.md);
                            approvals are the client's to answer, as in the terminal
@@ -162,6 +168,8 @@ interface Args {
   print?: string;
   rpc?: boolean;
   cwd?: string;
+  /** `mnemo opera <name>`: the first agent conducts this Opera. */
+  opera?: string;
 }
 
 /** A mistake in the command line: exits 2, like the subcommands' usage errors. */
@@ -532,13 +540,23 @@ async function main(): Promise<number> {
     const { evolveCommand } = await import("../src/evolve/cli.ts");
     return evolveCommand(process.argv.slice(3), mnemoHome());
   }
+  if (process.argv[2] === "agents") return agentsCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "memory") {
     const home = mnemoHome();
     pointPiAt(agentDir(home));
     const { runMemoryCommand } = await heavy();
     return runMemoryCommand(process.argv.slice(3), home, agentDir(home));
   }
-  const args = parse(process.argv.slice(2));
+  let argv = process.argv.slice(2);
+  let opera: OperaLaunch | undefined;
+  if (argv[0] === "opera") {
+    const r = operaCommand(argv.slice(1), mnemoHome());
+    if (typeof r === "number") return r;
+    opera = r;
+    argv = r.rest;
+  }
+  const args = parse(argv);
+  if (opera) Object.assign(args, { cwd: opera.dir, opera: opera.name });
   if (args.help) return console.log(USAGE), 0;
   if (args.version) return console.log(pkg.version), 0;
   if (mayOffer(process.argv.slice(2), process.stdin.isTTY === true && process.stdout.isTTY === true, process.env)) {
@@ -601,7 +619,7 @@ async function main(): Promise<number> {
   const roster = new Roster();
   /** One agent's host and pi session in `agentCwd`; the first gets --continue and the demo's injections. */
   const makeAgent = async (agentCwd: string, first = false) => {
-    const host = createHost({ roster, home, agentDir: dir, modelRuntime: runtimeModels, memory, mode: args.mode, settings, reflect: args.reflect, verify: args.verify, escalate: args.escalate });
+    const host = createHost({ roster, home, agentDir: dir, modelRuntime: runtimeModels, memory, mode: args.mode, settings, reflect: args.reflect, verify: args.verify, escalate: args.escalate, opera: first && args.opera ? readOpera(home, args.opera) : undefined });
     try {
       const runtime = await startRuntime({
         cwd: agentCwd,
@@ -631,11 +649,13 @@ async function main(): Promise<number> {
     await controller.bind();
     const server = new RpcServer({ controller, version: pkg.version, write: (e) => void process.stdout.write(`${JSON.stringify(e)}\n`), onQuit: () => finish() });
     server.start();
+    const registry = joinRegistry({ home, kind: "rpc", version: pkg.version, roster, members: () => [memberOf(host.node, cwd, controller)] });
     if (args.continueRecent && runtime.session.messages.length > 0) controller.transcript.load(runtime.session.messages);
     const rl = readline.createInterface({ input: process.stdin });
     rl.on("line", (l) => void server.handle(l));
     rl.on("close", () => finish());
     await closed;
+    registry?.close();
     server.stop();
     controller.dialogs.cancelAll();
     await runtime.dispose();
@@ -646,6 +666,23 @@ async function main(): Promise<number> {
   if (args.print !== undefined) {
     const session = runtime.session;
     await session.bindExtensions({});
+    // Seen from other terminals (`mnemo agents`), and stoppable from them; it takes no new words.
+    const registry = joinRegistry({
+      home,
+      kind: "print",
+      version: pkg.version,
+      roster,
+      members: () => [
+        {
+          node: host.node,
+          cwd,
+          model: () => (session.model ? `${session.model.provider}/${session.model.id}` : undefined),
+          mode: () => args.mode,
+          session: () => session.sessionFile,
+          control: { running: () => session.isStreaming, interrupt: () => void session.abort().catch(() => {}) },
+        },
+      ],
+    });
     try {
       if (!session.model || !session.modelRuntime.hasConfiguredAuth(session.model.provider)) {
         console.error("mnemo: no model configured — run mnemo and use /login, then /model");
@@ -673,6 +710,7 @@ async function main(): Promise<number> {
       await settleBackground(host);
       return 0;
     } finally {
+      registry?.close();
       await runtime.dispose();
       memory?.stop();
     }
@@ -734,6 +772,22 @@ async function main(): Promise<number> {
   controller.transcript.push({ kind: "welcome" });
   watch(cwd, controller);
   firstId = fleet.adopt(cwd, { controller, host, source: workspaceSource(controller, host, home) }).id;
+  // Every conversation of this terminal, seen and reachable from the others (`mnemo agents`, the hub).
+  const registry: Joined | undefined = joinRegistry({ home, kind: "interactive", version: pkg.version, roster, members: () => fleet.snapshot().agents.map((a) => memberOf(a.host.node, a.cwd, a.controller)) });
+  if (registry) {
+    // A question waiting for an answer is something the roster does not see.
+    const watched = new Set<number>();
+    const follow = () => {
+      for (const a of fleet.snapshot().agents)
+        if (!watched.has(a.id)) {
+          watched.add(a.id);
+          a.controller.dialogs.subscribe(registry.poke);
+        }
+      registry.poke();
+    };
+    fleet.subscribe(follow);
+    follow();
+  }
   // From here a failure nothing caught (an extension's timer, a stray promise) is a notice in
   // every open agent, not the end of the session.
   onStrayError = (kind, error) => {
@@ -763,6 +817,7 @@ async function main(): Promise<number> {
       onboard,
       stats,
       clearTerminal,
+      elsewhere: registry ? () => elsewhere(home, registry.tag) : undefined,
       onOnboarded: (choice) => {
         writeState(home, { ...state, onboarded: true });
         if (choice === "login") void controller.submit("/login");
@@ -829,6 +884,7 @@ async function main(): Promise<number> {
   }
 
   await done;
+  registry?.close();
   mouse.set(false);
   memory?.stop();
   instance.unmount();

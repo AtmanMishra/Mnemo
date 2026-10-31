@@ -16,6 +16,8 @@ import { Checkpoints } from "../runtime/checkpoints.ts";
 import { Roster, type Access } from "../runtime/roster.ts";
 import { limitsOf, SettingsStore } from "../runtime/settings.ts";
 import { managedPath } from "../policy/managed.ts";
+import { Conductor } from "../opera/conductor.ts";
+import type { OperaConfig } from "../opera/store.ts";
 
 /**
  * How much Mnemo may do without asking.
@@ -93,6 +95,10 @@ export interface Host {
   subDir?: string;
   /** For a sub-agent started from a profile: its name and instructions (runtime/profiles.ts). */
   profile?: { name: string; body: string };
+  /** In an Opera (`mnemo opera <name>`): the conductor's threads, budget and log, shared by its whole tree (opera/conductor.ts). */
+  opera?: Conductor;
+  /** The folder whose project memory this agent recalls and stores in, when it is not its own (an Opera's threads share the Opera's). */
+  memoryCwd?: string;
 }
 
 /** Run something after the fact without letting it fail the turn, and keep track of it. */
@@ -126,12 +132,16 @@ export interface HostOptions {
   label?: string;
   /** Injected by tests; the default probes for a Python that actually runs. */
   python?: () => string | undefined;
+  /** This agent conducts the Opera (`mnemo opera <name>`). */
+  opera?: OperaConfig;
 }
 
 export function createHost(o: HostOptions): Host {
   let python: string | undefined | null = null;
   const roster = o.roster ?? new Roster();
   if (o.settings) roster.setLimits(limitsOf(o.settings.get()));
+  const node = roster.addRoot(o.label ?? "mnemo").id;
+  const opera = o.opera && new Conductor(o.home, o.opera, roster, node, { agentDir: o.agentDir });
   return {
     home: o.home,
     agentDir: o.agentDir,
@@ -146,7 +156,7 @@ export function createHost(o: HostOptions): Host {
       }),
     depth: 0,
     roster,
-    node: roster.addRoot(o.label ?? "mnemo").id,
+    node,
     access: "full",
     mode: o.mode ?? "default",
     settings: o.settings ?? new SettingsStore(),
@@ -157,5 +167,7 @@ export function createHost(o: HostOptions): Host {
     background: new Set(),
     signals: [],
     checkpoints: new Checkpoints(),
+    opera,
+    memoryCwd: opera?.dir,
   };
 }
