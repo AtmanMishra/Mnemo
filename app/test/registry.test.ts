@@ -264,9 +264,11 @@ describe("publisher", () => {
 
   test("a long session keeps its live agents and only the newest finished ones", () => {
     // One clock tick for all of them, as on a fast machine: the newest is told apart by its number.
+    // Two conversations, so each stays under the roster's own keepEnded and the publisher's cap is what trims.
     const { roster, root, pub, read } = setup({ now: () => NOW });
+    const web = roster.addRoot("web");
     for (let i = 0; i < 70; i++) {
-      const s = roster.addSub(root.id, { label: `s${i}`, task: "", access: "full" });
+      const s = roster.addSub(i % 2 ? web.id : root.id, { label: `s${i}`, task: "", access: "full" });
       roster.finish(s.id, "done", `answer ${i}`);
     }
     const live = roster.addSub(root.id, { label: "still going", task: "", access: "full" });
