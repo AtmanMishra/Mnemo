@@ -6,7 +6,7 @@
  */
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
-import { isEnded, type RosterNode } from "../runtime/roster.ts";
+import { isEnded, usage, type RosterNode } from "../runtime/roster.ts";
 import { statusStyle, treeOf } from "./tree.ts";
 import { palette } from "./theme.ts";
 import { useSettings } from "./settings-context.ts";
@@ -57,6 +57,7 @@ export function NodePane({
     for (let i = 0, n = 0; i < words.length && n < max; i += width - 2, n++) lines.push({ text: words.slice(i, i + width - 2), tone });
   };
   wrap("task: ", node.task, palette.dim, 4);
+  if (node.model) lines.push({ text: usage(node), tone: palette.faint });
   lines.push({ text: node.stepCount ? `steps (${node.stepCount})` : "no steps yet", tone: palette.faint });
   for (const s of node.steps.slice(-6)) lines.push({ text: `  ${s}`, tone: palette.dim });
   if (node.answer) wrap("answer: ", node.answer, palette.text, 6);
