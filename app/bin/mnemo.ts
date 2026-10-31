@@ -22,6 +22,8 @@ import type { Mode } from "../src/extensions/host.ts";
 import type { MemoryService as MemoryServiceType } from "@mnemo/memory";
 import type { startRuntime as StartRuntime } from "../src/runtime/runtime.ts";
 import { scheduleCommand } from "../src/schedule/cli.ts";
+import { backgroundCommand } from "../src/background/cli.ts";
+import { eventsFor, watchBackground } from "../src/background/feed.ts";
 import { skillsCommand } from "../src/market/cli.ts";
 import { projectSkillsWarning } from "../src/market/scan.ts";
 import { agentsCommand, elsewhere } from "../src/registry/cli.ts";
@@ -75,6 +77,7 @@ async function heavy() {
     ProjectTrustStore: pi.ProjectTrustStore,
     SessionManager: pi.SessionManager,
     MemoryService: memory.MemoryService,
+    projectIdentity: memory.projectIdentity,
     createModelRuntime: runtime.createModelRuntime,
     startRuntime: runtime.startRuntime,
     chooseModel: modelChoice.chooseModel,
@@ -113,6 +116,7 @@ usage
   mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
   mnemo skills …           install skills from marketplaces, as Claude Code installs plugins (mnemo skills --help)
   mnemo schedule …         run a prompt on a timer, read-only unless you allow actions (mnemo schedule --help)
+  mnemo background …       memory work while Mnemo is open: learn from Claude Code, report clutter (mnemo background --help)
   mnemo agents …           every agent running on this machine, in any project; tell, steer or stop one (mnemo agents --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
   mnemo --rpc              the session over JSON lines on stdin/stdout, for an editor extension (docs/RPC.md);
@@ -532,6 +536,15 @@ async function main(): Promise<number> {
   if (process.argv[2] === "uninstall") return uninstallCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "skills") return skillsCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "schedule") return scheduleCommand(process.argv.slice(3), mnemoHome());
+  if (process.argv[2] === "background") {
+    const home = mnemoHome();
+    pointPiAt(agentDir(home));
+    return backgroundCommand(process.argv.slice(3), home, async (force) => {
+      await import("../src/runtime/bun-setup.ts");
+      const { runBackgroundTasks } = await import("../src/memory-cli.ts");
+      return runBackgroundTasks(home, agentDir(home), force);
+    });
+  }
   if (process.argv[2] === "agents") return agentsCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "memory") {
     const home = mnemoHome();
@@ -560,7 +573,7 @@ async function main(): Promise<number> {
   const cfg = settings.get();
   args.motion &&= cfg.motion;
   args.boot &&= cfg.bootAnimation;
-  const { React, render, SessionManager, MemoryService, createModelRuntime, startRuntime, chooseModel, Controller, createDemoProject, createFaux, demoScript, DEMO_PROMPT, createHost, settleBackground, mnemoExtensions, Root, RpcServer, workspaceSource, Fleet, Roster, exitLine, Notifier } = await heavy();
+  const { React, render, SessionManager, MemoryService, createModelRuntime, startRuntime, chooseModel, Controller, createDemoProject, createFaux, demoScript, DEMO_PROMPT, createHost, settleBackground, mnemoExtensions, Root, RpcServer, workspaceSource, Fleet, Roster, exitLine, Notifier, projectIdentity } = await heavy();
 
   let cwd = path.resolve(args.cwd ?? process.cwd());
   let modelRuntime = undefined as Awaited<ReturnType<typeof createModelRuntime>> | undefined;
@@ -622,6 +635,24 @@ async function main(): Promise<number> {
     }
   };
   const { host, runtime } = await makeAgent(cwd, true);
+  /**
+   * Background memory work (background/): each result is shown in the open conversations it is about,
+   * and a run starts when the setting is on and a task is due. Not in the demo, which has its own memory.
+   */
+  const projectOf = new Map<string, string>();
+  const watchResults = (agents: () => readonly { cwd: string; host: typeof host }[]) =>
+    args.demo
+      ? () => {}
+      : watchBackground({
+          home,
+          settings,
+          onEvents: (events) => {
+            for (const a of agents()) {
+              if (!projectOf.has(a.cwd)) projectOf.set(a.cwd, projectIdentity(a.cwd).id);
+              for (const e of eventsFor(events, 0, projectOf.get(a.cwd))) a.host.ui?.note({ kind: "session", text: `Background ${e.task}: ${e.text}`, items: e.items });
+            }
+          },
+        });
 
   if (args.rpc) {
     // stdout is the protocol: anything else that prints goes to stderr.
@@ -637,7 +668,9 @@ async function main(): Promise<number> {
     const rl = readline.createInterface({ input: process.stdin });
     rl.on("line", (l) => void server.handle(l));
     rl.on("close", () => finish());
+    const stopWatching = watchResults(() => [{ cwd, host }]);
     await closed;
+    stopWatching();
     registry?.close();
     server.stop();
     controller.dialogs.cancelAll();
@@ -777,6 +810,7 @@ async function main(): Promise<number> {
     const file = logError(home, kind, error);
     for (const a of fleet.snapshot().agents) a.controller.transcript.notice(`Something failed in the background: ${message(error)} (details in ${file})`, "warn");
   };
+  const stopWatching = watchResults(() => fleet.snapshot().agents);
   if (!memsrv && args.memory)
     controller.transcript.notice(`Memory is off: ${memsrvName()} was not found. \`mnemo doctor\` says where it looks.`, "warn");
   if (args.continueRecent && runtime.session.messages.length > 0) {
@@ -874,6 +908,7 @@ async function main(): Promise<number> {
   }
 
   await done;
+  stopWatching();
   registry?.close();
   mouse.set(false);
   memory?.stop();

@@ -548,6 +548,20 @@ off fires once, and a lock file keeps two schedulers from running the same job. 
 by itself: `mnemo schedule run` stays in the foreground, and `run --once` is for your own
 cron, systemd, launchd or Task Scheduler entry.
 
+## Background memory work
+
+The `background` setting is **off until you turn it on** (`mnemo settings set background on`).
+Then, while a Mnemo is open, it starts `mnemo background run` once a task is due (every
+`backgroundEvery` minutes), and a lock file lets only one process run the tasks at a time. The
+run makes no connection of its own: ingest sends Claude Code transcripts, redacted as `mnemo
+memory ingest` redacts them, to your model provider for reflection, and nothing else leaves.
+It writes facts the way learning after a run does; a skill stays a candidate, since nobody is
+there to approve it. Tidy and curate only report what `mnemo memory tidy` and `curate` would
+change; nothing is retired or archived without you. Results go to
+`$MNEMO_HOME/background/events.jsonl` (0600, redacted, the newest 100 to 200 kept), and an
+open conversation gets the ones about its project as a note with its next prompt. A project
+cannot turn any of this on, and `mnemo background` shows what ran.
+
 ## Uninstalling
 
 `mnemo uninstall` removes the program (`mnemo` and `memsrv` in `$MNEMO_HOME/bin`,
