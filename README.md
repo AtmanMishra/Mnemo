@@ -395,7 +395,7 @@ can drive it too, and a frontier model's sessions can teach the memory a cheap m
 | Agent | How | Command |
 |---|---|---|
 | Claude Code, live | hooks at session start, on each prompt and at the end of a run | `mnemo memory setup claude-code` |
-| Claude Code, after the fact | replays saved sessions through the loop, once each | `mnemo memory ingest` |
+| Claude Code, Codex, opencode, after the fact | replays saved sessions through the loop, once each | `mnemo memory ingest [--agent claude-code\|codex\|opencode]` |
 | Codex | MCP server on stdio | `mnemo memory setup codex` |
 | Cursor, opencode, any MCP client | `memory_recall`, `memory_search`, `memory_remember` | `mnemo memory mcp` |
 
