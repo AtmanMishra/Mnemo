@@ -311,7 +311,9 @@ transcript).
   facts in one profile, or two pitfalls, that say the same thing — equal once
   normalized, or ≥ 85% of their words in common), *stale* (a project fact whose
   every file path is gone from the project root), *distrusted*. Nothing is deleted:
-  a fact is retired by superseding it with `(forgotten)`, a node by `forget`.
+  a fact is retired by superseding it with `(forgotten)`, a node by `forget`. A root
+  session also applies it by itself, in the background at its start, at most once a day per
+  project (`tidyWhenDue`, `$MNEMO_HOME/memory/tidied.json`; the `tidyMemory` setting).
   `curateSkills` (`mnemo memory curate`) sorts skills by their `last used` fact.
 
 ---
@@ -348,6 +350,7 @@ gets a copy one level deeper.
 | `mnemo-policy` | `tool_call` — the only hook that decides: rules, mode, grants, then the approval dialog (§3.6) |
 | `mnemo-hooks` | user and managed hooks (`extensions/hooks.ts`): `tool_call` after the gate (PreToolUse, may only refuse), `tool_result` (PostToolUse, may add a note), `session_start`, `session_shutdown` |
 | `mnemo-plan` | `before_agent_start` (a plan-mode section in the system prompt while the mode is `plan`); `ask_user` (a question in a pick or text dialog; the root session only) |
+| `mnemo-guide` | `before_agent_start`: a line in the tool list for each active Mnemo tool, and a `working` section saying when to use them unasked (code index before grep, `code_refs` before changing a signature, `memory_search` before exploring, `memory_steer` on a wrong approach, skills, sub-agents for broad reading); only the tools the agent has are named |
 | `mnemo-checkpoints` | `tool_call` on `edit`/`write`: keeps the file's bytes under the current turn (rewind) |
 | `mnemo-lsp` | `tool_result` on `edit`/`write` (root session, trusted folder, servers named in `$MNEMO_HOME/lsp.json`): shows the server the new text (`lsp/client.ts`, JSON-RPC over stdio) and appends its errors and warnings to the result; `session_shutdown` stops the servers |
 | `mnemo-shell` | re-registers pi's `bash` with the provider keys taken out of the command's environment |

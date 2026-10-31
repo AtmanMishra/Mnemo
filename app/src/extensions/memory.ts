@@ -5,13 +5,39 @@
  * schemas, the event shapes, the model call for reflection, the approval
  * dialog for saving a skill, and running reflection in the background.
  */
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { anchorKey, anchorTag, describeSessionHits, MemorySession, SessionIndex, textOf, type AnchorCheck, type AnchorState, type Reflector } from "@mnemo/memory";
+import { applyTidy, describeSessionHits, MemorySession, planTidy, projectIdentity, redact, SessionIndex, textOf, type MemoryService, type Reflector, type TidyItem } from "@mnemo/memory";
 import { sessionIndexPath, sessionSources, skillsDir } from "../runtime/paths.ts";
 import { inBackground, type Host } from "./host.ts";
 
 export { describeHit, DIRECTIVE, profileBlock, recallMessage } from "@mnemo/memory";
+
+const TIDY_EVERY = 24 * 60 * 60 * 1000;
+
+/**
+ * `mnemo memory tidy --apply`, by itself: at most once a day per project. Retired items stay in
+ * the journal as history and are never recalled again; nothing is deleted. Undefined when it
+ * was not due; otherwise what it retired (often nothing).
+ */
+export async function tidyWhenDue(mem: MemoryService, home: string, cwd: string, now = Date.now()): Promise<TidyItem[] | undefined> {
+  const file = path.join(home, "memory", "tidied.json");
+  let last: Record<string, number> = {};
+  try {
+    last = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    // never tidied
+  }
+  const identity = projectIdentity(cwd);
+  if (now - (last[identity.id] ?? 0) < TIDY_EVERY) return undefined;
+  const plan = await planTidy(mem, identity.id, identity.root);
+  if (plan.length) await applyTidy(mem, identity.id, plan);
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, `${JSON.stringify({ ...last, [identity.id]: now }, null, 2)}\n`, { mode: 0o600 });
+  return plan;
+}
 
 export function memoryExtension(host: Host) {
   return (pi: ExtensionAPI): void => {
@@ -226,6 +252,17 @@ export function memoryExtension(host: Host) {
       if (ctx.model) reflectWith = { model: ctx.model, sessionId: ctx.sessionManager.getSessionId() };
       const run = { messages, signals: host.signals.splice(0) };
       inBackground(host, () => s.end(run));
+    });
+
+    // Memory grows duplicates, facts about files that are gone and memories marked wrong; a root
+    // session clears them out in the background, as `mnemo memory tidy --apply` would.
+    pi.on("session_start", async (_event, ctx) => {
+      if (host.depth > 0 || !host.settings.get().tidyMemory) return;
+      inBackground(host, async () => {
+        const retired = await tidyWhenDue(mem, host.home, ctx.cwd);
+        if (retired?.length)
+          host.ui?.note({ kind: "session", text: `Tidied memory: retired ${retired.length} (kept as history)`, items: retired.map((t) => redact(`${t.why} · ${t.what}`)) });
+      });
     });
 
     pi.on("session_shutdown", async () => {
