@@ -60,6 +60,14 @@ export function subsOf(snap: Pick<RosterSnapshot, "nodes">, rootId: number): Ros
   return out;
 }
 
+/** `run r3: 5 agents · 7/40 messages · $0.31 woken`: the run a node is in, as the views show it. */
+export function runLine(snap: Pick<RosterSnapshot, "runs"> & { limits?: RosterSnapshot["limits"] }, node: Pick<RosterNode, "run">): string {
+  const r = node.run ? snap.runs?.get(node.run) : undefined;
+  if (!r) return "";
+  const cap = (snap.limits ?? LIMITS).runMessages;
+  return `run ${r.id}: ${r.members.length} agent${r.members.length === 1 ? "" : "s"} · ${r.messages}/${cap} messages${r.wakeSpend > 0 ? ` · $${r.wakeSpend.toFixed(2)} woken` : ""}${r.stopped ? " · stopped" : ""}`;
+}
+
 /** Roots linked to `rootId`, itself not included. */
 export function linkedRoots(snap: Pick<RosterSnapshot, "nodes" | "groups">, rootId: number): RosterNode[] {
   const g = snap.groups.get(rootId);

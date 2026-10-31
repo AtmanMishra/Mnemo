@@ -285,6 +285,7 @@ uses credentials it finds in your environment (`ANTHROPIC_API_KEY`,
 | `mnemo settings …` | list, get, set and reset [settings](#configuration) from a shell |
 | `mnemo memory …` | memory for [other agents](#memory-for-other-agents), plus `status`, `tidy`, `curate` |
 | `mnemo schedule …` <sup>**`main`**</sup> | run a prompt on a timer ([more](#scheduled-runs)) |
+| `mnemo agents …` <sup>**`main`**</sup> | every agent running on this machine, in any project, and what each is doing; tell, steer or stop one from any terminal ([more](#every-agent-on-this-machine)) |
 | `mnemo skills …` <sup>**`main`**</sup> | add a skills marketplace and install its skills, as Claude Code does with plugins: `mnemo skills marketplace add anthropics/skills`, `mnemo skills install document-skills@anthropic-agent-skills` |
 | `mnemo --rpc` | the session as JSON lines, for an [editor](#in-your-editor) |
 | `mnemo update` · `mnemo uninstall` | [update](#install) and [remove](#install) |
@@ -424,8 +425,14 @@ flowchart TB
   siblings, and nobody else. Links come back when both projects are open again.
 - **Messages are data.** A message is framed as another model's text; it grants no permission and
   the receiver's gate decides every edit and command exactly as before.
-- **Bounded.** A message wakes an idle agent, but a chain stops after 12 messages in a row and woken
-  turns may spend $0.50 between your prompts. Depth 3, 4 live children per agent and 16 per
+- **Teams.** Every agent has a number (`#2` on its card and in every tree). Type `@2 …` at the start
+  of a prompt (or `/tell 2 …`) to say something to agent #2 as yourself. One prompt of yours is a
+  **run**: the agents it sets going share it, so 1 can ask 2, 2 can ask 3 and 4 at once
+  (`message_agent` takes up to 4 recipients), and the answers come back up the chain. `r r` on the
+  agents page stops a whole run.
+- **Bounded.** A message wakes an idle agent, but a chain stops after 12 messages in a row, a run
+  after 40 messages, woken turns may spend $0.50 per agent and $1.00 per run between your prompts,
+  and an agent cannot message back past the one that asked it. Depth 3, 4 live children per agent and 16 per
   conversation. All of these are [settings](#configuration) with fixed ceilings.
 - **Watch and steer.** `ctrl+g` the hub draws the tree; `ctrl+s` splits up to four agents (layouts
   with `alt+l`) and you can type to a running sub-agent in its pane; `ctrl+y` is the playground, a
@@ -483,7 +490,8 @@ folder.
 ### Hooks
 
 A hook is a command you choose that Mnemo runs at a fixed point: `PreToolUse`, `PostToolUse`,
-`SessionStart` and `SessionEnd`. They come from `~/.mnemo/hooks.json` (and an administrator's
+`SessionStart`, `SessionEnd`, `SubagentStart` (with the sub-agent's model and limits; it can refuse
+the sub-agent like a `PreToolUse` hook refuses a call) and `SubagentStop` (with how it ended). They come from `~/.mnemo/hooks.json` (and an administrator's
 managed policy, which runs first).
 
 ```json
@@ -505,6 +513,21 @@ A run is `mnemo -p` in a child process, so the gate, the managed policy and your
 **A job is read-only (`--plan`) unless it was added with `--actions`**, and `--actions` never means
 `yolo`: deny rules still hold. Give an acting job a budget first (`mnemo settings runSpend 0.50`).
 Each run has a timeout and a redacted log; `mnemo schedule list`, `logs` and `run` do the rest.
+
+### Every agent on this machine
+
+```bash
+mnemo agents                          # what runs now in every terminal and project, and what finished
+mnemo agents show k3f9.2              # one agent: task, steps, model, mode, answer, transcript
+mnemo agents tell k3f9.2 "also check the error path"
+mnemo agents stop k3f9                # stop that terminal's turn
+```
+
+Each Mnemo process (a terminal, `-p`, `--rpc`, a scheduled run) keeps a file in
+`~/.mnemo/registry/`, so any terminal sees the rest; the hub lists them under *Elsewhere*. One that
+crashed shows as **lost**. Your words start a turn under that terminal's mode and gate, and its
+approvals are answered only there. It is all files: no socket, no server, nothing leaves the machine.
+`MNEMO_REGISTRY=0` keeps a process out.
 
 ### Language-server diagnostics
 

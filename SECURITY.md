@@ -156,7 +156,9 @@ or run a different program, is not bound by it.
 ## Hooks
 
 A hook is a command you choose that Mnemo runs at a fixed point: `PreToolUse` (after the
-gate let a call through, before it runs), `PostToolUse`, `SessionStart` and `SessionEnd`.
+gate let a call through, before it runs), `PostToolUse`, `SessionStart`, `SessionEnd`,
+`SubagentStart` (which can refuse a sub-agent, and refuses it when it fails, like `PreToolUse`)
+and `SubagentStop`.
 They come from `$MNEMO_HOME/hooks.json` and the managed policy's `hooks` (which run first,
 and which you cannot remove); a folder's own hooks are never read.
 
@@ -216,6 +218,11 @@ and which you cannot remove); a folder's own hooks are never read.
   on: that key is for the model, and memsrv is started without it. The address
   must be `https://` (or local), and is read from the real environment or
   `$MNEMO_HOME/.env`, never from the folder you are working in.
+- Conversations are saved locally under `$MNEMO_HOME/agent/sessions/`, and since sub-agent
+  transcripts are kept too, so are a saved conversation's sub-agents (`<session>/sub/`, as
+  the conversation itself is written: not redacted). Sub-agent transcripts are removed after
+  `keepSubTranscripts` days (30; 0 keeps them). The `<session>.state.json` beside each holds
+  only what the roster already cleaned and redacted, mode 0600.
 
 ## Credentials
 
@@ -366,6 +373,16 @@ What that does and does not allow:
   live children, 16 live sub-agents per conversation); these numbers are the defaults, and
   the settings can change them within fixed ceilings (see Settings below); a sub-agent never has more access
   than its parent.
+- **A run is bounded as a whole**: 40 messages and $1.00 of woken turns for everything one prompt
+  of yours sets going, at most 4 recipients per message, and an agent cannot message back past
+  the one that asked it (the ping-pong guard). `r r` on the agents page stops a run. Only what
+  you type carries your authority: `@N` and `/tell` are yours; an `@N` inside another agent's
+  message is text, and the run's goal reaches other agents only as quoted context.
+- **A parent agent can only tighten what its sub-agent may use.** Your sub-agent settings
+  (model, thinking, output tokens, context, turns, budget) are the ceiling; a parent may
+  ask for less for one task, never more (a number above yours is capped and it is told
+  so). It may pick another model only one that has credentials, matches your `subModels`
+  when you set it, and passes the managed `models` list.
 - **What agents write is cleaned and redacted** (control and bidirectional-override
   characters removed, credential shapes redacted) before it is stored, shown on the
   agents page or the playground, or delivered, so an agent cannot repaint your
@@ -377,6 +394,28 @@ What that does and does not allow:
   last prompt (not transcripts or file contents), and a read-only research agent that
   reads hostile text can pass it on as a message. The framing, the gate and the limits
   above are the mitigations; this is still a prompt-injection path between agents.
+
+## Agents in other terminals
+
+Every Mnemo process writes what its agents are doing to `$MNEMO_HOME/registry/` so another
+terminal can list them (`mnemo agents`, the hub's *Elsewhere*), and takes three requests from
+there: `tell` and `steer` (your words) and `stop`.
+
+- **Files, not a server.** A request is a file in `registry/inbox/<tag>/`; the owning process
+  reads it within a second. No socket is opened and nothing leaves the machine. Folders are 0700
+  and files 0600, so another OS user can neither read the list nor send a request.
+- **What a request can do is small.** It can give an agent words, which start a turn under that
+  terminal's mode, gate and deny rules exactly as if typed there, or stop a turn. It cannot answer
+  an approval (only the terminal that asks can), run a slash command (so no mode or model change),
+  link agents or reach a tool. Words are cleaned of control characters and bounded (8,000
+  characters, 16 KB per request, 20 requests per second of pickup); each request is applied at
+  most once (taken before it is applied).
+- **What is written is what the agents page shows**: labels, tasks, last steps and answers
+  already cleaned and redacted by the roster, plus folders, model and mode. No transcript content.
+- **Accepted risk.** A request has the same OS-level trust as `permissions.json`: anything that
+  can write to your home folder as you can send one. An agent's own `write`, `edit` or `bash` into
+  `~/.mnemo/registry/` is a change outside its project, so it asks you in `default` and
+  `accept-edits`; in `yolo` nothing asks, as for any file. `MNEMO_REGISTRY=0` keeps a process out.
 
 ## Settings
 
@@ -477,6 +516,24 @@ chose. Read it first (`mnemo skills show plugin@marketplace`, and the files unde
   each session each installed skill is re-read, and one whose file changed, gained a file or
   turned into a link is left out and reported (`mnemo skills verify` says which). This catches
   tampering after install; it does not tell you the skill was good to begin with.
+- **A skill is scanned before it is installed.** `mnemo skills install` and `update` read every
+  text file of each skill with rules ported from NVIDIA SkillSpector (`app/src/market/scan.ts`):
+  instructions that override the system prompt, hidden text (bidirectional controls, zero-width
+  characters, instructions in HTML comments), sending the conversation or credentials out,
+  reading SSH keys or another agent's login, remote code piped into a shell, obfuscated
+  execution, reverse shells, the cloud metadata service, jailbreak framing. A HIGH or CRITICAL
+  finding stops the install, with nothing copied, until you pass `--force`; MEDIUM is printed.
+  `mnemo skills scan` reads a plugin before you install it, a folder, or (with no argument) every
+  skill Mnemo loads, and the question a folder's `.agents/` asks before it loads names its skills
+  that have such findings. These are text patterns: they catch the common and careless, not a
+  skill written to get past them, and a security skill that quotes them on purpose is flagged too.
+- **SkillSpector itself runs only if you installed it, and offline.** When `skillspector` is on
+  PATH (`uv tool install git+https://github.com/NVIDIA/skillspector.git`), a scan also runs
+  `skillspector scan <skill> --no-llm --format json` and adds its findings. Mnemo never installs
+  or downloads it. The child gets the base environment (no API keys, so no LLM even if asked)
+  and HTTP(S) proxy variables that point at a closed port on loopback, so its OSV.dev
+  vulnerability lookup falls back to its built-in list instead of calling out. That holds for its
+  HTTP client, which honours the proxy variables; it is a filter, not a sandbox.
 
 ## Scheduled runs
 

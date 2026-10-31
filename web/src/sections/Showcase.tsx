@@ -14,9 +14,9 @@ const SCENES = [
   { id: "split", tab: "Split view", title: "Up to four agents side by side", body: "ctrl+s splits the screen, alt+l changes the layout, and a sub-agent that starts while its agent is on screen takes a pane of its own." },
   { id: "siblings", tab: "Siblings", title: "Linked agents talk to each other", body: "Link two agents in the hub and they see what the other is doing and send each other messages, marked as another agent's words, never yours. Limits you can see keep it bounded." },
   { id: "themes", tab: "Themes", title: "Eleven palettes, same roles", body: "/theme switches the look and keeps the meaning: one colour for the agent, one for structure, one for anything memory did. Pick one; every scene here follows it." },
-  { id: "code", tab: "Code index", title: "It looks up code instead of guessing", body: "The agent asks an index of your project where something is defined and what calls it, and after an edit it is told what elsewhere calls what changed. Merged on main; ships in the next release. Turn it off with the codeIndex setting.", soon: "next release" },
-  { id: "hooks", tab: "Hooks", title: "Your own check before a command runs", body: "A hook is a command you chose, run before or after a tool call. It can refuse a call but never allow one, and a hook that fails refuses too. Hooks come only from your own hooks.json, never from a project. In an open pull request, not released.", soon: "in review" },
-  { id: "schedule", tab: "Schedules", title: "A prompt on a timer", body: "mnemo schedule runs a prompt on a timer, read-only unless you gave the job actions, and never in yolo mode. Jobs live only in your own folder. In an open pull request, not released.", soon: "in review" },
+  { id: "code", tab: "Code index", title: "It looks up code instead of guessing", body: "The agent asks an index of your project where something is defined and what calls it, and after an edit it is told what elsewhere calls what changed. Turn it off with the codeIndex setting." },
+  { id: "hooks", tab: "Hooks", title: "Your own check before a command runs", body: "A hook is a command you chose, run before or after a tool call. It can refuse a call but never allow one, and a hook that fails refuses too. Hooks come only from your own hooks.json, never from a project." },
+  { id: "schedule", tab: "Schedules", title: "A prompt on a timer", body: "mnemo schedule runs a prompt on a timer, read-only unless you gave the job actions, and never in yolo mode. Jobs live only in your own folder." },
 ] as const;
 type SceneId = (typeof SCENES)[number]["id"];
 
@@ -26,7 +26,7 @@ const THEMES = [
 ] as const;
 type ThemeId = (typeof THEMES)[number][0];
 
-const L = ({ g, c, children }: { g: string; c: string; children: ReactNode }) => (
+export const L = ({ g, c, children }: { g: string; c: string; children: ReactNode }) => (
   <div className={`sc-ln ${c}`}><b aria-hidden="true">{g}</b><span>{children}</span></div>
 );
 
@@ -339,12 +339,12 @@ export function Showcase() {
             <div className="show-tabs" role="tablist" aria-label="Features" aria-orientation="vertical" onKeyDown={onTabKey}>
               {SCENES.map((s, i) => (
                 <button key={s.id} id={`sc-tab-${s.id}`} type="button" role="tab" aria-selected={s.id === cur} aria-controls="sc-panel" tabIndex={s.id === cur ? 0 : -1} onClick={() => setCur(s.id)}>
-                  <span aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>{s.tab}{"soon" in s ? <em className="sc-soon">{s.soon}</em> : null}
+                  <span aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>{s.tab}
                 </button>
               ))}
             </div>
             <div className="show-copy" aria-live="polite">
-              <h3>{scene.title}{"soon" in scene ? <em className="sc-soon">{scene.soon}</em> : null}</h3>
+              <h3>{scene.title}</h3>
               <p>{scene.body}</p>
             </div>
           </div>

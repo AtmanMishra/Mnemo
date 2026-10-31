@@ -121,6 +121,7 @@ const BUILTINS: Omit<CommandInfo, "source">[] = [
   { name: "settings", description: "change how Mnemo looks and behaves: theme, keys, agent limits, notifications · /settings <name> <value> sets one" },
   { name: "remote", description: "a read-only web view of this session on this machine (off until /settings remote is on): /remote starts it, /remote off stops it" },
   { name: "mouse", description: "mouse wheel scrolls the conversation (on) or your terminal selects text (off)" },
+  { name: "tell", description: "say something to another agent as yourself: /tell 2 check the tests (or type @2 … in the prompt)" },
   { name: "bestof", description: 'race N attempts at a task, keep the smallest that passes: /bestof 3 "npm test" <task>' },
   { name: "plan", description: "toggle plan mode (read-only)" },
   { name: "skills", description: "the skills Mnemo can load" },
@@ -431,12 +432,26 @@ export class Controller {
     return out;
   }
 
+  /** The other agents the user can address with `@N`: every live one in this process. */
+  agents(): { id: number; label: string; kind: "root" | "sub"; status: string }[] {
+    const host = this.options.host;
+    if (!host) return [];
+    return host.roster
+      .snapshot()
+      .nodes.filter((n) => n.id !== host.node && !["done", "failed", "stopped"].includes(n.status))
+      .map((n) => ({ id: n.id, label: n.label, kind: n.kind, status: n.status }));
+  }
+
   /** Send what the user typed: a built-in command, or a prompt for pi. */
   async submit(text: string, mode: "auto" | "steer" = "auto"): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) return;
     // A finished race has said its piece in the transcript.
     if (this.chrome.race?.done) this.update({ race: undefined });
+    // `@2 …` is the user's words to agent #2 (to this one, just a prompt).
+    const at = /^@(\d+)\s+(\S[\s\S]*)$/.exec(trimmed);
+    if (at && this.options.host && Number(at[1]) !== this.options.host.node) return void this.tellAgent(Number(at[1]), at[2]!);
+    if (at && this.options.host) return this.submit(at[2]!, mode);
     if (trimmed.startsWith("/")) {
       const [name = "", ...rest] = trimmed.slice(1).split(/\s+/);
       // A command that fails says so; it never rejects into the interface (an unhandled rejection ends the program).
@@ -468,6 +483,16 @@ export class Controller {
       if (!aborted && !this.draft.includes(trimmed)) this.setDraft([trimmed, this.draft].filter((t) => t.trim()).join("\n\n"));
       this.transcript.notice(errorText(error), "error");
     }
+  }
+
+  /** The user's words to another agent of this process: a prompt for a top-level one, a note a running sub-agent reads after its step. */
+  private tellAgent(id: number, text: string): void {
+    const roster = this.options.host?.roster;
+    if (!roster) return;
+    const r = roster.tellUser(id, text);
+    if (!r.ok) return void this.transcript.notice(`Not sent to #${id}: ${r.reason}.`, "warn");
+    const n = roster.get(id);
+    this.transcript.notice(n?.kind === "sub" ? `Told #${id} ${r.label}: it reads it after its current step.` : `Sent to #${id} ${r.label} as your prompt${n?.status === "running" ? "; it reads it when it finishes what it is doing" : ""}.`);
   }
 
   /**
@@ -755,6 +780,19 @@ export class Controller {
           if (!ok) return true;
         }
         void this.raceBestOf(n, check, task);
+        return true;
+      }
+      case "tell": {
+        const m = /^#?(\d+)\s+(\S[\s\S]*)$/.exec(arg.trim());
+        if (!m) {
+          this.transcript.notice("Say who and what: /tell 2 check the tests. The agents page shows each agent's number.", "warn");
+          return true;
+        }
+        if (this.options.host && Number(m[1]) === this.options.host.node) {
+          await this.submit(m[2]!);
+          return true;
+        }
+        this.tellAgent(Number(m[1]), m[2]!);
         return true;
       }
       case "remote": {
