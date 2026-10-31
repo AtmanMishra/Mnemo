@@ -207,6 +207,18 @@ describe("publisher", () => {
     expect(s.steps).toEqual(["step 4", "step 5", "step 6", "step 7", "step 8"]);
   });
 
+  test("a sub-agent's own model, thinking level, limits and turns are in the record", () => {
+    const { roster, root, pub, read } = setup();
+    const sub = roster.addSub(root.id, { label: "cheap", task: "", access: "full", model: "anthropic/haiku", thinking: "low", caps: { turns: 60, spend: 0.5, maxTokens: 8000, context: 64000 } });
+    roster.turn(sub.id);
+    roster.turn(sub.id);
+    pub.flush();
+    const r = read();
+    expect(r.agents.find((a) => a.node === sub.id)).toMatchObject({ model: "anthropic/haiku", thinking: "low", caps: { turns: 60, spend: 0.5, maxTokens: 8000, context: 64000 }, turns: 2 });
+    // A conversation's model comes from its session, as before.
+    expect(r.agents.find((a) => a.node === root.id)!.model).toBe("p/m");
+  });
+
   test("what an agent writes is cleaned before it reaches the file", () => {
     const { roster, root, pub, read } = setup();
     const sub = roster.addSub(root.id, { label: "x\u001b[31mred", task: `key ${"sk-"}ant-api03-${"A".repeat(40)}`, access: "full" });
@@ -264,9 +276,11 @@ describe("publisher", () => {
 
   test("a long session keeps its live agents and only the newest finished ones", () => {
     // One clock tick for all of them, as on a fast machine: the newest is told apart by its number.
+    // The roster itself keeps 40 ended sub-agents per conversation, so two conversations go past the record's 60.
     const { roster, root, pub, read } = setup({ now: () => NOW });
+    const other = roster.addRoot("web");
     for (let i = 0; i < 70; i++) {
-      const s = roster.addSub(root.id, { label: `s${i}`, task: "", access: "full" });
+      const s = roster.addSub(i % 2 ? other.id : root.id, { label: `s${i}`, task: "", access: "full" });
       roster.finish(s.id, "done", `answer ${i}`);
       // Written as it goes, as a live session is: the roster itself keeps only its newest 40 finished nodes.
       pub.flush();
@@ -277,7 +291,9 @@ describe("publisher", () => {
     expect(r.agents.length).toBe(60);
     expect(r.agents.some((a) => a.node === live.id)).toBe(true);
     expect(r.agents.some((a) => a.node === root.id)).toBe(true);
+    expect(r.agents.some((a) => a.node === other.id)).toBe(true);
     expect(r.agents.some((a) => a.label === "s69")).toBe(true);
+    expect(r.agents.some((a) => a.label === "s68")).toBe(true);
     expect(r.agents.some((a) => a.label === "s0")).toBe(false);
   });
 
@@ -618,6 +634,26 @@ describe("mnemo agents", () => {
     out.length = 0;
     expect(await agentsCommand(["show", "k3f9.2", "--json"], h, o)).toBe(0);
     expect(JSON.parse(out.join(""))).toMatchObject({ ref: "k3f9.2", label: "researcher", process: { tag: "k3f9", state: "live" } });
+  });
+
+  test("show gives a sub-agent's model, thinking level and how much of its limits it used", async () => {
+    const h = home();
+    put(h, record({ tag: "k3f9", agents: [agent({ node: 1 }), agent({ node: 2, parent: 1, kind: "sub", depth: 1, label: "cheap", status: "running", model: "anthropic/haiku", thinking: "low", caps: { turns: 60, spend: 0.5, maxTokens: 8000, context: 64000 }, turns: 12, spent: 0.031 })] }));
+    const { io: o, out } = io({ read: { now: NOW } });
+    expect(await agentsCommand(["show", "k3f9.2"], h, o)).toBe(0);
+    const text = out.join("\n");
+    expect(text).toContain("model    anthropic/haiku · thinking low");
+    expect(text).toContain("limits   12/60 turns · $0.03/$0.50 · 8,000 output tokens · 64,000 context");
+    // No limits line for an agent that has none.
+    out.length = 0;
+    await agentsCommand(["show", "k3f9.1"], h, o);
+    expect(out.join("\n")).not.toContain("limits");
+  });
+
+  test("limits from disk are numbers or nothing", () => {
+    const r = parseRecord({ ...record(), agents: [agent({ caps: { turns: "lots", spend: 1 } as unknown as AgentEntry["caps"], turns: "x" as unknown as number })] })!;
+    expect(r.agents[0]!.caps).toEqual({ turns: 0, spend: 1, maxTokens: 0, context: 0 });
+    expect(r.agents[0]!.turns).toBeUndefined();
   });
 
   test("usage mistakes exit 2 and say what is wrong", async () => {
