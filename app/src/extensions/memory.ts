@@ -54,11 +54,11 @@ export function memoryExtension(host: Host) {
           });
           return answer.kind !== "no";
         },
-        // A team run's lesson, kept only if the user says so: it is recalled into every later session.
-        approveLesson: async (lesson) => {
+        // A run's lesson, kept only if the user says so: it is recalled into every later session.
+        approveLesson: async (lesson, team) => {
           if (!host.ui) return false;
           const answer = await host.ui.approve({
-            tool: "Save team lesson",
+            tool: team ? "Save team lesson" : "Save lesson",
             subject: lesson.cue,
             preview: [{ text: `+ ${lesson.lesson}`, tone: "add" as const }],
             reason: `${lesson.evidence ? `${lesson.evidence} ` : ""}(${lesson.confidence} confidence; kept in this project's memory, recalled at the start of later sessions)`,
@@ -203,6 +203,7 @@ export function memoryExtension(host: Host) {
       const messages = [...held, ...event.messages];
       // Changed code and checked nothing: back once, to verify, before it is called done.
       const nudge = host.verify && host.settings.get().verify && host.depth === 0 && last.stopReason !== "error" ? await s.verifyNudge() : undefined;
+      host.verifying = !!nudge;
       if (nudge) {
         held = messages;
         pi.sendMessage({ customType: "mnemo-verify", content: nudge, display: true }, { triggerTurn: true });

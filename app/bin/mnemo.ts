@@ -115,6 +115,7 @@ usage
   mnemo skills …           install skills from marketplaces, as Claude Code installs plugins (mnemo skills --help)
   mnemo opera …            one conductor over several repositories, threads in worktrees (mnemo opera --help)
   mnemo schedule …         run a prompt on a timer, read-only unless you allow actions (mnemo schedule --help)
+  mnemo evolve …           how runs went (stats), replayable checked runs (tasks, replay) (mnemo evolve --help)
   mnemo agents …           every agent running on this machine, in any project; tell, steer or stop one (mnemo agents --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
   mnemo --rpc              the session over JSON lines on stdin/stdout, for an editor extension (docs/RPC.md);
@@ -535,6 +536,10 @@ async function main(): Promise<number> {
   if (process.argv[2] === "uninstall") return uninstallCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "skills") return skillsCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "schedule") return scheduleCommand(process.argv.slice(3), mnemoHome());
+  if (process.argv[2] === "evolve") {
+    const { evolveCommand } = await import("../src/evolve/cli.ts");
+    return evolveCommand(process.argv.slice(3), mnemoHome());
+  }
   if (process.argv[2] === "agents") return agentsCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "memory") {
     const home = mnemoHome();

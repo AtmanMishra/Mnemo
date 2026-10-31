@@ -205,8 +205,10 @@ agents worked together (how to split the work, whom to hand what, what to check 
 step is done), with when it applies, the evidence and a confidence. A guess is dropped; for
 the rest you are asked ("Save team lesson"). An accepted lesson is a project fact,
 `team lesson (<when it applies>)`, so every later session in the project starts with it; a
-later lesson for the same case replaces it. A run one agent did alone is reflected on as
-before, with nothing added to the prompt.
+later lesson for the same case replaces it. A run one agent did alone may offer a lesson too,
+about how to work in the project ("Save lesson", kept as `lesson (<when it applies>)`). Runs
+vote on kept lessons, and one that hurt more than it helped leaves the prompt; see
+[EVOLVE.md](EVOLVE.md#lessons-the-playbook).
 
 ## Not yet
 

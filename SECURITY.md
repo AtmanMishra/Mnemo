@@ -31,7 +31,9 @@ running things you did not approve, but anything you approve runs with your
 permissions. In headless mode (`mnemo -p`) there is nobody to ask, so every
 call that would ask is **allowed**: it behaves like `yolo`, and only `deny`
 rules and `--plan` still refuse. Run `-p`, `--yolo` and best-of (`--best-of`, `/bestof`) only
-in a place you can afford to lose: a container, a throwaway checkout.
+in a place you can afford to lose: a container, a throwaway checkout. `mnemo evolve replay` is
+`-p` too: it reruns prompts from your own earlier runs in a scratch git worktree with a scratch
+copy of your Mnemo home, so the same applies to it (see [docs/EVOLVE.md](docs/EVOLVE.md)).
 
 ### What the gate is, and is not
 

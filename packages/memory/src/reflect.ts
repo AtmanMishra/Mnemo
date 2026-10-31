@@ -142,6 +142,24 @@ This run was a team: several agents shared it (see TEAM RUN). Also return
   "lesson": null | {"cue": "...", "lesson": "...", "evidence": "...", "confidence": "low"|"medium"|"high"}
 lesson — at most ONE thing about how the agents worked together that the next team run in this project should do differently or again: how to split the work, whom to hand what, what to check before calling a step done. "cue": when it applies, in a few words ("splitting a refactor", "a flaky test suite"). "evidence": what in TEAM RUN or the transcript shows it (a step that was redone, a hand-off that lost something, a check that caught a bug). Not a fact about the codebase (that is facts), not this task's specifics. null unless the run clearly shows it.`;
 
+/** Added for a run one agent did: the same one lesson, about how to work in this project. */
+export const LESSON_PROMPT = `
+
+Also return
+  "lesson": null | {"cue": "...", "lesson": "...", "evidence": "...", "confidence": "low"|"medium"|"high"}
+lesson — at most ONE thing about how to work in this project that the next run should do differently or again: a step that failed and what worked instead, a check that caught a mistake, something the user had to correct. "cue": when it applies, in a few words ("changing the parser", "a flaky test suite"). "evidence": what in the transcript shows it. Not a fact about the codebase (that is facts), not the fix for one error (that is fixes), not this task's specifics. null unless the run clearly shows it.`;
+
+/** A kept lesson's key: `lesson (<cue>)`, or `team lesson (<cue>)` from a team run. */
+export const LESSON_KEY = /^(team )?lesson \(/;
+
+/** Added when KNOWN holds lessons: the run's votes on them, the playbook's helped and hurt counts. */
+export const LESSON_VOTES_PROMPT = `
+
+KNOWN holds lessons (keys starting "lesson (" or "team lesson ("). Also return
+  "lesson_votes": {"helped": ["<key>"], "hurt": ["<key>"]}
+Always include "lesson_votes" when KNOWN holds lessons. Go through each KNOWN lesson and check the run against it:
+helped — the run did what the lesson says and it mattered: it avoided the mistake the lesson warns of, or a step the lesson names caught a problem. hurt — the run followed the lesson and that went wrong: a step it prescribes failed and something else worked, or the user corrected what it said to do. Use the exact KNOWN keys. A lesson the run never touched goes in neither list.`;
+
 export interface LearnedFact {
   scope: "project" | "user";
   key: string;
@@ -168,7 +186,7 @@ export interface SkillProposal {
   reason?: string;
 }
 
-/** How a team should work next time, as one run showed it. Saved only if the user accepts it. */
+/** How to work next time (a team run: how the team should), as one run showed it. Saved only if the user accepts it. */
 export interface TeamLesson {
   cue: string;
   lesson: string;
@@ -182,6 +200,8 @@ export interface Reflection {
   fixes: { problem: string; fix: string }[];
   skill?: SkillProposal;
   lesson?: TeamLesson;
+  /** Kept lessons this run says helped or hurt, by key. */
+  votes?: { helped: string[]; hurt: string[] };
 }
 
 const str = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(0, n) : "");
@@ -249,7 +269,11 @@ export function parseReflection(answer: string): Reflection {
           confidence: confidences.includes(l.confidence as (typeof confidences)[number]) ? (l.confidence as TeamLesson["confidence"]) : "low",
         }
       : undefined;
-  return { facts, episode, fixes, skill, lesson };
+  const v = raw.lesson_votes as Record<string, unknown> | null | undefined;
+  // A model often copies the KNOWN line's "project · " too.
+  const keys = (x: unknown) => strs(x, 120).map((k) => k.replace(/^(project|user)\s*·\s*/, "")).filter((k) => LESSON_KEY.test(k));
+  const votes = v && typeof v === "object" ? { helped: keys(v.helped), hurt: keys(v.hurt) } : undefined;
+  return { facts, episode, fixes, skill, lesson, ...(votes && (votes.helped.length || votes.hurt.length) ? { votes } : {}) };
 }
 
 /** Is this run worth a reflection call? Small talk and one-line answers are not. */

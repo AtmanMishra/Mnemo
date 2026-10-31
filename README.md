@@ -362,7 +362,7 @@ flowchart LR
 | **Recall** | Before each message, the project and user profiles go into the system prompt and relevant facts are recalled, ranked by search score × trust. |
 | **Steer** | Each failed tool call marks a pitfall; a refusal by the gate is not a failure. |
 | **Guard** | Before a `bash` call, a command that failed before is stopped once per session with its known fix. |
-| **Reflect** | After each run, one reflection call writes facts it can ground in what you said or a tool showed, the session record and failure → fix pairs. After a team run it also reads the run's `TASK.md` and `LOG.md` and may offer one lesson about how the agents worked together, kept only if you accept it. |
+| **Reflect** | After each run, one reflection call writes facts it can ground in what you said or a tool showed, the session record and failure → fix pairs. It may offer one lesson about how to work in the project (after a team run, about how the agents worked together, from the run's `TASK.md` and `LOG.md`), kept only if you accept it. Later runs vote on kept lessons, and one that hurt more than it helped leaves the prompt (`mnemo evolve lessons`). |
 | **Vote** | `+` / `-` in the memory pane tell recall what helped and what was wrong; what is marked wrong twice is no longer recalled. Reuse earns a vote up on its own. |
 | **Clean** | Everything written passes redaction, and text that tries to steer the agent or smuggle a secret out is refused. |
 

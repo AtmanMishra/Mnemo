@@ -1,9 +1,10 @@
 /**
  * A team run's lesson: when several agents shared a run, its reflection also reads TASK.md and
  * the end of LOG.md and may return one lesson about how the team worked. The user is asked; an
- * accepted lesson is a project fact, recalled in later sessions. A run one agent did alone is
- * reflected on exactly as before. Pure parts first, then real pi sessions on the scripted model
- * and the real memory sidecar.
+ * accepted lesson is a project fact, recalled in later sessions. A run one agent did alone may
+ * offer a lesson about how to work in the project. Runs vote on kept lessons (helped, hurt); a
+ * lesson that hurt more than it helped leaves the prompt. Pure parts first, then real pi
+ * sessions on the scripted model and the real memory sidecar.
  */
 import { test, expect, afterEach, setDefaultTimeout } from "bun:test";
 import * as fs from "node:fs";
@@ -11,6 +12,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai";
 import { digest, parseReflection, projectIdentity, worthReflecting } from "@mnemo/memory";
+import { evolveCommand } from "../src/evolve/cli.ts";
 import { Roster } from "../src/runtime/roster.ts";
 import { TaskBoard } from "../src/runtime/team.ts";
 import { MEMSRV, mnemoEnv, nextDialog } from "./helpers.ts";
@@ -139,21 +141,100 @@ mt("a lesson the user rejects, or one the reflection only guesses, is not kept",
   expect((await guess.memory!.profile("project", projectIdentity(guess.cwd).id)).some((f) => f.key.startsWith("team lesson"))).toBe(false);
 });
 
-mt("a run one agent did alone is not asked for a lesson, and one it returns anyway is dropped", async () => {
-  const e = await env();
+/** A run one agent did: an answer, then the reflection's answer `reflected`. Returns what the reflection was sent. */
+function soloRun(e: Env, reflected: Record<string, unknown>) {
   const sent: string[] = [];
   e.faux.setResponses([
     say("The config uses bun and biome; nothing to change."),
     (context) => {
       sent.push(JSON.stringify(context));
-      return say(JSON.stringify({ facts: [], fixes: [], skill: null, lesson: LESSON }));
+      return say(JSON.stringify({ facts: [], fixes: [], skill: null, ...reflected }));
     },
   ]);
-  await e.controller.submit("have a look at the configuration of this project and tell me what you see");
+  return sent;
+}
+const PROMPT = "have a look at the configuration of this project and tell me what you see";
+const SOLO = { cue: "changing the parser", lesson: "Run the grammar tests before the full suite.", evidence: "the full suite took 4 minutes to show a grammar error", confidence: "medium" as const };
+
+mt("a run one agent did alone may offer a lesson about how to work here; it is kept as \"lesson (cue)\"", async () => {
+  const e = await env();
+  const sent = soloRun(e, { lesson: SOLO });
+  await e.controller.submit(PROMPT);
+  const d = await nextDialog(e.controller, 5000);
+  if (d.kind !== "approval") throw new Error(`expected approval, got ${d.kind}`);
+  expect(d.request.tool).toBe("Save lesson");
+  d.resolve({ kind: "yes" });
   await e.idle();
-  expect(sent).toHaveLength(1);
   expect(sent[0]).not.toContain("This run was a team");
-  expect(sent[0]).not.toContain("TEAM RUN");
-  expect(e.controller.dialogs.current()).toBeUndefined();
-  expect((await e.memory!.profile("project", projectIdentity(e.cwd).id)).some((f) => f.key.startsWith("team lesson"))).toBe(false);
+  expect(sent[0]).toContain("how to work in this project");
+  // No lessons were kept yet: nothing to vote on.
+  expect(sent[0]).not.toContain("lesson_votes");
+  expect(await e.memory!.profile("project", projectIdentity(e.cwd).id)).toContainEqual({ key: "lesson (changing the parser)", value: SOLO.lesson });
+});
+
+mt("runs vote on kept lessons; one that hurt more than it helped leaves the prompt", async () => {
+  const first = await env();
+  const id = projectIdentity(first.cwd).id;
+  await first.memory!.learn("project", id, "lesson (changing the parser)", SOLO.lesson);
+  await first.memory!.learn("project", id, "team lesson (splitting a refactor)", LESSON.lesson);
+  const sent = soloRun(first, { lesson_votes: { helped: ["team lesson (splitting a refactor)", "lesson (never kept)"], hurt: ["lesson (changing the parser)", "not a lesson key"] } });
+  await first.controller.submit(PROMPT);
+  await first.idle();
+  expect(sent[0]).toContain("lesson_votes");
+  // Only kept lessons are counted; a key this project does not hold is ignored.
+  expect(Object.fromEntries(await first.memory!.lessonVotes(id))).toEqual({
+    "lesson (changing the parser)": { helped: 0, hurt: 1 },
+    "team lesson (splitting a refactor)": { helped: 1, hurt: 0 },
+  });
+  // The nodes that count votes are never recalled as knowledge.
+  const project = await first.memory!.project(id);
+  expect((await first.memory!.search("playbook changing the parser", 10, project)).some((h) => h.label.startsWith("playbook "))).toBe(true);
+  expect((await first.memory!.recall("playbook changing the parser", project, [])).some((h) => h.label.startsWith("playbook "))).toBe(false);
+  // One hurt vote is not enough to bench it.
+  const promptOf = async () => {
+    const prompts: string[] = [];
+    const next = await env({ home: first.home, cwd: first.cwd, reflect: false });
+    next.faux.setResponses([
+      (context) => {
+        prompts.push(JSON.stringify(context));
+        return say("hi");
+      },
+    ]);
+    await next.controller.submit("hello");
+    await next.idle();
+    return prompts[0]!;
+  };
+  expect(await promptOf()).toContain("Run the grammar tests before the full suite.");
+
+  // A lesson named on both sides says nothing; a second hurt vote benches it.
+  const second = await env({ home: first.home, cwd: first.cwd });
+  soloRun(second, { lesson_votes: { helped: ["team lesson (splitting a refactor)"], hurt: ["lesson (changing the parser)", "team lesson (splitting a refactor)"] } });
+  await second.controller.submit(PROMPT);
+  await second.idle();
+  expect((await first.memory!.lessonVotes(id)).get("lesson (changing the parser)")).toEqual({ helped: 0, hurt: 2 });
+  expect((await first.memory!.lessonVotes(id)).get("team lesson (splitting a refactor)")).toEqual({ helped: 1, hurt: 0 });
+  const after = await promptOf();
+  expect(after).not.toContain("Run the grammar tests before the full suite.");
+  expect(after).toContain("Give each sub-agent whole files");
+  // Benched, not forgotten: the fact is still in memory.
+  expect(await first.memory!.profile("project", id)).toContainEqual({ key: "lesson (changing the parser)", value: SOLO.lesson });
+
+  // mnemo evolve lessons lists them with their votes.
+  const out: string[] = [];
+  const io = { out: (x: string) => out.push(x), err: (x: string) => out.push(x) };
+  expect(await evolveCommand(["lessons", "--cwd", first.cwd], first.home, io)).toBe(0);
+  expect(out.join("\n")).toContain("benched lesson (changing the parser)  helped 0 · hurt 2");
+  expect(out.join("\n")).toContain("team lesson (splitting a refactor)  helped 1 · hurt 0\n    Give each sub-agent whole files");
+  out.length = 0;
+  expect(await evolveCommand(["lessons", "--cwd", first.cwd, "--json"], first.home, io)).toBe(0);
+  expect(out.map((l) => JSON.parse(l))).toContainEqual({ key: "lesson (changing the parser)", lesson: SOLO.lesson, helped: 0, hurt: 2, benched: true });
+});
+
+test("lesson votes are parsed defensively", () => {
+  expect(parseReflection(JSON.stringify({ lesson_votes: { helped: ["lesson (a)"], hurt: ["team lesson (b)", "lesson x", 3] } })).votes).toEqual({ helped: ["lesson (a)"], hurt: ["team lesson (b)"] });
+  // The KNOWN line's scope, copied with the key, is dropped.
+  expect(parseReflection(JSON.stringify({ lesson_votes: { helped: ["project · lesson (a)"], hurt: [] } })).votes).toEqual({ helped: ["lesson (a)"], hurt: [] });
+  expect(parseReflection(JSON.stringify({ lesson_votes: { helped: [], hurt: [] } })).votes).toBeUndefined();
+  expect(parseReflection(JSON.stringify({ lesson_votes: "lesson (a)" })).votes).toBeUndefined();
+  expect(parseReflection(JSON.stringify({})).votes).toBeUndefined();
 });
