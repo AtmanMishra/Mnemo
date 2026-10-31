@@ -103,7 +103,7 @@ much agents may do on their own; what an agent may *touch* is decided by the gat
 | Sub-agent thinking | `subThinking` | inherit | inherit · off · minimal · low · medium · high · xhigh | a sub-agent's thinking level, and the most its parent may ask for (inherit: the parent's own) |
 | Sub-agent output | `subMaxTokens` | the model's own | 0–1000000 | output tokens per model call of a sub-agent, and the most its parent may ask for |
 | Sub-agent context | `subContext` | the model's own | 0, or 32000–10000000 | context a sub-agent keeps before it compacts (by `autoCompact` and `compactReserve`), and the most its parent may ask for |
-| Keep sub-agent transcripts | `keepSubTranscripts` | 30 days | 0–3650 | days a sub-agent's saved transcript is kept (0: forever; your own conversations are never removed) |
+| Keep sub-agent transcripts | `keepSubTranscripts` | 30 days | 0–3650 | days a sub-agent's saved transcript, and a run's TASK.md and LOG.md, are kept (0: forever; your own conversations are never removed) |
 
 ### Notifications
 

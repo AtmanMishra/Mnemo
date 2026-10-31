@@ -378,6 +378,12 @@ What that does and does not allow:
   the one that asked it (the ping-pong guard). `r r` on the agents page stops a run. Only what
   you type carries your authority: `@N` and `/tell` are yours; an `@N` inside another agent's
   message is text, and the run's goal reaches other agents only as quoted context.
+- **A team's TASK.md and LOG.md are data.** They live in the Mnemo home (folder 0700, files
+  0600), never in the project, so a cloned repository cannot plant one. The goal in TASK.md is
+  copied by the program from your prompt and no agent can edit it; agents change the plan only
+  with `task_update`, which never rewrites another agent's step; LOG.md is written by the
+  program. What agents wrote is cleaned and redacted before it is written, and an agent sees
+  it as a hidden or framed message labelled data, never in the system prompt.
 - **A parent agent can only tighten what its sub-agent may use.** Your sub-agent settings
   (model, thinking, output tokens, context, turns, budget) are the ceiling; a parent may
   ask for less for one task, never more (a number above yours is capped and it is told

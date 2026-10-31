@@ -190,7 +190,7 @@ export const DEFS: Record<SettingKey, Def> = {
   subThinking: { group: "Agents", label: "Sub-agent thinking", help: "thinking level of a sub-agent, and the most its parent may ask for (inherit: the parent's own)", kind: "enum", default: "inherit", options: THINKING_CHOICES },
   subMaxTokens: int("Agents", "Sub-agent output", "output tokens per model call of a sub-agent, and the most its parent may ask for (0: the model's own maximum)", 0, 0, 1_000_000, "tokens"),
   subContext: int("Agents", "Sub-agent context", "context a sub-agent keeps before it compacts, and the most its parent may ask for (0: the model's window; otherwise at least 32000)", 0, 0, 10_000_000, "tokens"),
-  keepSubTranscripts: int("Agents", "Keep sub-agent transcripts", "days a sub-agent's saved transcript is kept (0: forever; your own conversations are never removed)", 30, 0, 3650, "days"),
+  keepSubTranscripts: int("Agents", "Keep sub-agent transcripts", "days a sub-agent's saved transcript, and a run's TASK.md and LOG.md, are kept (0: forever; your own conversations are never removed)", 30, 0, 3650, "days"),
 
   notify: bool("Notifications", "Desktop notice", "tell the terminal when a long turn ends or Mnemo asks, while it is in the background (MNEMO_NOTIFY=0 overrides)", true, true),
   notifyAfter: int("Notifications", "Notify after", "a turn must run this long to notify", 20, 0, 3600, "s"),
