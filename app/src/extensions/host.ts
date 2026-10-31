@@ -71,6 +71,11 @@ export interface Host {
   escalations: { from: string; to: string; reason: string }[];
   /** Set by the memory extension: the session record learns the model changed. */
   onModelChanged?: (model: string, reason: string) => Promise<void>;
+  /**
+   * The code index for a folder, brought up to date, or why there is none; set by the code
+   * extension (absent when `codeIndex` is off). Memory uses it to pin facts to definitions.
+   */
+  codeIndex?: (cwd: string) => Promise<import("../code/index.ts").CodeIndex | string>;
   /** What memory recalled in this session (node → line), set by the memory extension. */
   recalled?: Map<number, string>;
   /** Files as they were before each turn changed them (shared with sub-agents). */

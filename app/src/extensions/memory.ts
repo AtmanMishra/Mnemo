@@ -5,14 +5,40 @@
  * schemas, the event shapes, the model call for reflection, the approval
  * dialogs for saving a skill or a team run's lesson, and running reflection in the background.
  */
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { describeSessionHits, MemorySession, SessionIndex, textOf, type Reflector } from "@mnemo/memory";
+import { anchorKey, anchorTag, applyTidy, describeSessionHits, MemorySession, planTidy, projectIdentity, redact, SessionIndex, textOf, type AnchorCheck, type AnchorState, type MemoryService, type Reflector, type TidyItem } from "@mnemo/memory";
 import { sessionIndexPath, sessionSources, skillsDir } from "../runtime/paths.ts";
 import { boardOf } from "../runtime/team.ts";
 import { inBackground, type Host } from "./host.ts";
 
 export { describeHit, DIRECTIVE, profileBlock, recallMessage } from "@mnemo/memory";
+
+const TIDY_EVERY = 24 * 60 * 60 * 1000;
+
+/**
+ * `mnemo memory tidy --apply`, by itself: at most once a day per project. Retired items stay in
+ * the journal as history and are never recalled again; nothing is deleted. Undefined when it
+ * was not due; otherwise what it retired (often nothing).
+ */
+export async function tidyWhenDue(mem: MemoryService, home: string, cwd: string, now = Date.now()): Promise<TidyItem[] | undefined> {
+  const file = path.join(home, "memory", "tidied.json");
+  let last: Record<string, number> = {};
+  try {
+    last = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    // never tidied
+  }
+  const identity = projectIdentity(cwd);
+  if (now - (last[identity.id] ?? 0) < TIDY_EVERY) return undefined;
+  const plan = await planTidy(mem, identity.id, identity.root);
+  if (plan.length) await applyTidy(mem, identity.id, plan);
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, `${JSON.stringify({ ...last, [identity.id]: now }, null, 2)}\n`, { mode: 0o600 });
+  return plan;
+}
 
 export function memoryExtension(host: Host) {
   return (pi: ExtensionAPI): void => {
@@ -32,8 +58,20 @@ export function memoryExtension(host: Host) {
       if (answer.stopReason === "error") throw new Error(answer.errorMessage ?? "no answer");
       return textOf(answer.content);
     };
+    // Is the code each pinned fact is about as it was? Asked of the code index, which is brought up to date first.
+    const anchorsIn = (cwd: string): AnchorCheck => async (anchors) => {
+      const ix = await host.codeIndex?.(cwd);
+      if (!ix || typeof ix === "string") return new Map();
+      return new Map(
+        anchors.map((a) => {
+          const d = ix.lookup(`${a.path}#${a.qname}`).find((d) => d.qname === a.qname);
+          return [anchorKey(a), (!d ? "gone" : d.hash === a.hash ? "fresh" : "changed") satisfies AnchorState];
+        }),
+      );
+    };
     const sessionFor = (cwd: string, model?: string): MemorySession => {
       session ??= new MemorySession({
+        anchors: anchorsIn(cwd),
         memory: mem,
         // An Opera's threads share the Opera's memory, whichever repository they work in.
         cwd: host.memoryCwd ?? cwd,
@@ -119,14 +157,29 @@ export function memoryExtension(host: Host) {
         description:
           "Store a durable fact in long-term memory. scope 'project' for facts about this codebase, 'user' for the user's preferences. " +
           "Use a short stable key; the same key again replaces the old value (kept as history). " +
+          "A fact about one function, method or type: name it in code, and the fact is marked as possibly stale once that code changes. " +
           "Not for deferred work or the status of the current task: Mnemo records each session's open work itself.",
         parameters: Type.Object({
           scope: Type.Union([Type.Literal("project"), Type.Literal("user")]),
           key: Type.String(),
           value: Type.String(),
+          code: Type.Optional(Type.String({ description: "The definition the fact is about: 'Cache.get', or 'src/cache.ts#Cache.get' when the name is not unique" })),
         }),
         async execute(_id, params, _signal, _update, ctx) {
-          const r = await sessionFor(ctx.cwd).remember(params.scope, params.key, params.value);
+          let value = params.value;
+          if (params.code) {
+            const ix = await host.codeIndex?.(ctx.cwd);
+            const unpinned = "Remember it without code, or name the definition in the value.";
+            if (!ix) throw new Error(`The code index is off (/settings codeIndex), so a fact cannot be pinned to code. ${unpinned}`);
+            if (typeof ix === "string") throw new Error(`${ix} So a fact cannot be pinned to code here. ${unpinned}`);
+            const defs = ix.lookup(params.code).filter((d) => d.kind !== "module");
+            if (!defs.length) throw new Error(`No definition named ${params.code} in the code index. code_search finds its name. ${unpinned}`);
+            if (defs.length > 1)
+              throw new Error(`${params.code} names ${defs.length} definitions: ${defs.slice(0, 6).map((d) => `${d.path}#${d.qname}`).join(", ")}. Give one as path#name.`);
+            const d = defs[0]!;
+            value = `${value} ${anchorTag({ path: d.path, qname: d.qname, hash: d.hash })}`;
+          }
+          const r = await sessionFor(ctx.cwd).remember(params.scope, params.key, value);
           return {
             content: [{ type: "text", text: r.superseded ? `Updated ${params.key} (the old value is kept as history).` : `Remembered ${params.key}.` }],
             details: r,
@@ -142,7 +195,8 @@ export function memoryExtension(host: Host) {
         description: "Tell memory that something it supplied was wrong or that an approach failed, so it is trusted less next time.",
         parameters: Type.Object({ failure: Type.String({ description: "What went wrong and why" }) }),
         async execute(_id, params, _signal, _update, ctx) {
-          await sessionFor(ctx.cwd).steer(params.failure);
+          const recorded = await sessionFor(ctx.cwd).steer(params.failure);
+          if (!recorded) throw new Error("memory could not record this (it is not reachable, or no run is in progress)");
           return { content: [{ type: "text", text: "Recorded." }], details: {} };
         },
       }),
@@ -151,12 +205,12 @@ export function memoryExtension(host: Host) {
     pi.on("before_agent_start", async (event, ctx) => {
       try {
         const s = sessionFor(ctx.cwd, ctx.model?.id);
-        const r = await s.recall(event.prompt);
+        const r = await s.recall(event.prompt, pi.getActiveTools());
         host.episode = s.episode;
-        return {
-          systemPrompt: event.systemPrompt + r.system,
-          ...(r.message ? { message: { customType: "mnemo-recall", content: r.message, display: false } } : {}),
-        };
+        // A section, not a returned systemPrompt: that would be a forced prompt, and every section an
+        // extension loaded after this one sets would be dropped from it.
+        event.systemPromptOptions.sections.memory = r.system.trim();
+        return r.message ? { message: { customType: "mnemo-recall", content: r.message, display: false } } : undefined;
       } catch {
         return undefined;
       }
@@ -214,6 +268,17 @@ export function memoryExtension(host: Host) {
       const runId = host.roster.get(host.node)?.run;
       const run = { messages, signals: host.signals.splice(0), team: runId ? boardOf(host.roster, host.home).record(runId) : "" };
       inBackground(host, () => s.end(run));
+    });
+
+    // Memory grows duplicates, facts about files that are gone and memories marked wrong; a root
+    // session clears them out in the background, as `mnemo memory tidy --apply` would.
+    pi.on("session_start", async (_event, ctx) => {
+      if (host.depth > 0 || !host.settings.get().tidyMemory) return;
+      inBackground(host, async () => {
+        const retired = await tidyWhenDue(mem, host.home, ctx.cwd);
+        if (retired?.length)
+          host.ui?.note({ kind: "session", text: `Tidied memory: retired ${retired.length} (kept as history)`, items: retired.map((t) => redact(`${t.why} · ${t.what}`)) });
+      });
     });
 
     pi.on("session_shutdown", async () => {

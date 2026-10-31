@@ -22,10 +22,13 @@ import type { Mode } from "../src/extensions/host.ts";
 import type { MemoryService as MemoryServiceType } from "@mnemo/memory";
 import type { startRuntime as StartRuntime } from "../src/runtime/runtime.ts";
 import { scheduleCommand } from "../src/schedule/cli.ts";
+import { backgroundCommand } from "../src/background/cli.ts";
+import { eventsFor, watchBackground } from "../src/background/feed.ts";
 import { skillsCommand } from "../src/market/cli.ts";
+import { projectSkillsWarning } from "../src/market/scan.ts";
 import { operaCommand, type OperaLaunch } from "../src/opera/cli.ts";
 import { readOpera } from "../src/opera/store.ts";
-import { agentsCommand, elsewhere } from "../src/registry/cli.ts";
+import { agentsCommand, elsewhere, interruptedHere } from "../src/registry/cli.ts";
 import { joinRegistry, memberOf, type Joined } from "../src/registry/join.ts";
 import { applyTheme, themePaints, type ThemeName } from "../src/ui/theme.ts";
 import { mouse } from "../src/ui/mouse.ts";
@@ -76,6 +79,7 @@ async function heavy() {
     ProjectTrustStore: pi.ProjectTrustStore,
     SessionManager: pi.SessionManager,
     MemoryService: memory.MemoryService,
+    projectIdentity: memory.projectIdentity,
     createModelRuntime: runtime.createModelRuntime,
     startRuntime: runtime.startRuntime,
     chooseModel: modelChoice.chooseModel,
@@ -103,6 +107,7 @@ const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
 usage
   mnemo                    start in this folder
   mnemo -c, --continue     continue the most recent session here
+  mnemo --session <file>   continue that saved session (mnemo agents resume finds one in any project)
   mnemo -p "<prompt>"      answer once and print the result (no interface); asks nothing: what would ask
                            is allowed, while deny rules and --plan still refuse
   mnemo doctor [--fix]     what is installed, configured and reachable; --fix repairs what it can
@@ -116,6 +121,7 @@ usage
   mnemo opera …            one conductor over several repositories, threads in worktrees (mnemo opera --help)
   mnemo schedule …         run a prompt on a timer, read-only unless you allow actions (mnemo schedule --help)
   mnemo evolve …           how runs went (stats), replayable checked runs (tasks, replay) (mnemo evolve --help)
+  mnemo background …       memory work while Mnemo is open: learn from Claude Code, report clutter (mnemo background --help)
   mnemo agents …           every agent running on this machine, in any project; tell, steer or stop one (mnemo agents --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
   mnemo --rpc              the session over JSON lines on stdin/stdout, for an editor extension (docs/RPC.md);
@@ -164,6 +170,8 @@ interface Args {
   mode: Mode;
   model?: string;
   continueRecent: boolean;
+  /** A saved session file to continue (`mnemo agents resume` passes it). */
+  session?: string;
   trustProject?: boolean;
   print?: string;
   rpc?: boolean;
@@ -207,6 +215,7 @@ function parse(argv: string[]): Args {
     else if (v === "--yolo") a.mode = "yolo";
     else if (v === "--trust-project") a.trustProject = true;
     else if (v === "-c" || v === "--continue") a.continueRecent = true;
+    else if (v === "--session") a.session = value(++i, v);
     else if (v === "--rpc") a.rpc = true;
     else if (v === "-p" || v === "--print") a.print = value(++i, v);
     else if (v === "--cwd") a.cwd = value(++i, v);
@@ -230,13 +239,14 @@ async function trustDecision(cwd: string, dir: string, args: Args): Promise<bool
   if (store.get(cwd) !== null) return undefined;
   const found = [".agents/extensions", ".agents/settings.json", ".agents/mcp.json", ".agents/skills", ".agents/prompts", ".agents/themes", ".agents/agents"].filter((f) => fs.existsSync(path.join(cwd, f)));
   const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true && args.print === undefined && !args.dump;
+  const warning = found.includes(".agents/skills") ? projectSkillsWarning(cwd) : undefined;
   if (!interactive) {
-    console.error(`mnemo: not loading this folder's ${found.join(", ") || "project resources"} (not trusted; --trust-project allows it)`);
+    console.error(`mnemo: not loading this folder's ${found.join(", ") || "project resources"} (not trusted; --trust-project allows it)${warning ? `. ${warning}` : ""}`);
     return undefined;
   }
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
   try {
-    const answer = (await rl.question(`This folder ships its own ${found.join(", ")}.\nExtensions run as code with your permissions, before any approval, and the rest steers the model.\nLoad them? [y] this time · [a] always for this folder · [N] no: `)).trim().toLowerCase();
+    const answer = (await rl.question(`This folder ships its own ${found.join(", ")}.\nExtensions run as code with your permissions, before any approval, and the rest steers the model.\n${warning ? `${warning}\n` : ""}Load them? [y] this time · [a] always for this folder · [N] no: `)).trim().toLowerCase();
     if (answer === "a") {
       store.set(cwd, true);
       return true;
@@ -540,7 +550,20 @@ async function main(): Promise<number> {
     const { evolveCommand } = await import("../src/evolve/cli.ts");
     return evolveCommand(process.argv.slice(3), mnemoHome());
   }
-  if (process.argv[2] === "agents") return agentsCommand(process.argv.slice(3), mnemoHome());
+  if (process.argv[2] === "background") {
+    const home = mnemoHome();
+    pointPiAt(agentDir(home));
+    return backgroundCommand(process.argv.slice(3), home, async (force) => {
+      await import("../src/runtime/bun-setup.ts");
+      const { runBackgroundTasks } = await import("../src/memory-cli.ts");
+      return runBackgroundTasks(home, agentDir(home), force);
+    });
+  }
+  if (process.argv[2] === "agents") {
+    // `saved` and `resume` read pi's session files, wherever pi keeps them for Mnemo.
+    pointPiAt(agentDir(mnemoHome()));
+    return agentsCommand(process.argv.slice(3), mnemoHome());
+  }
   if (process.argv[2] === "memory") {
     const home = mnemoHome();
     pointPiAt(agentDir(home));
@@ -577,7 +600,7 @@ async function main(): Promise<number> {
   const cfg = settings.get();
   args.motion &&= cfg.motion;
   args.boot &&= cfg.bootAnimation;
-  const { React, render, SessionManager, MemoryService, createModelRuntime, startRuntime, chooseModel, Controller, createDemoProject, createFaux, demoScript, DEMO_PROMPT, createHost, settleBackground, mnemoExtensions, Root, RpcServer, workspaceSource, Fleet, Roster, exitLine, Notifier } = await heavy();
+  const { React, render, SessionManager, MemoryService, createModelRuntime, startRuntime, chooseModel, Controller, createDemoProject, createFaux, demoScript, DEMO_PROMPT, createHost, settleBackground, mnemoExtensions, Root, RpcServer, workspaceSource, Fleet, Roster, exitLine, Notifier, projectIdentity } = await heavy();
 
   let cwd = path.resolve(args.cwd ?? process.cwd());
   let modelRuntime = undefined as Awaited<ReturnType<typeof createModelRuntime>> | undefined;
@@ -596,7 +619,11 @@ async function main(): Promise<number> {
   }
   modelRuntime ??= await createModelRuntime(dir);
   if (!args.demo) {
-    const choice = chooseModel(modelRuntime, { flag: args.model, agentDir: dir, continuing: args.continueRecent });
+    if (args.session) {
+      if (!fs.statSync(args.session, { throwIfNoEntry: false })?.isFile()) return console.error(`mnemo: no saved session at ${args.session}`), 2;
+      injected = { ...injected, sessionManager: SessionManager.open(path.resolve(args.session)) };
+    }
+    const choice = chooseModel(modelRuntime, { flag: args.model, agentDir: dir, continuing: args.continueRecent || !!args.session });
     if (choice.error) return console.error(`mnemo: ${choice.error}`), 2;
     if (choice.model) injected = { ...injected, model: choice.model };
   }
@@ -639,6 +666,24 @@ async function main(): Promise<number> {
     }
   };
   const { host, runtime } = await makeAgent(cwd, true);
+  /**
+   * Background memory work (background/): each result is shown in the open conversations it is about,
+   * and a run starts when the setting is on and a task is due. Not in the demo, which has its own memory.
+   */
+  const projectOf = new Map<string, string>();
+  const watchResults = (agents: () => readonly { cwd: string; host: typeof host }[]) =>
+    args.demo
+      ? () => {}
+      : watchBackground({
+          home,
+          settings,
+          onEvents: (events) => {
+            for (const a of agents()) {
+              if (!projectOf.has(a.cwd)) projectOf.set(a.cwd, projectIdentity(a.cwd).id);
+              for (const e of eventsFor(events, 0, projectOf.get(a.cwd))) a.host.ui?.note({ kind: "session", text: `Background ${e.task}: ${e.text}`, items: e.items });
+            }
+          },
+        });
 
   if (args.rpc) {
     // stdout is the protocol: anything else that prints goes to stderr.
@@ -650,11 +695,13 @@ async function main(): Promise<number> {
     const server = new RpcServer({ controller, version: pkg.version, write: (e) => void process.stdout.write(`${JSON.stringify(e)}\n`), onQuit: () => finish() });
     server.start();
     const registry = joinRegistry({ home, kind: "rpc", version: pkg.version, roster, members: () => [memberOf(host.node, cwd, controller)] });
-    if (args.continueRecent && runtime.session.messages.length > 0) controller.transcript.load(runtime.session.messages);
+    if ((args.continueRecent || args.session) && runtime.session.messages.length > 0) controller.transcript.load(runtime.session.messages);
     const rl = readline.createInterface({ input: process.stdin });
     rl.on("line", (l) => void server.handle(l));
     rl.on("close", () => finish());
+    const stopWatching = watchResults(() => [{ cwd, host }]);
     await closed;
+    stopWatching();
     registry?.close();
     server.stop();
     controller.dialogs.cancelAll();
@@ -794,17 +841,29 @@ async function main(): Promise<number> {
     const file = logError(home, kind, error);
     for (const a of fleet.snapshot().agents) a.controller.transcript.notice(`Something failed in the background: ${message(error)} (details in ${file})`, "warn");
   };
+  const stopWatching = watchResults(() => fleet.snapshot().agents);
   if (!memsrv && args.memory)
     controller.transcript.notice(`Memory is off: ${memsrvName()} was not found. \`mnemo doctor\` says where it looks.`, "warn");
-  if (args.continueRecent && runtime.session.messages.length > 0) {
+  if ((args.continueRecent || args.session) && runtime.session.messages.length > 0) {
     controller.transcript.load(runtime.session.messages);
-    controller.transcript.notice("Continuing the most recent session");
+    controller.transcript.notice(args.session ? "Resumed session" : "Continuing the most recent session");
   }
+  // A conversation here that died with its process (a crash, a closed terminal) is said once, not left to be found.
+  if (registry && !args.demo) void interruptedHere(home, cwd, runtime.session.sessionFile).then((lost) => {
+    for (const s of lost) controller.transcript.notice(`A conversation here was cut off when its process died: “${s.title}”. mnemo agents resume ${s.id.slice(0, 8)} continues it.`, "warn");
+  });
 
   // A terminal gets the workspace (full screen, alternate buffer) unless --inline; a dump or a pipe the inline transcript.
   const layout = interactive && !args.inline ? "workspace" : "inline";
   const onboard = interactive && !args.demo && (args.intro || !state.onboarded);
   const stats = memory ? await bootStats(memory, runtime) : undefined;
+  // Ink turns raw mode on in an effect, after the first frame is on screen. A key pressed in
+  // between (esc on the intro) would meet a cooked terminal: echoed as ^[ and, on macOS, lost.
+  // Raw from before the first frame, the key waits in the terminal until Ink reads it.
+  if (interactive) {
+    process.stdin.setRawMode(true);
+    process.on("exit", () => process.stdin.setRawMode(false));
+  }
   instance = render(
     React.createElement(Root, {
       controller,
@@ -884,6 +943,7 @@ async function main(): Promise<number> {
   }
 
   await done;
+  stopWatching();
   registry?.close();
   mouse.set(false);
   memory?.stop();

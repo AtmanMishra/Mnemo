@@ -121,7 +121,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<AgentSessio
       agentDir: options.agentDir,
       modelRuntime,
       settingsManager: piSettings(cwd, options.agentDir, projectTrusted(cwd, options.agentDir, options.trustProject), options.settings),
-      // First, so extensions that build on the rendered prompt (memory recall) see the section it sets.
+      // First, so a sub-agent's role extension (which sets the same section) has the last word.
       resourceLoaderOptions: { extensionFactories: [piDocs, ...(options.extensions ?? [])] },
     });
     const created = await createAgentSessionFromServices({

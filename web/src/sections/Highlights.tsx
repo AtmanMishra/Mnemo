@@ -13,10 +13,10 @@ type Status = "released" | "on main" | "in review";
 
 const ITEMS = [
   { id: "team", pr: 83, status: "in review" as Status, tag: "Teams", tone: "teal", title: "A shared plan and log per run", body: "Once a second agent works on what you asked, they share a TASK.md and a LOG.md. Agents claim steps with task_update, only a step's owner marks it done, and each turn starts with what the others did." },
-  { id: "runs", pr: 82, status: "in review" as Status, tag: "@N", tone: "red", title: "Talk to any agent by number", body: "Every agent has a number. @2 at the start of a prompt is your words to agent #2. One prompt of yours is a run: capped at 40 messages and $1.00 of woken turns, and r r stops all of it." },
-  { id: "saved", pr: 81, status: "in review" as Status, tag: "Saved", tone: "mustard", title: "Sub-agents are saved with the conversation", body: "Each sub-agent's transcript is kept beside the conversation, with a state file that lists every agent it started: model, limits, turns, spend and answer. SubagentStart and SubagentStop hooks can log or refuse delegation." },
-  { id: "registry", pr: 80, status: "in review" as Status, tag: "Registry", tone: "plum", title: "Every agent on the machine", body: "mnemo agents lists what runs in every terminal and project, and tells, steers or stops one from anywhere. It is all local files: no socket, no server, and approvals stay in the terminal that asks." },
-  { id: "limits", pr: 79, status: "in review" as Status, tag: "Limits", tone: "olive", title: "Pick a sub-agent's model and limits", body: "Settings choose the model sub-agents run on and their turns, budget, thinking and context. A parent may lower any of them for one task, never raise one past yours, and the result says what was capped." },
+  { id: "runs", pr: 82, status: "on main" as Status, tag: "@N", tone: "red", title: "Talk to any agent by number", body: "Every agent has a number. @2 at the start of a prompt is your words to agent #2. One prompt of yours is a run: capped at 40 messages and $1.00 of woken turns, and r r stops all of it." },
+  { id: "saved", pr: 81, status: "on main" as Status, tag: "Saved", tone: "mustard", title: "Sub-agents are saved with the conversation", body: "Each sub-agent's transcript is kept beside the conversation, with a state file that lists every agent it started: model, limits, turns, spend and answer. SubagentStart and SubagentStop hooks can log or refuse delegation." },
+  { id: "registry", pr: 80, status: "on main" as Status, tag: "Registry", tone: "plum", title: "Every agent on the machine", body: "mnemo agents lists what runs in every terminal and project, and tells, steers or stops one from anywhere. It is all local files: no socket, no server, and approvals stay in the terminal that asks." },
+  { id: "limits", pr: 79, status: "on main" as Status, tag: "Limits", tone: "olive", title: "Pick a sub-agent's model and limits", body: "Settings choose the model sub-agents run on and their turns, budget, thinking and context. A parent may lower any of them for one task, never raise one past yours, and the result says what was capped." },
 ] as const;
 type ItemId = (typeof ITEMS)[number]["id"];
 
@@ -278,7 +278,8 @@ export function Highlights() {
               <em className="sc-soon">{item.status}</em>
               <a href={`${REPO}/pull/${item.pr}`}>Pull request #{item.pr}</a>
             </p>
-            {item.status !== "released" && <p className="fine">Not in a release yet, and it may change in review.</p>}
+            {item.status === "on main" && <p className="fine">Merged, and in the next release.</p>}
+            {item.status === "in review" && <p className="fine">Not merged yet, and it may change in review.</p>}
           </div>
           <div id="hl-panel" role="tabpanel" aria-labelledby={`hl-tab-${cur}`} className="th sc-win th-night hl-win">
             <div className="sc-bar" aria-hidden="true"><i /><i /><i /><span>mnemo · ~/shop</span></div>

@@ -62,6 +62,7 @@ much agents may do on their own; what an agent may *touch* is decided by the gat
 | Default mode † | `mode` | default | default · plan | how much Mnemo may do without asking (bypass modes are never a default) |
 | Learn after runs | `reflect` | on | on · off | write durable facts to memory after each run (--no-reflect overrides) |
 | Record outcomes | `recordOutcomes` | on | on · off | keep a local record of each run's checks, cost and turns, and replayable copies of checked runs ([mnemo evolve](EVOLVE.md)) |
+| Tidy memory | `tidyMemory` | on | on · off | once a day per project, retire duplicate facts, facts about files that are gone and memories marked wrong (kept as history; mnemo memory tidy shows what it would do) |
 | Check changed code | `verify` | on | on · off | send a run that changed code back to run a check (--no-verify overrides) |
 | Escalation model | `escalateModel` | none | provider/model-id, or empty | provider/id to finish a run on after failed checks; empty for none |
 | Escalate after | `escalateAfter` | 2 checks | 1–10 | failed checks in one run before escalating |
@@ -76,6 +77,9 @@ much agents may do on their own; what an agent may *touch* is decided by the gat
 | Compact keeps | `compactKeep` | 20000 tokens | 1000–200000 | tokens of the most recent conversation kept as they are when it compacts |
 | Pass to commands | `passEnv` | none | variable names, comma-separated | variables bash and Python also get, such as GITHUB_TOKEN, SSH_AUTH_SOCK (they get no tokens otherwise; see SECURITY.md) |
 | Remote view | `remote` | off | on · off | allow `/remote` to start a read-only web view of the session on this machine (127.0.0.1 only, behind a token; `/remote` says how to turn this on while it is off) |
+| Background memory work | `background` | off | on · off | while Mnemo is open, learn from new Claude Code sessions and check memory and skills for clutter, then tell open conversations what changed (learning costs model calls; tidy and curate only report). `mnemo background` shows what ran |
+| Background interval | `backgroundEvery` | 60 min | 10–1440 | minutes between runs of each background task |
+| Background model | `backgroundModel` | none | provider/model-id, or empty | the model background learning reflects with; empty: `$MNEMO_MEMORY_MODEL`, then the default model |
 
 ### Agents
 

@@ -1,5 +1,6 @@
 /**
- * Ingest other agents' sessions into memory, once each.
+ * Ingest other agents' sessions into memory, once each: Claude Code's, Codex's
+ * and opencode's.
  *
  * A ledger in the Mnemo home records how many runs of each session have been
  * learned, so running ingest again only learns what is new — a session that
@@ -13,8 +14,12 @@ import * as path from "node:path";
 import type { MemoryService } from "../service.ts";
 import { MemorySession, type MemoryNote, type Reflector, type SkillOffer } from "../session.ts";
 import { parseClaudeCode, replay, type ReplaySession } from "./claude-code.ts";
+import { parseCodex } from "./codex.ts";
+import { opencodeDatabase, opencodeSessions } from "./opencode.ts";
 
 export { parseClaudeCode, replay, type ReplayRun, type ReplaySession, type ReplayTool } from "./claude-code.ts";
+export { parseCodex } from "./codex.ts";
+export { opencodeDatabase, opencodeSessions, type OpencodeSession } from "./opencode.ts";
 
 export interface IngestOptions {
   memory: MemoryService;
@@ -22,10 +27,14 @@ export interface IngestOptions {
   home: string;
   userSkillsDir: string;
   reflect?: Reflector;
-  /** Default `~/.claude/projects`. */
+  /** Claude Code's transcripts. Default `~/.claude/projects`. */
   projectsDir?: string;
   /** Only these transcripts (a Stop hook names its own). */
   files?: string[];
+  /** Codex's rollouts. Default `$CODEX_HOME/sessions`, else `~/.codex/sessions`. */
+  codexDir?: string;
+  /** opencode's database. Default from `opencodeDatabase()`. */
+  opencodeDb?: string;
   /** A session modified within this long is still in use (default 10 minutes). */
   settleMs?: number;
   /** Only sessions whose working directory is inside this one. */
@@ -139,15 +148,54 @@ export function claudeCodeSessions(projectsDir = path.join(os.homedir(), ".claud
     .sort((a, b) => fs.statSync(a).mtimeMs - fs.statSync(b).mtimeMs);
 }
 
-export async function ingestClaudeCode(o: IngestOptions): Promise<IngestReport> {
+export function codexSessions(sessionsDir = path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "sessions")): string[] {
+  if (!fs.existsSync(sessionsDir)) return [];
+  return fs
+    .readdirSync(sessionsDir, { recursive: true, encoding: "utf8" })
+    .filter((f) => /^rollout-.*\.jsonl$/.test(path.basename(f)))
+    .map((f) => path.join(sessionsDir, f))
+    .sort((a, b) => fs.statSync(a).mtimeMs - fs.statSync(b).mtimeMs);
+}
+
+/** A parsed session from one agent, and when it was last written. */
+interface Transcript {
+  agent: string;
+  session: ReplaySession;
+  updated: number;
+}
+
+function* fromFiles(agent: string, files: string[], parse: (text: string) => ReplaySession | undefined): Generator<Transcript> {
+  for (const file of files) {
+    const session = parse(fs.readFileSync(file, "utf8"));
+    if (session) yield { agent, session, updated: fs.statSync(file).mtimeMs };
+  }
+}
+
+export function ingestClaudeCode(o: IngestOptions): Promise<IngestReport> {
+  return ingest(o, fromFiles("claude-code", o.files ?? claudeCodeSessions(o.projectsDir), parseClaudeCode));
+}
+
+export function ingestCodex(o: IngestOptions): Promise<IngestReport> {
+  return ingest(o, fromFiles("codex", codexSessions(o.codexDir), parseCodex));
+}
+
+function* opencodeTranscripts(file = opencodeDatabase()): Generator<Transcript> {
+  for (const { session, updated } of opencodeSessions(file)) yield { agent: "opencode", session, updated };
+}
+
+export function ingestOpencode(o: IngestOptions): Promise<IngestReport> {
+  return ingest(o, opencodeTranscripts(o.opencodeDb));
+}
+
+async function ingest(o: IngestOptions, transcripts: Iterable<Transcript>): Promise<IngestReport> {
   const now = o.now ?? Date.now();
   const settle = o.settleMs ?? 10 * 60_000;
   const report: IngestReport = { sessions: 0, runs: 0, unchanged: 0, active: 0 };
-  for (const file of o.files ?? claudeCodeSessions(o.projectsDir)) {
-    const s = parseClaudeCode(fs.readFileSync(file, "utf8"));
-    if (!s || !s.runs.length) continue;
+  for (const t of transcripts) {
+    const s = t.session;
+    if (!s.runs.length) continue;
     if (o.under && !isInside(path.resolve(s.cwd), path.resolve(o.under))) continue;
-    const key = `claude-code:${s.id}`;
+    const key = `${t.agent}:${s.id}`;
     // One ingest per session at a time: another process (a Stop hook, a manual
     // ingest) replaying the same runs would record every episode twice.
     fs.mkdirSync(path.join(o.home, "memory", "ingest-locks"), { recursive: true, mode: 0o700 });
@@ -157,7 +205,7 @@ export async function ingestClaudeCode(o: IngestOptions): Promise<IngestReport> 
       continue;
     }
     try {
-      await ingestOne(o, file, s, key, now, settle, report);
+      await ingestOne(o, t, key, now, settle, report);
     } finally {
       release();
     }
@@ -171,13 +219,14 @@ function isInside(child: string, parent: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
-async function ingestOne(o: IngestOptions, file: string, s: ReplaySession, key: string, now: number, settle: number, report: IngestReport): Promise<void> {
+async function ingestOne(o: IngestOptions, t: Transcript, key: string, now: number, settle: number, report: IngestReport): Promise<void> {
+  const s = t.session;
   // Read under the session's lock: what another ingest finished is not learned again.
   const done = readLedger(o.home)[key] ?? 0;
   // The last run may still be going: wait for it to finish or go quiet.
   // settle 0 means do not wait: a file written this very millisecond (or with
   // an mtime a fraction ahead of the clock) is still taken.
-  const quiet = settle <= 0 || now - fs.statSync(file).mtimeMs > settle;
+  const quiet = settle <= 0 || now - t.updated > settle;
   const complete = quiet || s.runs.at(-1)!.finished ? s.runs.length : s.runs.length - 1;
   const fresh = s.runs.slice(done, complete);
   if (!fresh.length) {
@@ -191,7 +240,7 @@ async function ingestOne(o: IngestOptions, file: string, s: ReplaySession, key: 
       memory: o.memory,
       cwd: s.cwd,
       userSkillsDir: o.userSkillsDir,
-      source: { agent: "claude-code", model: s.model },
+      source: { agent: t.agent, model: s.model },
       reflect: o.reflect,
       approveSkill: o.approveSkill,
       notify: o.notify && ((note) => o.notify!(s.id, note)),
