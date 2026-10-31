@@ -311,7 +311,9 @@ transcript).
   facts in one profile, or two pitfalls, that say the same thing — equal once
   normalized, or ≥ 85% of their words in common), *stale* (a project fact whose
   every file path is gone from the project root), *distrusted*. Nothing is deleted:
-  a fact is retired by superseding it with `(forgotten)`, a node by `forget`.
+  a fact is retired by superseding it with `(forgotten)`, a node by `forget`. A root
+  session also applies it by itself, in the background at its start, at most once a day per
+  project (`tidyWhenDue`, `$MNEMO_HOME/memory/tidied.json`; the `tidyMemory` setting).
   `curateSkills` (`mnemo memory curate`) sorts skills by their `last used` fact.
 
 ---
@@ -348,6 +350,7 @@ gets a copy one level deeper.
 | `mnemo-policy` | `tool_call` — the only hook that decides: rules, mode, grants, then the approval dialog (§3.6) |
 | `mnemo-hooks` | user and managed hooks (`extensions/hooks.ts`): `tool_call` after the gate (PreToolUse, may only refuse), `tool_result` (PostToolUse, may add a note), `session_start`, `session_shutdown` |
 | `mnemo-plan` | `before_agent_start` (a plan-mode section in the system prompt while the mode is `plan`); `ask_user` (a question in a pick or text dialog; the root session only) |
+| `mnemo-guide` | `before_agent_start`: a line in the tool list for each active Mnemo tool, and a `working` section saying when to use them unasked (code index before grep, `code_refs` before changing a signature, `memory_search` before exploring, `memory_steer` on a wrong approach, skills, sub-agents for broad reading); only the tools the agent has are named |
 | `mnemo-checkpoints` | `tool_call` on `edit`/`write`: keeps the file's bytes under the current turn (rewind) |
 | `mnemo-lsp` | `tool_result` on `edit`/`write` (root session, trusted folder, servers named in `$MNEMO_HOME/lsp.json`): shows the server the new text (`lsp/client.ts`, JSON-RPC over stdio) and appends its errors and warnings to the result; `session_shutdown` stops the servers |
 | `mnemo-shell` | re-registers pi's `bash` with the provider keys taken out of the command's environment |
@@ -410,6 +413,16 @@ root, or more than 10,000 source files) is not indexed: the tools say so and poi
 guard left alone, and `/index` says which; the choice is kept in `~/.mnemo/index/projects.json`,
 never in the project. The plan this is the first slice of (the text index, memory anchors, ranking by the graph) is
 in the project's architecture document.
+
+**Memories pinned to definitions.** `memory_remember` takes an optional `code` (`Cache.get`, or
+`src/cache.ts#Cache.get` when the name is not unique). The code index resolves it to one definition and
+the value is kept with a tag at its end, `[code: src/cache.ts#Cache.get@<hash of its text>]`
+(`packages/memory/src/anchor.ts`), so the journal, its history and every agent reading memory carry it
+with no schema change. Before each run Mnemo asks the code index, brought up to date, whether each pinned
+definition is as it was: the fact reads as `(about Cache.get in src/cache.ts)`, or with `which has
+changed since this was written: check it still holds`, or `which no longer exists there`, in the profile
+block, recall and `memory_search`. The profile block is made again only when that verdict changes. An
+agent without the code index (hooks, MCP) shows what the fact is about and no verdict.
 
 `session_search` is a different question from `memory_search`: memory keeps what
 was *learned*, this keeps the record — every message and command of Mnemo's and

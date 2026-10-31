@@ -9,6 +9,7 @@ import { checkpointsExtension } from "./checkpoints.ts";
 import { codeExtension } from "./code.ts";
 import { escalateExtension } from "./escalate.ts";
 import { finalErrorsExtension } from "./final-errors.ts";
+import { guideExtension } from "./guide.ts";
 import { hooksExtension } from "./hooks.ts";
 import { kernelExtension } from "./kernel.ts";
 import { lspExtension } from "./lsp.ts";
@@ -30,6 +31,8 @@ export function mnemoExtensions(host: Host): InlineExtension[] {
     { name: "mnemo-hooks", factory: hooksExtension(host) },
     // Before memory, which builds on the rendered system prompt that holds plan mode's section.
     { name: "mnemo-plan", factory: planExtension(host) },
+    // Also before memory: the tool list and the working section are part of that rendered prompt.
+    { name: "mnemo-guide", factory: guideExtension() },
     { name: "mnemo-checkpoints", factory: checkpointsExtension(host) },
     { name: "mnemo-lsp", factory: lspExtension(host) },
     { name: "mnemo-shell", factory: shellExtension(host) },
