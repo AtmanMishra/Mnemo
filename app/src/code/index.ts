@@ -14,8 +14,13 @@
  *   inferred  the only definition of that name in the language family
  * Anything else stays untied and is counted, never guessed.
  *
- * What it never holds: file bodies (snippets are read from disk when asked for), files a
- * read tool may not read (the caller's `exclude`), files over 1 MiB, and binary files.
+ * Beside the definitions it keeps a text index for grep: every text file of the project (not
+ * only source), as the set of three-character sequences it holds. It is built and refreshed
+ * only when grep asks (`refreshText`), never by the code tools.
+ *
+ * What it never holds: file bodies (snippets are read from disk when asked for; the text index
+ * is contentless), files a read tool may not read (the caller's `exclude`), files over 1 MiB,
+ * and binary files.
  */
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
@@ -26,7 +31,7 @@ import { extract, type Definition, type SymbolKind } from "./extract.ts";
 import { familyOf, langOf, parsers, type LangId } from "./languages.ts";
 
 /** Bump when the tables or what the extractor writes into them change: the index is rebuilt. */
-const SCHEMA = "1";
+const SCHEMA = "2";
 const MAX_BYTES = 1024 * 1024;
 
 export type Confidence = "exact" | "inferred";
@@ -93,8 +98,16 @@ export class CodeIndex {
   private readonly exclude: (rel: string) => boolean;
   private readonly list: (root: string) => string[];
   private readonly maxFiles: number;
+  /** Whether this SQLite has the trigram index; without it grep narrows nothing. */
+  readonly trigrams: boolean;
   /** Files each file imports, rebuilt after a refresh changes anything. */
   private importsOf?: Map<string, Set<string>>;
+  /**
+   * Each definition's rank in the call graph, and how many files changed since it was made. A
+   * rank only nudges search, so it is made again once 2% of the files (at least 20) changed,
+   * not after every edit: on 15,000 files it takes about 4 s.
+   */
+  private rankOf?: { ranks: Map<number, number>; changed: number };
 
   constructor(file: string, root: string, o: CodeIndexOptions = {}) {
     this.root = root;
@@ -113,7 +126,7 @@ export class CodeIndex {
     this.db.run("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)");
     const version = this.db.query("SELECT value FROM meta WHERE key = 'schema'").get() as { value: string } | null;
     if (version?.value !== SCHEMA) {
-      for (const t of ["files", "defs", "refs", "defs_fts"]) this.db.run(`DROP TABLE IF EXISTS ${t}`);
+      for (const t of ["files", "defs", "refs", "defs_fts", "text_files", "text_fts"]) this.db.run(`DROP TABLE IF EXISTS ${t}`);
       this.db.run("INSERT OR REPLACE INTO meta VALUES ('schema', ?)", [SCHEMA]);
     }
     this.db.run("CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, size INTEGER, mtime REAL, hash TEXT, lang TEXT)");
@@ -126,6 +139,15 @@ export class CodeIndex {
     this.db.run("CREATE INDEX IF NOT EXISTS refs_name ON refs (name, kind)");
     this.db.run("CREATE INDEX IF NOT EXISTS refs_src ON refs (path, src)");
     this.db.run("CREATE VIRTUAL TABLE IF NOT EXISTS defs_fts USING fts5(words, signature, path)");
+    // Every text file for grep: which trigrams it holds, never its text (contentless).
+    this.db.run("CREATE TABLE IF NOT EXISTS text_files (id INTEGER PRIMARY KEY, path TEXT UNIQUE, size INTEGER, mtime REAL, hash TEXT, text INTEGER)");
+    try {
+      this.db.run("CREATE VIRTUAL TABLE IF NOT EXISTS text_fts USING fts5(body, tokenize='trigram', content='', contentless_delete=1, detail='none')");
+      this.trigrams = true;
+    } catch {
+      // An SQLite older than 3.43 (an old macOS's own): grep reads every text file instead.
+      this.trigrams = false;
+    }
   }
 
   close(): void {
@@ -162,7 +184,7 @@ export class CodeIndex {
         this.forget(rel);
         removed++;
       }
-    if (read || removed) this.importsOf = undefined;
+    if (read || removed) this.changed(read + removed);
     return { read, removed, files: seen.size };
   }
 
@@ -175,11 +197,86 @@ export class CodeIndex {
       st = fs.statSync(path.join(this.root, rel));
     } catch {
       this.forget(rel);
-      this.importsOf = undefined;
+      this.changed(1);
       return;
     }
     if (!st.isFile() || st.size > MAX_BYTES) return;
-    if (this.readFile(rel, st, await parsers())) this.importsOf = undefined;
+    if (this.readFile(rel, st, await parsers())) this.changed(1);
+  }
+
+  private changed(files: number): void {
+    this.importsOf = undefined;
+    if (this.rankOf && (this.rankOf.changed += files) > Math.max(20, this.files() / 50)) this.rankOf = undefined;
+  }
+
+  /** Bring the text index (every text file, for grep) up to date with the files on disk. */
+  async refreshText(): Promise<RefreshResult> {
+    const known = new Map(
+      (this.db.query("SELECT path, size, mtime, hash FROM text_files").all() as { path: string; size: number; mtime: number; hash: string }[]).map((r) => [r.path, r]),
+    );
+    const wanted = this.list(this.root).filter((f) => !this.exclude(f));
+    const sources = wanted.filter((f) => langOf(f)).length;
+    if (sources > this.maxFiles) return { read: 0, removed: 0, files: 0, tooMany: sources };
+    const seen = new Set<string>();
+    let read = 0;
+    for (const rel of wanted) {
+      let st: fs.Stats;
+      try {
+        st = fs.statSync(path.join(this.root, rel));
+      } catch {
+        continue;
+      }
+      if (!st.isFile() || st.size > MAX_BYTES) continue;
+      seen.add(rel);
+      const k = known.get(rel);
+      if (k && k.size === st.size && k.mtime === st.mtimeMs) continue;
+      if (this.readText(rel, st, k?.hash) && ++read % 50 === 0) await new Promise((r) => setTimeout(r, 0)); // let the interface draw
+    }
+    let removed = 0;
+    for (const rel of known.keys())
+      if (!seen.has(rel)) {
+        this.forgetText(rel);
+        removed++;
+      }
+    return { read, removed, files: seen.size };
+  }
+
+  private readText(rel: string, st: fs.Stats, oldHash?: string): boolean {
+    let bytes: Buffer;
+    try {
+      bytes = fs.readFileSync(path.join(this.root, rel));
+    } catch {
+      return false;
+    }
+    const hash = Bun.hash(bytes).toString(36);
+    if (hash === oldHash) {
+      this.db.run("UPDATE text_files SET size = ?, mtime = ? WHERE path = ?", [st.size, st.mtimeMs, rel]);
+      return false;
+    }
+    const text = !bytes.subarray(0, 8192).includes(0);
+    this.db.transaction(() => {
+      this.forgetText(rel);
+      const r = this.db.run("INSERT INTO text_files (path, size, mtime, hash, text) VALUES (?, ?, ?, ?, ?)", [rel, st.size, st.mtimeMs, hash, text ? 1 : 0]);
+      if (text && this.trigrams) this.db.run("INSERT INTO text_fts (rowid, body) VALUES (?, ?)", [r.lastInsertRowid, bytes.toString("utf8")]);
+    })();
+    return true;
+  }
+
+  private forgetText(rel: string): void {
+    if (this.trigrams) this.db.run("DELETE FROM text_fts WHERE rowid IN (SELECT id FROM text_files WHERE path = ?)", [rel]);
+    this.db.run("DELETE FROM text_files WHERE path = ?", [rel]);
+  }
+
+  /**
+   * Text files, in path order: all of them, or only those holding every trigram of one of the
+   * alternatives (see code/text.ts `requiredGrams`).
+   */
+  textFiles(grams?: string[][]): string[] {
+    if (!grams || !this.trigrams) return (this.db.query("SELECT path FROM text_files WHERE text = 1 ORDER BY path").all() as { path: string }[]).map((r) => r.path);
+    const match = grams.map((b) => `(${b.map((g) => `"${g.replaceAll('"', '""')}"`).join(" AND ")})`).join(" OR ");
+    return (
+      this.db.query("SELECT f.path AS path FROM text_fts JOIN text_files f ON f.id = text_fts.rowid WHERE text_fts MATCH ? AND f.text = 1 ORDER BY f.path").all(match) as { path: string }[]
+    ).map((r) => r.path);
   }
 
   /** Parse and store one file; false when its bytes had not changed. */
@@ -258,7 +355,7 @@ export class CodeIndex {
     return last === name ? byName : byName.filter((d) => d.qname.endsWith(name));
   }
 
-  /** Definitions ranked for plain words or identifiers: BM25, nudged towards what is used. */
+  /** Definitions ranked for plain words or identifiers: BM25, nudged towards what the call graph says is central. */
   search(query: string, k = 10): Def[] {
     const terms = [...new Set(words(query).split(" ").filter(Boolean))];
     if (!terms.length) return [];
@@ -266,20 +363,70 @@ export class CodeIndex {
     const rows = this.db
       .query("SELECT d.*, bm25(defs_fts, 10.0, 2.0, 1.0) AS rank FROM defs_fts JOIN defs d ON d.id = defs_fts.rowid WHERE defs_fts MATCH ? ORDER BY rank LIMIT ?")
       .all(match, k * 5) as (Record<string, unknown> & { rank: number })[];
-    const uses = this.db.prepare("SELECT count(*) AS n FROM refs WHERE name = ? AND kind != 'import'");
+    const rank = this.ranks();
     const ranked = rows.map((r) => {
         const d = rowDef(r);
-        const n = (uses.get(d.name) as { n: number }).n;
-        // bm25 is negative, lower is better; a used, exported definition is the likelier answer.
+        // bm25 is negative, lower is better; a definition much of the project reaches, and an
+        // exported one, is the likelier answer (rank 1 is the average definition: log 0).
         // Asking for a name by its name finds that definition first.
         const named = d.name.toLowerCase() === query.trim().toLowerCase() || d.qname.toLowerCase() === query.trim().toLowerCase();
-        return { d, score: -r.rank + 0.4 * Math.log1p(n) + (d.exported ? 0.3 : 0) + (named ? 100 : 0) };
+        return { d, score: -r.rank + 0.4 * Math.log(rank.get(d.id) ?? 1) + (d.exported ? 0.3 : 0) + (named ? 100 : 0) };
       });
-    uses.finalize();
     return ranked
       .sort((a, b) => b.score - a.score)
       .slice(0, k)
       .map((s) => s.d);
+  }
+
+  /**
+   * PageRank over the calls the index can tie (exact or inferred), scaled so the average
+   * definition is 1: what much of the project reaches, directly or through what calls it, ranks
+   * above what one test calls. Built from memory (no query per call), and kept while few files
+   * have changed (`rankOf`); a definition newer than the ranks is average.
+   */
+  ranks(): Map<number, number> {
+    if (this.rankOf) return this.rankOf.ranks;
+    const imports = this.imports();
+    const all = this.defs("");
+    const owner = new Map(all.map((d) => [`${d.path}#${d.qname}`, d.id]));
+    const byName = new Map<string, Def[]>();
+    for (const d of all)
+      if (CALLABLE.includes(d.kind)) {
+        const k = `${familyOf(langOf(d.path)!)} ${d.name}`;
+        const list = byName.get(k);
+        if (list) list.push(d);
+        else byName.set(k, [d]);
+      }
+    const named = new Map([...byName].map(([k, defs]) => [k, group(defs)]));
+    // Calls as edges between positions in `all`, then thirty rounds of PageRank over arrays.
+    const at = new Map(all.map((d, i) => [d.id, i]));
+    const from: number[] = [];
+    const to: number[] = [];
+    for (const r of this.db.query("SELECT * FROM refs WHERE kind = 'call' AND src != ''").all() as RefRow[]) {
+      const src = owner.get(`${r.path}#${r.src}`);
+      const cands = named.get(`${familyOf(langOf(r.path)!)} ${r.name}`);
+      if (src === undefined || !cands) continue;
+      for (const t of this.tie(r, imports, cands))
+        if (t.def.id !== src) {
+          from.push(at.get(src)!);
+          to.push(at.get(t.def.id)!);
+        }
+    }
+    const n = all.length || 1;
+    const outDegree = new Float64Array(n);
+    for (const f of from) outDegree[f]!++;
+    const damping = 0.85;
+    let pr = new Float64Array(n).fill(1 / n);
+    for (let round = 0; round < 30; round++) {
+      let dangling = 0;
+      for (let i = 0; i < n; i++) if (!outDegree[i]) dangling += pr[i]!;
+      const next = new Float64Array(n).fill((1 - damping + damping * dangling) / n);
+      for (let e = 0; e < from.length; e++) next[to[e]!]! += (damping * pr[from[e]!]!) / outDegree[from[e]!]!;
+      pr = next;
+    }
+    const ranks = new Map(all.map((d, i) => [d.id, pr[i]! * n]));
+    this.rankOf = { ranks, changed: 0 };
+    return ranks;
   }
 
   /** Who calls `to` (and, for a type, who extends or implements it). */
@@ -333,27 +480,29 @@ export class CodeIndex {
   }
 
   /** The definitions a call means, when the code says which; empty when it does not. */
-  private tie(r: RefRow, imports: Map<string, Set<string>>): { def: Def; confidence: Confidence }[] {
-    const family = familyOf(langOf(r.path)!);
-    const cands = this.defs(`WHERE name = ? AND kind IN (${CALLABLE.map(() => "?").join(",")})`, [r.name, ...CALLABLE]).filter(
-      (d) => familyOf(langOf(d.path)!) === family,
-    );
-    if (!cands.length) return [];
+  private tie(r: RefRow, imports: Map<string, Set<string>>, named?: Named): { def: Def; confidence: Confidence }[] {
+    const g =
+      named ??
+      group(
+        this.defs(`WHERE name = ? AND kind IN (${CALLABLE.map(() => "?").join(",")})`, [r.name, ...CALLABLE]).filter(
+          (d) => familyOf(langOf(d.path)!) === familyOf(langOf(r.path)!),
+        ),
+      );
     if (r.member) {
       if (r.recv) {
-        const typed = cands.filter((d) => d.parent === r.recv || d.parent.endsWith(`.${r.recv}`));
+        const typed = (g.byParent.get(lastPart(r.recv)) ?? []).filter((d) => d.parent === r.recv || d.parent.endsWith(`.${r.recv}`));
         return typed.map((def) => ({ def, confidence: "exact" as const }));
       }
-      const methods = cands.filter((d) => d.kind === "method");
-      return methods.length === 1 ? [{ def: methods[0]!, confidence: "inferred" }] : [];
+      return g.methods.length === 1 ? [{ def: g.methods[0]!, confidence: "inferred" }] : [];
     }
-    const plain = cands.filter((d) => d.kind !== "method");
-    const local = plain.filter((d) => d.path === r.path);
-    if (local.length) return local.map((def) => ({ def, confidence: "exact" as const }));
-    const imported = plain.filter((d) => imports.get(r.path)?.has(d.path));
+    const local = g.byPath.get(r.path);
+    if (local) return local.map((def) => ({ def, confidence: "exact" as const }));
+    const from = imports.get(r.path);
+    const imported = from ? g.plain.filter((d) => from.has(d.path)) : [];
     if (imported.length) return imported.map((def) => ({ def, confidence: "exact" as const }));
-    return plain.length === 1 ? [{ def: plain[0]!, confidence: "inferred" }] : [];
+    return g.plain.length === 1 ? [{ def: g.plain[0]!, confidence: "inferred" }] : [];
   }
+
 
   /** Each file's imports, resolved to files in the index where the language allows. */
   private imports(): Map<string, Set<string>> {
@@ -396,6 +545,37 @@ export class CodeIndex {
     ).map((h) => ({ def: this.def(h.id)!, uses: h.uses }));
     return { dirs: [...dirs].map(([dir, e]) => ({ dir, ...e })).sort((a, b) => b.defs - a.defs), hubs };
   }
+}
+
+/** The definitions of one name in one language family, as `tie` reads them. */
+interface Named {
+  methods: Def[];
+  /** Everything with a parent, by the parent's last part (`Cache` for `a.Cache`). */
+  byParent: Map<string, Def[]>;
+  /** What is not a method. */
+  plain: Def[];
+  /** What is not a method, by file. */
+  byPath: Map<string, Def[]>;
+}
+
+const lastPart = (name: string) => name.slice(name.lastIndexOf(".") + 1);
+
+function group(defs: Def[]): Named {
+  const g: Named = { methods: [], byParent: new Map(), plain: [], byPath: new Map() };
+  const add = (m: Map<string, Def[]>, k: string, d: Def) => {
+    const list = m.get(k);
+    if (list) list.push(d);
+    else m.set(k, [d]);
+  };
+  for (const d of defs) {
+    if (d.parent) add(g.byParent, lastPart(d.parent), d);
+    if (d.kind === "method") g.methods.push(d);
+    else {
+      g.plain.push(d);
+      add(g.byPath, d.path, d);
+    }
+  }
+  return g;
 }
 
 function rowDef(r: Record<string, unknown>): Def {

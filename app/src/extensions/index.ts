@@ -5,10 +5,12 @@
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { Host } from "./host.ts";
 import { agentsExtension } from "./agents.ts";
+import { backgroundExtension } from "./background.ts";
 import { checkpointsExtension } from "./checkpoints.ts";
 import { codeExtension } from "./code.ts";
 import { escalateExtension } from "./escalate.ts";
 import { finalErrorsExtension } from "./final-errors.ts";
+import { guideExtension } from "./guide.ts";
 import { hooksExtension } from "./hooks.ts";
 import { kernelExtension } from "./kernel.ts";
 import { lspExtension } from "./lsp.ts";
@@ -17,6 +19,7 @@ import { memoryExtension } from "./memory.ts";
 import { peersExtension } from "./peers.ts";
 import { planExtension } from "./plan.ts";
 import { policyExtension } from "./policy.ts";
+import { roleExtension } from "./role.ts";
 import { shellExtension } from "./shell.ts";
 import { skillsExtension } from "./skills.ts";
 import { stateExtension } from "./state.ts";
@@ -29,12 +32,15 @@ export function mnemoExtensions(host: Host): InlineExtension[] {
     { name: "mnemo-policy", factory: policyExtension(host) },
     // Right after the gate: a hook sees only calls the gate let through, and can still refuse them.
     { name: "mnemo-hooks", factory: hooksExtension(host) },
-    // Before memory, which builds on the rendered system prompt that holds plan mode's section.
     { name: "mnemo-plan", factory: planExtension(host) },
+    { name: "mnemo-role", factory: roleExtension(host) },
+    // Also before memory: the tool list and the working section are part of that rendered prompt.
+    { name: "mnemo-guide", factory: guideExtension() },
     { name: "mnemo-checkpoints", factory: checkpointsExtension(host) },
     { name: "mnemo-lsp", factory: lspExtension(host) },
     { name: "mnemo-shell", factory: shellExtension(host) },
     { name: "mnemo-memory", factory: memoryExtension(host) },
+    { name: "mnemo-background", factory: backgroundExtension(host) },
     { name: "mnemo-kernel", factory: kernelExtension(host) },
     { name: "mnemo-code", factory: codeExtension(host) },
     { name: "mnemo-agents", factory: agentsExtension(host, mnemoExtensions) },

@@ -59,6 +59,7 @@ export interface Settings extends Record<KeyAction, string> {
   // Behaviour
   mode: (typeof MODE_CHOICES)[number];
   reflect: boolean;
+  tidyMemory: boolean;
   verify: boolean;
   escalateModel: string;
   escalateAfter: number;
@@ -73,6 +74,9 @@ export interface Settings extends Record<KeyAction, string> {
   compactKeep: number;
   passEnv: string;
   remote: boolean;
+  background: boolean;
+  backgroundEvery: number;
+  backgroundModel: string;
   // Agents
   maxDepth: number;
   maxChildren: number;
@@ -147,6 +151,7 @@ export const DEFS: Record<SettingKey, Def> = {
 
   mode: { group: "Behaviour", label: "Default mode", help: "how much Mnemo may do without asking (bypass modes are never a default)", kind: "enum", default: "default", options: MODE_CHOICES, restart: true },
   reflect: bool("Behaviour", "Learn after runs", "write durable facts to memory after each run (--no-reflect overrides)", true),
+  tidyMemory: bool("Behaviour", "Tidy memory", "once a day per project, retire duplicate facts, facts about files that are gone and memories marked wrong (kept as history; mnemo memory tidy shows what it would do)", true),
   verify: bool("Behaviour", "Check changed code", "send a run that changed code back to run a check (--no-verify overrides)", true),
   escalateModel: { group: "Behaviour", label: "Escalation model", help: "provider/id to finish a run on after failed checks; empty for none", kind: "text", default: "" },
   escalateAfter: int("Behaviour", "Escalate after", "failed checks in one run before escalating", 2, 1, 10, "checks"),
@@ -162,6 +167,9 @@ export const DEFS: Record<SettingKey, Def> = {
   passEnv: { group: "Behaviour", label: "Pass to commands", help: "variables bash and Python also get, comma-separated, such as GITHUB_TOKEN, SSH_AUTH_SOCK (they get no tokens otherwise)", kind: "text", default: "" },
 
   remote: bool("Behaviour", "Remote view", "allow /remote to start a read-only web view of the session on this machine (127.0.0.1 only, behind a token; off until you turn this on)", false),
+  background: bool("Behaviour", "Background memory work", "while Mnemo is open, learn from new Claude Code sessions and check memory and skills for clutter, then tell open conversations what changed (learning costs model calls; tidy and curate only report)", false),
+  backgroundEvery: int("Behaviour", "Background interval", "minutes between runs of each background task", 60, 10, 1440, "min"),
+  backgroundModel: { group: "Behaviour", label: "Background model", help: "provider/id background learning reflects with; empty: $MNEMO_MEMORY_MODEL, then the default model", kind: "text", default: "" },
 
   maxDepth: int("Agents", "Sub-agent depth", "how deep sub-agents nest (0: none; raising it reaches conversations opened after)", 3, 0, 6),
   maxChildren: int("Agents", "Sub-agents per agent", "live sub-agents one agent may have", 4, 1, 16),
@@ -297,6 +305,7 @@ export function parseValue(key: SettingKey, raw: unknown): Parsed<Settings[Setti
     case "text": {
       const t = String(text ?? "");
       if (t === "") return { ok: true, value: "" };
+      if ((key === "escalateModel" || key === "backgroundModel") && !/^[\w.-]+\/[\w.:/@+-]+$/.test(t)) return { ok: false, error: `${key} is provider/model-id, or empty` };
       if (key === "escalateModel" && !MODEL_SPEC.test(t)) return { ok: false, error: "escalateModel is provider/model-id, or empty" };
       if (key === "subModel" && !MODEL_SPEC.test(t)) return { ok: false, error: "subModel is provider/model-id, or empty" };
       if (key === "subModels") {

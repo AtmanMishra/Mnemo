@@ -522,6 +522,24 @@ chose. Read it first (`mnemo skills show plugin@marketplace`, and the files unde
   each session each installed skill is re-read, and one whose file changed, gained a file or
   turned into a link is left out and reported (`mnemo skills verify` says which). This catches
   tampering after install; it does not tell you the skill was good to begin with.
+- **A skill is scanned before it is installed.** `mnemo skills install` and `update` read every
+  text file of each skill with rules ported from NVIDIA SkillSpector (`app/src/market/scan.ts`):
+  instructions that override the system prompt, hidden text (bidirectional controls, zero-width
+  characters, instructions in HTML comments), sending the conversation or credentials out,
+  reading SSH keys or another agent's login, remote code piped into a shell, obfuscated
+  execution, reverse shells, the cloud metadata service, jailbreak framing. A HIGH or CRITICAL
+  finding stops the install, with nothing copied, until you pass `--force`; MEDIUM is printed.
+  `mnemo skills scan` reads a plugin before you install it, a folder, or (with no argument) every
+  skill Mnemo loads, and the question a folder's `.agents/` asks before it loads names its skills
+  that have such findings. These are text patterns: they catch the common and careless, not a
+  skill written to get past them, and a security skill that quotes them on purpose is flagged too.
+- **SkillSpector itself runs only if you installed it, and offline.** When `skillspector` is on
+  PATH (`uv tool install git+https://github.com/NVIDIA/skillspector.git`), a scan also runs
+  `skillspector scan <skill> --no-llm --format json` and adds its findings. Mnemo never installs
+  or downloads it. The child gets the base environment (no API keys, so no LLM even if asked)
+  and HTTP(S) proxy variables that point at a closed port on loopback, so its OSV.dev
+  vulnerability lookup falls back to its built-in list instead of calling out. That holds for its
+  HTTP client, which honours the proxy variables; it is a filter, not a sandbox.
 
 ## Scheduled runs
 
@@ -535,6 +553,20 @@ last 20 are kept. `lastRun` is stored before a run starts, a window missed while
 off fires once, and a lock file keeps two schedulers from running the same job. Nothing starts
 by itself: `mnemo schedule run` stays in the foreground, and `run --once` is for your own
 cron, systemd, launchd or Task Scheduler entry.
+
+## Background memory work
+
+The `background` setting is **off until you turn it on** (`mnemo settings set background on`).
+Then, while a Mnemo is open, it starts `mnemo background run` once a task is due (every
+`backgroundEvery` minutes), and a lock file lets only one process run the tasks at a time. The
+run makes no connection of its own: ingest sends Claude Code transcripts, redacted as `mnemo
+memory ingest` redacts them, to your model provider for reflection, and nothing else leaves.
+It writes facts the way learning after a run does; a skill stays a candidate, since nobody is
+there to approve it. Tidy and curate only report what `mnemo memory tidy` and `curate` would
+change; nothing is retired or archived without you. Results go to
+`$MNEMO_HOME/background/events.jsonl` (0600, redacted, the newest 100 to 200 kept), and an
+open conversation gets the ones about its project as a note with its next prompt. A project
+cannot turn any of this on, and `mnemo background` shows what ran.
 
 ## Uninstalling
 

@@ -6,12 +6,13 @@
  * same session (hooks, an MCP server, or a transcript replayed after the
  * fact). Nothing here prints; everything returns text or notes.
  */
+export { anchorKey, anchorsIn, anchorTag, showValue, splitAnchor, type Anchor, type AnchorCheck, type AnchorState } from "./anchor.ts";
 export { MemoryClient, type MemoryChild } from "./client.ts";
 export { Credit } from "./credit.ts";
 export { describeNode, summarizeMemory, type MemoryNode, type MemorySummary } from "./panel.ts";
 export { findMemsrv, journalPath, memsrvName, mnemoHome } from "./paths.ts";
 export { normalizeRemote, projectIdentity, type ProjectIdentity } from "./project.ts";
-export { describeHit, DIRECTIVE, hitLine, profileBlock, recallMessage } from "./recall.ts";
+export { describeHit, DIRECTIVE, directiveFor, hitLine, profileBlock, recallMessage } from "./recall.ts";
 export { readMemory, type MemoryReader } from "./read.ts";
 export { redact } from "./redact.ts";
 export { applyTidy, pathsIn, planTidy, sameMeaning, type TidyItem } from "./tidy.ts";
@@ -55,9 +56,16 @@ export {
 } from "./session.ts";
 export { renderSkill, skillPath, writeSkill, type SkillScope } from "./skills.ts";
 export {
+  acquireLock,
   claudeCodeSessions,
+  codexSessions,
   ingestClaudeCode,
+  ingestCodex,
+  ingestOpencode,
+  opencodeDatabase,
+  opencodeSessions,
   parseClaudeCode,
+  parseCodex,
   replay,
   type IngestOptions,
   type IngestReport,
