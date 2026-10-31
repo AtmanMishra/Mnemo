@@ -21,10 +21,13 @@ const mt = MEMSRV ? test : test.skip;
 
 const call = (name: string, args: Record<string, unknown>) => fauxAssistantMessage([fauxToolCall(name, args as Parameters<typeof fauxToolCall>[1])], { stopReason: "toolUse" });
 const say = (t: string) => fauxAssistantMessage(fauxText(t));
-/** Answers, and keeps the system prompt the model was given (pi sends it as the first message). */
+/** Answers, and keeps the system prompt the model was given. */
 const capture = (into: string[], answer: string): FauxResponseStep => (context) => {
-  const system = (context as unknown as { messages: { role: string; content: unknown }[] }).messages.find((m) => m.role === "system")?.content;
-  into.push(typeof system === "string" ? system : JSON.stringify(system));
+  // The prompt comes in sections, and a later system message carries only the sections that changed.
+  const sections: Record<string, string | null> = {};
+  for (const m of (context as unknown as { messages: { role: string; sections?: Record<string, string | null> }[] }).messages)
+    if (m.role === "system") Object.assign(sections, m.sections);
+  into.push(Object.values(sections).filter(Boolean).join("\n\n"));
   return say(answer);
 };
 
