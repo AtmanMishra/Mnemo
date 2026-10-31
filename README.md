@@ -430,6 +430,9 @@ flowchart TB
   agents page stops a whole run. A run with more than one agent shares a plan and a log
   (`TASK.md`, `LOG.md` in the Mnemo home; `/task` shows them): agents claim steps with
   `task_update` and each turn starts with what the others did.
+- **Profiles.** Save a sub-agent you use often as `~/.mnemo/agent/agents/reviewer.md` (model,
+  tools, limits and instructions in one file, like Claude Code's agent files); agents start it
+  with `spawn_subagent(profile: "reviewer")`, always within your sub-agent settings.
 - **Bounded.** A message wakes an idle agent, but a chain stops after 12 messages in a row, a run
   after 40 messages, woken turns may spend $0.50 per agent and $1.00 per run between your prompts,
   and an agent cannot message back past the one that asked it. Depth 3, 4 live children per agent and 16 per
@@ -490,7 +493,7 @@ folder.
 ### Hooks
 
 A hook is a command you choose that Mnemo runs at a fixed point: `PreToolUse`, `PostToolUse`,
-`SessionStart`, `SessionEnd`, `SubagentStart` (with the sub-agent's model and limits; it can refuse
+`SessionStart`, `SessionEnd`, `SubagentStart` (with the sub-agent's model, limits and profile; it can refuse
 the sub-agent like a `PreToolUse` hook refuses a call) and `SubagentStop` (with how it ended). They come from `~/.mnemo/hooks.json` (and an administrator's
 managed policy, which runs first).
 

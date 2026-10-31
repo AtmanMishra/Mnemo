@@ -68,7 +68,7 @@ async function heavy() {
   return {
     React: React.default,
     render: ink.render,
-    hasTrustRequiringProjectResources: pi.hasTrustRequiringProjectResources,
+    needsTrust: runtime.needsTrust,
     ProjectTrustStore: pi.ProjectTrustStore,
     SessionManager: pi.SessionManager,
     MemoryService: memory.MemoryService,
@@ -215,11 +215,11 @@ function parse(argv: string[]): Args {
  */
 async function trustDecision(cwd: string, dir: string, args: Args): Promise<boolean | undefined> {
   if (args.trustProject) return true;
-  const { hasTrustRequiringProjectResources, ProjectTrustStore } = await heavy();
-  if (!hasTrustRequiringProjectResources(cwd)) return undefined;
+  const { needsTrust, ProjectTrustStore } = await heavy();
+  if (!needsTrust(cwd)) return undefined;
   const store = new ProjectTrustStore(dir);
   if (store.get(cwd) !== null) return undefined;
-  const found = [".agents/extensions", ".agents/settings.json", ".agents/mcp.json", ".agents/skills", ".agents/prompts", ".agents/themes"].filter((f) => fs.existsSync(path.join(cwd, f)));
+  const found = [".agents/extensions", ".agents/settings.json", ".agents/mcp.json", ".agents/skills", ".agents/prompts", ".agents/themes", ".agents/agents"].filter((f) => fs.existsSync(path.join(cwd, f)));
   const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true && args.print === undefined && !args.dump;
   if (!interactive) {
     console.error(`mnemo: not loading this folder's ${found.join(", ") || "project resources"} (not trusted; --trust-project allows it)`);
