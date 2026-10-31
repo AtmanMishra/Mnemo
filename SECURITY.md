@@ -412,6 +412,28 @@ What that does and does not allow:
   reads hostile text can pass it on as a message. The framing, the gate and the limits
   above are the mitigations; this is still a prompt-injection path between agents.
 
+## Agents in other terminals
+
+Every Mnemo process writes what its agents are doing to `$MNEMO_HOME/registry/` so another
+terminal can list them (`mnemo agents`, the hub's *Elsewhere*), and takes three requests from
+there: `tell` and `steer` (your words) and `stop`.
+
+- **Files, not a server.** A request is a file in `registry/inbox/<tag>/`; the owning process
+  reads it within a second. No socket is opened and nothing leaves the machine. Folders are 0700
+  and files 0600, so another OS user can neither read the list nor send a request.
+- **What a request can do is small.** It can give an agent words, which start a turn under that
+  terminal's mode, gate and deny rules exactly as if typed there, or stop a turn. It cannot answer
+  an approval (only the terminal that asks can), run a slash command (so no mode or model change),
+  link agents or reach a tool. Words are cleaned of control characters and bounded (8,000
+  characters, 16 KB per request, 20 requests per second of pickup); each request is applied at
+  most once (taken before it is applied).
+- **What is written is what the agents page shows**: labels, tasks, last steps and answers
+  already cleaned and redacted by the roster, plus folders, model and mode. No transcript content.
+- **Accepted risk.** A request has the same OS-level trust as `permissions.json`: anything that
+  can write to your home folder as you can send one. An agent's own `write`, `edit` or `bash` into
+  `~/.mnemo/registry/` is a change outside its project, so it asks you in `default` and
+  `accept-edits`; in `yolo` nothing asks, as for any file. `MNEMO_REGISTRY=0` keeps a process out.
+
 ## Settings
 
 Since 0.1.7 `/settings` (and `mnemo settings`) change how Mnemo behaves. The reference is
