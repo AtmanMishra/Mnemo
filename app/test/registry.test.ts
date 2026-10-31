@@ -268,6 +268,8 @@ describe("publisher", () => {
     for (let i = 0; i < 70; i++) {
       const s = roster.addSub(root.id, { label: `s${i}`, task: "", access: "full" });
       roster.finish(s.id, "done", `answer ${i}`);
+      // As the roster subscription would: the roster itself lets go of old ended sub-agents (keepEnded).
+      pub.flush();
     }
     const live = roster.addSub(root.id, { label: "still going", task: "", access: "full" });
     pub.flush();
