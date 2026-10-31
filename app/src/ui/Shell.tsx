@@ -29,7 +29,7 @@ import { Hub, agentState, type AgentState } from "./Hub.tsx";
 import { Playground } from "./Playground.tsx";
 import { NodePane } from "./NodePane.tsx";
 import { Roster } from "../runtime/roster.ts";
-import { familyPanes, linkedRoots, subsOf, withNewSub } from "./tree.ts";
+import { familyPanes, linkedRoots, runLine, subsOf, withNewSub } from "./tree.ts";
 import { caret, chordMatches } from "../runtime/settings.ts";
 import { useSettings } from "./settings-context.ts";
 import { defaultLayout, fitsPanes, LAYOUT_LABEL, layoutsFor, nextLayout, SPLIT_MAX, splitRects, type SplitLayout } from "./layout.ts";
@@ -343,6 +343,11 @@ export function Shell({ fleet, motion, initial, elsewhere }: ShellProps): React.
             onUnlink={(id) => void fleet.unlink(id)}
             onFamily={splitWithFamily}
             onPlayground={() => setScreen("playground")}
+            onStopRun={(id) => {
+              const r = fleet.stopRun(id);
+              setError(r ? undefined : "that agent is not in a run");
+              if (r) agents.find((a) => a.id === id)?.controller.transcript.notice(`Stopped run ${r.run}: ${r.agents} agent${r.agents === 1 ? "" : "s"} were still working.`, "warn");
+            }}
           />
         ) : null}
         {screen === "playground" ? (
@@ -400,7 +405,7 @@ export function Shell({ fleet, motion, initial, elsewhere }: ShellProps): React.
                 const on = nodeFocus === k && !picker;
                 return (
                   <Box key={k} position="absolute" left={r.x} top={r.y} width={r.w} height={r.h} borderStyle="round" borderBackgroundColor={ground()} borderColor={on ? palette.magenta : palette.faint}>
-                    <NodePane node={node} nodes={tree.nodes} width={r.w - 2} height={r.h - 2} focused={on} onTell={(text) => roster.tell(node.id, text)} />
+                    <NodePane node={node} nodes={tree.nodes} width={r.w - 2} height={r.h - 2} focused={on} onTell={(text) => roster.tell(node.id, text)} run={runLine(tree, node)} />
                   </Box>
                 );
               })

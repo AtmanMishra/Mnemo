@@ -83,6 +83,9 @@ export interface Settings extends Record<KeyAction, string> {
   messageChars: number;
   sendsPerMinute: number;
   inbox: number;
+  runMessages: number;
+  runWakeSpend: number;
+  fanOut: number;
   subMaxTurns: number;
   subSpend: number;
   subModel: string;
@@ -169,6 +172,9 @@ export const DEFS: Record<SettingKey, Def> = {
   messageChars: int("Agents", "Message length", "characters in one agent-to-agent message", 2000, 100, 20000, "chars"),
   sendsPerMinute: int("Agents", "Message rate", "messages one agent may send per minute", 30, 1, 300),
   inbox: int("Agents", "Held messages", "messages an agent may hold for your next prompt", 20, 1, 200),
+  runMessages: int("Agents", "Messages per run", "messages all agents may pass in one run (what one prompt of yours sets going) before they wait for you", 40, 1, 1000, "messages"),
+  runWakeSpend: { group: "Agents", label: "Run wake budget", help: "dollars all turns that messages start in one run may spend together (0: messages wake no one)", kind: "number", default: 1, min: 0, max: 1000, unit: "$" },
+  fanOut: int("Agents", "Recipients per message", "agents one message may go to", 4, 1, 16),
   subMaxTurns: int("Agents", "Sub-agent turns", "model calls one sub-agent may make before it is stopped and returns what it has (0: no limit)", 60, 0, 1000, "turns"),
   subSpend: { group: "Agents", label: "Sub-agent budget", help: "dollars one sub-agent may spend before it is stopped and returns what it has (0: no limit)", kind: "number", default: 0, min: 0, max: 1000, unit: "$" },
   subModel: { group: "Agents", label: "Sub-agent model", help: "provider/id sub-agents run on unless their parent picks another; empty: the parent's current model", kind: "text", default: "" },
@@ -210,7 +216,7 @@ export function defaults(): Settings {
 
 /** The roster's caps, from the settings that name them. */
 export function limitsOf(s: Settings): Partial<Limits> {
-  return { maxDepth: s.maxDepth, maxChildren: s.maxChildren, maxLive: s.maxLive, hops: s.hops, wakeSpend: s.wakeSpend, runSpend: s.runSpend, messageChars: s.messageChars, sendsPerWindow: s.sendsPerMinute, inbox: s.inbox, maxTurns: s.maxTurns, subMaxTurns: s.subMaxTurns, subSpend: s.subSpend };
+  return { maxDepth: s.maxDepth, maxChildren: s.maxChildren, maxLive: s.maxLive, hops: s.hops, wakeSpend: s.wakeSpend, runSpend: s.runSpend, messageChars: s.messageChars, sendsPerWindow: s.sendsPerMinute, inbox: s.inbox, runMessages: s.runMessages, runWakeSpend: s.runWakeSpend, fanOut: s.fanOut, maxTurns: s.maxTurns, subMaxTurns: s.subMaxTurns, subSpend: s.subSpend };
 }
 
 /** What pi's compaction should do, from the settings. */
@@ -352,7 +358,7 @@ export function showValue(key: SettingKey, value: Settings[SettingKey]): string 
   if (key === "subModel" && value === "") return "the parent's model";
   if (key === "subModels" && value === "") return "any with credentials";
   if (def.kind === "text") return value === "" ? "none" : String(value);
-  if (key === "wakeSpend") return `$${(value as number).toFixed(2)}`;
+  if (key === "wakeSpend" || key === "runWakeSpend") return `$${(value as number).toFixed(2)}`;
   if (key === "subSpend") return value === 0 ? "no limit" : `$${(value as number).toFixed(2)}`;
   if ((key === "maxTurns" || key === "subMaxTurns") && value === 0) return "no limit";
   if ((key === "subMaxTokens" || key === "subContext") && value === 0) return "the model's own";

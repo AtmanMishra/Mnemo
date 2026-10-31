@@ -150,6 +150,21 @@ do. Plain files are the source of truth, written whole (rename into place), fold
 conversation; older ones are only in the state file. Hooks `SubagentStart` and
 `SubagentStop` let you log or refuse delegation.
 
+**Runs, numbers and `@N`**: every agent shows its number (`#2`) on its card, in the
+trees and in its pane. `@2 …` at the start of a prompt (a picker offers the agents when you
+type `@`), or `/tell 2 …`, is your words to agent #2: a top-level agent gets them as its
+prompt (after what it is doing, if busy), a running sub-agent after its current step. One
+prompt of yours starts a **run** (`r1`, `r2`…) with your words as its goal; agents woken by a
+message, and sub-agents, join the run of what reached them, and the goal travels in every
+peer message as quoted context. A run is capped as one unit: `runMessages` (40 messages),
+`runWakeSpend` ($1.00 for all turns messages start), and `fanOut` (4 recipients per
+message), on top of the per-agent bounds. The **ping-pong guard** refuses a message to an
+agent earlier in the chain that asked the sender nothing (one answer per message read;
+a parent and its own sub-agent may always talk). **Queue or steer**: a busy agent reads a
+message when it finishes what it is doing, an `urgent` one (or one its sender waits on)
+after its current step. `r` twice on the agents page stops every agent working in the
+selected agent's run, and nothing in that run can send again.
+
 ## Not yet
 
 User-typed messages into the tree from the playground (it stays supervise-only).

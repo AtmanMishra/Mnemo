@@ -89,6 +89,9 @@ much agents may do on their own; what an agent may *touch* is decided by the gat
 | Message length | `messageChars` | 2000 chars | 100–20000 | characters in one agent-to-agent message |
 | Message rate | `sendsPerMinute` | 30 | 1–300 | messages one agent may send per minute |
 | Held messages | `inbox` | 20 | 1–200 | messages an agent may hold for your next prompt |
+| Messages per run | `runMessages` | 40 messages | 1–1000 | messages all agents may pass in one run (what one prompt of yours sets going) before they wait for you |
+| Run wake budget | `runWakeSpend` | $1.00 | 0–1000 | dollars all turns that messages start in one run may spend together (0: messages wake no one) |
+| Recipients per message | `fanOut` | 4 | 1–16 | agents one message may go to |
 | Sub-agent turns | `subMaxTurns` | 60 turns | 0–1000 | model calls one sub-agent may make before it is stopped and returns what it has (0: no limit) |
 | Sub-agent budget | `subSpend` | no limit | 0–1000 | dollars one sub-agent may spend before it is stopped and returns what it has (0: no limit) |
 | Sub-agent model | `subModel` | the parent's model | provider/id, or empty | the model sub-agents run on unless their parent picks another |
