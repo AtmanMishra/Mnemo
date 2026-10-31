@@ -7,7 +7,7 @@
  */
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { describeSessionHits, MemorySession, SessionIndex, textOf, type Reflector } from "@mnemo/memory";
+import { anchorKey, anchorTag, describeSessionHits, MemorySession, SessionIndex, textOf, type AnchorCheck, type AnchorState, type Reflector } from "@mnemo/memory";
 import { sessionIndexPath, sessionSources, skillsDir } from "../runtime/paths.ts";
 import { inBackground, type Host } from "./host.ts";
 
@@ -31,8 +31,20 @@ export function memoryExtension(host: Host) {
       if (answer.stopReason === "error") throw new Error(answer.errorMessage ?? "no answer");
       return textOf(answer.content);
     };
+    // Is the code each pinned fact is about as it was? Asked of the code index, which is brought up to date first.
+    const anchorsIn = (cwd: string): AnchorCheck => async (anchors) => {
+      const ix = await host.codeIndex?.(cwd);
+      if (!ix || typeof ix === "string") return new Map();
+      return new Map(
+        anchors.map((a) => {
+          const d = ix.lookup(`${a.path}#${a.qname}`).find((d) => d.qname === a.qname);
+          return [anchorKey(a), (!d ? "gone" : d.hash === a.hash ? "fresh" : "changed") satisfies AnchorState];
+        }),
+      );
+    };
     const sessionFor = (cwd: string, model?: string): MemorySession => {
       session ??= new MemorySession({
+        anchors: anchorsIn(cwd),
         memory: mem,
         cwd,
         userSkillsDir: skillsDir(host.home),
@@ -106,14 +118,29 @@ export function memoryExtension(host: Host) {
         description:
           "Store a durable fact in long-term memory. scope 'project' for facts about this codebase, 'user' for the user's preferences. " +
           "Use a short stable key; the same key again replaces the old value (kept as history). " +
+          "A fact about one function, method or type: name it in code, and the fact is marked as possibly stale once that code changes. " +
           "Not for deferred work or the status of the current task: Mnemo records each session's open work itself.",
         parameters: Type.Object({
           scope: Type.Union([Type.Literal("project"), Type.Literal("user")]),
           key: Type.String(),
           value: Type.String(),
+          code: Type.Optional(Type.String({ description: "The definition the fact is about: 'Cache.get', or 'src/cache.ts#Cache.get' when the name is not unique" })),
         }),
         async execute(_id, params, _signal, _update, ctx) {
-          const r = await sessionFor(ctx.cwd).remember(params.scope, params.key, params.value);
+          let value = params.value;
+          if (params.code) {
+            const ix = await host.codeIndex?.(ctx.cwd);
+            const unpinned = "Remember it without code, or name the definition in the value.";
+            if (!ix) throw new Error(`The code index is off (/settings codeIndex), so a fact cannot be pinned to code. ${unpinned}`);
+            if (typeof ix === "string") throw new Error(`${ix} So a fact cannot be pinned to code here. ${unpinned}`);
+            const defs = ix.lookup(params.code).filter((d) => d.kind !== "module");
+            if (!defs.length) throw new Error(`No definition named ${params.code} in the code index. code_search finds its name. ${unpinned}`);
+            if (defs.length > 1)
+              throw new Error(`${params.code} names ${defs.length} definitions: ${defs.slice(0, 6).map((d) => `${d.path}#${d.qname}`).join(", ")}. Give one as path#name.`);
+            const d = defs[0]!;
+            value = `${value} ${anchorTag({ path: d.path, qname: d.qname, hash: d.hash })}`;
+          }
+          const r = await sessionFor(ctx.cwd).remember(params.scope, params.key, value);
           return {
             content: [{ type: "text", text: r.superseded ? `Updated ${params.key} (the old value is kept as history).` : `Remembered ${params.key}.` }],
             details: r,

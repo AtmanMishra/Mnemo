@@ -227,6 +227,7 @@ export function codeExtension(host: Host) {
       }
       return ix;
     };
+    host.codeIndex = fresh;
     const text = (body: string, details: Record<string, unknown> = {}) => ({ content: [{ type: "text" as const, text: body }], details });
     const notFound = (ix: CodeIndex, name: string) =>
       text(`No definition named ${name} in the index (${ix.files()} files). Try code_search with words from it, or grep.`);
