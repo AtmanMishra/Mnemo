@@ -454,7 +454,7 @@ nothing. The process has no CPU bound.
 ### 3.4 Subagents
 
 `spawn_subagent` runs a second pi session **in the same process** with a
-parent-composed brief (never the parent's transcript), the parent's model, an
+parent-composed brief (never the parent's transcript), a model and limits, an
 in-memory session, and `access` of `read-only` (default) or `full`. Its host is a
 copy of the parent's one level deeper, so the memory service, the approval prompts
 (the user still answers for every edit and command), the refusal signals and the
@@ -463,6 +463,19 @@ what it learns the parent recalls. A sub-agent does not reflect — its work is 
 of the parent's run, which reflects on the whole — and a checkpoint taken during
 its turn is filed under the parent's message. Its steps stream into the parent's
 tool block.
+
+**Its model and limits** come from `resolveSpawn` (`src/extensions/agents.ts`): the
+user's `subModel`, `subThinking`, `subMaxTokens`, `subContext`, `subMaxTurns` and
+`subSpend` are the defaults and the ceilings, and the parent may pass `model`,
+`thinking`, `maxTokens`, `contextTokens`, `maxTurns` and `budget` to tighten them for one
+task. A number above the user's is capped to it (and the tool result says so); where
+the user set none (0), the parent may pick any. A model the parent names must exist,
+have credentials, match `subModels` when that is set, and pass the managed `models`
+list (which `enforceModels` also applies to every request). The child gets a *copy* of
+the model object with `maxTokens` and `contextWindow` lowered: pi sends
+`options.maxTokens ?? model.maxTokens` and compacts against `model.contextWindow`, so
+nothing else needs to know. The roster node keeps the model, thinking, caps and a turn
+count, which `list_agents`, the agents page, the pane and the playground show.
 
 **The tree.** Every agent of the process is a node in one `Roster`
 (`src/runtime/roster.ts`, shared through `Host.roster`): a *root* per open
@@ -497,7 +510,8 @@ passes, also one queued while a woken turn runs. **Chains are bounded**: a
 node's `hops` is one more than the message that reached it (a sub-agent inherits its
 parent's), a user prompt resets it to 0, and a message past `LIMITS.hops` (12) is held,
 so two agents answering each other stop. `message_agent` with `wait` registers a
-listener for the target's next message and returns it as the tool result (two minutes
+listener for the target's next message (several waits on one target are answered in
+the order they were asked) and returns it as the tool result (two minutes
 at most, or until the target ends) instead of delivering it. It never waits on an
 ancestor, which is blocked in `spawn_subagent` until this agent answers. Other bounds: 2,000 characters, 30 sends a minute per
 sender, 20 held per node (cleared at its user's next prompt), and **spend**: every

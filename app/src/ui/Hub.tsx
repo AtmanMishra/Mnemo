@@ -17,7 +17,7 @@ import { PixelArt } from "./components/PixelArt.tsx";
 import { outcomeColor, Strip } from "./components/Strip.tsx";
 import { mne, mneMini, pixelText } from "./pixel.ts";
 import { palette, ground } from "./theme.ts";
-import type { RosterSnapshot } from "../runtime/roster.ts";
+import { usage, type RosterSnapshot } from "../runtime/roster.ts";
 import { linkedRoots, relation, statusStyle, treeOf } from "./tree.ts";
 import type { Row } from "../registry/cli.ts";
 
@@ -273,7 +273,7 @@ export function Hub(p: HubProps): React.ReactElement {
                   {clip(node.label, 28)}
                 </Text>
                 <Text color={palette.faint}>{node.task ? `  ${clip(node.task.replace(/\s+/g, " "), Math.max(10, p.width - prefix.length - 40))}` : ""}</Text>
-                <Text color={palette.dim}>{node.kind === "sub" && node.stepCount ? `  ${node.stepCount} step${node.stepCount === 1 ? "" : "s"}` : ""}</Text>
+                <Text color={palette.dim}>{node.kind === "sub" ? `  ${usage(node) || (node.stepCount ? `${node.stepCount} step${node.stepCount === 1 ? "" : "s"}` : "")}` : ""}</Text>
               </Text>
             );
           })}

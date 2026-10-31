@@ -11,7 +11,7 @@
  */
 import React, { useState, useSyncExternalStore } from "react";
 import { Box, Text, useInput } from "ink";
-import type { RosterEvent, RosterNode, RosterSnapshot, RosterView } from "../runtime/roster.ts";
+import { usage, type RosterEvent, type RosterNode, type RosterSnapshot, type RosterView } from "../runtime/roster.ts";
 import { linkedRoots, statusStyle, treeOf } from "./tree.ts";
 import { palette } from "./theme.ts";
 
@@ -159,7 +159,7 @@ export function Playground(p: PlaygroundProps): React.ReactElement {
   const detail: string[] = [];
   if (chosen) {
     const links = chosen.kind === "root" ? linkedRoots(snap, chosen.id).map((n) => n.label) : [];
-    detail.push(`${chosen.label} · ${chosen.kind === "root" ? "top-level" : `sub-agent, depth ${chosen.depth}`} · ${chosen.status}${chosen.kind === "sub" ? ` · ${chosen.access}` : ""}${links.length ? ` · ⇄ ${links.join(", ")}` : ""}`);
+    detail.push(`${chosen.label} · ${chosen.kind === "root" ? "top-level" : `sub-agent, depth ${chosen.depth}`} · ${chosen.status}${chosen.kind === "sub" ? ` · ${chosen.access}` : ""}${chosen.model ? ` · ${usage(chosen)}` : ""}${links.length ? ` · ⇄ ${links.join(", ")}` : ""}`);
     if (chosen.task) detail.push(`${chosen.kind === "root" ? "last prompt" : "task"}: ${chosen.task.replace(/\s+/g, " ")}`);
     for (const s of chosen.steps.slice(-2)) detail.push(`  ${s}`);
     if (chosen.answer) detail.push(`answer: ${chosen.answer.replace(/\s+/g, " ")}`);
