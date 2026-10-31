@@ -29,11 +29,7 @@ export const LANES: Lane[] = [
     title: "Coming next: open for review",
     blurb: "Written and tested, in a draft pull request that has not been merged. Not in any release, and it may change in review.",
     items: [
-      { title: "Sub-agent model and limits", why: "Settings choose the model sub-agents run on and their turns, budget, thinking and context. A parent may lower any of them for one task, never raise one past yours.", link: { label: "Pull request #79", href: `${REPO}/pull/79` } },
-      { title: "Every agent on the machine", why: "mnemo agents lists what runs in every terminal and project, and tells, steers or stops one from anywhere. Plain local files: no socket, no server.", link: { label: "Pull request #80", href: `${REPO}/pull/80` } },
-      { title: "Sub-agents saved with the conversation", why: "Each sub-agent's transcript and a state file listing every agent a session started, plus SubagentStart and SubagentStop hooks.", link: { label: "Pull request #81", href: `${REPO}/pull/81` } },
-      { title: "Runs and @N", why: "Talk to any agent by its number. One prompt of yours is a run, capped at 40 messages and $1.00 of woken turns, and stopped as one.", link: { label: "Pull request #82", href: `${REPO}/pull/82` } },
-      { title: "A shared plan and log per run", why: "Agents working on one run share a TASK.md and a LOG.md, claim steps with task_update, and see what the others did at each turn.", link: { label: "Pull request #83", href: `${REPO}/pull/83` } },
+      { title: "A shared plan and log per run", why: "Agents working on one run share a TASK.md and a LOG.md, claim steps with task_update, and see what the others did at each turn.", link: { label: "Pull request #103", href: `${REPO}/pull/103` } },
     ],
   },
   {
@@ -76,6 +72,17 @@ export const LANES: Lane[] = [
       { title: "Trace tools", why: "A way to read the redacted per-call logs: mnemo traces." },
       { title: "A sandbox", why: "Decided: an OS sandbox is deliberately skipped for now, because it needs a native helper per system that cannot be tested here. The permission gate filters; it is not a sandbox, and the docs keep saying so." },
       { title: "A retrieval upgrade", why: "Switch the memory sidecar to its approximate-nearest-neighbour path when a project's memory grows past a size where it pays." },
+    ],
+  },
+  {
+    stage: "unreleased",
+    title: "Merged, in the next release",
+    blurb: "On the main branch and tested, but not yet in a downloadable release (the newest is 0.1.9).",
+    items: [
+      { badge: "main", title: "Sub-agent model and limits", why: "Settings choose the model sub-agents run on and their turns, budget, thinking and context. A parent may lower any of them for one task, never raise one past yours.", link: { label: "Pull request #79", href: `${REPO}/pull/79` } },
+      { badge: "main", title: "Every agent on the machine", why: "mnemo agents lists what runs in every terminal and project, and tells, steers or stops one from anywhere. Plain local files: no socket, no server.", link: { label: "Pull request #80", href: `${REPO}/pull/80` } },
+      { badge: "main", title: "Sub-agents saved with the conversation", why: "Each sub-agent's transcript and a state file listing every agent a session started, plus SubagentStart and SubagentStop hooks.", link: { label: "Pull request #81", href: `${REPO}/pull/81` } },
+      { badge: "main", title: "Runs and @N", why: "Talk to any agent by its number. One prompt of yours is a run, capped at 40 messages and $1.00 of woken turns, and stopped as one.", link: { label: "Pull request #82", href: `${REPO}/pull/82` } },
     ],
   },
   {
