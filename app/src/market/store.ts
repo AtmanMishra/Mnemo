@@ -18,6 +18,7 @@ import * as path from "node:path";
 import { trustedBin, SAFE_GIT } from "../runtime/bin.ts";
 import { baseEnv } from "../runtime/env.ts";
 import { NAME, readMarketplace, type Plugin } from "./marketplace.ts";
+import { blocking, formatFindings, scanSkill, type ScanOptions, type ScanResult } from "./scan.ts";
 
 const MAX_FILES = 300;
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -194,8 +195,25 @@ export function parseKey(text: string): { plugin: string; marketplace: string } 
   return { plugin: m[1]!, marketplace: m[2]! };
 }
 
-/** Install every skill of a plugin; replaces an earlier install of it. */
-export function install(home: string, key: string): InstalledRecord {
+/** A skill scan found HIGH or CRITICAL findings, and the install was not forced. */
+export class ScanRefused extends Error {
+  constructor(
+    readonly key: string,
+    readonly scans: Record<string, ScanResult>,
+  ) {
+    const lines = Object.entries(scans).flatMap(([name, s]) => {
+      const bad = blocking(s.findings);
+      return bad.length ? [`${name}:`, ...formatFindings(bad)] : [];
+    });
+    super(`${key} was not installed: the scan found what a skill should not do.\n${lines.join("\n")}\nRead the files (mnemo skills scan ${key} lists every finding); if they are what you want, install it with --force.`);
+  }
+}
+
+/**
+ * Install every skill of a plugin; replaces an earlier install of it. Each skill is scanned first
+ * (scan.ts), and a HIGH or CRITICAL finding stops the install unless `force`.
+ */
+export function install(home: string, key: string, o: { force?: boolean; scan?: ScanOptions } = {}): InstalledRecord & { scans: Record<string, ScanResult> } {
   const { plugin: pluginName, marketplace } = parseKey(key);
   const market = readMarkets(home)[marketplace];
   if (!market) throw new Error(`no marketplace called ${marketplace} (mnemo skills marketplace add <owner/repo>)`);
@@ -207,15 +225,19 @@ export function install(home: string, key: string): InstalledRecord {
   const staging = fs.mkdtempSync(path.join(path.dirname(final), ".staging-"));
   try {
     const skills: InstalledRecord["skills"] = {};
+    const scans: Record<string, ScanResult> = {};
     for (const s of plugin.skills) {
       copyTree(s.dir, path.join(staging, s.name), MAX_BYTES);
       skills[s.name] = hashes(path.join(staging, s.name)).files;
+      // The copy is what will load, so the copy is what is read.
+      scans[s.name] = scanSkill(path.join(staging, s.name), o.scan);
     }
+    if (!o.force && Object.values(scans).some((r) => blocking(r.findings).length)) throw new ScanRefused(key, scans);
     fs.rmSync(final, { recursive: true, force: true });
     fs.renameSync(staging, final);
     const record: InstalledRecord = { marketplace, plugin: pluginName, commit: market.commit, installed: Date.now(), skills };
     writeInstalled(home, { ...readInstalled(home), [`${pluginName}@${marketplace}`]: record });
-    return record;
+    return { ...record, scans };
   } finally {
     fs.rmSync(staging, { recursive: true, force: true });
   }

@@ -203,7 +203,7 @@ ask, so a call that would ask is allowed; `deny` rules and plan mode still hold)
 applies the smallest change that passes the check. `--escalate provider/id`
 finishes a run on a stronger model after two failed checks. `mnemo memory …` is
 memory for other agents: `setup claude-code|codex` prints the hooks and MCP entry,
-`ingest` learns from Claude Code sessions, `tidy [--apply]` retires duplicate facts
+`ingest` learns from Claude Code, Codex and opencode sessions, `tidy [--apply]` retires duplicate facts
 and pitfalls, facts about files that are gone, and what you marked wrong twice,
 `curate [--apply]` sorts skills by last use (stale after 30 days, archived after
 90, personal skills only), `status` says what memory holds.

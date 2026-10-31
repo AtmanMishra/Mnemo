@@ -64,7 +64,7 @@ export function kernelExtension(host: Host) {
         label: "Python",
         description:
           "Run Python in a persistent kernel (state survives between calls). Use it to compute, transform data, or script many steps at once. " +
-          "Inside the code, call tools as tools.read(path=...), tools.bash(command=...), tools.grep(pattern=...); " +
+          "Inside the code, call any tool you have by its name, e.g. tools.read(path=...), tools.bash(command=...); " +
           "tools.parallel([(\"read\", {\"path\": \"a\"}), ...]) runs several at once. The value of the last expression is returned.",
         parameters: Type.Object({
           code: Type.String({ description: "Python source to run" }),

@@ -379,6 +379,7 @@ The web page [How it works](https://mnemo.atmanmishra.dev/how-it-works) draws it
 | `mnemo memory status` | what memory holds and what has been ingested |
 | `mnemo memory tidy [--apply]` | find duplicates, facts about files that are gone, and what was marked wrong; `--apply` retires them |
 | `mnemo memory curate [--apply]` | skills by last use: stale after 30 days, archived after 90 |
+| `mnemo background` | ingest, tidy and curate on a timer while Mnemo is open, each result told to the open conversations of its project; off until `mnemo settings set background on` (tidy and curate only report) |
 | `--no-memory` · `--no-reflect` | run without memory, or without learning after the run |
 
 > [!TIP]
@@ -394,7 +395,7 @@ can drive it too, and a frontier model's sessions can teach the memory a cheap m
 | Agent | How | Command |
 |---|---|---|
 | Claude Code, live | hooks at session start, on each prompt and at the end of a run | `mnemo memory setup claude-code` |
-| Claude Code, after the fact | replays saved sessions through the loop, once each | `mnemo memory ingest` |
+| Claude Code, Codex, opencode, after the fact | replays saved sessions through the loop, once each | `mnemo memory ingest [--agent claude-code\|codex\|opencode]` |
 | Codex | MCP server on stdio | `mnemo memory setup codex` |
 | Cursor, opencode, any MCP client | `memory_recall`, `memory_search`, `memory_remember` | `mnemo memory mcp` |
 
@@ -428,7 +429,9 @@ flowchart TB
   of a prompt (or `/tell 2 …`) to say something to agent #2 as yourself. One prompt of yours is a
   **run**: the agents it sets going share it, so 1 can ask 2, 2 can ask 3 and 4 at once
   (`message_agent` takes up to 4 recipients), and the answers come back up the chain. `r r` on the
-  agents page stops a whole run.
+  agents page stops a whole run. A run with more than one agent shares a plan and a log
+  (`TASK.md`, `LOG.md` in the Mnemo home; `/task` shows them): agents claim steps with
+  `task_update` and each turn starts with what the others did.
 - **Bounded.** A message wakes an idle agent, but a chain stops after 12 messages in a row, a run
   after 40 messages, woken turns may spend $0.50 per agent and $1.00 per run between your prompts,
   and an agent cannot message back past the one that asked it. Depth 3, 4 live children per agent and 16 per
@@ -520,11 +523,14 @@ mnemo agents                          # what runs now in every terminal and proj
 mnemo agents show k3f9.2              # one agent: task, steps, model, mode, answer, transcript
 mnemo agents tell k3f9.2 "also check the error path"
 mnemo agents stop k3f9                # stop that terminal's turn
+mnemo agents saved                    # every saved conversation in every project: open, interrupted or saved
+mnemo agents resume 019a3f            # continue one here, in its own folder (a registry ref works too)
 ```
 
 Each Mnemo process (a terminal, `-p`, `--rpc`, a scheduled run) keeps a file in
 `~/.mnemo/registry/`, so any terminal sees the rest; the hub lists them under *Elsewhere*. One that
-crashed shows as **lost**. Your words start a turn under that terminal's mode and gate, and its
+crashed shows as **lost**, its conversation as **interrupted**, and the next Mnemo started in that
+folder says so; `resume` continues it. Your words start a turn under that terminal's mode and gate, and its
 approvals are answered only there. It is all files: no socket, no server, nothing leaves the machine.
 `MNEMO_REGISTRY=0` keeps a process out.
 
