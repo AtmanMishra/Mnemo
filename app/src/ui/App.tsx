@@ -101,6 +101,7 @@ export function App({ controller, version, home, motion, clearTerminal }: AppPro
           active={!dialog}
           commands={() => controller.commands()}
           files={files}
+          agents={() => controller.agents()}
           footer={chrome.footer}
           statuses={chrome.statuses}
           width={columns}

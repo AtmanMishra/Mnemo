@@ -14,7 +14,7 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { SessionManager, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
 import {
   contextHook,
@@ -33,7 +33,9 @@ import {
   type HookInput,
   type Reflector,
 } from "@mnemo/memory";
+import { runBackground, type RunResult } from "./background/run.ts";
 import { createModelRuntime } from "./runtime/runtime.ts";
+import { openSettings } from "./runtime/settings.ts";
 import { sessionIndexPath, sessionSources, skillsDir } from "./runtime/paths.ts";
 
 export const MEMORY_USAGE = `mnemo memory — memory for any coding agent
@@ -273,4 +275,32 @@ async function runHook(home: string, agentDir: string, out: NodeJS.WritableStrea
     memory.stop();
   }
   return 0;
+}
+
+/** Folders Mnemo sessions were saved in during the last `days` days that are still there. */
+export async function recentProjects(days = 7, now = Date.now()): Promise<string[]> {
+  const sessions = await SessionManager.listAll().catch(() => []);
+  const cwds = sessions.filter((s) => s.cwd && now - s.modified.getTime() < days * 86_400_000).map((s) => s.cwd);
+  return [...new Set(cwds)].filter((d) => fs.statSync(d, { throwIfNoEntry: false })?.isDirectory());
+}
+
+/** `mnemo background run`: the background tasks with the real sidecar and model (background/run.ts). */
+export async function runBackgroundTasks(home: string, agentDir: string, force: boolean): Promise<RunResult> {
+  const memsrv = findMemsrv(home);
+  if (!memsrv) throw new Error("memsrv was not found — `mnemo doctor` says where it looks");
+  const cfg = openSettings(home).get();
+  let reflect: Reflector | undefined;
+  let noModel: string | undefined;
+  try {
+    const modelRuntime = await createModelRuntime(agentDir);
+    reflect = modelReflector(modelRuntime, resolveModel(modelRuntime, agentDir, cfg.backgroundModel || process.env.MNEMO_MEMORY_MODEL || undefined));
+  } catch (error) {
+    noModel = `no model to learn with (mnemo settings set backgroundModel <provider/id>): ${error instanceof Error ? error.message : String(error)}`;
+  }
+  const memory = new MemoryService(memsrv, journalPath(home));
+  try {
+    return await runBackground({ home, everyMin: cfg.backgroundEvery, force, memory, reflect, noModel, userSkillsDir: skillsDir(home), projects: () => recentProjects() });
+  } finally {
+    memory.stop();
+  }
 }

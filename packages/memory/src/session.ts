@@ -28,7 +28,8 @@ import { Credit } from "./credit.ts";
 import { projectIdentity, type ProjectIdentity } from "./project.ts";
 import { redact, secretUnderKey } from "./redact.ts";
 import { unsafeMemory } from "./safety.ts";
-import { describeHit, hitLine, profileBlock, recallMessage } from "./recall.ts";
+import { anchorsIn, showValue, type AnchorCheck } from "./anchor.ts";
+import { describeHit, hitLine, profileBlock, recallMessage, type AnchorStates } from "./recall.ts";
 import { digest, parseReflection, REFLECT_PROMPT, worthReflecting, type Reflection, type ToolEvent } from "./reflect.ts";
 import { factValue, factsOf, type Hit, type MemoryService, type ProfileFact } from "./service.ts";
 import { renderSkill, skillPath, writeSkill, type SkillScope } from "./skills.ts";
@@ -87,6 +88,8 @@ export interface SessionOptions {
   approveSkill?: (offer: SkillOffer) => Promise<boolean>;
   /** A skill file was written: the agent should reload its skills. */
   skillsChanged?: () => void;
+  /** Whether the code facts are pinned to is as it was (anchor.ts); absent: not checked. */
+  anchors?: AnchorCheck;
 }
 
 export interface Recalled {
@@ -161,6 +164,8 @@ export class MemorySession {
   private systemText: string | undefined;
   /** The tools `systemText` was written for. */
   private systemTools: string | undefined;
+  /** The pinned facts whose code had changed or gone when the profile block was made. */
+  private stale = "";
   private firstRun = true;
   private readonly linked = new Set<number>();
   /** This run's failure markers, with the failure text a fix is matched against. */
@@ -288,9 +293,15 @@ export class MemorySession {
     );
     const lastSession = o.lastSession ? projectFacts.find((f) => f.key === "last session")?.value : undefined;
     const tools = o.tools?.join(" ");
-    if (tools !== this.systemTools) this.systemText = undefined;
-    this.systemTools = tools;
-    this.systemText ??= profileBlock(projectFacts, userFacts, this.identity.name, o.tools);
+    const states = await this.anchorStates([...projectFacts, ...userFacts].map((f) => f.value).concat(hits.flatMap((h) => factsOf(h.state).map((f) => f.value))));
+    // Code a fact is pinned to changed since the profile block was made: it is made again.
+    const stale = [...(states ?? [])].filter(([, s]) => s !== "fresh").map(([k, s]) => `${k} ${s}`).join("\n");
+    if (stale !== this.stale || tools !== this.systemTools) {
+      this.stale = stale;
+      this.systemTools = tools;
+      this.systemText = undefined;
+    }
+    this.systemText ??= profileBlock(projectFacts, userFacts, this.identity.name, states, o.tools);
     const items = [
       ...(projectFacts.length ? [`${projectFacts.length} fact${projectFacts.length === 1 ? "" : "s"} about ${this.identity.name}`] : []),
       ...(userFacts.length ? [`${userFacts.length} preference${userFacts.length === 1 ? "" : "s"}`] : []),
@@ -298,14 +309,26 @@ export class MemorySession {
       ...hits.map(hitLine),
     ];
     if (items.length) this.note({ kind: "recall", items });
-    return { system: this.systemText, message: hits.length || lastSession ? recallMessage(hits, lastSession) : undefined, items };
+    return { system: this.systemText, message: hits.length || lastSession ? recallMessage(hits, lastSession, states) : undefined, items };
+  }
+
+  /** What has happened to the code these values are pinned to; undefined when none is, or nobody can say. */
+  private async anchorStates(values: string[]): Promise<AnchorStates | undefined> {
+    const anchors = anchorsIn(values);
+    if (!anchors.length || !this.o.anchors) return undefined;
+    try {
+      return await this.o.anchors(anchors);
+    } catch {
+      return undefined;
+    }
   }
 
   /** Search within this project, rendered for a model. */
   async search(query: string, k = 5): Promise<string> {
     this.project ??= await this.mem.project(this.identity.id, this.identity.root);
     const hits = (await this.mem.search(query, k, this.project)).filter(readable);
-    return hits.length ? hits.map(describeHit).join("\n") : "Nothing in memory matches.";
+    const states = await this.anchorStates(hits.flatMap((h) => factsOf(h.state).map((f) => f.value)));
+    return hits.length ? hits.map((h) => describeHit(h, states)).join("\n") : "Nothing in memory matches.";
   }
 
   /** A fact the agent decided to keep. Throws when it cannot be kept. */
@@ -316,7 +339,7 @@ export class MemorySession {
     if (secretUnderKey(key, value)) throw new Error("memory does not keep credentials: remember where to find it (a vault, an env var's name) instead");
     const r = await this.learnFact(scope, key.toLowerCase(), value);
     if (!r) throw new Error("memory is not reachable");
-    this.note({ kind: "learned", items: [`${scope} · ${key}: ${value}`] });
+    this.note({ kind: "learned", items: [`${scope} · ${key}: ${showValue(value)}`] });
     return r;
   }
 

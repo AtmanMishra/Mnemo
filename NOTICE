@@ -9,3 +9,7 @@ own licences (MIT, Apache-2.0, BSD, ISC and similar), among them pi
 (@earendil-works/pi-coding-agent and pi-ai), Ink, React and marked on the
 TypeScript side and the crates listed in memory-layer/Cargo.lock on the Rust
 side. Their licences travel with them in node_modules and the Cargo registry.
+
+The skill scanning rules in app/src/market/scan.ts are ported from NVIDIA
+SkillSpector (https://github.com/NVIDIA/SkillSpector), Copyright (c) 2026
+NVIDIA CORPORATION & AFFILIATES, licensed under the Apache License, Version 2.0.
