@@ -57,7 +57,7 @@ test("a sub-agent starts a sub-agent of its own, and the roster records the tree
   expect(nodes[1]!.answer).toBe("modules mapped: fetch");
   expect(nodes[1]!.stepCount).toBeGreaterThan(0); // its delegation is a step
   expect(toolOutput(e, "spawn_subagent")[0]).toMatchObject({ status: "done" });
-  expect(roster.snapshot().events.map((x) => x.kind)).toEqual(["root", "spawn", "spawn", "done", "done"]);
+  expect(roster.snapshot().events.map((x) => x.kind)).toEqual(["root", "run", "spawn", "spawn", "done", "done"]);
 });
 
 test("a sub-agent whose model call fails says why, instead of finishing without an answer", async () => {

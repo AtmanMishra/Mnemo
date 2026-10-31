@@ -14,8 +14,13 @@
  *   inferred  the only definition of that name in the language family
  * Anything else stays untied and is counted, never guessed.
  *
- * What it never holds: file bodies (snippets are read from disk when asked for), files a
- * read tool may not read (the caller's `exclude`), files over 1 MiB, and binary files.
+ * Beside the definitions it keeps a text index for grep: every text file of the project (not
+ * only source), as the set of three-character sequences it holds. It is built and refreshed
+ * only when grep asks (`refreshText`), never by the code tools.
+ *
+ * What it never holds: file bodies (snippets are read from disk when asked for; the text index
+ * is contentless), files a read tool may not read (the caller's `exclude`), files over 1 MiB,
+ * and binary files.
  */
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
@@ -26,7 +31,7 @@ import { extract, type Definition, type SymbolKind } from "./extract.ts";
 import { familyOf, langOf, parsers, type LangId } from "./languages.ts";
 
 /** Bump when the tables or what the extractor writes into them change: the index is rebuilt. */
-const SCHEMA = "1";
+const SCHEMA = "2";
 const MAX_BYTES = 1024 * 1024;
 
 export type Confidence = "exact" | "inferred";
@@ -93,6 +98,8 @@ export class CodeIndex {
   private readonly exclude: (rel: string) => boolean;
   private readonly list: (root: string) => string[];
   private readonly maxFiles: number;
+  /** Whether this SQLite has the trigram index; without it grep narrows nothing. */
+  readonly trigrams: boolean;
   /** Files each file imports, rebuilt after a refresh changes anything. */
   private importsOf?: Map<string, Set<string>>;
 
@@ -113,7 +120,7 @@ export class CodeIndex {
     this.db.run("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)");
     const version = this.db.query("SELECT value FROM meta WHERE key = 'schema'").get() as { value: string } | null;
     if (version?.value !== SCHEMA) {
-      for (const t of ["files", "defs", "refs", "defs_fts"]) this.db.run(`DROP TABLE IF EXISTS ${t}`);
+      for (const t of ["files", "defs", "refs", "defs_fts", "text_files", "text_fts"]) this.db.run(`DROP TABLE IF EXISTS ${t}`);
       this.db.run("INSERT OR REPLACE INTO meta VALUES ('schema', ?)", [SCHEMA]);
     }
     this.db.run("CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, size INTEGER, mtime REAL, hash TEXT, lang TEXT)");
@@ -126,6 +133,15 @@ export class CodeIndex {
     this.db.run("CREATE INDEX IF NOT EXISTS refs_name ON refs (name, kind)");
     this.db.run("CREATE INDEX IF NOT EXISTS refs_src ON refs (path, src)");
     this.db.run("CREATE VIRTUAL TABLE IF NOT EXISTS defs_fts USING fts5(words, signature, path)");
+    // Every text file for grep: which trigrams it holds, never its text (contentless).
+    this.db.run("CREATE TABLE IF NOT EXISTS text_files (id INTEGER PRIMARY KEY, path TEXT UNIQUE, size INTEGER, mtime REAL, hash TEXT, text INTEGER)");
+    try {
+      this.db.run("CREATE VIRTUAL TABLE IF NOT EXISTS text_fts USING fts5(body, tokenize='trigram', content='', contentless_delete=1, detail='none')");
+      this.trigrams = true;
+    } catch {
+      // An SQLite older than 3.43 (an old macOS's own): grep reads every text file instead.
+      this.trigrams = false;
+    }
   }
 
   close(): void {
@@ -180,6 +196,76 @@ export class CodeIndex {
     }
     if (!st.isFile() || st.size > MAX_BYTES) return;
     if (this.readFile(rel, st, await parsers())) this.importsOf = undefined;
+  }
+
+  /** Bring the text index (every text file, for grep) up to date with the files on disk. */
+  async refreshText(): Promise<RefreshResult> {
+    const known = new Map(
+      (this.db.query("SELECT path, size, mtime, hash FROM text_files").all() as { path: string; size: number; mtime: number; hash: string }[]).map((r) => [r.path, r]),
+    );
+    const wanted = this.list(this.root).filter((f) => !this.exclude(f));
+    const sources = wanted.filter((f) => langOf(f)).length;
+    if (sources > this.maxFiles) return { read: 0, removed: 0, files: 0, tooMany: sources };
+    const seen = new Set<string>();
+    let read = 0;
+    for (const rel of wanted) {
+      let st: fs.Stats;
+      try {
+        st = fs.statSync(path.join(this.root, rel));
+      } catch {
+        continue;
+      }
+      if (!st.isFile() || st.size > MAX_BYTES) continue;
+      seen.add(rel);
+      const k = known.get(rel);
+      if (k && k.size === st.size && k.mtime === st.mtimeMs) continue;
+      if (this.readText(rel, st, k?.hash) && ++read % 50 === 0) await new Promise((r) => setTimeout(r, 0)); // let the interface draw
+    }
+    let removed = 0;
+    for (const rel of known.keys())
+      if (!seen.has(rel)) {
+        this.forgetText(rel);
+        removed++;
+      }
+    return { read, removed, files: seen.size };
+  }
+
+  private readText(rel: string, st: fs.Stats, oldHash?: string): boolean {
+    let bytes: Buffer;
+    try {
+      bytes = fs.readFileSync(path.join(this.root, rel));
+    } catch {
+      return false;
+    }
+    const hash = Bun.hash(bytes).toString(36);
+    if (hash === oldHash) {
+      this.db.run("UPDATE text_files SET size = ?, mtime = ? WHERE path = ?", [st.size, st.mtimeMs, rel]);
+      return false;
+    }
+    const text = !bytes.subarray(0, 8192).includes(0);
+    this.db.transaction(() => {
+      this.forgetText(rel);
+      const r = this.db.run("INSERT INTO text_files (path, size, mtime, hash, text) VALUES (?, ?, ?, ?, ?)", [rel, st.size, st.mtimeMs, hash, text ? 1 : 0]);
+      if (text && this.trigrams) this.db.run("INSERT INTO text_fts (rowid, body) VALUES (?, ?)", [r.lastInsertRowid, bytes.toString("utf8")]);
+    })();
+    return true;
+  }
+
+  private forgetText(rel: string): void {
+    if (this.trigrams) this.db.run("DELETE FROM text_fts WHERE rowid IN (SELECT id FROM text_files WHERE path = ?)", [rel]);
+    this.db.run("DELETE FROM text_files WHERE path = ?", [rel]);
+  }
+
+  /**
+   * Text files, in path order: all of them, or only those holding every trigram of one of the
+   * alternatives (see code/text.ts `requiredGrams`).
+   */
+  textFiles(grams?: string[][]): string[] {
+    if (!grams || !this.trigrams) return (this.db.query("SELECT path FROM text_files WHERE text = 1 ORDER BY path").all() as { path: string }[]).map((r) => r.path);
+    const match = grams.map((b) => `(${b.map((g) => `"${g.replaceAll('"', '""')}"`).join(" AND ")})`).join(" OR ");
+    return (
+      this.db.query("SELECT f.path AS path FROM text_fts JOIN text_files f ON f.id = text_fts.rowid WHERE text_fts MATCH ? AND f.text = 1 ORDER BY f.path").all(match) as { path: string }[]
+    ).map((r) => r.path);
   }
 
   /** Parse and store one file; false when its bytes had not changed. */

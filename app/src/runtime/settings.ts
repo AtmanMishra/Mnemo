@@ -59,6 +59,7 @@ export interface Settings extends Record<KeyAction, string> {
   // Behaviour
   mode: (typeof MODE_CHOICES)[number];
   reflect: boolean;
+  tidyMemory: boolean;
   verify: boolean;
   escalateModel: string;
   escalateAfter: number;
@@ -73,6 +74,9 @@ export interface Settings extends Record<KeyAction, string> {
   compactKeep: number;
   passEnv: string;
   remote: boolean;
+  background: boolean;
+  backgroundEvery: number;
+  backgroundModel: string;
   // Agents
   maxDepth: number;
   maxChildren: number;
@@ -83,6 +87,9 @@ export interface Settings extends Record<KeyAction, string> {
   messageChars: number;
   sendsPerMinute: number;
   inbox: number;
+  runMessages: number;
+  runWakeSpend: number;
+  fanOut: number;
   subMaxTurns: number;
   subSpend: number;
   subModel: string;
@@ -90,6 +97,7 @@ export interface Settings extends Record<KeyAction, string> {
   subThinking: (typeof THINKING_CHOICES)[number];
   subMaxTokens: number;
   subContext: number;
+  keepSubTranscripts: number;
   // Notifications and updates
   notify: boolean;
   notifyAfter: number;
@@ -143,6 +151,7 @@ export const DEFS: Record<SettingKey, Def> = {
 
   mode: { group: "Behaviour", label: "Default mode", help: "how much Mnemo may do without asking (bypass modes are never a default)", kind: "enum", default: "default", options: MODE_CHOICES, restart: true },
   reflect: bool("Behaviour", "Learn after runs", "write durable facts to memory after each run (--no-reflect overrides)", true),
+  tidyMemory: bool("Behaviour", "Tidy memory", "once a day per project, retire duplicate facts, facts about files that are gone and memories marked wrong (kept as history; mnemo memory tidy shows what it would do)", true),
   verify: bool("Behaviour", "Check changed code", "send a run that changed code back to run a check (--no-verify overrides)", true),
   escalateModel: { group: "Behaviour", label: "Escalation model", help: "provider/id to finish a run on after failed checks; empty for none", kind: "text", default: "" },
   escalateAfter: int("Behaviour", "Escalate after", "failed checks in one run before escalating", 2, 1, 10, "checks"),
@@ -158,6 +167,9 @@ export const DEFS: Record<SettingKey, Def> = {
   passEnv: { group: "Behaviour", label: "Pass to commands", help: "variables bash and Python also get, comma-separated, such as GITHUB_TOKEN, SSH_AUTH_SOCK (they get no tokens otherwise)", kind: "text", default: "" },
 
   remote: bool("Behaviour", "Remote view", "allow /remote to start a read-only web view of the session on this machine (127.0.0.1 only, behind a token; off until you turn this on)", false),
+  background: bool("Behaviour", "Background memory work", "while Mnemo is open, learn from new Claude Code sessions and check memory and skills for clutter, then tell open conversations what changed (learning costs model calls; tidy and curate only report)", false),
+  backgroundEvery: int("Behaviour", "Background interval", "minutes between runs of each background task", 60, 10, 1440, "min"),
+  backgroundModel: { group: "Behaviour", label: "Background model", help: "provider/id background learning reflects with; empty: $MNEMO_MEMORY_MODEL, then the default model", kind: "text", default: "" },
 
   maxDepth: int("Agents", "Sub-agent depth", "how deep sub-agents nest (0: none; raising it reaches conversations opened after)", 3, 0, 6),
   maxChildren: int("Agents", "Sub-agents per agent", "live sub-agents one agent may have", 4, 1, 16),
@@ -168,6 +180,9 @@ export const DEFS: Record<SettingKey, Def> = {
   messageChars: int("Agents", "Message length", "characters in one agent-to-agent message", 2000, 100, 20000, "chars"),
   sendsPerMinute: int("Agents", "Message rate", "messages one agent may send per minute", 30, 1, 300),
   inbox: int("Agents", "Held messages", "messages an agent may hold for your next prompt", 20, 1, 200),
+  runMessages: int("Agents", "Messages per run", "messages all agents may pass in one run (what one prompt of yours sets going) before they wait for you", 40, 1, 1000, "messages"),
+  runWakeSpend: { group: "Agents", label: "Run wake budget", help: "dollars all turns that messages start in one run may spend together (0: messages wake no one)", kind: "number", default: 1, min: 0, max: 1000, unit: "$" },
+  fanOut: int("Agents", "Recipients per message", "agents one message may go to", 4, 1, 16),
   subMaxTurns: int("Agents", "Sub-agent turns", "model calls one sub-agent may make before it is stopped and returns what it has (0: no limit)", 60, 0, 1000, "turns"),
   subSpend: { group: "Agents", label: "Sub-agent budget", help: "dollars one sub-agent may spend before it is stopped and returns what it has (0: no limit)", kind: "number", default: 0, min: 0, max: 1000, unit: "$" },
   subModel: { group: "Agents", label: "Sub-agent model", help: "provider/id sub-agents run on unless their parent picks another; empty: the parent's current model", kind: "text", default: "" },
@@ -175,6 +190,7 @@ export const DEFS: Record<SettingKey, Def> = {
   subThinking: { group: "Agents", label: "Sub-agent thinking", help: "thinking level of a sub-agent, and the most its parent may ask for (inherit: the parent's own)", kind: "enum", default: "inherit", options: THINKING_CHOICES },
   subMaxTokens: int("Agents", "Sub-agent output", "output tokens per model call of a sub-agent, and the most its parent may ask for (0: the model's own maximum)", 0, 0, 1_000_000, "tokens"),
   subContext: int("Agents", "Sub-agent context", "context a sub-agent keeps before it compacts, and the most its parent may ask for (0: the model's window; otherwise at least 32000)", 0, 0, 10_000_000, "tokens"),
+  keepSubTranscripts: int("Agents", "Keep sub-agent transcripts", "days a sub-agent's saved transcript is kept (0: forever; your own conversations are never removed)", 30, 0, 3650, "days"),
 
   notify: bool("Notifications", "Desktop notice", "tell the terminal when a long turn ends or Mnemo asks, while it is in the background (MNEMO_NOTIFY=0 overrides)", true, true),
   notifyAfter: int("Notifications", "Notify after", "a turn must run this long to notify", 20, 0, 3600, "s"),
@@ -208,7 +224,7 @@ export function defaults(): Settings {
 
 /** The roster's caps, from the settings that name them. */
 export function limitsOf(s: Settings): Partial<Limits> {
-  return { maxDepth: s.maxDepth, maxChildren: s.maxChildren, maxLive: s.maxLive, hops: s.hops, wakeSpend: s.wakeSpend, runSpend: s.runSpend, messageChars: s.messageChars, sendsPerWindow: s.sendsPerMinute, inbox: s.inbox, maxTurns: s.maxTurns, subMaxTurns: s.subMaxTurns, subSpend: s.subSpend };
+  return { maxDepth: s.maxDepth, maxChildren: s.maxChildren, maxLive: s.maxLive, hops: s.hops, wakeSpend: s.wakeSpend, runSpend: s.runSpend, messageChars: s.messageChars, sendsPerWindow: s.sendsPerMinute, inbox: s.inbox, runMessages: s.runMessages, runWakeSpend: s.runWakeSpend, fanOut: s.fanOut, maxTurns: s.maxTurns, subMaxTurns: s.subMaxTurns, subSpend: s.subSpend };
 }
 
 /** What pi's compaction should do, from the settings. */
@@ -289,6 +305,7 @@ export function parseValue(key: SettingKey, raw: unknown): Parsed<Settings[Setti
     case "text": {
       const t = String(text ?? "");
       if (t === "") return { ok: true, value: "" };
+      if ((key === "escalateModel" || key === "backgroundModel") && !/^[\w.-]+\/[\w.:/@+-]+$/.test(t)) return { ok: false, error: `${key} is provider/model-id, or empty` };
       if (key === "escalateModel" && !MODEL_SPEC.test(t)) return { ok: false, error: "escalateModel is provider/model-id, or empty" };
       if (key === "subModel" && !MODEL_SPEC.test(t)) return { ok: false, error: "subModel is provider/model-id, or empty" };
       if (key === "subModels") {
@@ -350,10 +367,11 @@ export function showValue(key: SettingKey, value: Settings[SettingKey]): string 
   if (key === "subModel" && value === "") return "the parent's model";
   if (key === "subModels" && value === "") return "any with credentials";
   if (def.kind === "text") return value === "" ? "none" : String(value);
-  if (key === "wakeSpend") return `$${(value as number).toFixed(2)}`;
+  if (key === "wakeSpend" || key === "runWakeSpend") return `$${(value as number).toFixed(2)}`;
   if (key === "subSpend") return value === 0 ? "no limit" : `$${(value as number).toFixed(2)}`;
   if ((key === "maxTurns" || key === "subMaxTurns") && value === 0) return "no limit";
   if ((key === "subMaxTokens" || key === "subContext") && value === 0) return "the model's own";
+  if (key === "keepSubTranscripts" && value === 0) return "forever";
   return def.unit && def.kind !== "chord" ? `${value} ${def.unit}` : String(value);
 }
 

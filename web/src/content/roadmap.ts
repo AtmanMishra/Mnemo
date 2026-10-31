@@ -29,10 +29,11 @@ export const LANES: Lane[] = [
     title: "Coming next: open for review",
     blurb: "Written and tested, in a draft pull request that has not been merged. Not in any release, and it may change in review.",
     items: [
-      { title: "Hooks", why: "Run your own commands before and after tool calls and sessions. A hook can block a call, and no hook can loosen the permission gate.", link: { label: "Pull request #62", href: `${REPO}/pull/62` } },
-      { title: "Schedules", why: "mnemo schedule runs a prompt on a timer. Jobs live only in your own ~/.mnemo/schedules.json, never in a project, and a run is read-only plan mode unless you gave the job actions.", link: { label: "Pull request #68", href: `${REPO}/pull/68` } },
-      { title: "Language-server diagnostics", why: "After an edit, the agent is told about the errors your language server reports. Opt-in through lsp.json, and only in a folder you trust.", link: { label: "Pull request #67", href: `${REPO}/pull/67` } },
-      { title: ".agents/ as the project folder", why: "A project's own settings, skills and MCP config move from .pi/ to .agents/. Breaking for a repository that only has .pi/.", link: { label: "Pull request #65", href: `${REPO}/pull/65` } },
+      { title: "Sub-agent model and limits", why: "Settings choose the model sub-agents run on and their turns, budget, thinking and context. A parent may lower any of them for one task, never raise one past yours.", link: { label: "Pull request #79", href: `${REPO}/pull/79` } },
+      { title: "Every agent on the machine", why: "mnemo agents lists what runs in every terminal and project, and tells, steers or stops one from anywhere. Plain local files: no socket, no server.", link: { label: "Pull request #80", href: `${REPO}/pull/80` } },
+      { title: "Sub-agents saved with the conversation", why: "Each sub-agent's transcript and a state file listing every agent a session started, plus SubagentStart and SubagentStop hooks.", link: { label: "Pull request #81", href: `${REPO}/pull/81` } },
+      { title: "Runs and @N", why: "Talk to any agent by its number. One prompt of yours is a run, capped at 40 messages and $1.00 of woken turns, and stopped as one.", link: { label: "Pull request #82", href: `${REPO}/pull/82` } },
+      { title: "A shared plan and log per run", why: "Agents working on one run share a TASK.md and a LOG.md, claim steps with task_update, and see what the others did at each turn.", link: { label: "Pull request #83", href: `${REPO}/pull/83` } },
     ],
   },
   {
@@ -44,14 +45,6 @@ export const LANES: Lane[] = [
         title: "Background curator",
         why: "While you are away, it uses your default model to tidy memory, merge duplicate facts, resurface forgotten knowledge and propose skill changes. Facts apply on their own; skills wait for your review. It runs only when idle and within a daily token budget.",
         link: { label: "feature/background-curator", href: `${REPO}/tree/feature/background-curator` },
-      },
-      {
-        title: "Remote view",
-        why: "Watch and answer a running session from a browser. Loopback only, behind a token, and off by default. Being built; no pull request yet.",
-      },
-      {
-        title: "A marketplace for skills and MCP servers",
-        why: "Read-only, and every entry pinned by content hash so what you install is what was reviewed. Being built; no pull request yet.",
       },
       {
         title: "A pass in real terminals",
@@ -86,25 +79,14 @@ export const LANES: Lane[] = [
     ],
   },
   {
-    stage: "unreleased",
-    title: "Merged, in the next release",
-    blurb: "On the main branch and tested, but not yet in a downloadable release (the newest is 0.1.8).",
-    items: [
-      { badge: "main", title: "A code index for the agent", why: "code_search, code_symbol, code_refs and code_map answer where something is defined and what calls it, and after an edit the agent is told what elsewhere calls what it changed. Two settings, codeIndex and codeImpact, turn it down.", link: { label: "Pull request #66", href: `${REPO}/pull/66` } },
-      { badge: "main", title: "Commands get an allowlisted environment", why: "bash and the Python kernel no longer inherit your whole environment, only a short list. passEnv names more. MCP servers over stdio get the same list, and MCP over HTTP stays off unless your own mcp.json says allowNetwork.", link: { label: "Pull requests #53 and #61", href: `${REPO}/pull/61` } },
-      { badge: "main", title: "Managed policy and network egress rules", why: "A policy file user and project settings cannot widen, and outbound rules that refuse cloud metadata addresses by default.", link: { label: "Pull requests #52 and #58", href: `${REPO}/pull/58` } },
-      { badge: "main", title: "Deny rules hold inside the Python tool", why: "A path the gate refuses in bash is refused in a Python cell too.", link: { label: "Pull request #50", href: `${REPO}/pull/50` } },
-      { badge: "main", title: "Plan mode asks before it plans", why: "Clarifying questions with choices, answered before a plan is written.", link: { label: "Pull request #57", href: `${REPO}/pull/57` } },
-      { badge: "main", title: "--model, and a provider's preferred model", why: "Pick the model on the command line. Bedrock is no longer the default because one AWS variable is set, and a provider starts on its preferred model.", link: { label: "Pull requests #51 and #63", href: `${REPO}/pull/63` } },
-      { badge: "main", title: "Stop at the first 401, 402 or 403", why: "A refused key or an empty balance ends the run with the reason instead of retrying.", link: { label: "Pull request #49", href: `${REPO}/pull/49` } },
-      { badge: "main", title: "mnemo -p says where it works", why: "When the folder has unfinished work or no git, a headless run says so up front.", link: { label: "Pull request #64", href: `${REPO}/pull/64` } },
-    ],
-  },
-  {
     stage: "shipped",
     title: "Shipped",
     blurb: "Done, in the release named.",
     items: [
+      { title: "Hooks, scheduled runs and skills from marketplaces", why: "Your own commands before and after tool calls, mnemo schedule for a prompt on a timer (read-only unless the job may act), and mnemo skills to install a plugin's skills, hash-checked.", in: "0.1.9" },
+      { title: "A code index and language-server diagnostics", why: "code_search, code_symbol, code_refs and code_map instead of only grep, and the compiler's errors in the result of an edit.", in: "0.1.9" },
+      { title: "A remote view, .agents/ and a faster start", why: "/remote serves a read-only view on loopback behind a token. A folder's resources move from .pi/ to .agents/. Commands start without loading the whole session.", in: "0.1.9" },
+      { title: "An allowlisted environment, egress rules and a managed policy", why: "Commands and MCP servers get a short environment list, cloud metadata addresses are refused, deny rules hold in the Python tool, and an administrator's policy cannot be widened.", in: "0.1.9" },
       { title: "A VS Code extension, MCP servers as tools, a wider /rewind, a prompt budget", why: "mnemo --rpc for editors, MCP through the permission gate, shell changes rewound, a dollar cap per prompt, and nothing a folder chose runs before it is trusted.", in: "0.1.8" },
       { title: "Agents that talk to each other on their own", why: "A message wakes an idle agent, which can answer; bounded at 12 messages in a row and a $0.50 allowance for turns messages start, until you prompt again.", in: "0.1.6" },
       { title: "Type to a running sub-agent; links that survive a restart", why: "A focused sub-agent pane in the split is a prompt to it, and linked projects are linked again when both are open.", in: "0.1.6" },

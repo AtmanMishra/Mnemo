@@ -76,3 +76,7 @@ A check returns `true` or a string with the evidence of failure.
 `bun eval/code-index.ts` measures `code_search`, `code_refs` and the `codeImpact` note against the
 TypeScript compiler and `grep`, with no model and no network. `--sample N` sets how many symbols,
 `--json <file>` keeps the numbers. Results and what they changed: `docs/CODE-INDEX-EVAL.md`.
+
+`bun eval/grep-index.ts [repo]` measures grep behind the text index (the grep used where ripgrep
+is not installed): how many files it reads, its time against reading every file and against `rg`,
+and whether its lines are rg's. Exits non-zero when any line differs.

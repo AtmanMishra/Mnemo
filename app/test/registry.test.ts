@@ -276,9 +276,11 @@ describe("publisher", () => {
 
   test("a long session keeps its live agents and only the newest finished ones", () => {
     // One clock tick for all of them, as on a fast machine: the newest is told apart by its number.
+    // The roster itself keeps 40 ended sub-agents per conversation, so two conversations go past the record's 60.
     const { roster, root, pub, read } = setup({ now: () => NOW });
+    const other = roster.addRoot("web");
     for (let i = 0; i < 70; i++) {
-      const s = roster.addSub(root.id, { label: `s${i}`, task: "", access: "full" });
+      const s = roster.addSub(i % 2 ? other.id : root.id, { label: `s${i}`, task: "", access: "full" });
       roster.finish(s.id, "done", `answer ${i}`);
     }
     const live = roster.addSub(root.id, { label: "still going", task: "", access: "full" });
@@ -287,7 +289,9 @@ describe("publisher", () => {
     expect(r.agents.length).toBe(60);
     expect(r.agents.some((a) => a.node === live.id)).toBe(true);
     expect(r.agents.some((a) => a.node === root.id)).toBe(true);
+    expect(r.agents.some((a) => a.node === other.id)).toBe(true);
     expect(r.agents.some((a) => a.label === "s69")).toBe(true);
+    expect(r.agents.some((a) => a.label === "s68")).toBe(true);
     expect(r.agents.some((a) => a.label === "s0")).toBe(false);
   });
 
