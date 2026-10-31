@@ -69,6 +69,11 @@ export interface Host {
   escalations: { from: string; to: string; reason: string }[];
   /** Set by the memory extension: the session record learns the model changed. */
   onModelChanged?: (model: string, reason: string) => Promise<void>;
+  /**
+   * The code index for a folder, brought up to date, or why there is none; set by the code
+   * extension (absent when `codeIndex` is off). Memory uses it to pin facts to definitions.
+   */
+  codeIndex?: (cwd: string) => Promise<import("../code/index.ts").CodeIndex | string>;
   /** What memory recalled in this session (node → line), set by the memory extension. */
   recalled?: Map<number, string>;
   /** Files as they were before each turn changed them (shared with sub-agents). */
@@ -87,6 +92,8 @@ export interface Host {
   episode?: number;
   /** For a sub-agent: the episode of the session that spawned it. */
   parentEpisode?: number;
+  /** For a sub-agent: where the transcripts of its tree are saved (the root session's `sub/` folder); unset when that session is not saved. */
+  subDir?: string;
 }
 
 /** Run something after the fact without letting it fail the turn, and keep track of it. */

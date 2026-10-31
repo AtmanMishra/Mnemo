@@ -13,7 +13,7 @@ import { App } from "../src/ui/App.tsx";
 import * as os from "node:os";
 import { fileTree, type Item, type Pane, type WorkspaceSource } from "../src/ui/workspace/model.ts";
 import { mnemoEnv, nextDialog } from "./helpers.ts";
-import { waitFor } from "./wait-for.ts";
+import { listening, waitFor } from "./wait-for.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { workspaceSource } from "../src/runtime/workspace-source.ts";
@@ -56,6 +56,7 @@ async function mount(delay = 0) {
   const acts: string[] = [];
   const r = render(React.createElement(Workspace, { controller: e.controller, source: fakeSource(acts, delay), motion: false }));
   await waitFor(() => expect(r.lastFrame()).toContain("Ask anything about this project."));
+  await listening(r.stdin);
   return { ...r, e, acts };
 }
 
@@ -74,26 +75,25 @@ test("tab moves focus to the sidebar, moving the selection previews it, esc come
   expect(r.lastFrame()).toContain("FILES");
   expect(r.lastFrame()).toContain("TRANSCRIPT");
   r.stdin.write(KEY.tab);
-  await wait();
+  await waitFor(() => expect(r.lastFrame()).toContain("❯ Ask Mnemo anything")); // composer lost its cursor
   r.stdin.write(KEY.down); // README.md
-  await wait(150);
-  expect(r.lastFrame()).toContain("contents of files:README.md");
+  await waitFor(() => expect(r.lastFrame()).toContain("contents of files:README.md"));
   r.stdin.write(KEY.esc);
-  await wait(150);
-  expect(r.lastFrame()).toContain("TRANSCRIPT");
+  await waitFor(() => {
+    expect(r.lastFrame()).toContain("TRANSCRIPT");
+    expect(r.lastFrame()).not.toContain("contents of files:README.md");
+  });
   r.unmount();
 });
 
 test("a directory opens with → and closes with ←", async () => {
   const r = await mount();
   r.stdin.write(KEY.tab);
-  await wait();
+  await waitFor(() => expect(r.lastFrame()).toContain("❯ Ask Mnemo anything")); // composer lost its cursor
   r.stdin.write(KEY.right);
-  await wait();
-  expect(r.lastFrame()).toContain("app.ts");
+  await waitFor(() => expect(r.lastFrame()).toContain("app.ts"));
   r.stdin.write(KEY.left);
-  await wait();
-  expect(r.lastFrame()).not.toContain("app.ts");
+  await waitFor(() => expect(r.lastFrame()).not.toContain("app.ts"));
   r.unmount();
 });
 
@@ -118,11 +118,9 @@ test("ctrl+b hides and shows the sidebar", async () => {
   const r = await mount();
   expect(r.lastFrame()).toContain("FILES");
   r.stdin.write(KEY.ctrlB);
-  await wait();
-  expect(r.lastFrame()).not.toContain("FILES");
+  await waitFor(() => expect(r.lastFrame()).not.toContain("FILES"));
   r.stdin.write(KEY.ctrlB);
-  await wait();
-  expect(r.lastFrame()).toContain("FILES");
+  await waitFor(() => expect(r.lastFrame()).toContain("FILES"));
   r.unmount();
 });
 
@@ -131,8 +129,7 @@ test("a turn's answer appears in the transcript viewport", async () => {
   r.e.faux.setResponses([fauxAssistantMessage(fauxText("The answer is forty-two."))]);
   await r.e.controller.submit("what is the answer?");
   await r.e.idle();
-  await wait(80);
-  expect(r.lastFrame()).toContain("The answer is forty-two.");
+  await waitFor(() => expect(r.lastFrame()).toContain("The answer is forty-two."));
   r.unmount();
 });
 
@@ -185,27 +182,28 @@ test("m in the memory pane opens the map; [ ] walk the timeline of turns", async
   await r.e.idle();
   await r.e.controller.submit("two");
   await r.e.idle();
-  await wait(80);
+  await waitFor(() => expect(r.lastFrame()).toContain("second answer"));
   r.stdin.write(KEY.tab);
-  await wait();
+  await waitFor(() => expect(r.lastFrame()).toContain("❯ Ask Mnemo anything")); // composer lost its cursor
   r.stdin.write("2");
-  await wait(80);
+  // The memory pane loads its items on its own time; the map draws what it has.
+  await waitFor(() => expect(r.lastFrame()).toContain("package manager"));
   r.stdin.write("m");
-  await wait(120);
-  expect(r.lastFrame()).toContain("MEMORY MAP");
-  expect(r.lastFrame()).toContain("package manager");
+  await waitFor(() => {
+    expect(r.lastFrame()).toContain("MEMORY MAP");
+    expect(r.lastFrame()).toContain("package manager");
+  });
   r.stdin.write(KEY.esc);
-  await wait();
-  expect(r.lastFrame()).toContain("TRANSCRIPT");
+  await waitFor(() => expect(r.lastFrame()).toContain("TRANSCRIPT"));
   r.stdin.write("[");
-  await wait();
+  await waitFor(() => expect(r.lastFrame()).toContain("turn 2/2"));
   r.stdin.write("[");
-  await wait(120);
-  expect(r.lastFrame()).toContain("turn 1/2");
-  expect(r.lastFrame()).toContain("first answer");
+  await waitFor(() => {
+    expect(r.lastFrame()).toContain("turn 1/2");
+    expect(r.lastFrame()).toContain("first answer");
+  });
   r.stdin.write(KEY.esc);
-  await wait();
-  expect(r.lastFrame()).not.toContain("turn 1/2");
+  await waitFor(() => expect(r.lastFrame()).not.toContain("turn 1/2"));
   r.unmount();
 });
 
@@ -227,12 +225,12 @@ test("the mouse wheel scrolls the conversation, and ignores clicks", async () =>
   expect(r.lastFrame()).toContain("row 120");
   expect(r.lastFrame()).not.toContain("row 001");
   for (let i = 0; i < 60; i++) r.stdin.write("\x1b[<64;10;5M");
-  await wait(150);
-  expect(r.lastFrame()).not.toContain("row 120");
-  expect(r.lastFrame()).toMatch(/rows? up/);
+  await waitFor(() => {
+    expect(r.lastFrame()).not.toContain("row 120");
+    expect(r.lastFrame()).toMatch(/rows? up/);
+  });
   for (let i = 0; i < 80; i++) r.stdin.write("\x1b[<65;10;5M");
-  await wait(150);
-  expect(r.lastFrame()).toContain("row 120");
+  await waitFor(() => expect(r.lastFrame()).toContain("row 120"));
   r.unmount();
 });
 
@@ -260,28 +258,26 @@ test("ctrl+f finds an earlier message, ↑↓ step through matches, enter stays 
     await r.e.controller.submit(q);
     await r.e.idle();
   }
-  await wait(80);
+  await waitFor(() => expect(r.lastFrame()).toContain("a second walrus"));
   r.stdin.write("\x06");
-  await wait();
+  await waitFor(() => expect(r.lastFrame()).toContain("find: ▏"));
   for (const ch of "walrus") r.stdin.write(ch);
-  await wait(120);
-  let frame = r.lastFrame()!;
-  expect(frame).toContain("find: walrus");
-  expect(frame).toContain("1/2");
-  expect(frame).toContain("a second walrus");
+  await waitFor(() => {
+    expect(r.lastFrame()).toContain("find: walrus");
+    expect(r.lastFrame()).toContain("1/2");
+    expect(r.lastFrame()).toContain("a second walrus");
+  });
   r.stdin.write("\x1b[A");
-  await wait(120);
-  frame = r.lastFrame()!;
-  expect(frame).toContain("2/2");
+  await waitFor(() => expect(r.lastFrame()).toContain("2/2"));
+  const frame = r.lastFrame()!;
   expect(frame.indexOf("lives in the north")).toBeLessThan(frame.indexOf("penguins"));
   r.stdin.write("\r");
-  await wait(120);
-  frame = r.lastFrame()!;
-  expect(frame).not.toContain("find:");
-  expect(frame).toContain("turn 1/3");
+  await waitFor(() => {
+    expect(r.lastFrame()).not.toContain("find:");
+    expect(r.lastFrame()).toContain("turn 1/3");
+  });
   r.stdin.write(KEY.esc);
-  await wait(120);
-  expect(r.lastFrame()).not.toContain("turn 1/3");
+  await waitFor(() => expect(r.lastFrame()).not.toContain("turn 1/3"));
   r.unmount();
 });
 
@@ -297,7 +293,7 @@ test("ctrl+o reprints what is already printed, in the new state", async () => {
 test("ctrl+k on an empty prompt opens the palette; a file is mentioned, a command runs", async () => {
   const r = await mount();
   r.stdin.write("\x0b");
-  await wait(120);
+  await waitFor(() => expect(r.e.controller.dialogs.current()?.kind).toBe("select"));
   let d = r.e.controller.dialogs.current();
   if (d?.kind !== "select") throw new Error(`expected the palette, got ${d?.kind}`);
   const labels = d.choices.map((c) => c.label);
@@ -305,30 +301,29 @@ test("ctrl+k on an empty prompt opens the palette; a file is mentioned, a comman
   expect(labels).toContain("▤ src/app.ts");
   expect(labels).toContain("▣ fix the login bug");
   d.resolve("f:src/app.ts");
-  await wait(120);
-  expect(r.e.controller.snapshot().draftRequest?.text).toBe("@src/app.ts ");
+  await waitFor(() => expect(r.e.controller.snapshot().draftRequest?.text).toBe("@src/app.ts "));
 
+  // ctrl+k opens the palette only on an empty prompt: the cleared draft must reach the composer first.
+  await waitFor(() => expect(r.lastFrame()).toContain("@src/app.ts"));
   r.e.controller.setDraft("");
-  await wait();
+  await waitFor(() => expect(r.lastFrame()).not.toContain("@src/app.ts"));
   r.stdin.write("\x0b");
-  await wait(120);
+  await waitFor(() => expect(r.e.controller.dialogs.current()?.kind).toBe("select"));
   d = r.e.controller.dialogs.current();
   if (d?.kind !== "select") throw new Error("no palette");
   d.resolve("c:remember");
-  await wait(80);
-  expect(r.e.controller.snapshot().draftRequest?.text).toBe("/remember ");
+  await waitFor(() => expect(r.e.controller.snapshot().draftRequest?.text).toBe("/remember "));
   r.unmount();
 });
 
 test("ctrl+k with words in the prompt still kills to the end of the line", async () => {
   const r = await mount();
   for (const ch of "keep this") r.stdin.write(ch);
-  await wait();
+  await waitFor(() => expect(r.lastFrame()).toContain("keep this"));
   r.stdin.write("\x01"); // ctrl+a: start of line
   r.stdin.write("\x0b");
-  await wait(120);
+  await waitFor(() => expect(r.lastFrame()).not.toContain("keep this"));
   expect(r.e.controller.dialogs.current()).toBeUndefined();
-  expect(r.lastFrame()).not.toContain("keep this");
   r.unmount();
 });
 
@@ -371,23 +366,19 @@ test("a picked turn and a search do not survive /new", async () => {
     await r.e.controller.submit(q);
     await r.e.idle();
   }
-  await wait(80);
+  await waitFor(() => expect(r.lastFrame()).toContain("a penguin"));
   r.stdin.write("\x06");
-  await wait();
+  await waitFor(() => expect(r.lastFrame()).toContain("find: ▏"));
   for (const ch of "walrus") r.stdin.write(ch);
-  await wait(120);
+  await waitFor(() => expect(r.lastFrame()).toContain("find: walrus"));
   r.stdin.write("\r");
-  await wait(120);
-  expect(r.lastFrame()).toContain("turn 1/2");
+  await waitFor(() => expect(r.lastFrame()).toContain("turn 1/2"));
   await r.e.controller.submit("/new");
-  await wait(120);
-  expect(r.lastFrame()).not.toContain("turn 1/");
+  await waitFor(() => expect(r.lastFrame()).not.toContain("turn 1/"));
   r.stdin.write("\x06");
-  await wait(80);
-  expect(r.lastFrame()).toContain("find: ▏");
+  await waitFor(() => expect(r.lastFrame()).toContain("find: ▏"));
   await r.e.controller.submit("/new");
-  await wait(120);
-  expect(r.lastFrame()).not.toContain("find:");
+  await waitFor(() => expect(r.lastFrame()).not.toContain("find:"));
   r.unmount();
 });
 
@@ -423,10 +414,10 @@ test("inline, ctrl+k opens the palette and the shortcuts promise only what works
   const e = await mnemoEnv();
   envs.push(e);
   const r = render(React.createElement(App, { controller: e.controller, version: "t", home: os.homedir(), motion: false, clearTerminal: () => {} }));
-  await wait(80);
+  await waitFor(() => expect(r.lastFrame()).toContain("Ask Mnemo anything"));
+  await listening(r.stdin);
   r.stdin.write("?");
-  await wait();
-  expect(r.lastFrame()).toContain("ctrl+k");
+  await waitFor(() => expect(r.lastFrame()).toContain("ctrl+k"));
   expect(r.lastFrame()).not.toContain("ctrl+f");
   r.stdin.write("?");
   await wait();
@@ -436,7 +427,6 @@ test("inline, ctrl+k opens the palette and the shortcuts promise only what works
   expect(d.choices.some((c) => c.label === "/help")).toBe(true);
   const file = d.choices.find((c) => c.value.startsWith("f:"))!;
   d.resolve(file.value);
-  await wait();
-  expect(e.controller.draftText).toBe(`@${file.value.slice(2)} `);
+  await waitFor(() => expect(e.controller.draftText).toBe(`@${file.value.slice(2)} `));
   r.unmount();
 });

@@ -494,6 +494,7 @@ export function Workspace({ controller, source, motion, initial, width, height, 
           active={active && !dialog && !search && focus === "composer"}
           commands={() => controller.commands()}
           files={() => files}
+          agents={() => controller.agents()}
           footer={chrome.footer}
           statuses={chrome.statuses}
           width={columns}
