@@ -30,7 +30,15 @@ and `Controller` is the only caller of the session.
 
 **Sessions vs memory.** `~/.mnemo/agent/sessions/<encoded-cwd>/*.jsonl` are
 conversations (pi writes them, keyed by working directory — a session is created
-for the agent's `cwd`). The memory journal (`~/.mnemo/memory/journal.jsonl`) is
+for the agent's `cwd`). Beside each saved conversation `<session>.jsonl` are
+`<session>/sub/*.jsonl`, the transcripts of its sub-agents at any depth (pi sessions
+whose header names the conversation as `parentSession`; `/resume` lists only the
+conversations), and `<session>.state.json`, which the `mnemo-state` extension rewrites
+(whole, by rename, mode 0600) as the roster changes: pid, mode, model, status and every
+agent the session started, with its model, limits, turns, spend, answer and transcript,
+including the ended sub-agents the live roster let go of (`LIMITS.keepEnded`, 40 per
+conversation). Sub-agent transcripts older than `keepSubTranscripts` days (30) are removed
+when a saved session starts; the conversations themselves never are. The memory journal (`~/.mnemo/memory/journal.jsonl`) is
 cross-session and cross-project. Neither is derivable from the other. A third
 thing, `memory/sessions.db`, is an index over both Mnemo's sessions and Claude
 Code's, derived and rebuildable.

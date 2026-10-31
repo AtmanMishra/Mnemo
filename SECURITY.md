@@ -156,7 +156,9 @@ or run a different program, is not bound by it.
 ## Hooks
 
 A hook is a command you choose that Mnemo runs at a fixed point: `PreToolUse` (after the
-gate let a call through, before it runs), `PostToolUse`, `SessionStart` and `SessionEnd`.
+gate let a call through, before it runs), `PostToolUse`, `SessionStart`, `SessionEnd`,
+`SubagentStart` (which can refuse a sub-agent, and refuses it when it fails, like `PreToolUse`)
+and `SubagentStop`.
 They come from `$MNEMO_HOME/hooks.json` and the managed policy's `hooks` (which run first,
 and which you cannot remove); a folder's own hooks are never read.
 
@@ -216,6 +218,11 @@ and which you cannot remove); a folder's own hooks are never read.
   on: that key is for the model, and memsrv is started without it. The address
   must be `https://` (or local), and is read from the real environment or
   `$MNEMO_HOME/.env`, never from the folder you are working in.
+- Conversations are saved locally under `$MNEMO_HOME/agent/sessions/`, and since sub-agent
+  transcripts are kept too, so are a saved conversation's sub-agents (`<session>/sub/`, as
+  the conversation itself is written: not redacted). Sub-agent transcripts are removed after
+  `keepSubTranscripts` days (30; 0 keeps them). The `<session>.state.json` beside each holds
+  only what the roster already cleaned and redacted, mode 0600.
 
 ## Credentials
 

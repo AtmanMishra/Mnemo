@@ -144,6 +144,12 @@ do. Plain files are the source of truth, written whole (rename into place), fold
   *Elsewhere*, read every 2 seconds while the hub shows. It is read-only there.
 - `MNEMO_REGISTRY=0` keeps a process out of the registry (it is neither listed nor reachable).
 
+**Saved sub-agents**: a saved conversation keeps each sub-agent's transcript in
+`<session>/sub/` and a `<session>.state.json` with every agent it started (see
+`docs/MNEMO-INTERNALS.md` §1). The live roster keeps the last 40 ended sub-agents per
+conversation; older ones are only in the state file. Hooks `SubagentStart` and
+`SubagentStop` let you log or refuse delegation.
+
 ## Not yet
 
 User-typed messages into the tree from the playground (it stays supervise-only).
