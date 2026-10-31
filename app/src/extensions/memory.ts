@@ -9,7 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { applyTidy, describeSessionHits, MemorySession, planTidy, projectIdentity, redact, SessionIndex, textOf, type MemoryService, type Reflector, type TidyItem } from "@mnemo/memory";
+import { anchorKey, anchorTag, applyTidy, describeSessionHits, MemorySession, planTidy, projectIdentity, redact, SessionIndex, textOf, type AnchorCheck, type AnchorState, type MemoryService, type Reflector, type TidyItem } from "@mnemo/memory";
 import { sessionIndexPath, sessionSources, skillsDir } from "../runtime/paths.ts";
 import { inBackground, type Host } from "./host.ts";
 
