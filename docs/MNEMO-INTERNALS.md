@@ -282,7 +282,7 @@ transcript).
   that project as `scope`; another project's profile node is dropped client-side.
 - **Recall** (`MemoryService.recall`): a prompt of fewer than two words recalls
   nothing; otherwise `4k` hits are fetched and filtered — not the profiles (they go
-  into the system prompt whole), not `gap:`/`lesson:`/`skill candidate` nodes, not a
+  into the system prompt whole), not `gap:`/`lesson:`/`skill candidate`/`playbook` nodes, not a
   pitfall without a fix, not an episode without a recorded goal, not anything
   **distrusted** — then ranked by `score × trust`, where `trust = 2(up+1) /
   (up+down+2)` (1 with no votes, toward 2 as it keeps helping, toward 0 as it is
@@ -299,7 +299,16 @@ transcript).
   (a fix joins its failure's marker when it shares two distinctive words with it,
   otherwise it is a pitfall of its own) and at most one skill. A skill is saved
   when the user asked for it or the same procedure was seen in a second session,
-  and only after an approval dialog that shows the file. Everything written passes
+  and only after an approval dialog that shows the file. A team run (`RunEnd.team`: its
+  `TASK.md` and the end of `LOG.md`) adds that record to the digest and
+  `TEAM_LESSON_PROMPT` to the prompt; its one lesson (cue, lesson, evidence,
+  confidence) is offered through `approveLesson` unless its confidence is low, and an
+  accepted one is the project fact `team lesson (<cue>)`. A solo run gets `LESSON_PROMPT`
+  instead, and its accepted lesson is `lesson (<cue>)`. When the project holds lessons,
+  `LESSON_VOTES_PROMPT` asks which of them helped or hurt this run; each vote is
+  `mark_useful` on the node `playbook <project id> :: <key>` (`voteLesson`, read back with
+  `lessonVotes`), and a lesson with `hurt ≥ helped + 2` is left out of the profile block.
+  Everything written passes
   `redact` and `unsafeMemory`, which refuses text that tries to steer the agent,
   smuggle a secret out or hide characters (memory is injected into later prompts,
   of every attached agent, so a fact is a standing instruction).
@@ -532,6 +541,27 @@ is `urgent` or waited on (`now`, `steer`). `stopRun` stops its running members. 
 `/tell` go through `Controller.tellAgent` → `Roster.tellUser`: a root's `prompt` handle
 (`pi.sendUserMessage`, which passes `input` and so starts that agent's own run) or a
 sub-agent's `tell`.
+
+**Profiles.** `runtime/profiles.ts` reads `<name>.md` from `agent/agents/` in the home and,
+when `ctx.isProjectTrusted()`, the project's `.agents/agents/` (`needsTrust` in runtime.ts adds
+that folder to what makes a project ask for trust). `spawn_subagent` merges the profile under
+the parent's own params and passes the result to `resolveSpawn` as the ask, so the profile is
+capped like a parent; `profileTools` narrows the child's tool list. The body reaches the child
+through `Host.profile`, as a `profile` system prompt section set in `before_agent_start`; the
+list of profiles is an `agent_profiles` section, only for an agent that has `spawn_subagent`.
+
+**Background spawns.** With `background: true`, `spawn_subagent` runs the child's whole life
+(`work`) through `inBackground` and returns the node id. Before `finish`, while the child still
+runs, it sends `[background result]` (or the failure) with `Roster.send` from the child to the
+parent, so the run's caps, the frame and waking all apply as for any message. After `finish`,
+any still-running children of the node are stopped with `stopTree`, and a node stopped while
+its session was being set up never prompts.
+
+**Races.** `race` (agents.ts, only for a full-access agent) calls `bestOf` with a runner that
+starts each attempt through `spawnOne(…, { cwd: worktree, unattended: true })`: the child's
+session runs in the worktree and its mode reads as `yolo` unless the user is in plan mode. The
+gate treats `race` as a command (EXEC), with the check as its subject and a preview that says
+the attempts are unattended; it never offers a grant.
 
 **Teams.** `runtime/team.ts` keeps one `TaskBoard` per roster (`boardOf`), keyed by run id.
 A run gets files (`$MNEMO_HOME/runs/<when>-<pid>-<run>/TASK.md`, written whole by rename,

@@ -285,6 +285,7 @@ uses credentials it finds in your environment (`ANTHROPIC_API_KEY`,
 | `mnemo settings …` | list, get, set and reset [settings](#configuration) from a shell |
 | `mnemo memory …` | memory for [other agents](#memory-for-other-agents), plus `status`, `tidy`, `curate` |
 | `mnemo schedule …` <sup>**`main`**</sup> | run a prompt on a timer ([more](#scheduled-runs)) |
+| `mnemo opera …` <sup>**`main`**</sup> | one conductor over several repositories; its threads each work in their own worktree ([docs/OPERA.md](docs/OPERA.md)) |
 | `mnemo agents …` <sup>**`main`**</sup> | every agent running on this machine, in any project, and what each is doing; tell, steer or stop one from any terminal ([more](#every-agent-on-this-machine)) |
 | `mnemo skills …` <sup>**`main`**</sup> | add a skills marketplace and install its skills, as Claude Code does with plugins: `mnemo skills marketplace add anthropics/skills`, `mnemo skills install document-skills@anthropic-agent-skills` |
 | `mnemo --rpc` | the session as JSON lines, for an [editor](#in-your-editor) |
@@ -361,7 +362,7 @@ flowchart LR
 | **Recall** | Before each message, the project and user profiles go into the system prompt and relevant facts are recalled, ranked by search score × trust. |
 | **Steer** | Each failed tool call marks a pitfall; a refusal by the gate is not a failure. |
 | **Guard** | Before a `bash` call, a command that failed before is stopped once per session with its known fix. |
-| **Reflect** | After each run, one reflection call writes facts it can ground in what you said or a tool showed, the session record and failure → fix pairs. |
+| **Reflect** | After each run, one reflection call writes facts it can ground in what you said or a tool showed, the session record and failure → fix pairs. It may offer one lesson about how to work in the project (after a team run, about how the agents worked together, from the run's `TASK.md` and `LOG.md`), kept only if you accept it. Later runs vote on kept lessons, and one that hurt more than it helped leaves the prompt (`mnemo evolve lessons`). |
 | **Vote** | `+` / `-` in the memory pane tell recall what helped and what was wrong; what is marked wrong twice is no longer recalled. Reuse earns a vote up on its own. |
 | **Clean** | Everything written passes redaction, and text that tries to steer the agent or smuggle a secret out is refused. |
 
@@ -432,6 +433,12 @@ flowchart TB
   agents page stops a whole run. A run with more than one agent shares a plan and a log
   (`TASK.md`, `LOG.md` in the Mnemo home; `/task` shows them): agents claim steps with
   `task_update` and each turn starts with what the others did.
+- **Profiles.** Save a sub-agent you use often as `~/.mnemo/agent/agents/reviewer.md` (model,
+  tools, limits and instructions in one file, like Claude Code's agent files); agents start it
+  with `spawn_subagent(profile: "reviewer")`, always within your sub-agent settings. With
+  `background: true` a parent starts one and goes on; the answer arrives as a message. For a
+  hard change with a test, an agent can `race` 2 to 4 attempts in worktrees (you approve it
+  first) and keep the smallest change that passes, like `/bestof`.
 - **Bounded.** A message wakes an idle agent, but a chain stops after 12 messages in a row, a run
   after 40 messages, woken turns may spend $0.50 per agent and $1.00 per run between your prompts,
   and an agent cannot message back past the one that asked it. Depth 3, 4 live children per agent and 16 per
@@ -492,7 +499,7 @@ folder.
 ### Hooks
 
 A hook is a command you choose that Mnemo runs at a fixed point: `PreToolUse`, `PostToolUse`,
-`SessionStart`, `SessionEnd`, `SubagentStart` (with the sub-agent's model and limits; it can refuse
+`SessionStart`, `SessionEnd`, `SubagentStart` (with the sub-agent's model, limits and profile; it can refuse
 the sub-agent like a `PreToolUse` hook refuses a call) and `SubagentStop` (with how it ended). They come from `~/.mnemo/hooks.json` (and an administrator's
 managed policy, which runs first).
 

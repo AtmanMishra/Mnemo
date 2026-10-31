@@ -9,22 +9,29 @@
  * prompts (the user still answers for every edit and command). Its steps
  * stream into the parent's tool block while it works.
  */
-import { Type, type Model } from "@earendil-works/pi-ai";
+import * as path from "node:path";
+import { Type, type Model, type Static } from "@earendil-works/pi-ai";
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
   defineTool,
   SessionManager,
+  type AgentToolUpdateCallback,
   type ExtensionAPI,
+  type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type { Host } from "./host.ts";
-import { RosterError, type Limits, type SubCaps } from "../runtime/roster.ts";
+import { inBackground, type Host } from "./host.ts";
+import { isEnded, RosterError, type Limits, type SubCaps } from "../runtime/roster.ts";
 import { stepLine } from "./peers.ts";
 import { piSettings, projectTrusted } from "../runtime/runtime.ts";
 import { SUB_CONTEXT_MIN, THINKING_CHOICES, type Settings } from "../runtime/settings.ts";
 import { loadManaged, nameAllowed } from "../policy/managed.ts";
 import { loadHooks, subagentHooks } from "./hooks.ts";
 import { subDirOf } from "../runtime/session-files.ts";
+import { bestOf, describeBestOf } from "../runtime/best-of.ts";
+import { envNames } from "../runtime/env.ts";
+import { loadProfiles, profileTools, type Profile } from "../runtime/profiles.ts";
+import { conductorTools } from "./opera.ts";
 
 /** What a parent asked for one sub-agent, beside its brief. */
 export interface SpawnAsk {
@@ -46,6 +53,21 @@ export interface SpawnPlan {
 }
 
 const LEVELS = THINKING_CHOICES.filter((l) => l !== "inherit");
+
+const SPAWN = Type.Object({
+    task: Type.String({ description: "The complete brief" }),
+    profile: Type.Optional(Type.String({ description: "A saved profile's name: its model, tools, limits and instructions; what you set here overrides it" })),
+    name: Type.Optional(Type.String({ description: "A short name for it, e.g. 'auth researcher'" })),
+    access: Type.Optional(Type.Union([Type.Literal("read-only"), Type.Literal("full")])),
+    model: Type.Optional(Type.String({ description: "provider/id" })),
+    thinking: Type.Optional(Type.Union(LEVELS.map((l) => Type.Literal(l)))),
+    maxTokens: Type.Optional(Type.Number({ description: "Output tokens per model call" })),
+    contextTokens: Type.Optional(Type.Number({ description: "Context it keeps before compacting" })),
+    maxTurns: Type.Optional(Type.Number({ description: "Model calls before it stops and returns what it has" })),
+    budget: Type.Optional(Type.Number({ description: "Dollars before it stops and returns what it has" })),
+    background: Type.Optional(Type.Boolean({ description: "Return at once and get its answer later as a message, so you can go on meanwhile" })),
+  });
+export type SpawnParams = Static<typeof SPAWN>;
 const name = (m: { provider: string; id: string }) => `${m.provider}/${m.id}`;
 
 /**
@@ -124,6 +146,15 @@ const READ_ONLY = ["read", "grep", "find", "ls", "code_search", "code_symbol", "
 
 export function agentsExtension(host: Host, extensionsFor: (child: Host) => import("@earendil-works/pi-coding-agent").InlineExtension[]) {
   return (pi: ExtensionAPI): void => {
+    // A profiled sub-agent's instructions, and the profiles a parent can start: in the system prompt, as the user's or a trusted project's.
+    pi.on("before_agent_start", (event, ctx) => {
+      if (host.profile) event.systemPromptOptions.sections.profile = `You are working as the "${host.profile.name}" agent. Its instructions:\n\n${host.profile.body}`;
+      if (host.depth >= host.roster.limits.maxDepth || !pi.getActiveTools().includes("spawn_subagent")) return;
+      const { profiles } = loadProfiles(host.home, ctx.cwd, ctx.isProjectTrusted());
+      if (profiles.size)
+        event.systemPromptOptions.sections.agent_profiles =
+          "Saved sub-agent profiles (spawn_subagent with profile: name):\n" + [...profiles.values()].map((p) => `- ${p.name}: ${p.description}`).join("\n");
+    });
     if (host.depth >= host.roster.limits.maxDepth) return;
     // Read once per session, as the hooks extension does.
     const { hooks } = loadHooks(host);
@@ -136,153 +167,238 @@ export function agentsExtension(host: Host, extensionsFor: (child: Host) => impo
           "the goal, the relevant files, constraints, and what to return. Use 'read-only' for research; 'full' lets it edit and run commands (the user still approves). " +
           "A sub-agent can start sub-agents of its own, to a limited depth, and can message the agents around it (list_agents). Start independent tasks in one step to run them side by side. " +
           "Model and limits default to the user's settings; you may lower them (a cheaper model or a smaller budget for a simple task), never raise them past the user's.",
-        parameters: Type.Object({
-          task: Type.String({ description: "The complete brief" }),
-          name: Type.Optional(Type.String({ description: "A short name for it, e.g. 'auth researcher'" })),
-          access: Type.Optional(Type.Union([Type.Literal("read-only"), Type.Literal("full")])),
-          model: Type.Optional(Type.String({ description: "provider/id" })),
-          thinking: Type.Optional(Type.Union(LEVELS.map((l) => Type.Literal(l)))),
-          maxTokens: Type.Optional(Type.Number({ description: "Output tokens per model call" })),
-          contextTokens: Type.Optional(Type.Number({ description: "Context it keeps before compacting" })),
-          maxTurns: Type.Optional(Type.Number({ description: "Model calls before it stops and returns what it has" })),
-          budget: Type.Optional(Type.Number({ description: "Dollars before it stops and returns what it has" })),
-        }),
-        async execute(_id, params, signal, onUpdate, ctx) {
-          if (!ctx.model) throw new Error("no model is selected");
-          const access = params.access === "full" ? "full" : "read-only";
-          const resolved = resolveSpawn({
-            ask: params,
-            settings: host.settings.get(),
-            limits: host.roster.limits,
-            parent: ctx.model,
-            parentThinking: pi.getThinkingLevel(),
-            find: (provider, id) => host.modelRuntime.getModel(provider, id),
-            hasAuth: (provider) => host.modelRuntime.hasConfiguredAuth(provider),
-            managed: loadManaged(host.managedFile)?.models,
-          });
-          if (!resolved.ok) throw new Error(resolved.reason);
-          const { plan } = resolved;
-          const modelName = `${plan.model.provider}/${plan.model.id}`;
-          const refused = await subagentHooks(
-            hooks,
-            "SubagentStart",
-            { parent: host.node, depth: host.depth + 1, name: params.name ?? "", task: params.task, access, model: modelName, thinking: plan.thinking, caps: plan.caps, cwd: ctx.cwd },
-            ctx.cwd,
-            host.agentDir,
-          );
-          if (refused) throw new Error(`A hook refused this sub-agent: ${refused}`);
-          // Every transcript of a tree goes in its root session's folder, flat, whatever the depth.
-          const rootFile = host.depth === 0 ? ctx.sessionManager.getSessionFile() : undefined;
-          const subDir = host.depth === 0 ? (rootFile ? subDirOf(rootFile) : undefined) : host.subDir;
-          let node;
-          try {
-            node = host.roster.addSub(host.node, { label: params.name ?? "", task: params.task, access, model: modelName, thinking: plan.thinking, caps: plan.caps });
-          } catch (e) {
-            if (e instanceof RosterError) throw new Error(e.message);
-            throw e;
-          }
-          const child: Host = {
-            ...host,
-            depth: host.depth + 1,
-            node: node.id,
-            access,
-            background: host.background,
-            signals: host.signals,
-            episode: undefined,
-            parentEpisode: host.episode,
-            subDir,
-          };
-          // The mode is the user's, and they can change it while the child works:
-          // a copy taken at spawn time kept a child in yolo after a switch to plan.
-          Object.defineProperty(child, "mode", {
-            get: () => host.mode,
-            set: (mode: Host["mode"]) => {
-              host.mode = mode;
-            },
-            enumerable: true,
-          });
-          let session: Awaited<ReturnType<typeof createAgentSessionFromServices>>["session"] | undefined;
-          let unsubscribe = () => {};
-          const onAbort = () => void session?.abort();
-          let outcome: "done" | "failed" = "failed";
-          let answer: string | undefined;
-          try {
-            const services = await createAgentSessionServices({
-              cwd: ctx.cwd,
-              agentDir: host.agentDir,
-              modelRuntime: host.modelRuntime,
-              settingsManager: piSettings(ctx.cwd, host.agentDir, projectTrusted(ctx.cwd, host.agentDir), host.settings),
-              resourceLoaderOptions: { extensionFactories: extensionsFor(child) },
-            });
-            ({ session } = await createAgentSessionFromServices({
-              services,
-              sessionManager: subDir ? SessionManager.create(ctx.cwd, subDir, { parentSession: rootFile ?? undefined }) : SessionManager.inMemory(ctx.cwd),
-              model: plan.model,
-              thinkingLevel: plan.thinking as never,
-              tools: access === "full" ? undefined : READ_ONLY,
-            }));
-            await session.bindExtensions({});
-            const file = session.sessionManager.getSessionFile();
-            if (subDir && file) host.roster.setTranscript(node.id, file);
-            const steps: string[] = [];
-            // A sub-agent that has made its turns or spent its dollars is stopped and returns what it has.
-            let turns = 0;
-            let stoppedBy: string | undefined;
-            const stop = (why: string) => {
-              if (stoppedBy) return;
-              stoppedBy = why;
-              void session?.abort();
-            };
-            const { turns: maxTurns, spend } = plan.caps;
-            // The parent's number only when it is the one that holds; a pick above the user's was capped to theirs.
-            const limits = host.roster.limits;
-            const whose = (mine: number, theirs: number, setting: string) => (mine !== theirs ? "set by its parent" : `/settings ${setting}`);
-            unsubscribe = session.subscribe((event) => {
-              if (event.type === "turn_start") {
-                if (maxTurns > 0 && ++turns > maxTurns) return stop(`${maxTurns} turns (${whose(maxTurns, limits.subMaxTurns, "subMaxTurns")})`);
-                host.roster.turn(node.id);
-              }
-              if ((event.type === "turn_start" || event.type === "message_end") && spend > 0 && (host.roster.get(node.id)?.spent ?? 0) >= spend) stop(`$${spend.toFixed(2)} (${whose(spend, limits.subSpend, "subSpend")})`);
-              if (event.type === "tool_execution_start") {
-                steps.push(stepLine(event.toolName, (event.args ?? {}) as Record<string, unknown>));
-                onUpdate?.({ content: [{ type: "text", text: steps.slice(-8).join("\n") }], details: { steps: steps.length } });
-              }
-            });
-            signal?.addEventListener("abort", onAbort);
-            if (signal?.aborted) onAbort();
-            await session.prompt(params.task);
-            // A failed model call does not throw out of prompt(): it is the last reply, with an error and no text.
-            // Say why, so the parent (and the user) see the cause instead of an empty answer.
-            const last = session.messages.filter((m) => m.role === "assistant").at(-1) as { stopReason?: string; errorMessage?: string } | undefined;
-            if (!stoppedBy && (!last || last.stopReason === "error")) {
-              answer = `the sub-agent's model call failed: ${last?.errorMessage?.trim() || "no reply from the model"}`;
-              throw new Error(answer);
-            }
-            answer = session.getLastAssistantText()?.trim() || (stoppedBy ? "" : "(the sub-agent finished without an answer)");
-            if (stoppedBy) answer = `${answer}${answer ? "\n\n" : ""}[stopped at its limit of ${stoppedBy}; ${answer ? "this is what it had" : "it had nothing to report"}]`;
-            outcome = "done";
-            const ran = `[ran on ${plan.model.provider}/${plan.model.id}, thinking ${session.thinkingLevel}${plan.notes.length ? `; ${plan.notes.join("; ")}` : ""}]`;
-            return {
-              content: [{ type: "text", text: `${answer}\n\n${ran}` }],
-              details: { steps: steps.length, cost: session.getSessionStats().cost, node: node.id, model: `${plan.model.provider}/${plan.model.id}` },
-            };
-          } finally {
-            signal?.removeEventListener("abort", onAbort);
-            unsubscribe();
-            // A tree that was stopped keeps "stopped"; finish ignores a node that already ended.
-            host.roster.finish(node.id, signal?.aborted ? "stopped" : outcome, answer);
-            session?.dispose();
-            const ended = host.roster.get(node.id);
-            await subagentHooks(
-              hooks,
-              "SubagentStop",
-              { agent: node.id, parent: host.node, depth: host.depth + 1, name: node.label, status: ended?.status ?? outcome, answer: (answer ?? "").slice(0, 2000), model: modelName, turns: ended?.turns ?? 0, spent: ended?.spent ?? 0, transcript: ended?.transcript, cwd: ctx.cwd },
-              ctx.cwd,
-              host.agentDir,
-            );
-          }
-        },
+        parameters: SPAWN,
+        execute: (_id, params, signal, onUpdate, ctx) => spawnOne(params, signal, onUpdate, ctx),
       }),
     );
+
+    // A race edits through its winner and runs the check: only an agent that may change things starts one.
+    if (host.access === "full")
+      pi.registerTool(
+        defineTool({
+          name: "race",
+          label: "Race",
+          description:
+            "For a hard change with a clear test: have 2 to 4 sub-agents attempt the same task side by side, each in its own copy of the project " +
+            "(a git worktree), then run the check command in each and apply the smallest change that passes. The user approves the race first; " +
+            "the attempts then work unattended in their copies. Give each a different model with models when you want different approaches.",
+          parameters: Type.Object({
+            task: Type.String({ description: "The complete brief every attempt gets" }),
+            check: Type.String({ description: "A shell command that exits 0 when a change is right, e.g. 'bun test'" }),
+            n: Type.Optional(Type.Number({ description: "Attempts, 2 to 4 (default 2)" })),
+            models: Type.Optional(Type.Array(Type.String(), { description: "provider/id per attempt, in order; the rest use the default" })),
+          }),
+          async execute(_id, params, signal, onUpdate, ctx) {
+            const n = params.n ?? 2;
+            const most = Math.min(4, host.roster.limits.maxChildren);
+            if (!Number.isInteger(n) || n < 2 || n > most) throw new Error(`a race has 2 to ${most} attempts`);
+            if (!params.check.trim()) throw new Error("say how a change is judged: a check command");
+            if ((params.models?.length ?? 0) > n) throw new Error(`${params.models!.length} models for ${n} attempts`);
+            const lanes = Array.from({ length: n }, () => "running");
+            const show = () => onUpdate?.({ content: [{ type: "text", text: lanes.map((l, i) => `attempt ${i + 1}: ${l}`).join("\n") }], details: { lanes: [...lanes] } });
+            const result = await bestOf({
+              n,
+              cwd: ctx.cwd,
+              check: params.check,
+              keepDir: path.join(host.home, "best-of", new Date().toISOString().replace(/[:.]/g, "-")),
+              agentDir: host.agentDir,
+              passEnv: envNames(host.settings.get().passEnv),
+              onProgress: (i, state, info) => {
+                lanes[i] = `${state}${info?.size !== undefined ? ` (${info.size} lines)` : ""}${info?.error ? `: ${info.error.slice(0, 80)}` : ""}`;
+                show();
+              },
+              run: async (i, cwd) => {
+                const r = await spawnOne({ task: params.task, name: `attempt ${i + 1}`, access: "full", model: params.models?.[i] }, signal, undefined, ctx, { cwd, unattended: true });
+                return r.content.map((c) => c.text).join("\n");
+              },
+            });
+            return {
+              content: [{ type: "text", text: describeBestOf(result) }],
+              details: { winner: result.winner?.i, passed: result.candidates.filter((c) => c.passed).length, kept: result.kept },
+            };
+          },
+        }),
+      );
+
+    // An Opera's conductor starts its threads with the same machinery, each in its own worktree.
+    if (host.opera && host.depth === 0) conductorTools(pi, host, host.opera, spawnOne);
+
+    /**
+     * Start one sub-agent and, unless it runs in the background, wait for its answer. `where` runs
+     * it in another folder (a race's worktree, an Opera thread's) and, for a race the user approved,
+     * unattended there; `trusted` says whether that folder's own resources may load.
+     */
+    async function spawnOne(params: SpawnParams, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext, where?: { cwd: string; unattended: boolean; trusted?: boolean }) {
+      const cwd = where?.cwd ?? ctx.cwd;
+      if (!ctx.model) throw new Error("no model is selected");
+      let profile: Profile | undefined;
+      if (params.profile) {
+        const { profiles } = loadProfiles(host.home, ctx.cwd, ctx.isProjectTrusted());
+        profile = profiles.get(params.profile.trim());
+        if (!profile) throw new Error(`no profile ${params.profile}${profiles.size ? `; there are ${[...profiles.keys()].join(", ")}` : ""}`);
+      }
+      // What the parent set wins over the profile; both are asks the user's settings cap.
+      const given = Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined));
+      const ask = { ...profile, ...given };
+      const access = ask.access === "full" ? "full" : "read-only";
+      const label = params.name ?? profile?.name ?? "";
+      const resolved = resolveSpawn({
+        ask,
+        settings: host.settings.get(),
+        limits: host.roster.limits,
+        parent: ctx.model,
+        parentThinking: pi.getThinkingLevel(),
+        find: (provider, id) => host.modelRuntime.getModel(provider, id),
+        hasAuth: (provider) => host.modelRuntime.hasConfiguredAuth(provider),
+        managed: loadManaged(host.managedFile)?.models,
+      });
+      if (!resolved.ok) throw new Error(resolved.reason);
+      const { plan } = resolved;
+      const modelName = `${plan.model.provider}/${plan.model.id}`;
+      const refused = await subagentHooks(
+        hooks,
+        "SubagentStart",
+        { parent: host.node, depth: host.depth + 1, name: label, task: params.task, access, model: modelName, thinking: plan.thinking, caps: plan.caps, profile: profile?.name, cwd: cwd },
+        cwd,
+        host.agentDir,
+      );
+      if (refused) throw new Error(`A hook refused this sub-agent: ${refused}`);
+      // Every transcript of a tree goes in its root session's folder, flat, whatever the depth.
+      const rootFile = host.depth === 0 ? ctx.sessionManager.getSessionFile() : undefined;
+      const subDir = host.depth === 0 ? (rootFile ? subDirOf(rootFile) : undefined) : host.subDir;
+      let node;
+      try {
+        node = host.roster.addSub(host.node, { label, task: params.task, access, model: modelName, thinking: plan.thinking, caps: plan.caps });
+      } catch (e) {
+        if (e instanceof RosterError) throw new Error(e.message);
+        throw e;
+      }
+      // The child's whole life; in the background its answer comes back as a message from it.
+      const work = async (signal: AbortSignal | undefined, onUpdate: ((u: { content: { type: "text"; text: string }[]; details: { steps: number } }) => void) | undefined) => {
+        const child: Host = {
+          ...host,
+          depth: host.depth + 1,
+          node: node.id,
+          access,
+          background: host.background,
+          signals: host.signals,
+          episode: undefined,
+          parentEpisode: host.episode,
+          subDir,
+          profile: profile && { name: profile.name, body: profile.body },
+        };
+        // The mode is the user's, and they can change it while the child works:
+        // a copy taken at spawn time kept a child in yolo after a switch to plan.
+        Object.defineProperty(child, "mode", {
+          get: () => (where?.unattended && host.mode !== "plan" ? "yolo" : host.mode),
+          set: (mode: Host["mode"]) => {
+            host.mode = mode;
+          },
+          enumerable: true,
+        });
+        let session: Awaited<ReturnType<typeof createAgentSessionFromServices>>["session"] | undefined;
+        let unsubscribe = () => {};
+        const onAbort = () => void session?.abort();
+        let outcome: "done" | "failed" = "failed";
+        let answer: string | undefined;
+        let ran = "";
+        let failure: string | undefined;
+        try {
+          const services = await createAgentSessionServices({
+            cwd: cwd,
+            agentDir: host.agentDir,
+            modelRuntime: host.modelRuntime,
+            settingsManager: piSettings(cwd, host.agentDir, projectTrusted(cwd, host.agentDir, where?.trusted), host.settings),
+            resourceLoaderOptions: { extensionFactories: extensionsFor(child) },
+          });
+          ({ session } = await createAgentSessionFromServices({
+            services,
+            sessionManager: subDir ? SessionManager.create(cwd, subDir, { parentSession: rootFile ?? undefined }) : SessionManager.inMemory(cwd),
+            model: plan.model,
+            thinkingLevel: plan.thinking as never,
+            tools: profile ? profileTools(profile, access === "full" ? undefined : READ_ONLY) : access === "full" ? undefined : READ_ONLY,
+          }));
+          await session.bindExtensions({});
+          const file = session.sessionManager.getSessionFile();
+          if (subDir && file) host.roster.setTranscript(node.id, file);
+          const steps: string[] = [];
+          // A sub-agent that has made its turns or spent its dollars is stopped and returns what it has.
+          let turns = 0;
+          let stoppedBy: string | undefined;
+          const stop = (why: string) => {
+            if (stoppedBy) return;
+            stoppedBy = why;
+            void session?.abort();
+          };
+          const { turns: maxTurns, spend } = plan.caps;
+          // The parent's number only when it is the one that holds; a pick above the user's was capped to theirs.
+          const limits = host.roster.limits;
+          const whose = (mine: number, theirs: number, setting: string) => (mine !== theirs ? "set by its parent" : `/settings ${setting}`);
+          unsubscribe = session.subscribe((event) => {
+            if (event.type === "turn_start") {
+              if (maxTurns > 0 && ++turns > maxTurns) return stop(`${maxTurns} turns (${whose(maxTurns, limits.subMaxTurns, "subMaxTurns")})`);
+              host.roster.turn(node.id);
+            }
+            if ((event.type === "turn_start" || event.type === "message_end") && spend > 0 && (host.roster.get(node.id)?.spent ?? 0) >= spend) stop(`$${spend.toFixed(2)} (${whose(spend, limits.subSpend, "subSpend")})`);
+            if (event.type === "tool_execution_start") {
+              steps.push(stepLine(event.toolName, (event.args ?? {}) as Record<string, unknown>));
+              onUpdate?.({ content: [{ type: "text", text: steps.slice(-8).join("\n") }], details: { steps: steps.length } });
+            }
+          });
+          signal?.addEventListener("abort", onAbort);
+          if (signal?.aborted) onAbort();
+          // Stopped while it was being set up (a background one, from the agents page): it never starts.
+          if (isEnded(host.roster.get(node.id)?.status ?? "stopped")) throw new Error("stopped before it started");
+          await session.prompt(params.task);
+          // A failed model call does not throw out of prompt(): it is the last reply, with an error and no text.
+          // Say why, so the parent (and the user) see the cause instead of an empty answer.
+          const last = session.messages.filter((m) => m.role === "assistant").at(-1) as { stopReason?: string; errorMessage?: string } | undefined;
+          if (!stoppedBy && (!last || last.stopReason === "error")) {
+            answer = `the sub-agent's model call failed: ${last?.errorMessage?.trim() || "no reply from the model"}`;
+            throw new Error(answer);
+          }
+          answer = session.getLastAssistantText()?.trim() || (stoppedBy ? "" : "(the sub-agent finished without an answer)");
+          if (stoppedBy) answer = `${answer}${answer ? "\n\n" : ""}[stopped at its limit of ${stoppedBy}; ${answer ? "this is what it had" : "it had nothing to report"}]`;
+          outcome = "done";
+          ran = `[ran${profile ? ` as profile ${profile.name}` : ""} on ${plan.model.provider}/${plan.model.id}, thinking ${session.thinkingLevel}${plan.notes.length ? `; ${plan.notes.join("; ")}` : ""}]`;
+          return {
+            content: [{ type: "text" as const, text: `${answer}\n\n${ran}` }],
+            details: { steps: steps.length, cost: session.getSessionStats().cost, node: node.id, model: `${plan.model.provider}/${plan.model.id}` },
+          };
+        } catch (e) {
+          failure = e instanceof Error ? e.message : String(e);
+          throw e;
+        } finally {
+          signal?.removeEventListener("abort", onAbort);
+          unsubscribe();
+          // Sent while it still runs (an ended agent sends nothing); a stopped one has nothing to say.
+          if (params.background && host.roster.get(node.id)?.status === "running") {
+            const max = host.roster.limits.messageChars;
+            const said =
+              outcome === "done" ? `[background result]\n\n${answer}\n\n${ran}` : `[background sub-agent failed: ${failure ?? answer ?? "no reason given"}]`;
+            host.roster.send(node.id, host.node, said.length > max ? `${said.slice(0, max - 1)}…` : said);
+          }
+          // A tree that was stopped keeps "stopped"; finish ignores a node that already ended.
+          host.roster.finish(node.id, signal?.aborted ? "stopped" : outcome, answer);
+          // Its own background sub-agents could no longer report to it.
+          for (const c of host.roster.children(node.id)) if (!isEnded(c.status)) host.roster.stopTree(c.id);
+          session?.dispose();
+          const ended = host.roster.get(node.id);
+          await subagentHooks(
+            hooks,
+            "SubagentStop",
+            { agent: node.id, parent: host.node, depth: host.depth + 1, name: node.label, status: ended?.status ?? outcome, answer: (answer ?? "").slice(0, 2000), model: modelName, turns: ended?.turns ?? 0, spent: ended?.spent ?? 0, transcript: ended?.transcript, cwd },
+            cwd,
+            host.agentDir,
+          );
+        }
+      };
+      if (!params.background) return work(signal, onUpdate);
+      inBackground(host, () => work(undefined, undefined));
+      return {
+        content: [{ type: "text" as const, text: `Started #${node.id} "${node.label}" in the background. Its answer will reach you as a message from #${node.id}; go on meanwhile, and do not wait or poll for it.` }],
+        details: { steps: 0, cost: 0, node: node.id, model: modelName, background: true },
+      };
+    }
   };
 }

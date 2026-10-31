@@ -61,6 +61,7 @@ much agents may do on their own; what an agent may *touch* is decided by the gat
 |---|---|---|---|---|
 | Default mode † | `mode` | default | default · plan | how much Mnemo may do without asking (bypass modes are never a default) |
 | Learn after runs | `reflect` | on | on · off | write durable facts to memory after each run (--no-reflect overrides) |
+| Record outcomes | `recordOutcomes` | on | on · off | keep a local record of each run's checks, cost and turns, and replayable copies of checked runs ([mnemo evolve](EVOLVE.md)) |
 | Tidy memory | `tidyMemory` | on | on · off | once a day per project, retire duplicate facts, facts about files that are gone and memories marked wrong (kept as history; mnemo memory tidy shows what it would do) |
 | Check changed code | `verify` | on | on · off | send a run that changed code back to run a check (--no-verify overrides) |
 | Escalation model | `escalateModel` | none | provider/model-id, or empty | provider/id to finish a run on after failed checks; empty for none |
