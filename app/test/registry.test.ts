@@ -265,6 +265,8 @@ describe("publisher", () => {
   test("a long session keeps its live agents and only the newest finished ones", () => {
     // One clock tick for all of them, as on a fast machine: the newest is told apart by its number.
     const { roster, root, pub, read } = setup({ now: () => NOW });
+    // The roster itself drops ended sub-agents past keepEnded (40); raised here so the record's own cap is what trims.
+    roster.setLimits({ keepEnded: 100 });
     for (let i = 0; i < 70; i++) {
       const s = roster.addSub(root.id, { label: `s${i}`, task: "", access: "full" });
       roster.finish(s.id, "done", `answer ${i}`);
