@@ -24,6 +24,8 @@ import type { startRuntime as StartRuntime } from "../src/runtime/runtime.ts";
 import { scheduleCommand } from "../src/schedule/cli.ts";
 import { skillsCommand } from "../src/market/cli.ts";
 import { projectSkillsWarning } from "../src/market/scan.ts";
+import { agentsCommand, elsewhere } from "../src/registry/cli.ts";
+import { joinRegistry, memberOf, type Joined } from "../src/registry/join.ts";
 import { applyTheme, themePaints, type ThemeName } from "../src/ui/theme.ts";
 import { mouse } from "../src/ui/mouse.ts";
 import { FOCUS_OFF, FOCUS_ON } from "../src/ui/notify.ts";
@@ -111,6 +113,7 @@ usage
   mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
   mnemo skills …           install skills from marketplaces, as Claude Code installs plugins (mnemo skills --help)
   mnemo schedule …         run a prompt on a timer, read-only unless you allow actions (mnemo schedule --help)
+  mnemo agents …           every agent running on this machine, in any project; tell, steer or stop one (mnemo agents --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
   mnemo --rpc              the session over JSON lines on stdin/stdout, for an editor extension (docs/RPC.md);
                            approvals are the client's to answer, as in the terminal
@@ -529,6 +532,7 @@ async function main(): Promise<number> {
   if (process.argv[2] === "uninstall") return uninstallCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "skills") return skillsCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "schedule") return scheduleCommand(process.argv.slice(3), mnemoHome());
+  if (process.argv[2] === "agents") return agentsCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "memory") {
     const home = mnemoHome();
     pointPiAt(agentDir(home));
@@ -628,11 +632,13 @@ async function main(): Promise<number> {
     await controller.bind();
     const server = new RpcServer({ controller, version: pkg.version, write: (e) => void process.stdout.write(`${JSON.stringify(e)}\n`), onQuit: () => finish() });
     server.start();
+    const registry = joinRegistry({ home, kind: "rpc", version: pkg.version, roster, members: () => [memberOf(host.node, cwd, controller)] });
     if (args.continueRecent && runtime.session.messages.length > 0) controller.transcript.load(runtime.session.messages);
     const rl = readline.createInterface({ input: process.stdin });
     rl.on("line", (l) => void server.handle(l));
     rl.on("close", () => finish());
     await closed;
+    registry?.close();
     server.stop();
     controller.dialogs.cancelAll();
     await runtime.dispose();
@@ -643,6 +649,23 @@ async function main(): Promise<number> {
   if (args.print !== undefined) {
     const session = runtime.session;
     await session.bindExtensions({});
+    // Seen from other terminals (`mnemo agents`), and stoppable from them; it takes no new words.
+    const registry = joinRegistry({
+      home,
+      kind: "print",
+      version: pkg.version,
+      roster,
+      members: () => [
+        {
+          node: host.node,
+          cwd,
+          model: () => (session.model ? `${session.model.provider}/${session.model.id}` : undefined),
+          mode: () => args.mode,
+          session: () => session.sessionFile,
+          control: { running: () => session.isStreaming, interrupt: () => void session.abort().catch(() => {}) },
+        },
+      ],
+    });
     try {
       if (!session.model || !session.modelRuntime.hasConfiguredAuth(session.model.provider)) {
         console.error("mnemo: no model configured — run mnemo and use /login, then /model");
@@ -670,6 +693,7 @@ async function main(): Promise<number> {
       await settleBackground(host);
       return 0;
     } finally {
+      registry?.close();
       await runtime.dispose();
       memory?.stop();
     }
@@ -731,6 +755,22 @@ async function main(): Promise<number> {
   controller.transcript.push({ kind: "welcome" });
   watch(cwd, controller);
   firstId = fleet.adopt(cwd, { controller, host, source: workspaceSource(controller, host, home) }).id;
+  // Every conversation of this terminal, seen and reachable from the others (`mnemo agents`, the hub).
+  const registry: Joined | undefined = joinRegistry({ home, kind: "interactive", version: pkg.version, roster, members: () => fleet.snapshot().agents.map((a) => memberOf(a.host.node, a.cwd, a.controller)) });
+  if (registry) {
+    // A question waiting for an answer is something the roster does not see.
+    const watched = new Set<number>();
+    const follow = () => {
+      for (const a of fleet.snapshot().agents)
+        if (!watched.has(a.id)) {
+          watched.add(a.id);
+          a.controller.dialogs.subscribe(registry.poke);
+        }
+      registry.poke();
+    };
+    fleet.subscribe(follow);
+    follow();
+  }
   // From here a failure nothing caught (an extension's timer, a stray promise) is a notice in
   // every open agent, not the end of the session.
   onStrayError = (kind, error) => {
@@ -748,6 +788,13 @@ async function main(): Promise<number> {
   const layout = interactive && !args.inline ? "workspace" : "inline";
   const onboard = interactive && !args.demo && (args.intro || !state.onboarded);
   const stats = memory ? await bootStats(memory, runtime) : undefined;
+  // Ink turns raw mode on in an effect, after the first frame is on screen. A key pressed in
+  // between (esc on the intro) would meet a cooked terminal: echoed as ^[ and, on macOS, lost.
+  // Raw from before the first frame, the key waits in the terminal until Ink reads it.
+  if (interactive) {
+    process.stdin.setRawMode(true);
+    process.on("exit", () => process.stdin.setRawMode(false));
+  }
   instance = render(
     React.createElement(Root, {
       controller,
@@ -760,6 +807,7 @@ async function main(): Promise<number> {
       onboard,
       stats,
       clearTerminal,
+      elsewhere: registry ? () => elsewhere(home, registry.tag) : undefined,
       onOnboarded: (choice) => {
         writeState(home, { ...state, onboarded: true });
         if (choice === "login") void controller.submit("/login");
@@ -826,6 +874,7 @@ async function main(): Promise<number> {
   }
 
   await done;
+  registry?.close();
   mouse.set(false);
   memory?.stop();
   instance.unmount();
