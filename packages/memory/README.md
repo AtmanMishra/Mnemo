@@ -56,6 +56,8 @@ const { system, message } = await session.recall(prompt); // system prompt block
 session.toolStart("bash", { command: "pnpm test" });
 await session.toolEnd("bash", { command: "pnpm test" }, false, "vitest: not found");
 await session.end({ messages }); // credit, then one reflection call
+// A run several agents shared: pass its record as `team`, and give the session an
+// `approveLesson` to be asked before its one lesson is kept as a project fact.
 await session.close();
 ```
 

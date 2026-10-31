@@ -20,10 +20,12 @@ export {
   parseReflection,
   recoveries,
   REFLECT_PROMPT,
+  TEAM_LESSON_PROMPT,
   textOf,
   worthReflecting,
   type DigestInput,
   type Reflection,
+  type TeamLesson,
   type ToolEvent,
 } from "./reflect.ts";
 export {

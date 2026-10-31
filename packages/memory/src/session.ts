@@ -29,7 +29,7 @@ import { projectIdentity, type ProjectIdentity } from "./project.ts";
 import { redact, secretUnderKey } from "./redact.ts";
 import { unsafeMemory } from "./safety.ts";
 import { describeHit, hitLine, profileBlock, recallMessage } from "./recall.ts";
-import { digest, parseReflection, REFLECT_PROMPT, worthReflecting, type Reflection, type ToolEvent } from "./reflect.ts";
+import { digest, parseReflection, REFLECT_PROMPT, TEAM_LESSON_PROMPT, worthReflecting, type Reflection, type TeamLesson, type ToolEvent } from "./reflect.ts";
 import { factValue, factsOf, type Hit, type MemoryService, type ProfileFact } from "./service.ts";
 import { renderSkill, skillPath, writeSkill, type SkillScope } from "./skills.ts";
 
@@ -85,6 +85,8 @@ export interface SessionOptions {
   notify?: (note: MemoryNote) => void;
   /** Asked before a skill file is written; absent means skills stay candidates. */
   approveSkill?: (offer: SkillOffer) => Promise<boolean>;
+  /** Asked before a team run's lesson is kept; absent means it is not. */
+  approveLesson?: (lesson: TeamLesson) => Promise<boolean>;
   /** A skill file was written: the agent should reload its skills. */
   skillsChanged?: () => void;
 }
@@ -102,6 +104,8 @@ export interface RunEnd {
   messages: readonly unknown[];
   /** What the user said outside the chat (a refusal with a reason). */
   signals?: readonly string[];
+  /** A team run's record (TASK.md and the end of LOG.md): the run is then asked for one lesson. */
+  team?: string;
 }
 
 const REFUSAL = /declined this call|Refused by a rule|Plan mode is read-only|The user doesn't want to proceed/;
@@ -439,7 +443,7 @@ export class MemorySession {
         return [];
       }
     });
-    const digestInput = { messages: run.messages, tools: this.toolLog, files: [...this.files], signals: run.signals ?? [], skills };
+    const digestInput = { messages: run.messages, tools: this.toolLog, files: [...this.files], signals: run.signals ?? [], skills, team: run.team };
     if (ep !== undefined && !failed) await mem.good(ep, "run completed without errors");
     for (const name of this.skillsRead.keys()) {
       const node = await mem.findLabel(`skill ${name}`);
@@ -454,12 +458,12 @@ export class MemorySession {
     let answer: string;
     try {
       // Redacted: the run may hold a pasted key, and the reflection model may be a third party's.
-      answer = await this.o.reflect(REFLECT_PROMPT, redact(`KNOWN:\n${known.join("\n") || "(nothing yet)"}\n\nRUN:\n${digest(digestInput)}`));
+      answer = await this.o.reflect(run.team?.trim() ? REFLECT_PROMPT + TEAM_LESSON_PROMPT : REFLECT_PROMPT, redact(`KNOWN:\n${known.join("\n") || "(nothing yet)"}\n\nRUN:\n${digest(digestInput)}`));
     } catch (error) {
       this.note({ kind: "failed", text: `Reflection failed: ${error instanceof Error ? error.message : String(error)}` });
       return;
     }
-    await this.apply(parseReflection(answer), { projectFacts, userFacts, ep });
+    await this.apply(parseReflection(answer), { projectFacts, userFacts, ep, team: Boolean(run.team?.trim()) });
   }
 
   /** The conversation is over. */
@@ -506,7 +510,7 @@ export class MemorySession {
   }
 
   /** Write what one reflection found. Kept separate so its rules read in one place. */
-  private async apply(r: Reflection, ctx: { projectFacts: ProfileFact[]; userFacts: ProfileFact[]; ep: number | undefined }): Promise<void> {
+  private async apply(r: Reflection, ctx: { projectFacts: ProfileFact[]; userFacts: ProfileFact[]; ep: number | undefined; team: boolean }): Promise<void> {
     const mem = this.mem;
     const learned: string[] = [];
     // Facts: only what the user said or a tool showed; a guess is not memory.
@@ -556,6 +560,22 @@ export class MemorySession {
     }
     if (fixed.length) this.note({ kind: "learned", items: fixed.map((x) => `fix · ${x}`) });
     if (r.skill && !this.refuse(`${r.skill.name} ${r.skill.description} ${r.skill.instructions}`)) await this.proposeSkill(r.skill);
+    // Only a team run was asked for one.
+    if (r.lesson && ctx.team) await this.offerLesson(r.lesson, known);
+  }
+
+  /**
+   * How a team should work next time. A guess is not offered; the user decides on the rest, and
+   * an accepted lesson is a project fact, recalled into every later session's profile here. One
+   * per cue: a later lesson on the same cue replaces it.
+   */
+  private async offerLesson(l: TeamLesson, known: Map<string, string>): Promise<void> {
+    if (l.confidence === "low" || !this.o.approveLesson) return;
+    const key = `team lesson (${l.cue.replace(/[:()]/g, "")})`;
+    if (known.get(`project:${key}`) === l.lesson || this.refuse(`${l.cue} ${l.lesson} ${l.evidence}`)) return;
+    if (!(await this.o.approveLesson(l))) return;
+    await this.learnFact("project", key, l.lesson);
+    this.note({ kind: "learned", items: [`project · ${key}: ${l.lesson}`] });
   }
 
   /**
