@@ -29,7 +29,8 @@ const READ = new Set(["read", "grep", "find", "ls", "code_search", "code_symbol"
 /** Read-class tools that still write to memory: plan mode is "change nothing", memory included. */
 const WRITES_MEMORY = new Set(["memory_remember", "memory_steer"]);
 const EDIT = new Set(["edit", "write", "create_skill", "update_skill"]);
-const EXEC = new Set(["bash", "powershell", "ipy_run"]);
+/** A race runs its check command, and its attempts work unattended in copies of the project. */
+const EXEC = new Set(["bash", "powershell", "ipy_run", "race"]);
 const MCP_RESOURCES = new Set(["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]);
 /** A tool an MCP server provides (`mcp__<server>__<tool>`) or reads through: what it does is the server's to say. */
 const isMcp = (tool: string) => tool.startsWith("mcp__") || MCP_RESOURCES.has(tool);
@@ -119,6 +120,7 @@ export function globMatch(pattern: string, text: string): boolean {
 /** The argument that makes a call dangerous: the command, the path, the code. */
 export function subjectOf(tool: string, input: Record<string, unknown>): string {
   if (isMcp(tool)) return JSON.stringify(input);
+  if (tool === "race") return typeof input.check === "string" ? input.check : "";
   const v = input.command ?? input.path ?? input.code ?? input.pattern ?? input.name ?? "";
   return typeof v === "string" ? v : JSON.stringify(v);
 }
@@ -339,6 +341,7 @@ const TITLES: Record<string, string> = {
   ipy_run: "Python",
   powershell: "PowerShell",
   create_skill: "New skill",
+  race: "Race",
   update_skill: "Change skill",
 };
 
@@ -354,6 +357,14 @@ export function approvalPreview(tool: string, input: Record<string, unknown>): A
   }
   if (tool === "write") return lines(input.content).map((t) => ({ text: `+ ${plain(t)}`, tone: "add" as const }));
   if (tool === "ipy_run") return lines(input.code).map((t) => ({ text: plain(t) }));
+  if (tool === "race") {
+    const n = typeof input.n === "number" ? input.n : 2;
+    return [
+      { text: `${n} attempts, each in its own copy of this project, working unattended: nothing asks before their edits and commands there.`, tone: "muted" as const },
+      { text: "Then this check runs in each copy, and the smallest change that passes is applied here.", tone: "muted" as const },
+      ...lines(input.task).map((t) => ({ text: plain(t) })),
+    ];
+  }
   // The whole command, not just what fits a line: the part that matters is often the tail.
   if ((tool === "bash" || tool === "powershell") && typeof input.command === "string" && (input.command.includes("\n") || input.command.length > 80))
     return lines(input.command).map((t) => ({ text: plain(t) }));

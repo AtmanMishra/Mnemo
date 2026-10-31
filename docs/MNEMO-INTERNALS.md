@@ -530,6 +530,12 @@ parent, so the run's caps, the frame and waking all apply as for any message. Af
 any still-running children of the node are stopped with `stopTree`, and a node stopped while
 its session was being set up never prompts.
 
+**Races.** `race` (agents.ts, only for a full-access agent) calls `bestOf` with a runner that
+starts each attempt through `spawnOne(…, { cwd: worktree, unattended: true })`: the child's
+session runs in the worktree and its mode reads as `yolo` unless the user is in plan mode. The
+gate treats `race` as a command (EXEC), with the check as its subject and a preview that says
+the attempts are unattended; it never offers a grant.
+
 **Teams.** `runtime/team.ts` keeps one `TaskBoard` per roster (`boardOf`), keyed by run id.
 A run gets files (`$MNEMO_HOME/runs/<when>-<pid>-<run>/TASK.md`, written whole by rename,
 and `LOG.md`, appended) once it has a second member or any plan; lines logged before that
