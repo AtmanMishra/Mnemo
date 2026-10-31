@@ -114,6 +114,58 @@ agent is not woken again until you prompt it. The agents page shows `$ woken tur
 The playground's **conversation view** (`c`) shows the selected agent's messages with
 one other as a thread; `tab` moves to its next partner.
 
+## Every agent on this machine (`mnemo agents`)
+
+The roster is one process's. The **registry** shows them all: every Mnemo process, in any
+project, writes `$MNEMO_HOME/registry/procs/<tag>.json` (its conversations and sub-agents with
+status, task, last steps, folder, model, mode, spend, an approval waiting) when its roster changes
+and every 5 seconds as a heartbeat. Interactive sessions, `--rpc`, `-p` and so scheduled runs all
+do. Plain files are the source of truth, written whole (rename into place), folders 0700 and files
+0600; there is no database to drift or to lock on Windows.
+
+- **Status**: `running`, `idle`, `waiting` (an approval or question open in that terminal),
+  `done`, `failed`, `stopped`, `closed` (a conversation you closed) and `lost` (its process died
+  without saying so: its pid is gone, or its heartbeat is 90 seconds old). Scheduled jobs that
+  are due later are listed as **queued**. Finished and lost entries are kept a day (at most 50
+  processes); `mnemo agents clear` forgets them now.
+- **Refs**: `k3f9.2` is agent 2 in process `k3f9`. Node numbers are the process's own; the tag
+  makes them unique across terminals. A tag alone means that process's conversation; a name works
+  when one live agent has it.
+- **Control** without a server: `mnemo agents tell|steer|stop <ref>` drops a file in
+  `registry/inbox/<tag>/`; the owning process picks it up within a second, applies it through the
+  calls its own interface makes (`Roster.tell`/`stopTree` for a sub-agent, the controller's
+  `submit`/`interrupt` for a conversation) and writes the answer to `registry/acks/<id>.json`,
+  which the command prints. `tell` is queued behind a running turn or starts one; `steer` is read
+  after the current step; `stop` interrupts a conversation's turn, or stops a sub-agent and what
+  it started. The words are yours: they start a turn under that terminal's mode and gate. Nothing
+  else can be asked: no approvals (answered only in the terminal that asks), no slash commands,
+  no mode changes, no links. A `-p` run accepts only `stop`.
+- **The hub** lists other processes' live agents (and what was lost in the last hour) under
+  *Elsewhere*, read every 2 seconds while the hub shows. It is read-only there.
+- `MNEMO_REGISTRY=0` keeps a process out of the registry (it is neither listed nor reachable).
+
+**Saved sub-agents**: a saved conversation keeps each sub-agent's transcript in
+`<session>/sub/` and a `<session>.state.json` with every agent it started (see
+`docs/MNEMO-INTERNALS.md` §1). The live roster keeps the last 40 ended sub-agents per
+conversation; older ones are only in the state file. Hooks `SubagentStart` and
+`SubagentStop` let you log or refuse delegation.
+
+**Runs, numbers and `@N`**: every agent shows its number (`#2`) on its card, in the
+trees and in its pane. `@2 …` at the start of a prompt (a picker offers the agents when you
+type `@`), or `/tell 2 …`, is your words to agent #2: a top-level agent gets them as its
+prompt (after what it is doing, if busy), a running sub-agent after its current step. One
+prompt of yours starts a **run** (`r1`, `r2`…) with your words as its goal; agents woken by a
+message, and sub-agents, join the run of what reached them, and the goal travels in every
+peer message as quoted context. A run is capped as one unit: `runMessages` (40 messages),
+`runWakeSpend` ($1.00 for all turns messages start), and `fanOut` (4 recipients per
+message), on top of the per-agent bounds. The **ping-pong guard** refuses a message to an
+agent earlier in the chain that asked the sender nothing (one answer per message read;
+a parent and its own sub-agent may always talk). **Queue or steer**: a busy agent reads a
+message when it finishes what it is doing, an `urgent` one (or one its sender waits on)
+after its current step. `r` twice on the agents page stops every agent working in the
+selected agent's run, and nothing in that run can send again.
+
 ## Not yet
 
 User-typed messages into the tree from the playground (it stays supervise-only).
+Agents messaging agents in another process (links across terminals), and a global agent number.

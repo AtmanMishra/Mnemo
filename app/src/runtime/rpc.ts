@@ -60,6 +60,10 @@ function wireNode(n: RosterNode) {
     endedAt: n.endedAt,
     woken: n.woken,
     wakeSpend: n.wakeSpend,
+    model: n.model,
+    turns: n.turns,
+    spent: n.spent,
+    caps: n.caps,
   };
 }
 

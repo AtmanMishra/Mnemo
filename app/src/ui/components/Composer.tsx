@@ -18,6 +18,8 @@ export interface ComposerProps {
   active: boolean;
   commands: () => CommandInfo[];
   files: () => readonly string[];
+  /** The agents `@N` can address (none: `@` is for files only). */
+  agents?: () => readonly { id: number; label: string; kind: string; status: string }[];
   footer: FooterData;
   statuses: readonly [string, string][];
   draftRequest?: { text: string; seq: number };
@@ -65,7 +67,7 @@ const shortcuts = (k: Settings): { key: string; text: string; needs?: "find" | "
   { key: "esc esc", text: "on an empty prompt: rewind to an earlier message" },
   { key: "↑ ↓", text: "history" },
   { key: "tab", text: "accept suggestion" },
-  { key: "@", text: "mention a file" },
+  { key: "@", text: "mention a file · @2 at the start talks to agent #2" },
   { key: "/", text: "commands" },
   { key: "shift+tab", text: "mode: default → accept edits → plan" },
   { key: k["keys.thinking"], text: "thinking level" },
@@ -119,7 +121,14 @@ export function Composer(props: ComposerProps): React.ReactElement {
         label: `/${c.name}`,
         detail: c.source === "builtin" ? c.description : `${c.description} · ${c.source}`,
       }));
-    return matchFiles(props.files(), token.query, 50).map((f) => ({ value: `@${f}`, label: f }));
+    const files = matchFiles(props.files(), token.query, 50).map((f) => ({ value: `@${f}`, label: f }));
+    // `@` then digits names an agent (`@2 do this` goes to agent #2 as your words), at the start of the prompt.
+    if (token.from !== 0 || !/^\d*$/.test(token.query) || !props.agents) return files;
+    const agents = props
+      .agents()
+      .filter((a) => String(a.id).startsWith(token.query))
+      .map((a) => ({ value: `@${a.id}`, label: `#${a.id} ${a.label}`, detail: `${a.kind === "root" ? "agent" : "sub-agent"} · ${a.status} · your words, as a prompt` }));
+    return [...agents, ...files];
   }, [token?.kind, token?.query, menuClosed]);
   const menuOpen = suggestions.length > 0;
   const selected = suggestions[Math.min(menuIndex, suggestions.length - 1)];

@@ -29,12 +29,13 @@ import { Hub, agentState, type AgentState } from "./Hub.tsx";
 import { Playground } from "./Playground.tsx";
 import { NodePane } from "./NodePane.tsx";
 import { Roster } from "../runtime/roster.ts";
-import { familyPanes, linkedRoots, subsOf, withNewSub } from "./tree.ts";
+import { familyPanes, linkedRoots, runLine, subsOf, withNewSub } from "./tree.ts";
 import { caret, chordMatches } from "../runtime/settings.ts";
 import { useSettings } from "./settings-context.ts";
 import { defaultLayout, fitsPanes, LAYOUT_LABEL, layoutsFor, nextLayout, SPLIT_MAX, splitRects, type SplitLayout } from "./layout.ts";
 import { Toasts, useToasts } from "./Toasts.tsx";
 import { ExitCard } from "./ExitCard.tsx";
+import type { Row } from "../registry/cli.ts";
 
 export type Screen = "agent" | "split" | "hub" | "playground";
 
@@ -43,6 +44,27 @@ export interface ShellProps {
   motion: boolean;
   /** Where to start (tests and snapshots). */
   initial?: { screen?: Screen; picker?: boolean };
+  /** Agents of other Mnemo processes (the registry), for the hub; read every few seconds while it shows. */
+  elsewhere?: () => readonly Row[];
+}
+
+/** What `read` returns, re-read every `ms` while `on`. */
+function usePolled<T>(read: (() => T) | undefined, on: boolean, ms: number): T | undefined {
+  const [value, setValue] = useState<T | undefined>(undefined);
+  useEffect(() => {
+    if (!read || !on) return;
+    const load = () => {
+      try {
+        setValue(read());
+      } catch {
+        /* an unreadable registry shows nothing */
+      }
+    };
+    load();
+    const t = setInterval(load, ms);
+    return () => clearInterval(t);
+  }, [read, on, ms]);
+  return value;
 }
 
 /** What a shell with no agent reads from (never shown: it has no agents). */
@@ -128,7 +150,7 @@ function FleetBar({
   );
 }
 
-export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElement {
+export function Shell({ fleet, motion, initial, elsewhere }: ShellProps): React.ReactElement {
   const snap = useSyncExternalStore(fleet.subscribe, fleet.snapshot);
   // A theme change re-draws everything; light themes paint their own ground.
   const theme = useSyncExternalStore(subscribeTheme, themeName);
@@ -146,6 +168,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
   /** The layout a split opens in: the one chosen in settings if it fits this many panes, else by terminal width. */
   const startLayout = (n: number): SplitLayout => (prefs.splitLayout !== "auto" && layoutsFor(n).includes(prefs.splitLayout) ? prefs.splitLayout : defaultLayout(n, columns));
   const [screen, setScreen] = useState<Screen>(initial?.screen ?? "agent");
+  const others = usePolled(elsewhere, screen === "hub", 2000);
   const [activeId, setActiveId] = useState<number | undefined>(agents[0]?.id);
   const [splitKeys, setSplitKeys] = useState<string[]>([]);
   const [layoutChoice, setLayoutChoice] = useState<SplitLayout | undefined>();
@@ -297,6 +320,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
             active={!picker}
             split={splitAgents}
             roster={tree}
+            elsewhere={others}
             onOpen={(id) => go(id, "agent")}
             onSplit={(id) => {
               // The agent you are in is always in the split, so taking it out would do nothing.
@@ -319,6 +343,11 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
             onUnlink={(id) => void fleet.unlink(id)}
             onFamily={splitWithFamily}
             onPlayground={() => setScreen("playground")}
+            onStopRun={(id) => {
+              const r = fleet.stopRun(id);
+              setError(r ? undefined : "that agent is not in a run");
+              if (r) agents.find((a) => a.id === id)?.controller.transcript.notice(`Stopped run ${r.run}: ${r.agents} agent${r.agents === 1 ? "" : "s"} were still working.`, "warn");
+            }}
           />
         ) : null}
         {screen === "playground" ? (
@@ -376,7 +405,7 @@ export function Shell({ fleet, motion, initial }: ShellProps): React.ReactElemen
                 const on = nodeFocus === k && !picker;
                 return (
                   <Box key={k} position="absolute" left={r.x} top={r.y} width={r.w} height={r.h} borderStyle="round" borderBackgroundColor={ground()} borderColor={on ? palette.magenta : palette.faint}>
-                    <NodePane node={node} nodes={tree.nodes} width={r.w - 2} height={r.h - 2} focused={on} onTell={(text) => roster.tell(node.id, text)} />
+                    <NodePane node={node} nodes={tree.nodes} width={r.w - 2} height={r.h - 2} focused={on} onTell={(text) => roster.tell(node.id, text)} run={runLine(tree, node)} />
                   </Box>
                 );
               })
