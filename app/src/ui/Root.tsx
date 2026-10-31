@@ -13,6 +13,7 @@ import { SettingsContext } from "./settings-context.ts";
 import { Onboarding, type OnboardingChoice } from "./components/Onboarding.tsx";
 import type { Fleet } from "../runtime/fleet.ts";
 import { Shell } from "./Shell.tsx";
+import type { Row } from "../registry/cli.ts";
 
 export interface RootProps {
   /** The first agent: the inline layout and the onboarding use it. */
@@ -29,6 +30,8 @@ export interface RootProps {
   stats?: BootInfo["stats"];
   clearTerminal: () => void;
   onOnboarded: (choice: OnboardingChoice) => void;
+  /** Agents of other Mnemo processes, for the hub. */
+  elsewhere?: () => readonly Row[];
 }
 
 type Phase = "boot" | "onboarding" | "main";
@@ -65,7 +68,7 @@ function Phases(p: RootProps): React.ReactElement {
       </MotionContext.Provider>
     );
   return p.layout === "workspace" ? (
-    <Shell fleet={p.fleet} motion={p.motion} />
+    <Shell fleet={p.fleet} motion={p.motion} elsewhere={p.elsewhere} />
   ) : (
     <App controller={p.controller} version={p.version} home={p.home} motion={p.motion} clearTerminal={p.clearTerminal} />
   );

@@ -66,6 +66,12 @@ const sitemap = existsSync(join(dist, "sitemap.xml")) ? readFileSync(join(dist, 
 for (const r of routes) if (!sitemap.includes(`<loc>https://mnemo.atmanmishra.dev${r === "/" ? "/" : r}</loc>`)) fail(`${r}: missing from sitemap.xml`);
 for (const f of ["/404.html", "/changelog.xml", "/install.sh", "/install.ps1", "/mnemo-commands-and-shortcuts.md", "/robots.txt", "/.well-known/security.txt"]) if (!have.has(f)) fail(`${f}: missing from dist`);
 
+// The home page's highlights: five features, each a tab, and the first demo rendered without JavaScript.
+const home = html["/"] ?? "";
+const tabs = (home.match(/id="hl-tab-/g) || []).length;
+if (tabs !== 5) fail(`/: ${tabs} highlight tabs (want 5)`);
+if (!home.includes('id="hl-panel"') || !home.includes("TASK.md")) fail("/: the first highlight's demo did not render on the server");
+
 if (problems.length) {
   console.error(`site check failed (${problems.length}):\n - ${problems.join("\n - ")}`);
   process.exit(1);
