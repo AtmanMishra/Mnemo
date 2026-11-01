@@ -72,8 +72,13 @@ export function piSettings(cwd: string, agentDir: string, trusted: boolean, mnem
  */
 export function projectTrusted(cwd: string, agentDir: string, override?: boolean): boolean {
   if (override !== undefined) return override;
-  if (!hasTrustRequiringProjectResources(cwd)) return true;
+  if (!needsTrust(cwd)) return true;
   return new ProjectTrustStore(agentDir).get(cwd) === true;
+}
+
+/** pi's list, and agent profiles (`.agents/agents/`), which steer a sub-agent's model and tools. */
+export function needsTrust(cwd: string): boolean {
+  return hasTrustRequiringProjectResources(cwd) || fs.existsSync(path.join(cwd, ".agents", "agents"));
 }
 
 /** A managed policy's model list holds here, for every request this runtime sends. */

@@ -291,7 +291,7 @@ describe("publisher", () => {
     expect(r.agents.length).toBe(60);
     expect(r.agents.some((a) => a.node === live.id)).toBe(true);
     expect(r.agents.some((a) => a.node === root.id)).toBe(true);
-    expect(r.agents.some((a) => a.node === other.id)).toBe(true);
+    expect(r.agents.some((a) => a.node === web.id)).toBe(true);
     expect(r.agents.some((a) => a.label === "s69")).toBe(true);
     expect(r.agents.some((a) => a.label === "s68")).toBe(true);
     expect(r.agents.some((a) => a.label === "s0")).toBe(false);

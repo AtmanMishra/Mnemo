@@ -63,6 +63,10 @@ export type Scope = "project" | "user";
 
 export const USER_LABEL = "user preferences";
 export const projectLabel = (projectId: string) => `project ${projectId}`;
+/** Where a kept lesson's helped and hurt votes are counted: the lesson itself is a profile fact, which has no votes. */
+export const playbookLabel = (projectId: string, key: string) => `playbook ${projectId} :: ${key}`;
+/** A lesson that hurt this much more often than it helped is left out of the prompt. */
+export const BENCH_MARGIN = 2;
 
 /** Values written by `forget`: still history, never an answer. */
 const FORGOTTEN = "(forgotten)";
@@ -283,8 +287,8 @@ export class MemoryService {
     return hits
       .filter((h) => !profileNodes.includes(h.node) && h.score > 0.05)
       // gap: and lexical "lesson:" nodes are token bags with nothing to act on
-      // (audit F6, F7); candidates are not knowledge until saved.
-      .filter((h) => !/^(gap:|lesson:|skill candidate)/.test(h.label))
+      // (audit F6, F7); candidates are not knowledge until saved; playbook nodes only count votes.
+      .filter((h) => !/^(gap:|lesson:|skill candidate|playbook )/.test(h.label))
       .filter((h) => h.area !== "Salience" || factValue(h.state, "fix") !== undefined)
       .filter((h) => h.kind !== "TaskEpisode" || factValue(h.state, "goal") !== undefined)
       .filter((h) => !distrusted(h))
@@ -313,6 +317,26 @@ export class MemoryService {
   /** A failure: one marker per distinct failure (counted), no gap node for tool errors. */
   async steer(episode: number, failure: string): Promise<{ pain_node?: number; occurrences?: number; blamed_feeders?: [number, number][] } | undefined> {
     return this.call("steer", { episode, failure: redact(failure), dedupe: true, gap: false });
+  }
+
+  /** A run's vote on a kept lesson. */
+  async voteLesson(projectId: string, key: string, helped: boolean): Promise<void> {
+    const node = await this.standing(playbookLabel(projectId, key), "harness", "procedural");
+    if (node !== undefined) await this.markUseful(node, helped);
+  }
+
+  /** Helped and hurt votes on this project's lessons, by key; a lesson with no votes is absent. */
+  async lessonVotes(projectId: string): Promise<Map<string, { helped: number; hurt: number }>> {
+    const prefix = playbookLabel(projectId, "");
+    const out = new Map<string, { helped: number; hurt: number }>();
+    for (const n of await this.nodes()) {
+      if (!n.label.startsWith(prefix)) continue;
+      const key = n.label.slice(prefix.length);
+      const was = out.get(key) ?? { helped: 0, hurt: 0 };
+      // Two processes may each have made the node before ensure_node: count both.
+      out.set(key, { helped: was.helped + (n.useful ?? 0), hurt: was.hurt + (n.unhelpful ?? 0) });
+    }
+    return out;
   }
 
   async good(episode: number, detail: string): Promise<void> {

@@ -250,6 +250,14 @@ export class TaskBoard {
     return parts.join("\n\n");
   }
 
+  /** What a team run left, for its reflection: TASK.md and the end of LOG.md. Empty when the run was no team. */
+  record(runId: string, lines = 30): string {
+    const run = this.roster.run(runId);
+    const t = this.teams.get(runId);
+    if (!run || !t || !this.isTeam(run, t)) return "";
+    return `${renderTask(t.task).trim()}\n\n## Log (last ${Math.min(lines, t.log.length)} of ${t.logged})\n${t.log.slice(-lines).map((l) => l.line).join("\n")}`;
+  }
+
   /** The step `id` has claimed in its run, if any (a message about it steers). */
   claimed(id: number): number[] {
     const run = this.runOf(id);
