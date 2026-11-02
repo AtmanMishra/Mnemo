@@ -47,6 +47,18 @@ export const AREA_LABEL: Record<Area, string> = {
 
 export const RELEASES: Release[] = [
   {
+    version: "0.2.1",
+    date: "2026-11-02",
+    headline: "Startup no longer waits on a memory sidecar that does not answer.",
+    changes: [
+      { kind: "fixed", area: "memory", text: "Blank screen at startup when the memory sidecar is unresponsive", detail: "Startup waits 5 s for the sidecar's first reply, leaves a timed-out one alone for 60 s, and caps the intro's memory numbers at 2 s, so memory never holds up the first frame." },
+    ],
+    known: [
+      "The gate filters; it is not a sandbox.",
+      "mnemo update on Windows can fail in install.ps1 (Get-FileHash missing); reinstall with the one-liner.",
+    ],
+  },
+  {
     version: "0.2.0",
     date: "2026-11-02",
     headline: "Agents that work as a team (a registry, runs, a shared plan, profiles, background sub-agents, Opera, evolve), memory that works in the background, and a faster, better-ranked code search.",
