@@ -47,6 +47,35 @@ export const AREA_LABEL: Record<Area, string> = {
 
 export const RELEASES: Release[] = [
   {
+    version: "0.2.0",
+    date: "2026-11-02",
+    headline: "Agents that work as a team (a registry, runs, a shared plan, profiles, background sub-agents, Opera, evolve), memory that works in the background, and a faster, better-ranked code search.",
+    changes: [
+      { kind: "added", area: "agents", text: "Sub-agent model and limits in settings", detail: "Choose the model sub-agents run on and their turns, budget, thinking and context. A parent may lower any of them for one task, never raise one past yours." },
+      { kind: "added", area: "agents", text: "mnemo agents", detail: "Lists every agent on the machine, in every terminal and project, and tells, steers or stops one from anywhere. Plain local files: no socket, no server." },
+      { kind: "added", area: "agents", text: "Sub-agents saved with the conversation", detail: "Each transcript and a state file listing every agent a session started, plus SubagentStart and SubagentStop hooks." },
+      { kind: "added", area: "agents", text: "Runs and @N", detail: "Talk to any agent by its number. One prompt of yours is a run, capped at 40 messages and $1.00 of woken turns, and stopped as one." },
+      { kind: "added", area: "agents", text: "A shared plan and log per run", detail: "Agents on one run share a TASK.md and a LOG.md, claim steps with task_update, and see what the others did at each turn." },
+      { kind: "added", area: "agents", text: "Agent profiles", detail: "A sub-agent you use often, saved as one Markdown file and started by name within your sub-agent settings." },
+      { kind: "added", area: "agents", text: "Background sub-agents", detail: "spawn_subagent returns at once and the answer comes back as a message, so the parent keeps working." },
+      { kind: "added", area: "agents", text: "mnemo opera", detail: "A conductor that hands work to threads, each in its own git worktree, across several repositories." },
+      { kind: "added", area: "agents", text: "mnemo evolve", detail: "Run records, replayable task cards, a lesson playbook and versions you can revert. Sub-agents reflect on a run and keep team lessons." },
+      { kind: "added", area: "agents", text: "Find and resume every conversation", detail: "mnemo agents saved lists conversations across projects, and resume reopens one." },
+      { kind: "added", area: "memory", text: "Background memory work", detail: "Ingest, tidy and curate run on a timer, and the agent is told to open conversations it has not read." },
+      { kind: "added", area: "memory", text: "Memories pinned to definitions", detail: "A fact can point at a function and reads as stale once that function changes." },
+      { kind: "added", area: "memory", text: "Codex and opencode sessions in ingest", detail: "mnemo memory ingest reads them next to Claude Code's and Mnemo's own." },
+      { kind: "added", area: "tools", text: "grep without ripgrep", detail: "A trigram text index behind grep for when rg is not installed." },
+      { kind: "changed", area: "tools", text: "Call-graph ranking in code_search", detail: "Results are ordered by how much of the project calls them, not by how often a name appears." },
+      { kind: "changed", area: "agents", text: "The agent uses its own tools unasked", detail: "Prompts say when to use each tool and tidy memory by itself; each agent is told only about tools it has." },
+      { kind: "security", area: "safety", text: "Skills are scanned before they are trusted", detail: "SkillSpector rules run over a skill before it loads." },
+      { kind: "fixed", area: "install", text: "Flaky Windows and macOS tests", detail: "Fixed at their cause: tests wait on screen state, not on fixed sleeps." },
+    ],
+    known: [
+      "The gate filters; it is not a sandbox.",
+      "mnemo update on Windows can fail in install.ps1 (Get-FileHash missing); reinstall with the one-liner.",
+    ],
+  },
+  {
     version: "0.1.9",
     date: "2026-10-20",
     headline: "Hooks, scheduled runs, a code index, language-server diagnostics, skills from marketplaces, a remote view, and egress, environment and managed-policy controls.",
