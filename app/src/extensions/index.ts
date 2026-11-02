@@ -15,7 +15,10 @@ import { hooksExtension } from "./hooks.ts";
 import { kernelExtension } from "./kernel.ts";
 import { lspExtension } from "./lsp.ts";
 import { mcpExtensions } from "./mcp.ts";
+import { modelNotesExtension } from "./model-notes.ts";
+import { outcomeExtension } from "./outcome.ts";
 import { memoryExtension } from "./memory.ts";
+import { operaExtension } from "./opera.ts";
 import { peersExtension } from "./peers.ts";
 import { planExtension } from "./plan.ts";
 import { policyExtension } from "./policy.ts";
@@ -33,13 +36,18 @@ export function mnemoExtensions(host: Host): InlineExtension[] {
     // Right after the gate: a hook sees only calls the gate let through, and can still refuse them.
     { name: "mnemo-hooks", factory: hooksExtension(host) },
     { name: "mnemo-plan", factory: planExtension(host) },
+    { name: "mnemo-model-notes", factory: modelNotesExtension(host) },
     { name: "mnemo-role", factory: roleExtension(host) },
     // Also before memory: the tool list and the working section are part of that rendered prompt.
     { name: "mnemo-guide", factory: guideExtension() },
     { name: "mnemo-checkpoints", factory: checkpointsExtension(host) },
     { name: "mnemo-lsp", factory: lspExtension(host) },
     { name: "mnemo-shell", factory: shellExtension(host) },
+    // Before memory, whose system prompt is final: a section set after it would be dropped.
+    { name: "mnemo-opera", factory: operaExtension(host) },
     { name: "mnemo-memory", factory: memoryExtension(host) },
+    // After memory, which says whether a run that ended goes back to verify.
+    { name: "mnemo-outcome", factory: outcomeExtension(host) },
     { name: "mnemo-background", factory: backgroundExtension(host) },
     { name: "mnemo-kernel", factory: kernelExtension(host) },
     { name: "mnemo-code", factory: codeExtension(host) },

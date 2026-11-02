@@ -279,6 +279,9 @@ describe("publisher", () => {
     // The roster itself keeps 40 ended sub-agents per conversation, so two conversations go past the record's 60.
     const { roster, root, pub, read } = setup({ now: () => NOW });
     const other = roster.addRoot("web");
+    // The roster itself drops ended sub-agents past keepEnded (40); raised here so the record's own cap is what trims.
+    roster.setLimits({ keepEnded: 100 });
+    const web = roster.addRoot("web");
     for (let i = 0; i < 70; i++) {
       const s = roster.addSub(i % 2 ? other.id : root.id, { label: `s${i}`, task: "", access: "full" });
       roster.finish(s.id, "done", `answer ${i}`);
@@ -291,7 +294,7 @@ describe("publisher", () => {
     expect(r.agents.length).toBe(60);
     expect(r.agents.some((a) => a.node === live.id)).toBe(true);
     expect(r.agents.some((a) => a.node === root.id)).toBe(true);
-    expect(r.agents.some((a) => a.node === other.id)).toBe(true);
+    expect(r.agents.some((a) => a.node === web.id)).toBe(true);
     expect(r.agents.some((a) => a.label === "s69")).toBe(true);
     expect(r.agents.some((a) => a.label === "s68")).toBe(true);
     expect(r.agents.some((a) => a.label === "s0")).toBe(false);

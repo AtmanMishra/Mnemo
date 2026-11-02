@@ -3,7 +3,7 @@
  * `MemorySession` from @mnemo/memory, which holds the loop itself (and is
  * what other agents attach to). This file owns only what is pi's: the tools'
  * schemas, the event shapes, the model call for reflection, the approval
- * dialog for saving a skill, and running reflection in the background.
+ * dialogs for saving a skill or a team run's lesson, and running reflection in the background.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -11,6 +11,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { anchorKey, anchorTag, applyTidy, describeSessionHits, MemorySession, planTidy, projectIdentity, redact, SessionIndex, textOf, type AnchorCheck, type AnchorState, type MemoryService, type Reflector, type TidyItem } from "@mnemo/memory";
 import { sessionIndexPath, sessionSources, skillsDir } from "../runtime/paths.ts";
+import { boardOf } from "../runtime/team.ts";
 import { inBackground, type Host } from "./host.ts";
 
 export { describeHit, DIRECTIVE, profileBlock, recallMessage } from "@mnemo/memory";
@@ -72,7 +73,8 @@ export function memoryExtension(host: Host) {
       session ??= new MemorySession({
         anchors: anchorsIn(cwd),
         memory: mem,
-        cwd,
+        // An Opera's threads share the Opera's memory, whichever repository they work in.
+        cwd: host.memoryCwd ?? cwd,
         userSkillsDir: skillsDir(host.home),
         source: { agent: "mnemo", model },
         parentEpisode: host.parentEpisode,
@@ -87,6 +89,17 @@ export function memoryExtension(host: Host) {
             subject: offer.file,
             preview: offer.body.split("\n").map((text) => ({ text: `+ ${text}`, tone: "add" as const })),
             reason: offer.reason,
+          });
+          return answer.kind !== "no";
+        },
+        // A run's lesson, kept only if the user says so: it is recalled into every later session.
+        approveLesson: async (lesson, team) => {
+          if (!host.ui) return false;
+          const answer = await host.ui.approve({
+            tool: team ? "Save team lesson" : "Save lesson",
+            subject: lesson.cue,
+            preview: [{ text: `+ ${lesson.lesson}`, tone: "add" as const }],
+            reason: `${lesson.evidence ? `${lesson.evidence} ` : ""}(${lesson.confidence} confidence; kept in this project's memory, recalled at the start of later sessions)`,
           });
           return answer.kind !== "no";
         },
@@ -244,6 +257,7 @@ export function memoryExtension(host: Host) {
       const messages = [...held, ...event.messages];
       // Changed code and checked nothing: back once, to verify, before it is called done.
       const nudge = host.verify && host.settings.get().verify && host.depth === 0 && last.stopReason !== "error" ? await s.verifyNudge() : undefined;
+      host.verifying = !!nudge;
       if (nudge) {
         held = messages;
         pi.sendMessage({ customType: "mnemo-verify", content: nudge, display: true }, { triggerTurn: true });
@@ -251,7 +265,8 @@ export function memoryExtension(host: Host) {
       }
       held = [];
       if (ctx.model) reflectWith = { model: ctx.model, sessionId: ctx.sessionManager.getSessionId() };
-      const run = { messages, signals: host.signals.splice(0) };
+      const runId = host.roster.get(host.node)?.run;
+      const run = { messages, signals: host.signals.splice(0), team: runId ? boardOf(host.roster, host.home).record(runId) : "" };
       inBackground(host, () => s.end(run));
     });
 

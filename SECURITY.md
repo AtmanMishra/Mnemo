@@ -31,7 +31,9 @@ running things you did not approve, but anything you approve runs with your
 permissions. In headless mode (`mnemo -p`) there is nobody to ask, so every
 call that would ask is **allowed**: it behaves like `yolo`, and only `deny`
 rules and `--plan` still refuse. Run `-p`, `--yolo` and best-of (`--best-of`, `/bestof`) only
-in a place you can afford to lose: a container, a throwaway checkout.
+in a place you can afford to lose: a container, a throwaway checkout. `mnemo evolve replay` is
+`-p` too: it reruns prompts from your own earlier runs in a scratch git worktree with a scratch
+copy of your Mnemo home, so the same applies to it (see [docs/EVOLVE.md](docs/EVOLVE.md)).
 
 ### What the gate is, and is not
 
@@ -100,7 +102,7 @@ in a place you can afford to lose: a container, a throwaway checkout.
   them, or `cat /proc/$PPID/environ`: in `default` mode that asks, and no "always"
   grant covers a command that mentions `/proc`, but **in `yolo` and `-p` it runs**
   unless a `deny` rule stops it.
-- **A folder's own `.agents/` extensions, settings, prompts and skills run code and
+- **A folder's own `.agents/` extensions, settings, prompts, skills and agent profiles run code and
   steer the model**, so Mnemo loads them only for a folder you have trusted: it asks
   once at start-up (`a` remembers it), headless runs skip them unless you pass
   `--trust-project`. Do not trust a repository you have not read.
@@ -200,6 +202,8 @@ and which you cannot remove); a folder's own hooks are never read.
   is missing; install them yourself if you want them.
 - **A skills marketplace, only one you add.** `mnemo skills marketplace add` and `update` run
   `git clone` of the address you typed (see Skill marketplaces).
+- **An Opera repository, only one you attach.** `mnemo opera add <name> <https-url>` runs
+  `git clone` of the address you typed (see Opera).
 - **An MCP server over HTTP, only one you name.** An HTTP server in your own
   `mcp.json` is contacted only when its entry says `"allowNetwork": true`; the
   model's tool calls, with their arguments, then go to that address, and
@@ -384,6 +388,15 @@ What that does and does not allow:
   with `task_update`, which never rewrites another agent's step; LOG.md is written by the
   program. What agents wrote is cleaned and redacted before it is written, and an agent sees
   it as a hidden or framed message labelled data, never in the system prompt.
+- **A race is approved like a command, every time.** An agent's `race` runs a check command and
+  has 2 to 4 sub-agents work unattended in git worktrees of your project, then applies the
+  smallest passing change here. The gate asks before each race (no "always"), plan mode refuses
+  it, and deny rules still hold inside the attempts; a worktree is a copy of your files, not a
+  sandbox, so an attempt's commands can reach what yours can, as with `/bestof`.
+- **An agent profile asks, as a parent does.** A profile (`~/.mnemo/agent/agents/<name>.md`, or a
+  trusted folder's `.agents/agents/`) sets a sub-agent's model, tools, limits and instructions,
+  all within your sub-agent settings and its access; a tool list only narrows what the access
+  allows. Yours win over a folder's of the same name, so a cloned repository cannot replace one.
 - **A parent agent can only tighten what its sub-agent may use.** Your sub-agent settings
   (model, thinking, output tokens, context, turns, budget) are the ceiling; a parent may
   ask for less for one task, never more (a number above yours is capped and it is told
@@ -540,6 +553,44 @@ chose. Read it first (`mnemo skills show plugin@marketplace`, and the files unde
   and HTTP(S) proxy variables that point at a closed port on loopback, so its OSV.dev
   vulnerability lookup falls back to its built-in list instead of calling out. That holds for its
   HTTP client, which honours the proxy variables; it is a filter, not a sandbox.
+
+## Opera
+
+`mnemo opera <name>` starts a conductor that hands work to threads across several repositories
+(`docs/OPERA.md`). A thread is a background sub-agent, so everything in *Agents that talk to agents*
+holds for it; on top:
+
+- **Only you attach, clone or trust a repository**, with `mnemo opera add`. No tool can, and
+  `opera.json` (0600 in `~/.mnemo/opera/<name>/`) is written only by `mnemo opera`; an entry in
+  it that is not what that command writes (a relative path, an odd name) is dropped when read.
+- **The clone is the only network use**: `owner/repo` (GitHub) or an `https://` address you typed,
+  with `http`, `ssh`, `file`, `ext::` and passwords in the address refused, the repository's hooks
+  and fsmonitor off, no submodules, no system or global git config (so no credential helper:
+  clone a private repository yourself and attach the folder) and a 10-minute limit. It is the
+  whole history, so threads can branch from it. Nothing is fetched by the conductor or a thread.
+- **A clone is untrusted** unless you add it with `--trust`: its `.agents/` extensions, settings,
+  skills and profiles do not load in its threads. A folder of yours is trusted in its threads as
+  you trusted it in a session there.
+- **Your checkout is not touched.** Each thread works in a new git worktree under
+  `~/.mnemo/opera/<name>/worktrees/`, on a new branch `opera/<name>/<thread>`, from the
+  repository's HEAD. Starting a thread adds that worktree and branch, so plan mode refuses
+  `thread_start`. A thread that fails to start leaves neither behind. Threads never push or merge
+  unless you ask. The worktree is the thread's project folder for the gate (accept-edits frees
+  edits there only), but the gate filters, it is not a sandbox: an approved command can reach
+  outside it.
+- **Approvals stay yours.** Threads are never unattended: every edit and command a thread makes is
+  asked in the conductor's terminal under your mode, and deny rules hold. `thread_steer` is a peer
+  message from the conductor (data, no authority), within the run's message caps.
+- **Budgets.** Each thread has your sub-agent limits (the conductor may lower them, never raise
+  them). All threads of an Opera, and the sub-agents they start, share its budget ($5 unless you
+  set another with `--budget`; 0 is no limit): crossing it stops every thread, and no thread
+  starts until you raise it (`mnemo opera budget`). The conductor's own turns are your prompts and
+  count against `runSpend`, not the Opera's budget.
+- **LOG.md is the program's record**, 0600, one line per tool call, message, start and ending,
+  cleaned of control characters and redacted. The conductor reads it as data.
+- **Memory is shared**: every thread recalls and stores in the Opera's own project memory, not in
+  its repository's. A fact one thread learns from hostile text in one repository reaches the
+  others; the risk is that of *Memory is input the model trusts*.
 
 ## Scheduled runs
 

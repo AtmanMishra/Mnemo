@@ -154,6 +154,30 @@ do. Plain files are the source of truth, written whole (rename into place), fold
   interrupted says so once, with the command that continues it. Interrupted is known for as long
   as the record is kept (a day); after that the conversation is listed as saved.
 
+**Agent profiles**: a profile is a saved sub-agent, one Markdown file per name in
+`~/.mnemo/agent/agents/` or a trusted folder's `.agents/agents/` (yours win on a name both
+have). Its frontmatter sets `description` (required), `model`, `thinking`, `access`, `tools`,
+`maxTurns`, `budget`, `maxTokens` and `contextTokens`; its body becomes the sub-agent's
+instructions, in its system prompt. `spawn_subagent(profile: "reviewer", task)` starts one;
+what the parent also sets wins over the profile, and your sub-agent settings cap both. An
+agent that can start sub-agents sees the profiles' names and descriptions in its system
+prompt; with none saved, nothing is added. A `tools` list narrows what the access allows,
+and the team tools (`list_agents`, `message_agent`, `task_update`) always stay.
+
+**Background sub-agents**: `spawn_subagent(background: true)` returns at once with the new
+agent's number, and the parent goes on. When the sub-agent finishes, its answer (or why it
+failed) reaches the parent as a message from it, framed like any peer message and counted in
+the run's caps; an idle parent is woken by it. A sub-agent that finishes stops the background
+sub-agents it started, since they could no longer report to it; `r r` stops a whole run.
+
+**Races**: an agent with full access can call `race(task, check, n, models?)`: 2 to 4
+sub-agents attempt the same task, each in its own git worktree, then the check runs in each
+and the smallest change that passes is applied (the `/bestof` machinery, with in-process
+sub-agents instead of headless runs). The gate asks you before every race, showing the check
+and the task, and never offers "always"; plan mode refuses it. Once you approve, the attempts
+work unattended in their copies (as `/bestof` candidates do), your deny rules still hold, and
+each attempt is a sub-agent with your sub-agent limits. `models` gives attempts different models.
+
 **Saved sub-agents**: a saved conversation keeps each sub-agent's transcript in
 `<session>/sub/` and a `<session>.state.json` with every agent it started (see
 `docs/MNEMO-INTERNALS.md` §1). The live roster keeps the last 40 ended sub-agents per
@@ -184,6 +208,17 @@ agent claimed cannot be taken over, and only its owner marks it done or blocked.
 start of each turn, and with each peer message, an agent is shown what the others in its
 run did since it last looked, as data. `/task` shows the plan and where the files are; old
 run folders go after `keepSubTranscripts` days.
+
+**A team's lesson**: when a team run ends, the reflection that follows every run also reads
+its `TASK.md` and the last 30 lines of `LOG.md`, and may return one lesson about how the
+agents worked together (how to split the work, whom to hand what, what to check before a
+step is done), with when it applies, the evidence and a confidence. A guess is dropped; for
+the rest you are asked ("Save team lesson"). An accepted lesson is a project fact,
+`team lesson (<when it applies>)`, so every later session in the project starts with it; a
+later lesson for the same case replaces it. A run one agent did alone may offer a lesson too,
+about how to work in the project ("Save lesson", kept as `lesson (<when it applies>)`). Runs
+vote on kept lessons, and one that hurt more than it helped leaves the prompt; see
+[EVOLVE.md](EVOLVE.md#lessons-the-playbook).
 
 ## Not yet
 
