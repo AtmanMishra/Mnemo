@@ -29,7 +29,8 @@ export const LANES: Lane[] = [
     title: "Coming next: open for review",
     blurb: "Written and tested, in a draft pull request that has not been merged. Not in any release, and it may change in review.",
     items: [
-      { title: "A shared plan and log per run", why: "Agents working on one run share a TASK.md and a LOG.md, claim steps with task_update, and see what the others did at each turn.", link: { label: "Pull request #103", href: `${REPO}/pull/103` } },
+      { title: "Agent profiles", why: "A sub-agent you use often, saved as one Markdown file (model, tools, limits and instructions), that agents start by name within your sub-agent settings.", link: { label: "Pull request #85", href: `${REPO}/pull/85` } },
+      { title: "Background sub-agents", why: "spawn_subagent returns at once and the answer comes back as a message, so the parent keeps working meanwhile.", link: { label: "Pull request #86", href: `${REPO}/pull/86` } },
     ],
   },
   {
@@ -83,6 +84,7 @@ export const LANES: Lane[] = [
       { badge: "main", title: "Every agent on the machine", why: "mnemo agents lists what runs in every terminal and project, and tells, steers or stops one from anywhere. Plain local files: no socket, no server.", link: { label: "Pull request #80", href: `${REPO}/pull/80` } },
       { badge: "main", title: "Sub-agents saved with the conversation", why: "Each sub-agent's transcript and a state file listing every agent a session started, plus SubagentStart and SubagentStop hooks.", link: { label: "Pull request #81", href: `${REPO}/pull/81` } },
       { badge: "main", title: "Runs and @N", why: "Talk to any agent by its number. One prompt of yours is a run, capped at 40 messages and $1.00 of woken turns, and stopped as one.", link: { label: "Pull request #82", href: `${REPO}/pull/82` } },
+      { badge: "main", title: "A shared plan and log per run", why: "Agents working on one run share a TASK.md and a LOG.md, claim steps with task_update, and see what the others did at each turn.", link: { label: "Pull requests #83 and #103", href: `${REPO}/pull/103` } },
     ],
   },
   {
