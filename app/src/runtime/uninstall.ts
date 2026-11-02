@@ -67,6 +67,12 @@ export const HOME_ENTRIES = [
   "hooks.json",
   "lsp.json",
   "config.json",
+  // sub-agent runs, background work, self-evolution, the agent registry and the conductor
+  "background",
+  "evolve",
+  "opera",
+  "registry",
+  "runs",
 ];
 
 /**
