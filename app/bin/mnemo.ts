@@ -26,7 +26,9 @@ import { backgroundCommand } from "../src/background/cli.ts";
 import { eventsFor, watchBackground } from "../src/background/feed.ts";
 import { skillsCommand } from "../src/market/cli.ts";
 import { projectSkillsWarning } from "../src/market/scan.ts";
-import { agentsCommand, elsewhere } from "../src/registry/cli.ts";
+import { operaCommand, type OperaLaunch } from "../src/opera/cli.ts";
+import { readOpera } from "../src/opera/store.ts";
+import { agentsCommand, elsewhere, interruptedHere } from "../src/registry/cli.ts";
 import { joinRegistry, memberOf, type Joined } from "../src/registry/join.ts";
 import { applyTheme, themePaints, type ThemeName } from "../src/ui/theme.ts";
 import { mouse } from "../src/ui/mouse.ts";
@@ -73,7 +75,7 @@ async function heavy() {
   return {
     React: React.default,
     render: ink.render,
-    hasTrustRequiringProjectResources: pi.hasTrustRequiringProjectResources,
+    needsTrust: runtime.needsTrust,
     ProjectTrustStore: pi.ProjectTrustStore,
     SessionManager: pi.SessionManager,
     MemoryService: memory.MemoryService,
@@ -105,6 +107,7 @@ const USAGE = `mnemo ${pkg.version} — a coding agent with a memory
 usage
   mnemo                    start in this folder
   mnemo -c, --continue     continue the most recent session here
+  mnemo --session <file>   continue that saved session (mnemo agents resume finds one in any project)
   mnemo -p "<prompt>"      answer once and print the result (no interface); asks nothing: what would ask
                            is allowed, while deny rules and --plan still refuse
   mnemo doctor [--fix]     what is installed, configured and reachable; --fix repairs what it can
@@ -115,7 +118,9 @@ usage
   mnemo settings …         every setting: list, get <name>, set <name> <value>, reset [name] (or /settings in a session)
   mnemo memory …           memory for other agents: ingest Claude Code sessions (mnemo memory --help)
   mnemo skills …           install skills from marketplaces, as Claude Code installs plugins (mnemo skills --help)
+  mnemo opera …            one conductor over several repositories, threads in worktrees (mnemo opera --help)
   mnemo schedule …         run a prompt on a timer, read-only unless you allow actions (mnemo schedule --help)
+  mnemo evolve …           how runs went (stats), replayable checked runs (tasks, replay) (mnemo evolve --help)
   mnemo background …       memory work while Mnemo is open: learn from Claude Code, report clutter (mnemo background --help)
   mnemo agents …           every agent running on this machine, in any project; tell, steer or stop one (mnemo agents --help)
   mnemo --demo             a scripted session in a scratch project (no key needed)
@@ -165,10 +170,14 @@ interface Args {
   mode: Mode;
   model?: string;
   continueRecent: boolean;
+  /** A saved session file to continue (`mnemo agents resume` passes it). */
+  session?: string;
   trustProject?: boolean;
   print?: string;
   rpc?: boolean;
   cwd?: string;
+  /** `mnemo opera <name>`: the first agent conducts this Opera. */
+  opera?: string;
 }
 
 /** A mistake in the command line: exits 2, like the subcommands' usage errors. */
@@ -206,6 +215,7 @@ function parse(argv: string[]): Args {
     else if (v === "--yolo") a.mode = "yolo";
     else if (v === "--trust-project") a.trustProject = true;
     else if (v === "-c" || v === "--continue") a.continueRecent = true;
+    else if (v === "--session") a.session = value(++i, v);
     else if (v === "--rpc") a.rpc = true;
     else if (v === "-p" || v === "--print") a.print = value(++i, v);
     else if (v === "--cwd") a.cwd = value(++i, v);
@@ -223,11 +233,11 @@ function parse(argv: string[]): Args {
  */
 async function trustDecision(cwd: string, dir: string, args: Args): Promise<boolean | undefined> {
   if (args.trustProject) return true;
-  const { hasTrustRequiringProjectResources, ProjectTrustStore } = await heavy();
-  if (!hasTrustRequiringProjectResources(cwd)) return undefined;
+  const { needsTrust, ProjectTrustStore } = await heavy();
+  if (!needsTrust(cwd)) return undefined;
   const store = new ProjectTrustStore(dir);
   if (store.get(cwd) !== null) return undefined;
-  const found = [".agents/extensions", ".agents/settings.json", ".agents/mcp.json", ".agents/skills", ".agents/prompts", ".agents/themes"].filter((f) => fs.existsSync(path.join(cwd, f)));
+  const found = [".agents/extensions", ".agents/settings.json", ".agents/mcp.json", ".agents/skills", ".agents/prompts", ".agents/themes", ".agents/agents"].filter((f) => fs.existsSync(path.join(cwd, f)));
   const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true && args.print === undefined && !args.dump;
   const warning = found.includes(".agents/skills") ? projectSkillsWarning(cwd) : undefined;
   if (!interactive) {
@@ -536,6 +546,10 @@ async function main(): Promise<number> {
   if (process.argv[2] === "uninstall") return uninstallCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "skills") return skillsCommand(process.argv.slice(3), mnemoHome());
   if (process.argv[2] === "schedule") return scheduleCommand(process.argv.slice(3), mnemoHome());
+  if (process.argv[2] === "evolve") {
+    const { evolveCommand } = await import("../src/evolve/cli.ts");
+    return evolveCommand(process.argv.slice(3), mnemoHome());
+  }
   if (process.argv[2] === "background") {
     const home = mnemoHome();
     pointPiAt(agentDir(home));
@@ -545,14 +559,27 @@ async function main(): Promise<number> {
       return runBackgroundTasks(home, agentDir(home), force);
     });
   }
-  if (process.argv[2] === "agents") return agentsCommand(process.argv.slice(3), mnemoHome());
+  if (process.argv[2] === "agents") {
+    // `saved` and `resume` read pi's session files, wherever pi keeps them for Mnemo.
+    pointPiAt(agentDir(mnemoHome()));
+    return agentsCommand(process.argv.slice(3), mnemoHome());
+  }
   if (process.argv[2] === "memory") {
     const home = mnemoHome();
     pointPiAt(agentDir(home));
     const { runMemoryCommand } = await heavy();
     return runMemoryCommand(process.argv.slice(3), home, agentDir(home));
   }
-  const args = parse(process.argv.slice(2));
+  let argv = process.argv.slice(2);
+  let opera: OperaLaunch | undefined;
+  if (argv[0] === "opera") {
+    const r = operaCommand(argv.slice(1), mnemoHome());
+    if (typeof r === "number") return r;
+    opera = r;
+    argv = r.rest;
+  }
+  const args = parse(argv);
+  if (opera) Object.assign(args, { cwd: opera.dir, opera: opera.name });
   if (args.help) return console.log(USAGE), 0;
   if (args.version) return console.log(pkg.version), 0;
   if (mayOffer(process.argv.slice(2), process.stdin.isTTY === true && process.stdout.isTTY === true, process.env)) {
@@ -592,7 +619,11 @@ async function main(): Promise<number> {
   }
   modelRuntime ??= await createModelRuntime(dir);
   if (!args.demo) {
-    const choice = chooseModel(modelRuntime, { flag: args.model, agentDir: dir, continuing: args.continueRecent });
+    if (args.session) {
+      if (!fs.statSync(args.session, { throwIfNoEntry: false })?.isFile()) return console.error(`mnemo: no saved session at ${args.session}`), 2;
+      injected = { ...injected, sessionManager: SessionManager.open(path.resolve(args.session)) };
+    }
+    const choice = chooseModel(modelRuntime, { flag: args.model, agentDir: dir, continuing: args.continueRecent || !!args.session });
     if (choice.error) return console.error(`mnemo: ${choice.error}`), 2;
     if (choice.model) injected = { ...injected, model: choice.model };
   }
@@ -615,7 +646,7 @@ async function main(): Promise<number> {
   const roster = new Roster();
   /** One agent's host and pi session in `agentCwd`; the first gets --continue and the demo's injections. */
   const makeAgent = async (agentCwd: string, first = false) => {
-    const host = createHost({ roster, home, agentDir: dir, modelRuntime: runtimeModels, memory, mode: args.mode, settings, reflect: args.reflect, verify: args.verify, escalate: args.escalate });
+    const host = createHost({ roster, home, agentDir: dir, modelRuntime: runtimeModels, memory, mode: args.mode, settings, reflect: args.reflect, verify: args.verify, escalate: args.escalate, opera: first && args.opera ? readOpera(home, args.opera) : undefined });
     try {
       const runtime = await startRuntime({
         cwd: agentCwd,
@@ -664,7 +695,7 @@ async function main(): Promise<number> {
     const server = new RpcServer({ controller, version: pkg.version, write: (e) => void process.stdout.write(`${JSON.stringify(e)}\n`), onQuit: () => finish() });
     server.start();
     const registry = joinRegistry({ home, kind: "rpc", version: pkg.version, roster, members: () => [memberOf(host.node, cwd, controller)] });
-    if (args.continueRecent && runtime.session.messages.length > 0) controller.transcript.load(runtime.session.messages);
+    if ((args.continueRecent || args.session) && runtime.session.messages.length > 0) controller.transcript.load(runtime.session.messages);
     const rl = readline.createInterface({ input: process.stdin });
     rl.on("line", (l) => void server.handle(l));
     rl.on("close", () => finish());
@@ -813,10 +844,14 @@ async function main(): Promise<number> {
   const stopWatching = watchResults(() => fleet.snapshot().agents);
   if (!memsrv && args.memory)
     controller.transcript.notice(`Memory is off: ${memsrvName()} was not found. \`mnemo doctor\` says where it looks.`, "warn");
-  if (args.continueRecent && runtime.session.messages.length > 0) {
+  if ((args.continueRecent || args.session) && runtime.session.messages.length > 0) {
     controller.transcript.load(runtime.session.messages);
-    controller.transcript.notice("Continuing the most recent session");
+    controller.transcript.notice(args.session ? "Resumed session" : "Continuing the most recent session");
   }
+  // A conversation here that died with its process (a crash, a closed terminal) is said once, not left to be found.
+  if (registry && !args.demo) void interruptedHere(home, cwd, runtime.session.sessionFile).then((lost) => {
+    for (const s of lost) controller.transcript.notice(`A conversation here was cut off when its process died: “${s.title}”. mnemo agents resume ${s.id.slice(0, 8)} continues it.`, "warn");
+  });
 
   // A terminal gets the workspace (full screen, alternate buffer) unless --inline; a dump or a pipe the inline transcript.
   const layout = interactive && !args.inline ? "workspace" : "inline";

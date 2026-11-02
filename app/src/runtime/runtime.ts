@@ -72,8 +72,13 @@ export function piSettings(cwd: string, agentDir: string, trusted: boolean, mnem
  */
 export function projectTrusted(cwd: string, agentDir: string, override?: boolean): boolean {
   if (override !== undefined) return override;
-  if (!hasTrustRequiringProjectResources(cwd)) return true;
+  if (!needsTrust(cwd)) return true;
   return new ProjectTrustStore(agentDir).get(cwd) === true;
+}
+
+/** pi's list, and agent profiles (`.agents/agents/`), which steer a sub-agent's model and tools. */
+export function needsTrust(cwd: string): boolean {
+  return hasTrustRequiringProjectResources(cwd) || fs.existsSync(path.join(cwd, ".agents", "agents"));
 }
 
 /** A managed policy's model list holds here, for every request this runtime sends. */
@@ -116,7 +121,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<AgentSessio
       agentDir: options.agentDir,
       modelRuntime,
       settingsManager: piSettings(cwd, options.agentDir, projectTrusted(cwd, options.agentDir, options.trustProject), options.settings),
-      // First, so extensions that build on the rendered prompt (memory recall) see the section it sets.
+      // First, so a sub-agent's role extension (which sets the same section) has the last word.
       resourceLoaderOptions: { extensionFactories: [piDocs, ...(options.extensions ?? [])] },
     });
     const created = await createAgentSessionFromServices({

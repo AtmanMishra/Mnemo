@@ -45,7 +45,7 @@ export async function contextHook(input: HookInput, o: HookOptions): Promise<str
   const session = new MemorySession({ memory: o.memory, cwd: input.cwd, userSkillsDir: o.userSkillsDir });
   if (event === "SessionStart") {
     const r = await session.context("", { lastSession: true });
-    return output(event, [r.system.replace(/memory_remember|memory_search/g, (t) => `${t} (the mnemo MCP tools, when connected)`).trim(), r.message].filter(Boolean).join("\n\n"));
+    return output(event, [r.system.replace(/memory_remember|memory_search|session_search/g, (t) => `${t} (the mnemo MCP tools, when connected)`).trim(), r.message].filter(Boolean).join("\n\n"));
   }
   if (event === "UserPromptSubmit" && input.prompt) {
     const r = await session.context(input.prompt);

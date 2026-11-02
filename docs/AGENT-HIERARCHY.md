@@ -118,7 +118,8 @@ one other as a thread; `tab` moves to its next partner.
 
 The roster is one process's. The **registry** shows them all: every Mnemo process, in any
 project, writes `$MNEMO_HOME/registry/procs/<tag>.json` (its conversations and sub-agents with
-status, task, last steps, folder, model, mode, spend, an approval waiting) when its roster changes
+status, task, last steps, folder, model, mode, spend, an approval waiting; for a sub-agent
+its own model, thinking level and limits with the turns used, which `mnemo agents show` prints) when its roster changes
 and every 5 seconds as a heartbeat. Interactive sessions, `--rpc`, `-p` and so scheduled runs all
 do. Plain files are the source of truth, written whole (rename into place), folders 0700 and files
 0600; there is no database to drift or to lock on Windows.
@@ -143,6 +144,39 @@ do. Plain files are the source of truth, written whole (rename into place), fold
 - **The hub** lists other processes' live agents (and what was lost in the last hour) under
   *Elsewhere*, read every 2 seconds while the hub shows. It is read-only there.
 - `MNEMO_REGISTRY=0` keeps a process out of the registry (it is neither listed nor reachable).
+- **Saved conversations** (`registry/saved.ts`): `mnemo agents saved` reads every session pi saved
+  for Mnemo, in every project (`SessionManager.listAll`), against the records: **open** (a live
+  process has it), **interrupted** (its process was lost mid-conversation) or **saved**, with the
+  count of sub-agent transcripts kept beside it. `mnemo agents resume <ref|id>` runs
+  `mnemo --cwd <its folder> --session <its file>` in this terminal; a sub-agent's ref continues the
+  conversation that started it, and an open one is refused (two writers would interleave the file:
+  `tell` reaches it instead). An interactive Mnemo started in a folder where a conversation was
+  interrupted says so once, with the command that continues it. Interrupted is known for as long
+  as the record is kept (a day); after that the conversation is listed as saved.
+
+**Agent profiles**: a profile is a saved sub-agent, one Markdown file per name in
+`~/.mnemo/agent/agents/` or a trusted folder's `.agents/agents/` (yours win on a name both
+have). Its frontmatter sets `description` (required), `model`, `thinking`, `access`, `tools`,
+`maxTurns`, `budget`, `maxTokens` and `contextTokens`; its body becomes the sub-agent's
+instructions, in its system prompt. `spawn_subagent(profile: "reviewer", task)` starts one;
+what the parent also sets wins over the profile, and your sub-agent settings cap both. An
+agent that can start sub-agents sees the profiles' names and descriptions in its system
+prompt; with none saved, nothing is added. A `tools` list narrows what the access allows,
+and the team tools (`list_agents`, `message_agent`, `task_update`) always stay.
+
+**Background sub-agents**: `spawn_subagent(background: true)` returns at once with the new
+agent's number, and the parent goes on. When the sub-agent finishes, its answer (or why it
+failed) reaches the parent as a message from it, framed like any peer message and counted in
+the run's caps; an idle parent is woken by it. A sub-agent that finishes stops the background
+sub-agents it started, since they could no longer report to it; `r r` stops a whole run.
+
+**Races**: an agent with full access can call `race(task, check, n, models?)`: 2 to 4
+sub-agents attempt the same task, each in its own git worktree, then the check runs in each
+and the smallest change that passes is applied (the `/bestof` machinery, with in-process
+sub-agents instead of headless runs). The gate asks you before every race, showing the check
+and the task, and never offers "always"; plan mode refuses it. Once you approve, the attempts
+work unattended in their copies (as `/bestof` candidates do), your deny rules still hold, and
+each attempt is a sub-agent with your sub-agent limits. `models` gives attempts different models.
 
 **Saved sub-agents**: a saved conversation keeps each sub-agent's transcript in
 `<session>/sub/` and a `<session>.state.json` with every agent it started (see
@@ -164,6 +198,27 @@ a parent and its own sub-agent may always talk). **Queue or steer**: a busy agen
 message when it finishes what it is doing, an `urgent` one (or one its sender waits on)
 after its current step. `r` twice on the agents page stops every agent working in the
 selected agent's run, and nothing in that run can send again.
+
+**A team's plan and log**: once a run has a second agent, or an agent adds a step, it gets
+`$MNEMO_HOME/runs/<when>-<pid>-<run>/` with `TASK.md` (your goal, copied by the program;
+numbered steps, each with an owner, a status and a one-line result; decisions and open
+questions, each signed) and `LOG.md` (one line per tool call, message, spawn and ending,
+written by the program). Agents change the plan only with `task_update`: a step another
+agent claimed cannot be taken over, and only its owner marks it done or blocked. At the
+start of each turn, and with each peer message, an agent is shown what the others in its
+run did since it last looked, as data. `/task` shows the plan and where the files are; old
+run folders go after `keepSubTranscripts` days.
+
+**A team's lesson**: when a team run ends, the reflection that follows every run also reads
+its `TASK.md` and the last 30 lines of `LOG.md`, and may return one lesson about how the
+agents worked together (how to split the work, whom to hand what, what to check before a
+step is done), with when it applies, the evidence and a confidence. A guess is dropped; for
+the rest you are asked ("Save team lesson"). An accepted lesson is a project fact,
+`team lesson (<when it applies>)`, so every later session in the project starts with it; a
+later lesson for the same case replaces it. A run one agent did alone may offer a lesson too,
+about how to work in the project ("Save lesson", kept as `lesson (<when it applies>)`). Runs
+vote on kept lessons, and one that hurt more than it helped leaves the prompt; see
+[EVOLVE.md](EVOLVE.md#lessons-the-playbook).
 
 ## Not yet
 

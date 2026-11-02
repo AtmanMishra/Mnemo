@@ -36,6 +36,10 @@ export interface AgentEntry {
   /** The project folder (a sub-agent works in its root's). */
   cwd?: string;
   model?: string;
+  /** A sub-agent's thinking level and limits (0 for turns or spend is no limit), and the model calls it made. */
+  thinking?: string;
+  caps?: { turns: number; spend: number; maxTokens: number; context: number };
+  turns?: number;
   mode?: string;
   /** What it is waiting for the user to answer, in that terminal ("approve bash"). */
   waiting?: string;
@@ -162,6 +166,9 @@ export function parseRecord(raw: unknown): ProcRecord | undefined {
       status: a.status as AgentEntry["status"],
       cwd: str(a.cwd, 4096),
       model: str(a.model, 200),
+      thinking: str(a.thinking, 20),
+      caps: a.caps && typeof a.caps === "object" ? { turns: num(a.caps.turns) ?? 0, spend: num(a.caps.spend) ?? 0, maxTokens: num(a.caps.maxTokens) ?? 0, context: num(a.caps.context) ?? 0 } : undefined,
+      turns: num(a.turns),
       mode: str(a.mode, 40),
       waiting: str(a.waiting, 120),
       steps: Array.isArray(a.steps) ? a.steps.filter((s): s is string => typeof s === "string").slice(-20) : [],
