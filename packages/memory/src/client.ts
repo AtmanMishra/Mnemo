@@ -49,10 +49,16 @@ export interface MemoryClientOptions {
   timeoutMs?: number;
   /** How long a stopped sidecar may live before it is killed. */
   killGraceMs?: number;
+  /** The wait for the first reply of a sidecar's life: a sidecar that is up answers at once, so a long wait only delays Mnemo. */
+  firstReplyMs?: number;
+  /** After a request times out, how long further requests fail at once instead of each waiting out the timeout. */
+  cooldownMs?: number;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_KILL_GRACE_MS = 250;
+const DEFAULT_FIRST_REPLY_MS = 5_000;
+const DEFAULT_COOLDOWN_MS = 60_000;
 
 export class MemoryClient {
   #child: MemoryChild | null = null;
@@ -64,6 +70,11 @@ export class MemoryClient {
   /** Every request runs after the previous one settles. */
   #queue: Promise<unknown> = Promise.resolve();
   #readonly: MemoryClientOptions;
+  /** Whether the current sidecar has answered anything yet. */
+  #answered = false;
+  /** Until this time, a sidecar that stopped answering is not asked again. */
+  #failUntil = 0;
+  #failError = "";
 
   constructor(options: MemoryClientOptions) {
     this.#readonly = options;
@@ -84,6 +95,9 @@ export class MemoryClient {
   /** Send one request. Never throws: a transport failure is a response too. */
   request(method: string, params: Record<string, unknown> = {}): Promise<MemoryResponse> {
     const task = this.#queue.then(async () => {
+      // A sidecar that timed out would make every call wait out the timeout in turn: a
+      // startup that makes a dozen of them was a minute of blank screen. One wait, then none.
+      if (Date.now() < this.#failUntil) return { ok: false, error: this.#failError } as MemoryResponse;
       try {
         this.#start();
       } catch (error) {
@@ -123,6 +137,7 @@ export class MemoryClient {
     if (this.alive) return;
     const child = this.#readonly.spawn(this.#readonly.binaryPath, [this.#readonly.journalPath]);
     this.#buffer = "";
+    this.#answered = false;
     this.#decoder = new StringDecoder("utf8");
     child.stdout?.on("data", (chunk) => this.#ingest(chunk));
     child.on("exit", () => {
@@ -152,7 +167,7 @@ export class MemoryClient {
     const child = this.#child;
     if (!child?.stdin) return Promise.resolve({ ok: false, error: "memory sidecar has no stdin" });
     const id = this.#nextId++;
-    const timeoutMs = this.#readonly.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timeoutMs = this.#answered ? (this.#readonly.timeoutMs ?? DEFAULT_TIMEOUT_MS) : Math.min(this.#readonly.firstReplyMs ?? DEFAULT_FIRST_REPLY_MS, this.#readonly.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
     return new Promise<MemoryResponse>((resolve) => {
       // Deliberately NOT unref'd. This timer is the promise's only guarantee
@@ -162,7 +177,12 @@ export class MemoryClient {
       // exists to prevent. Only cleanup timers are unref'd (see `stop`).
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        resolve({ ok: false, error: `memory sidecar did not answer ${method} within ${timeoutMs}ms` });
+        const error = `memory sidecar did not answer ${method} within ${timeoutMs}ms`;
+        this.#failError = error;
+        this.#failUntil = Date.now() + (this.#readonly.cooldownMs ?? DEFAULT_COOLDOWN_MS);
+        // Its next life starts clean; a late reply of this one is nobody's.
+        if (this.#child === child) this.stop();
+        resolve({ ok: false, error });
       }, timeoutMs);
 
       this.#pending.set(id, (response) => {
@@ -205,6 +225,7 @@ export class MemoryClient {
     const resolve = this.#pending.get(parsed.id);
     if (!resolve) return;
     this.#pending.delete(parsed.id);
+    this.#answered = true;
     resolve({ ok: parsed.ok === true, result: parsed.result, error: parsed.error });
   }
 }

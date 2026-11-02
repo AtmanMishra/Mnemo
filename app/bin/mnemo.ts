@@ -368,7 +368,8 @@ function writeState(home: string, state: State): void {
 
 /** What the launch sequence counts up: memories, skills, sessions. */
 async function bootStats(memory: MemoryServiceType, runtime: Awaited<ReturnType<typeof StartRuntime>>) {
-  const s = await memory.stats().catch(() => undefined);
+  // The first frame does not wait on the sidecar: without its numbers the intro simply shows none.
+  const s = await Promise.race([memory.stats().catch(() => undefined), new Promise<undefined>((r) => setTimeout(r, 2_000, undefined).unref())]);
   if (!s) return undefined;
   return { memories: s.nodes, skills: runtime.session.resourceLoader.getSkills().skills.length, sessions: s.episodes };
 }
