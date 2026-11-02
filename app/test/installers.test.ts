@@ -14,7 +14,7 @@ const pwsh = process.env.MNEMO_TEST_PWSH || Bun.which("pwsh");
 function home(extra: Record<string, string> = {}): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-inst-"));
   const h = path.join(root, ".mnemo");
-  for (const d of ["bin", "agent", "memory", "logs", "kernel", "best-of", "skill-history"]) fs.mkdirSync(path.join(h, d), { recursive: true });
+  for (const d of ["bin", "agent", "memory", "logs", "kernel", "best-of", "skill-history", "background", "evolve", "opera", "registry", "runs"]) fs.mkdirSync(path.join(h, d), { recursive: true });
   const files: Record<string, string> = { "state.json": "{}", "grants.json": "{}", "permissions.json": "{}", ".env": "", ...extra };
   for (const [f, body] of Object.entries(files)) fs.writeFileSync(path.join(h, f), body);
   return h;
