@@ -166,6 +166,24 @@ test("a sidecar that never answers is a timeout, not a hang", async () => {
   client.stop();
 });
 
+test("after one timeout the sidecar is not waited for again, then asked afresh", async () => {
+  let spawned = 0;
+  let silent = true;
+  const mk = () => (spawned++, fakeChild((reply) => (silent ? undefined : reply({ ok: true, result: { pong: true } }))));
+  const client = new MemoryClient({ binaryPath: "/fake", journalPath: "/fake/j", spawn: mk, timeoutMs: 2_000, firstReplyMs: 50, cooldownMs: 150 });
+  const t0 = Date.now();
+  assert.match(String((await client.request("ping")).error), /did not answer/);
+  // A dozen more calls (startup makes about that many) cost nothing and do not respawn it.
+  for (let i = 0; i < 12; i += 1) assert.equal((await client.request("stats")).ok, false);
+  assert.ok(Date.now() - t0 < 500, `took ${Date.now() - t0} ms`);
+  assert.equal(spawned, 1);
+  silent = false;
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal((await client.request("ping")).ok, true);
+  assert.equal(spawned, 2);
+  client.stop();
+});
+
 test("a sidecar that dies mid-request resolves the callers instead of stranding them", async () => {
   const control: FakeControl = { exit: () => {} };
   const child = fakeChild(() => {}, control);
