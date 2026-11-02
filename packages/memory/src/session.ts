@@ -30,8 +30,8 @@ import { redact, secretUnderKey } from "./redact.ts";
 import { unsafeMemory } from "./safety.ts";
 import { anchorsIn, showValue, type AnchorCheck } from "./anchor.ts";
 import { describeHit, hitLine, profileBlock, recallMessage, type AnchorStates } from "./recall.ts";
-import { digest, parseReflection, REFLECT_PROMPT, worthReflecting, type Reflection, type ToolEvent } from "./reflect.ts";
-import { factValue, factsOf, type Hit, type MemoryService, type ProfileFact } from "./service.ts";
+import { digest, LESSON_KEY, LESSON_PROMPT, LESSON_VOTES_PROMPT, parseReflection, REFLECT_PROMPT, TEAM_LESSON_PROMPT, worthReflecting, type Reflection, type TeamLesson, type ToolEvent } from "./reflect.ts";
+import { BENCH_MARGIN, factValue, factsOf, type Hit, type MemoryService, type ProfileFact } from "./service.ts";
 import { renderSkill, skillPath, writeSkill, type SkillScope } from "./skills.ts";
 
 /**
@@ -86,6 +86,8 @@ export interface SessionOptions {
   notify?: (note: MemoryNote) => void;
   /** Asked before a skill file is written; absent means skills stay candidates. */
   approveSkill?: (offer: SkillOffer) => Promise<boolean>;
+  /** Asked before a lesson is kept (`team`: from a team run); absent means it is not. */
+  approveLesson?: (lesson: TeamLesson, team: boolean) => Promise<boolean>;
   /** A skill file was written: the agent should reload its skills. */
   skillsChanged?: () => void;
   /** Whether the code facts are pinned to is as it was (anchor.ts); absent: not checked. */
@@ -105,6 +107,8 @@ export interface RunEnd {
   messages: readonly unknown[];
   /** What the user said outside the chat (a refusal with a reason). */
   signals?: readonly string[];
+  /** A team run's record (TASK.md and the end of LOG.md): the run is then asked for one lesson. */
+  team?: string;
 }
 
 const REFUSAL = /declined this call|Refused by a rule|Plan mode is read-only|The user doesn't want to proceed/;
@@ -162,6 +166,8 @@ export class MemorySession {
   private creating: Promise<number | undefined> | undefined;
   private episodeAttached = false;
   private systemText: string | undefined;
+  /** The tools `systemText` was written for. */
+  private systemTools: string | undefined;
   /** The pinned facts whose code had changed or gone when the profile block was made. */
   private stale = "";
   private firstRun = true;
@@ -250,10 +256,10 @@ export class MemorySession {
     return id;
   }
 
-  /** `begin`, plus what memory has to say about this message. */
-  async recall(prompt: string): Promise<Recalled> {
+  /** `begin`, plus what memory has to say about this message. `tools`: the agent's, when it lacks some of memory's. */
+  async recall(prompt: string, tools?: readonly string[]): Promise<Recalled> {
     await this.begin(prompt);
-    const r = await this.context(prompt, { lastSession: this.firstRun });
+    const r = await this.context(prompt, { lastSession: this.firstRun, tools });
     this.firstRun = false;
     return r;
   }
@@ -263,7 +269,7 @@ export class MemorySession {
    * holds no session state between calls (a hook, an MCP request). Recall is
    * linked to the episode as a feeder only when a run is in progress.
    */
-  async context(prompt: string, o: { lastSession?: boolean } = {}): Promise<Recalled> {
+  async context(prompt: string, o: { lastSession?: boolean; tools?: readonly string[] } = {}): Promise<Recalled> {
     const mem = this.mem;
     this.project ??= await mem.project(this.identity.id, this.identity.root);
     this.userNode ??= await mem.userNode();
@@ -290,14 +296,16 @@ export class MemorySession {
       prompt,
     );
     const lastSession = o.lastSession ? projectFacts.find((f) => f.key === "last session")?.value : undefined;
+    const tools = o.tools?.join(" ");
     const states = await this.anchorStates([...projectFacts, ...userFacts].map((f) => f.value).concat(hits.flatMap((h) => factsOf(h.state).map((f) => f.value))));
     // Code a fact is pinned to changed since the profile block was made: it is made again.
     const stale = [...(states ?? [])].filter(([, s]) => s !== "fresh").map(([k, s]) => `${k} ${s}`).join("\n");
-    if (stale !== this.stale) {
+    if (stale !== this.stale || tools !== this.systemTools) {
       this.stale = stale;
+      this.systemTools = tools;
       this.systemText = undefined;
     }
-    this.systemText ??= profileBlock(projectFacts, userFacts, this.identity.name, states);
+    this.systemText ??= profileBlock(await this.withoutBenched(projectFacts), userFacts, this.identity.name, states, o.tools);
     const items = [
       ...(projectFacts.length ? [`${projectFacts.length} fact${projectFacts.length === 1 ? "" : "s"} about ${this.identity.name}`] : []),
       ...(userFacts.length ? [`${userFacts.length} preference${userFacts.length === 1 ? "" : "s"}`] : []),
@@ -317,6 +325,16 @@ export class MemorySession {
     } catch {
       return undefined;
     }
+  }
+
+  /** The project's facts less the lessons that have hurt runs more often than they helped. */
+  private async withoutBenched(facts: ProfileFact[]): Promise<ProfileFact[]> {
+    if (!facts.some((f) => LESSON_KEY.test(f.key))) return facts;
+    const votes = await this.mem.lessonVotes(this.identity.id);
+    return facts.filter((f) => {
+      const v = votes.get(f.key);
+      return !v || v.hurt < v.helped + BENCH_MARGIN;
+    });
   }
 
   /** Search within this project, rendered for a model. */
@@ -351,15 +369,17 @@ export class MemorySession {
     return r;
   }
 
-  /** Something failed: one marker per distinct failure, counted. */
-  async steer(failure: string): Promise<void> {
-    if (this.episodeId === undefined) return;
+  /** Something failed: one marker per distinct failure, counted. False when nothing could be recorded. */
+  async steer(failure: string): Promise<boolean> {
+    if (this.episodeId === undefined) return false;
     const r = await this.mem.steer(this.episodeId, failure);
-    if (!r?.pain_node) return;
+    if (!r) return false;
+    if (!r.pain_node) return true;
     this.pains.push({ node: r.pain_node, text: failure });
     if (this.project !== undefined) await this.mem.link(r.pain_node, this.project, "part_of");
     const n = r.occurrences ?? 1;
     this.note({ kind: "steer", text: n > 1 ? `has seen this failure ${n} times` : "noted the failure for next time" });
+    return true;
   }
 
   /**
@@ -463,7 +483,7 @@ export class MemorySession {
         return [];
       }
     });
-    const digestInput = { messages: run.messages, tools: this.toolLog, files: [...this.files], signals: run.signals ?? [], skills };
+    const digestInput = { messages: run.messages, tools: this.toolLog, files: [...this.files], signals: run.signals ?? [], skills, team: run.team };
     if (ep !== undefined && !failed) await mem.good(ep, "run completed without errors");
     for (const name of this.skillsRead.keys()) {
       const node = await mem.findLabel(`skill ${name}`);
@@ -478,12 +498,13 @@ export class MemorySession {
     let answer: string;
     try {
       // Redacted: the run may hold a pasted key, and the reflection model may be a third party's.
-      answer = await this.o.reflect(REFLECT_PROMPT, redact(`KNOWN:\n${known.join("\n") || "(nothing yet)"}\n\nRUN:\n${digest(digestInput)}`));
+      const prompt = REFLECT_PROMPT + (run.team?.trim() ? TEAM_LESSON_PROMPT : LESSON_PROMPT) + (projectFacts.some((f) => LESSON_KEY.test(f.key)) ? LESSON_VOTES_PROMPT : "");
+      answer = await this.o.reflect(prompt, redact(`KNOWN:\n${known.join("\n") || "(nothing yet)"}\n\nRUN:\n${digest(digestInput)}`));
     } catch (error) {
       this.note({ kind: "failed", text: `Reflection failed: ${error instanceof Error ? error.message : String(error)}` });
       return;
     }
-    await this.apply(parseReflection(answer), { projectFacts, userFacts, ep });
+    await this.apply(parseReflection(answer), { projectFacts, userFacts, ep, team: Boolean(run.team?.trim()) });
   }
 
   /** The conversation is over. */
@@ -530,7 +551,7 @@ export class MemorySession {
   }
 
   /** Write what one reflection found. Kept separate so its rules read in one place. */
-  private async apply(r: Reflection, ctx: { projectFacts: ProfileFact[]; userFacts: ProfileFact[]; ep: number | undefined }): Promise<void> {
+  private async apply(r: Reflection, ctx: { projectFacts: ProfileFact[]; userFacts: ProfileFact[]; ep: number | undefined; team: boolean }): Promise<void> {
     const mem = this.mem;
     const learned: string[] = [];
     // Facts: only what the user said or a tool showed; a guess is not memory.
@@ -580,6 +601,37 @@ export class MemorySession {
     }
     if (fixed.length) this.note({ kind: "learned", items: fixed.map((x) => `fix · ${x}`) });
     if (r.skill && !this.refuse(`${r.skill.name} ${r.skill.description} ${r.skill.instructions}`)) await this.proposeSkill(r.skill);
+    if (r.lesson) await this.offerLesson(r.lesson, known, ctx.team);
+    if (r.votes) await this.voteLessons(r.votes, known);
+  }
+
+  /**
+   * The playbook's counts: each kept lesson the run says helped or hurt gets a vote. Only keys
+   * this project holds; a lesson named on both sides says nothing.
+   */
+  private async voteLessons(v: NonNullable<Reflection["votes"]>, known: Map<string, string>): Promise<void> {
+    const kept = (k: string) => known.has(`project:${k}`) && !(v.helped.includes(k) && v.hurt.includes(k));
+    const items: string[] = [];
+    for (const [keys, helped] of [[v.helped, true], [v.hurt, false]] as const)
+      for (const key of new Set(keys.filter(kept))) {
+        await this.mem.voteLesson(this.identity.id, key, helped);
+        items.push(`${key} ${helped ? "helped" : "hurt"}`);
+      }
+    if (items.length) this.note({ kind: "learned", items });
+  }
+
+  /**
+   * How to work next time (a team run: how the team should). A guess is not offered; the user
+   * decides on the rest, and an accepted lesson is a project fact, recalled into every later
+   * session's profile here. One per cue: a later lesson on the same cue replaces it.
+   */
+  private async offerLesson(l: TeamLesson, known: Map<string, string>, team: boolean): Promise<void> {
+    if (l.confidence === "low" || !this.o.approveLesson) return;
+    const key = `${team ? "team lesson" : "lesson"} (${l.cue.replace(/[:()]/g, "")})`;
+    if (known.get(`project:${key}`) === l.lesson || this.refuse(`${l.cue} ${l.lesson} ${l.evidence}`)) return;
+    if (!(await this.o.approveLesson(l, team))) return;
+    await this.learnFact("project", key, l.lesson);
+    this.note({ kind: "learned", items: [`project · ${key}: ${l.lesson}`] });
   }
 
   /**

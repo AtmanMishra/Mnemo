@@ -245,6 +245,36 @@ test("a name asked for by its name comes first; code_refs lists guessed callers 
   expect(results()[0]).not.toContain("src/call.ts:1  (inferred");
 });
 
+test("among definitions of one name, the one the call graph reaches most comes first; ranks survive a small change", async () => {
+  // Two `load`s: one that the app's entry points reach (directly and through each other), one that only a test calls.
+  const files: Record<string, string> = {
+    // A longer path: by words alone (BM25), the other `load` comes first.
+    "src/lib/io/files/load.ts": "export function load(p: string) { return p; }\n",
+    "src/app.ts": "import { load } from './lib/io/files/load';\nexport function boot() { load('a'); start(); }\nexport function start() { load('b'); }\n",
+    "src/cli.ts": "import { load } from './lib/io/files/load';\nimport { boot } from './app';\nexport function cli() { load('c'); boot(); }\n",
+    "t/load.ts": "export function load(p: string) { return p + '!'; }\n",
+    "t/one.test.ts": "import { load } from './load';\nexport function once() { load('t'); }\n",
+  };
+  const root = project(files);
+  const ix = indexOf(root);
+  await ix.refresh();
+  const [first, second] = ix.search("load", 5);
+  expect(first!.path).toBe("src/lib/io/files/load.ts");
+  expect(second!.path).toBe("t/load.ts");
+  const rank = ix.ranks();
+  expect(rank.get(first!.id)!).toBeGreaterThan(rank.get(second!.id)!);
+  // One edit is not worth rebuilding the ranks for; a definition they do not know yet counts as average.
+  fs.writeFileSync(path.join(root, "src/extra.ts"), "export function extra() {}\n");
+  await ix.refresh();
+  expect(ix.ranks()).toBe(rank);
+  expect(ix.search("extra", 1)[0]!.qname).toBe("extra");
+  // Past 20 changed files they are made again.
+  for (let i = 0; i < 21; i++) fs.writeFileSync(path.join(root, `src/gen${i}.ts`), `export function gen${i}() { extra(); }\n`);
+  await ix.refresh();
+  expect(ix.ranks()).not.toBe(rank);
+  expect(ix.ranks().get(ix.lookup("extra")[0]!.id)!).toBeGreaterThan(1);
+});
+
 test("files a read may not see are never indexed: credentials and paths a deny rule covers", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "mnemo-home-"));
   fs.writeFileSync(path.join(home, "permissions.json"), JSON.stringify({ rules: [{ tool: "read", pattern: "private/*", action: "deny" }] }));

@@ -125,6 +125,11 @@ export class Publisher {
       access: n.access,
       status: n.status,
       ...extra,
+      // A sub-agent may run on its own model; the roster knows which.
+      model: n.model ?? extra.model,
+      thinking: n.thinking,
+      caps: n.caps,
+      turns: n.turns,
       waiting: isEnded(n.status) ? undefined : extra.waiting,
       steps: n.steps.slice(-STEPS),
       stepCount: n.stepCount,

@@ -127,8 +127,9 @@ mt("F3: profiles stay in the system prompt and per-message recall arrives as a m
   await e.idle();
   // pi hands the provider a transcript whose first message is the system prompt.
   const parts = seen.map((s) => {
-    const messages = (JSON.parse(s) as { messages: { role: string; content: unknown }[] }).messages;
-    return { system: JSON.stringify(messages.find((m) => m.role === "system")?.content), rest: JSON.stringify(messages.filter((m) => m.role !== "system")) };
+    const messages = (JSON.parse(s) as { messages: { role: string; content: unknown; sections?: unknown }[] }).messages;
+    const system = messages.find((m) => m.role === "system");
+    return { system: JSON.stringify(system?.sections ?? system?.content), rest: JSON.stringify(messages.filter((m) => m.role !== "system")) };
   });
   // The system prompt (the cached prefix) is byte-identical across runs.
   expect(parts[0]!.system).toBe(parts[1]!.system);

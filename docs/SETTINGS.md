@@ -61,6 +61,7 @@ much agents may do on their own; what an agent may *touch* is decided by the gat
 |---|---|---|---|---|
 | Default mode † | `mode` | default | default · plan | how much Mnemo may do without asking (bypass modes are never a default) |
 | Learn after runs | `reflect` | on | on · off | write durable facts to memory after each run (--no-reflect overrides) |
+| Record outcomes | `recordOutcomes` | on | on · off | keep a local record of each run's checks, cost and turns, and replayable copies of checked runs ([mnemo evolve](EVOLVE.md)) |
 | Tidy memory | `tidyMemory` | on | on · off | once a day per project, retire duplicate facts, facts about files that are gone and memories marked wrong (kept as history; mnemo memory tidy shows what it would do) |
 | Check changed code | `verify` | on | on · off | send a run that changed code back to run a check (--no-verify overrides) |
 | Escalation model | `escalateModel` | none | provider/model-id, or empty | provider/id to finish a run on after failed checks; empty for none |
@@ -103,7 +104,7 @@ much agents may do on their own; what an agent may *touch* is decided by the gat
 | Sub-agent thinking | `subThinking` | inherit | inherit · off · minimal · low · medium · high · xhigh | a sub-agent's thinking level, and the most its parent may ask for (inherit: the parent's own) |
 | Sub-agent output | `subMaxTokens` | the model's own | 0–1000000 | output tokens per model call of a sub-agent, and the most its parent may ask for |
 | Sub-agent context | `subContext` | the model's own | 0, or 32000–10000000 | context a sub-agent keeps before it compacts (by `autoCompact` and `compactReserve`), and the most its parent may ask for |
-| Keep sub-agent transcripts | `keepSubTranscripts` | 30 days | 0–3650 | days a sub-agent's saved transcript is kept (0: forever; your own conversations are never removed) |
+| Keep sub-agent transcripts | `keepSubTranscripts` | 30 days | 0–3650 | days a sub-agent's saved transcript, and a run's TASK.md and LOG.md, are kept (0: forever; your own conversations are never removed) |
 
 ### Notifications
 

@@ -59,9 +59,9 @@ export interface BestOfResult {
   kept: string;
 }
 
-const LINKED = ["node_modules", ".venv", "venv"];
+export const LINKED = ["node_modules", ".venv", "venv"];
 
-function git(cwd: string, args: string[], input?: string): string {
+export function git(cwd: string, args: string[], input?: string): string {
   const bin = trustedBin("git");
   if (!bin) throw new Error("git was not found on PATH");
   const r = Bun.spawnSync([bin, ...SAFE_GIT, ...args], { cwd, stdin: input === undefined ? "ignore" : Buffer.from(input), stdout: "pipe", stderr: "pipe" });
@@ -83,7 +83,7 @@ function killTree(pid: number | undefined): void {
   }
 }
 
-async function sh(cwd: string, command: string, timeoutMs: number, env: Record<string, string>): Promise<{ ok: boolean; output: string }> {
+export async function sh(cwd: string, command: string, timeoutMs: number, env: Record<string, string>): Promise<{ ok: boolean; output: string }> {
   const p = spawn("sh", ["-c", command], { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
   let output = "";
   const take = (chunk: Buffer) => {

@@ -12,19 +12,24 @@ export { Credit } from "./credit.ts";
 export { describeNode, summarizeMemory, type MemoryNode, type MemorySummary } from "./panel.ts";
 export { findMemsrv, journalPath, memsrvName, mnemoHome } from "./paths.ts";
 export { normalizeRemote, projectIdentity, type ProjectIdentity } from "./project.ts";
-export { describeHit, DIRECTIVE, hitLine, profileBlock, recallMessage } from "./recall.ts";
+export { describeHit, DIRECTIVE, directiveFor, hitLine, profileBlock, recallMessage } from "./recall.ts";
 export { readMemory, type MemoryReader } from "./read.ts";
 export { redact } from "./redact.ts";
 export { applyTidy, pathsIn, planTidy, sameMeaning, type TidyItem } from "./tidy.ts";
 export {
   digest,
+  LESSON_KEY,
+  LESSON_PROMPT,
+  LESSON_VOTES_PROMPT,
   parseReflection,
   recoveries,
   REFLECT_PROMPT,
+  TEAM_LESSON_PROMPT,
   textOf,
   worthReflecting,
   type DigestInput,
   type Reflection,
+  type TeamLesson,
   type ToolEvent,
 } from "./reflect.ts";
 export {
@@ -34,6 +39,7 @@ export {
   projectLabel,
   memsrvEnv,
   spawnMemsrv,
+  BENCH_MARGIN,
   USER_LABEL,
   type EdgeKind,
   type Hit,
@@ -58,8 +64,14 @@ export { renderSkill, skillPath, writeSkill, type SkillScope } from "./skills.ts
 export {
   acquireLock,
   claudeCodeSessions,
+  codexSessions,
   ingestClaudeCode,
+  ingestCodex,
+  ingestOpencode,
+  opencodeDatabase,
+  opencodeSessions,
   parseClaudeCode,
+  parseCodex,
   replay,
   type IngestOptions,
   type IngestReport,

@@ -59,6 +59,7 @@ export interface Settings extends Record<KeyAction, string> {
   // Behaviour
   mode: (typeof MODE_CHOICES)[number];
   reflect: boolean;
+  recordOutcomes: boolean;
   tidyMemory: boolean;
   verify: boolean;
   escalateModel: string;
@@ -151,6 +152,7 @@ export const DEFS: Record<SettingKey, Def> = {
 
   mode: { group: "Behaviour", label: "Default mode", help: "how much Mnemo may do without asking (bypass modes are never a default)", kind: "enum", default: "default", options: MODE_CHOICES, restart: true },
   reflect: bool("Behaviour", "Learn after runs", "write durable facts to memory after each run (--no-reflect overrides)", true),
+  recordOutcomes: bool("Behaviour", "Record outcomes", "keep a local record of each run's checks, cost and turns, and replayable copies of checked runs (mnemo evolve)", true),
   tidyMemory: bool("Behaviour", "Tidy memory", "once a day per project, retire duplicate facts, facts about files that are gone and memories marked wrong (kept as history; mnemo memory tidy shows what it would do)", true),
   verify: bool("Behaviour", "Check changed code", "send a run that changed code back to run a check (--no-verify overrides)", true),
   escalateModel: { group: "Behaviour", label: "Escalation model", help: "provider/id to finish a run on after failed checks; empty for none", kind: "text", default: "" },
@@ -190,7 +192,7 @@ export const DEFS: Record<SettingKey, Def> = {
   subThinking: { group: "Agents", label: "Sub-agent thinking", help: "thinking level of a sub-agent, and the most its parent may ask for (inherit: the parent's own)", kind: "enum", default: "inherit", options: THINKING_CHOICES },
   subMaxTokens: int("Agents", "Sub-agent output", "output tokens per model call of a sub-agent, and the most its parent may ask for (0: the model's own maximum)", 0, 0, 1_000_000, "tokens"),
   subContext: int("Agents", "Sub-agent context", "context a sub-agent keeps before it compacts, and the most its parent may ask for (0: the model's window; otherwise at least 32000)", 0, 0, 10_000_000, "tokens"),
-  keepSubTranscripts: int("Agents", "Keep sub-agent transcripts", "days a sub-agent's saved transcript is kept (0: forever; your own conversations are never removed)", 30, 0, 3650, "days"),
+  keepSubTranscripts: int("Agents", "Keep sub-agent transcripts", "days a sub-agent's saved transcript, and a run's TASK.md and LOG.md, are kept (0: forever; your own conversations are never removed)", 30, 0, 3650, "days"),
 
   notify: bool("Notifications", "Desktop notice", "tell the terminal when a long turn ends or Mnemo asks, while it is in the background (MNEMO_NOTIFY=0 overrides)", true, true),
   notifyAfter: int("Notifications", "Notify after", "a turn must run this long to notify", 20, 0, 3600, "s"),
